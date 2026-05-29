@@ -1,0 +1,34 @@
+{
+  "skill_id": "security_review",
+  "name": "Security Review",
+  "description": "Audit code for security vulnerabilities including injection, path traversal, secret exposure, and auth bypass.",
+  "triggers": ["security", "auth", "authentication", "injection", "xss", "csrf", "vulnerability", "secret", "password", "token", "jwt", "permission", "rbac", "sanitize", "escape", "validate"],
+  "required_context": ["file_tree", "auth_middleware", "route_handlers"],
+  "allowed_tools": ["read_file", "grep_patterns", "run_lint"],
+  "blocked_tools": ["write_secrets", "expose_env", "rm_rf"],
+  "checklist": [
+    "Check all routes for requireAuth middleware",
+    "Scan for process.env.SECRET or API key exposure in responses",
+    "Verify safeResolve() used for all path operations",
+    "Check for command injection in shell calls",
+    "Verify no SQL injection in raw query strings",
+    "Check for path traversal via ../ in user input",
+    "Ensure JWT secret not hardcoded",
+    "Verify no user-controlled data reaches eval() or exec()",
+    "Check CORS settings are restrictive",
+    "Ensure rate limiting applied to auth endpoints"
+  ],
+  "verification_commands": ["npm run lint", "grep -rn 'eval\\|exec\\|__import__' backend/"],
+  "example_tasks": [
+    "Audit new backlog endpoint for missing auth",
+    "Check if user-supplied paths are sanitized before file access",
+    "Scan for hardcoded secrets in new config files"
+  ],
+  "common_failure_modes": [
+    "New route added without requireAuth",
+    "Path concatenation without safeResolve",
+    "Environment variable logged or returned in API response",
+    "User input passed directly to shell command"
+  ],
+  "output_format": "Structured findings list: { severity, location, issue, fix }"
+}

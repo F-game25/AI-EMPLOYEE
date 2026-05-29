@@ -1,0 +1,30 @@
+/* IrisStriations.css
+ * Counter-rotation animation for the iris striations group.
+ * Period: 60s, opposite direction of the gear ring (negative rotation).
+ * Origin is 0,0 — parent SVG viewBox is centered on the eye.
+ */
+
+.it-striations {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: it-counter-rotate 60s linear infinite;
+  /* Hint to compositor — striations rotate constantly. */
+  will-change: transform;
+}
+
+@keyframes it-counter-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    /* Negative = counter to the gear ring's positive rotation. */
+    transform: rotate(-360deg);
+  }
+}
+
+/* Respect reduced-motion preference — freeze rotation. */
+@media (prefers-reduced-motion: reduce) {
+  .it-striations {
+    animation: none;
+  }
+}

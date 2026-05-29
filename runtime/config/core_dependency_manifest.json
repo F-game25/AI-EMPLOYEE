@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "policy": "enterprise_offline_core",
+  "description": "Dependencies in core are part of the AETERNUS NEXUS runtime, not optional extensions. Packaged builds must bundle them locally and verify imports before startup.",
+  "core": [
+    { "pip": "fastapi==0.115.0", "import": "fastapi", "purpose": "Python API backend" },
+    { "pip": "uvicorn[standard]==0.30.0", "import": "uvicorn", "purpose": "Python API server" },
+    { "pip": "psutil==6.1.1", "import": "psutil", "purpose": "system metrics and process health" },
+    { "pip": "pyyaml>=6.0", "import": "yaml", "purpose": "configuration parsing" },
+    { "pip": "bcrypt==4.2.0", "import": "bcrypt", "purpose": "password hashing" },
+    { "pip": "python-jose[cryptography]==3.4.0", "import": "jose", "purpose": "JWT auth" },
+    { "pip": "PyJWT>=2.8.0", "import": "jwt", "purpose": "JWT middleware compatibility" },
+    { "pip": "cryptography==46.0.7", "import": "cryptography", "purpose": "local secrets and encrypted storage" },
+    { "pip": "slowapi>=0.1.9", "import": "slowapi", "purpose": "rate limiting" },
+    { "pip": "pydantic-settings==2.3.4", "import": "pydantic_settings", "purpose": "typed runtime settings" },
+    { "pip": "httpx>=0.25.0,<1.0.0", "import": "httpx", "purpose": "internal HTTP clients" },
+    { "pip": "anthropic>=0.37.0", "import": "anthropic", "purpose": "external LLM provider when online policy allows it" },
+    { "pip": "numpy>=1.24.0", "import": "numpy", "purpose": "embeddings, neural memory and numeric runtime" },
+    { "pip": "python-multipart>=0.0.9", "import": "multipart", "purpose": "file upload and marketplace forms" },
+    { "pip": "langgraph>=0.2.40", "import": "langgraph", "purpose": "agent graph orchestration" },
+    { "pip": "langchain-core>=0.3.0", "import": "langchain_core", "purpose": "agent graph primitives" },
+    { "pip": "opentelemetry-api>=1.25.0", "import": "opentelemetry", "purpose": "local observability API" },
+    { "pip": "opentelemetry-sdk>=1.25.0", "import": "opentelemetry.sdk", "purpose": "local observability runtime" },
+    { "pip": "opentelemetry-instrumentation-fastapi>=0.46b0", "import": "opentelemetry.instrumentation.fastapi", "purpose": "FastAPI tracing hooks" },
+    { "pip": "playwright>=1.44.0", "import": "playwright", "purpose": "browser/RPA action model runtime" },
+    { "pip": "kubernetes>=30.0.0", "import": "kubernetes", "purpose": "deployment and cluster management surface" },
+    { "pip": "chromadb>=0.5.0", "import": "chromadb", "purpose": "local vector memory" },
+    { "pip": "neo4j>=5.20.0", "import": "neo4j", "purpose": "native enterprise knowledge graph capability; packaged as core, never loaded as a user extension" }
+  ],
+  "connectors": [
+    { "pip": "stripe>=7.0.0", "import": "stripe", "purpose": "external billing connector; never required for offline boot" },
+    { "pip": "mailchimp-marketing>=3.0.80", "import": "mailchimp_marketing", "purpose": "external marketing connector; never required for offline boot" },
+    { "pip": "sentry-sdk>=1.40.0", "import": "sentry_sdk", "purpose": "external error reporting when enabled" },
+    { "pip": "psycopg[binary]>=3.1.0", "import": "psycopg", "purpose": "external PostgreSQL connector" },
+    { "pip": "sentence-transformers>=2.7.0", "import": "sentence_transformers", "purpose": "large local embedding model; bundled model weights are handled separately" }
+  ],
+  "security_requirements": [
+    "No core dependency may be downloaded on first boot in offline mode.",
+    "Packaged apps must include wheelhouse/vendor artifacts with recorded hashes and licenses.",
+    "Vendored open-source code must live under a project namespace, for example aeternus_vendor/<name>, never as an untracked copy.",
+    "Patched vendored code must include upstream version, source URL, license, checksum and local patch note.",
+    "Network-capable connectors are policy-gated and may not be treated as core boot dependencies.",
+    "Memory systems are native AETERNUS runtime components. Vector, graph, SQL, episodic and procedural memory must be packaged and visible without third-party extension installation."
+  ]
+}

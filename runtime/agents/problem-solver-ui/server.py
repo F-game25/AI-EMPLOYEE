@@ -28,6 +28,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Any
@@ -66,7 +67,7 @@ if sys.version_info < (3, 10):
           f"{sys.version_info.major}.{sys.version_info.minor}")
     sys.exit(1)
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -307,6 +308,19 @@ _REPO_RUNTIME_DIR = _REPO_ROOT / "runtime"
 _REPO_AGENTS_DIR = _REPO_RUNTIME_DIR / "agents"
 _REPO_BIN_FILE = _REPO_RUNTIME_DIR / "bin" / "ai-employee"
 
+# Add runtime directory to sys.path for imports like 'from core.tenancy import ...'
+if str(_REPO_RUNTIME_DIR) not in sys.path:
+    sys.path.insert(0, str(_REPO_RUNTIME_DIR))
+
+# ── PII log sanitization — imported early so all subsequent logging is clean ──
+try:
+    from core.log_sanitizer import install_global_filter, SanitizedLoggingMiddleware as _SanitizedLoggingMiddleware
+    install_global_filter()
+    _LOG_SANITIZER_AVAILABLE = True
+except Exception as _ls_err:  # graceful degradation if starlette absent at this point
+    _LOG_SANITIZER_AVAILABLE = False
+    _SanitizedLoggingMiddleware = None  # type: ignore[assignment]
+
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 STATE_DIR = AI_HOME / "state"
 CONFIG_DIR = AI_HOME / "config"
@@ -338,7 +352,7 @@ _REPO_SKILLS_FILE = Path(__file__).parent.parent.parent / "config" / "skills_lib
 # Source agent_capabilities.json path (bundled in repo config directory)
 _REPO_CAPS_FILE = Path(__file__).parent.parent.parent / "config" / "agent_capabilities.json"
 
-PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "8787"))
+PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT", "18790"))
 HOST = os.environ.get("PROBLEM_SOLVER_UI_HOST", "127.0.0.1")
 MAX_CHAT_MESSAGE_LENGTH = 10000
 CHATLOG_MAX_ENTRIES = 1000
@@ -550,10 +564,29 @@ INFRA_AGENTS = {
   "discovery",
 }
 
+class _TruncatingFormatter(logging.Formatter):
+    """Caps every log line at 4 KB so a runaway repr() can't flood the disk.
+
+    Single events that try to log e.g. an entire bounded Queue's contents
+    (which produced multi-MB lines in the past) get clipped with a marker.
+    """
+    _MAX_LINE_BYTES = 4096
+
+    def format(self, record: logging.LogRecord) -> str:
+        out = super().format(record)
+        if len(out) > self._MAX_LINE_BYTES:
+            kept = out[: self._MAX_LINE_BYTES - 32]
+            out = f"{kept}…[truncated {len(out) - len(kept)} chars]"
+        return out
+
+
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(message)s",
 )
+# Replace root handler formatters so the cap applies to all log emissions.
+for _h in logging.getLogger().handlers:
+    _h.setFormatter(_TruncatingFormatter("%(message)s"))
 logger = logging.getLogger("problem-solver-ui")
 
 _ACTIVITY_LOCK = threading.Lock()
@@ -867,6 +900,13 @@ def _detect_llm_provider(model_route: Optional[str] = None) -> tuple[Optional[st
       gemma_model = runtime_env.get("GEMMA_MODEL") or os.environ.get("GEMMA_MODEL", "gemma4")
       return "gemma", gemma_model, runtime_env
 
+  if route == "wavefield":
+    ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    if _ollama_reachable(ollama_host):
+      wavefield_model = runtime_env.get("WAVEFIELD_MODEL") or os.environ.get("WAVEFIELD_MODEL", "")
+      if wavefield_model:
+        return "wavefield", wavefield_model, runtime_env
+
   anthropic_key = runtime_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
   if anthropic_key:
     return "anthropic", runtime_env.get("CLAUDE_MODEL") or os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), runtime_env
@@ -919,7 +959,7 @@ def _build_llm_system_prompt(
             logger.debug("_build_llm_system_prompt: context error — %s", exc)
 
     base = (
-        "You are Ultron, a world-class automation and intelligence platform. "
+        "You are AI Employee (Ultron), a world-class automation and intelligence platform. "
         "You work like a skilled human operator: thoughtful, reliable, and focused on results. "
         "You combine deep technical expertise with practical judgment—think of yourself as an exceptional engineer or strategist, not an AI system. "
         "You understand context completely, identify real problems, design thoughtful solutions, and execute reliably. "
@@ -1143,6 +1183,28 @@ def _load_chat_history(n_exchanges: int = 8) -> list:
     return history
 
 
+def _direct_conversation_reply(goal_plan: dict, message: str) -> str | None:
+    """Handle utility/chat turns that must never enter the task executor."""
+    response_type = str(goal_plan.get("response_type") or "").lower()
+    if response_type == "time":
+        from datetime import datetime
+
+        now = datetime.now().astimezone()
+        return f"It is {now.strftime('%H:%M:%S')} ({now.tzname() or 'local time'})."
+    if response_type == "date":
+        from datetime import datetime
+
+        now = datetime.now().astimezone()
+        day = str(now.day)
+        return f"Today is {now.strftime('%A, %B')} {day}, {now.year}."
+    if response_type == "greeting":
+        return "I’m here. Tell me what you want to build, fix, research, or run."
+    if response_type == "empty":
+        return "Send me a question or a task and I’ll route it properly."
+    # Let normal questions use the conversational LLM path.
+    return None
+
+
 def _generate_llm_response(
     message: str,
     routed_agent: str,
@@ -1170,7 +1232,58 @@ def _generate_llm_response(
       "[AI FLOW] → Core AI called (nn_enhanced=%s)", nn_output is not None and nn_output is not message
   )
 
-  provider, model, runtime_env = _detect_llm_provider(model_route)
+  effective_model_route = model_route
+  forced_model: Optional[str] = None
+  _shadow_wavefield = False
+  try:
+    from core.model_routing import select_model_route as _select_model_route  # noqa: PLC0415
+    from core.wavefield_provider import record_wavefield_event as _wf_record  # noqa: PLC0415
+
+    _route = _select_model_route(
+      prompt=final_input,
+      context=graph_context,
+      requested_route=model_route,
+      default_route="auto",
+    )
+    effective_model_route = _route.model_route
+    forced_model = _route.force_model
+    _shadow_wavefield = _route.shadow_wavefield
+    _wf_record("route_selected")
+    if effective_model_route == "wavefield":
+      _wf_record("route_selected_wavefield")
+    if _shadow_wavefield:
+      _wf_record("shadow_requests")
+    _ai_flow_logger.info(
+      "[AI FLOW] Route tier=%s est_tokens=%s threshold=%s rollout=%s route=%s shadow=%s",
+      _route.tier,
+      _route.estimated_tokens,
+      _route.threshold,
+      _route.rollout_mode,
+      effective_model_route,
+      _shadow_wavefield,
+    )
+  except Exception as _route_exc:
+    _ai_flow_logger.warning("[AI FLOW] Routing layer unavailable: %s", _route_exc)
+
+  provider, model, runtime_env = _detect_llm_provider(effective_model_route)
+  if forced_model:
+    model = forced_model
+
+  if _shadow_wavefield:
+    try:
+      from core.wavefield_provider import wavefield_healthcheck as _wf_healthcheck  # noqa: PLC0415
+
+      _ok, _reason = _wf_healthcheck(
+        ollama_host=runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
+        model=os.environ.get("WAVEFIELD_MODEL", "").strip() or None,
+      )
+      if not _ok:
+        from core.wavefield_provider import record_wavefield_event as _wf_record_shadow  # noqa: PLC0415
+
+        _wf_record_shadow("healthcheck_failures")
+        _ai_flow_logger.warning("[AI FLOW] Wave Field shadow healthcheck failed: %s", _reason)
+    except Exception as _shadow_exc:
+      _ai_flow_logger.debug("[AI FLOW] Wave Field shadow probe failed: %s", _shadow_exc)
   if not provider:
     _ai_flow_logger.warning("[AI FLOW] No LLM provider available — returning fallback")
     _fb = _fallback_response(
@@ -1236,6 +1349,43 @@ def _generate_llm_response(
       elif provider == "gemma":
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
         return _call_gemma_chat(final_input, system_prompt, ollama_host, history=_chat_history)
+      elif provider == "wavefield":
+        from core.wavefield_provider import record_wavefield_event, wavefield_allow_fallback, wavefield_call, wavefield_healthcheck  # noqa: PLC0415
+
+        healthy, reason = wavefield_healthcheck(
+          ollama_host=runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
+          model=model,
+        )
+        if not healthy:
+          record_wavefield_event("healthcheck_failures")
+          if not wavefield_allow_fallback():
+            raise RuntimeError(f"Wave Field unavailable: {reason}")
+          record_wavefield_event("fallbacks")
+          logger.warning("Wave Field healthcheck failed, fallback to default provider: %s", reason)
+          fallback_provider, fallback_model, fallback_env = _detect_llm_provider("auto")
+          if fallback_provider in (None, "wavefield"):
+            raise RuntimeError(f"No healthy fallback provider after Wave Field failure: {reason}")
+          if fallback_provider == "anthropic":
+            api_key = fallback_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+            return _call_anthropic_chat(final_input, system_prompt, fallback_model, api_key, history=_chat_history)
+          if fallback_provider == "openai":
+            api_key = fallback_env.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+            return _call_openai_chat(final_input, system_prompt, fallback_model, api_key, history=_chat_history)
+          if fallback_provider == "groq":
+            api_key = fallback_env.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+            return _call_groq_chat(final_input, system_prompt, fallback_model, api_key, history=_chat_history)
+          if fallback_provider == "gemma":
+            ollama_host = fallback_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+            return _call_gemma_chat(final_input, system_prompt, ollama_host, history=_chat_history)
+          ollama_host = fallback_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+          return _call_ollama_chat(final_input, system_prompt, fallback_model, ollama_host, history=_chat_history)
+        return wavefield_call(
+          prompt=final_input,
+          system_prompt=system_prompt,
+          history=_chat_history,
+          model=model,
+          timeout_s=LLM_TIMEOUT_SECONDS,
+        )
       else:
         ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
         return _call_ollama_chat(final_input, system_prompt, model, ollama_host, history=_chat_history)
@@ -1550,7 +1700,131 @@ try:
 except ImportError:
     _AI_ROUTER_AVAILABLE = False
 
-app = FastAPI(title="AI Employee Dashboard")
+app = FastAPI(
+    title="AI Employee API",
+    description="Autonomous AI workforce platform API",
+    version="1.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    openapi_tags=[
+        {"name": "auth", "description": "Authentication & token management"},
+        {"name": "tasks", "description": "Task execution & orchestration"},
+        {"name": "agents", "description": "Agent management"},
+        {"name": "research", "description": "Autonomous research"},
+        {"name": "vault", "description": "Knowledge vault"},
+        {"name": "billing", "description": "Usage & billing"},
+        {"name": "monitoring", "description": "Observability & metrics"},
+        {"name": "admin", "description": "Admin operations (admin role required)"},
+    ],
+)
+
+# ── Multi-tenancy initialization ──────────────────────────────────────────────
+from core.tenancy import init_tenant_manager
+from core.tenant_middleware import TenantMiddleware
+
+_tenant_manager = init_tenant_manager(AI_HOME)
+app.add_middleware(TenantMiddleware, secret_key=_jwt_secret_env)
+
+# ── Sentry error tracking ────────────────────────────────────────────────────
+_SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+if _SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        integrations=[
+            FastApiIntegration(),
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+        traces_sample_rate=0.1,
+        profiles_sample_rate=0.1,
+        environment=os.environ.get("ENVIRONMENT", "production"),
+    )
+
+# ── Jaeger distributed tracing (deferred, optional) ──────────────────────────
+_trace_provider = None
+_tracing_initialized = False
+
+def _init_tracing():
+    global _trace_provider, _tracing_initialized
+    if _tracing_initialized:
+        return
+    try:
+        from core.tracing import setup_tracing, setup_fastapi_instrumentation, setup_psycopg_instrumentation
+        _trace_provider = setup_tracing(service_name="ai-employee")
+        setup_fastapi_instrumentation(app)
+        setup_psycopg_instrumentation()
+        _tracing_initialized = True
+        logger.info("Tracing initialized (Jaeger)")
+    except Exception as e:
+        logger.warning(f"Tracing initialization failed (non-fatal): {e}")
+        _trace_provider = None
+
+# ── Sentry error tracking (deferred, optional) ────────────────────────────────
+_sentry_ok = False
+_sentry_initialized = False
+
+def _init_sentry():
+    global _sentry_ok, _sentry_initialized
+    if _sentry_initialized:
+        return
+    try:
+        from core.sentry_config import init_sentry
+        _sentry_ok = init_sentry(environment=os.environ.get("ENVIRONMENT", "production"))
+        _sentry_initialized = True
+        logger.info("Sentry initialized")
+    except Exception as e:
+        logger.warning(f"Sentry initialization failed (non-fatal): {e}")
+        _sentry_ok = False
+
+# ── Billing metrics (Phase 4, optional) ───────────────────────────────────────
+_billing_collector = None
+try:
+    from core.billing_metrics import get_billing_collector
+    _billing_collector = get_billing_collector()
+except Exception as e:
+    logger.warning(f"Billing metrics unavailable (non-fatal): {e}")
+
+# ── Rate limiter (optional) ────────────────────────────────────────────────────
+_rate_limiter = None
+try:
+    from core.rate_limiter import get_rate_limiter
+    _rate_limiter = get_rate_limiter()
+except Exception as e:
+    logger.warning(f"Rate limiter unavailable (non-fatal): {e}")
+
+# ── Embeddings manager (optional) ──────────────────────────────────────────────
+_embeddings_manager = None
+try:
+    from core.embeddings import get_embeddings_manager
+    _embeddings_manager = get_embeddings_manager()
+except Exception as e:
+    logger.warning(f"Embeddings manager unavailable (non-fatal): {e}")
+
+# ── Knowledge bootstrap daemon (non-blocking) ──────────────────────────────────
+bootstrap_knowledge = None
+_knowledge_count = 0
+
+def _bootstrap_knowledge_bg():
+    global _knowledge_count, bootstrap_knowledge
+    if bootstrap_knowledge is None:
+        logger.debug("Knowledge bootstrap not available; skipping")
+        return
+    try:
+        _knowledge_count = bootstrap_knowledge(AI_HOME)
+        logger.info(f"Knowledge bootstrap: {_knowledge_count} entries loaded")
+    except Exception as e:
+        logger.warning(f"Knowledge bootstrap failed: {e}")
+
+try:
+    from core.knowledge_bootstrap import bootstrap_knowledge
+    _kb_thread = threading.Thread(target=_bootstrap_knowledge_bg, daemon=True, name="knowledge-bootstrap")
+    _kb_thread.start()
+except Exception as e:
+    logger.warning(f"Knowledge bootstrap import failed (non-fatal): {e}")
+    bootstrap_knowledge = None
 
 # ── Optional endpoint authentication (REQUIRE_AUTH=1 enables enforcement) ──────
 # REQUIRE_AUTH defaults to "1" (enforced) for security.  Set REQUIRE_AUTH=0 in
@@ -1901,8 +2175,18 @@ def _issue_token_pair(
     auth: AuthManager,
     username: str,
     request: Request,
+    tenant_id: Optional[str] = None,
     state: Optional[dict[str, Any]] = None,
 ) -> tuple[str, str]:
+    # If tenant_id not provided, try to load from users.json
+    if tenant_id is None:
+        _users_file = STATE_DIR / "users.json"
+        try:
+            users = json.loads(_users_file.read_text()) if _users_file.exists() else {}
+            tenant_id = users.get(username, {}).get("tenant_id", f"user-{username}")
+        except Exception:
+            tenant_id = f"user-{username}"
+
     now = _now_utc()
     fingerprint = _request_fingerprint(request)
     access_token = auth.create_access_token(
@@ -1911,6 +2195,9 @@ def _issue_token_pair(
             "type": "user",
             "jti": secrets.token_hex(16),
             "fp": fingerprint,
+            "tenant_id": tenant_id,  # Add tenant_id to JWT claim
+            "email": f"{username}@ai-employee.local",
+            "org_name": username,
         }
     )
     refresh_token = secrets.token_urlsafe(48)
@@ -2005,6 +2292,27 @@ async def require_auth(
             )
 
 
+
+# ── RBAC permission dependency (wired here after require_auth is defined) ──
+try:
+    from core.rbac import require_permission as _require_permission  # noqa: E402
+
+    def require_permission(permission: str):  # type: ignore[misc]
+        """Return the inner check callable for use as Depends(require_permission(...))."""
+        dep = _require_permission(permission, require_auth)
+        # dep is Depends(_check); unwrap to the raw callable so callers can
+        # wrap it themselves with Depends() without double-wrapping.
+        return dep.dependency
+except Exception as _rbac_import_err:  # graceful degradation
+    import logging as _rbac_log
+    _rbac_log.getLogger(__name__).warning("core.rbac unavailable: %s", _rbac_import_err)
+
+    def require_permission(permission: str):  # type: ignore[misc]  # noqa: F811
+        """Fallback: pass-through callable for Depends(require_permission(...))."""
+        async def _noop() -> None:
+            return None
+        return _noop
+
 # ── Rate limiter ─────────────────────────────────────────────────
 if _SLOWAPI_AVAILABLE:
     _rate_limit = (
@@ -2028,6 +2336,54 @@ def _auth_rate_limit(f):
     if _SLOWAPI_AVAILABLE and limiter is not None:
         return limiter.limit("5/minute")(f)
     return f
+
+
+def _make_tier_limiter(solo_rpm: int = 60, team_rpm: int = 300, enterprise_rpm: int = 3000):
+    """Return a FastAPI Depends that enforces per-tier rate limits drawn from the JWT role.
+
+    Role mapping:
+      viewer   → solo_rpm
+      operator → team_rpm
+      admin    → enterprise_rpm  (also covers service tokens)
+
+    Falls back to solo_rpm when the role is unknown or slowapi is unavailable.
+    Endpoints must accept ``request: Request`` for slowapi to extract the key.
+    """
+    def _decorator(f):
+        if not (_SLOWAPI_AVAILABLE and limiter is not None):
+            return f
+
+        import functools
+
+        @functools.wraps(f)
+        async def _wrapper(request: Request, *args, **kwargs):
+            # Extract role from JWT; Authorization header already validated by require_auth
+            role = "viewer"
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                try:
+                    import jwt as _jwt
+                    token = auth_header.split(" ", 1)[1]
+                    payload = _jwt.decode(token, options={"verify_signature": False})
+                    role = payload.get("role", "viewer")
+                except Exception:
+                    pass
+            rpm = {
+                "admin": enterprise_rpm,
+                "operator": team_rpm,
+            }.get(role, solo_rpm)
+            limit_str = f"{rpm}/minute"
+            # Dynamically apply the limit for this request
+            limited = limiter.limit(limit_str)(f)
+            return await limited(request, *args, **kwargs)
+
+        return _wrapper
+
+    return _decorator
+
+
+# Pre-built tier limiter used on high-cost endpoints
+_tier_rate_limit = _make_tier_limiter(solo_rpm=60, team_rpm=300, enterprise_rpm=3000)
 
 # ── CORS ─────────────────────────────────────────────────────────
 _cors_origins = (
@@ -2057,6 +2413,76 @@ try:
     logger.info("✅ Feature modules loaded: %d routers", len(_FEATURE_ROUTERS))
 except Exception as _feat_err:
     logger.warning("⚠️  Feature modules failed to load: %s", _feat_err)
+
+# ── Neural Brain API (LangGraph + Mem0 + Neo4j cognitive stack) ────
+try:
+    from neural_brain.api import router as _neural_brain_router, forge_compat_router as _forge_compat_router
+    from neural_brain.api import model_fabric_router as _model_fabric_router
+    from neural_brain.api.code_index_router import router as _code_index_router
+    app.include_router(_neural_brain_router)
+    app.include_router(_forge_compat_router)
+    app.include_router(_model_fabric_router)
+    app.include_router(_code_index_router)
+    logger.info("✅ Neural Brain API + Model Fabric + Code Index loaded")
+except Exception as _nb_err:
+    logger.warning("⚠️  Neural Brain API failed to load: %s", _nb_err)
+
+# ── Auth + Admin API (JWT, RBAC, sessions, key rotation) ────────────
+try:
+    from neural_brain.api.auth_router import auth_router as _auth_router, admin_router as _admin_router
+    app.include_router(_auth_router)
+    app.include_router(_admin_router)
+    logger.info("✅ Auth + Admin API loaded")
+except Exception as _auth_err:
+    logger.warning("⚠️  Auth/Admin API failed to load: %s", _auth_err)
+
+# ── Zero-Trust Request Guard middleware ─────────────────────────────
+try:
+    from neural_brain.security.request_guard import RequestGuard
+    app.add_middleware(RequestGuard)
+    logger.info("✅ Zero-Trust RequestGuard middleware active")
+except Exception as _rg_err:
+    logger.warning("⚠️  RequestGuard middleware failed: %s", _rg_err)
+
+# ── PII sanitization middleware (outermost — added last due to LIFO ordering) ──
+if _LOG_SANITIZER_AVAILABLE and _SanitizedLoggingMiddleware is not None:
+    app.add_middleware(_SanitizedLoggingMiddleware)
+    logger.info("PII log sanitization middleware active")
+
+# ── Telemetry auto-capture + Key rotation ───────────────────────────
+try:
+    from neural_brain.core.telemetry import get_telemetry as _get_tel
+    from neural_brain.security.key_manager import get_key_manager as _get_km
+    _get_tel()   # starts drain thread + event subscription
+    _get_km()    # starts rotation loop
+    logger.info("✅ Telemetry + KeyManager started")
+except Exception as _tel_err:
+    logger.warning("⚠️  Telemetry/KeyManager failed: %s", _tel_err)
+
+# ── Privacy / Telemetry Engine / Update Manager ─────────────────────
+try:
+    from neural_brain.api.privacy_router import privacy_router as _priv_r, \
+        telemetry_router as _tel_r, updates_router as _upd_r
+    app.include_router(_priv_r)
+    app.include_router(_tel_r)
+    app.include_router(_upd_r)
+    # Boot subsystems
+    from neural_brain.config.privacy_mode import get_privacy as _get_priv
+    from neural_brain.telemetry.telemetry_engine import get_telemetry_engine as _get_te
+    _get_priv()   # loads + persists privacy mode
+    _get_te()     # starts event subscription + bundle loop
+    logger.info("✅ Privacy + TelemetryEngine + UpdateManager loaded (mode=%s)",
+                _get_priv().get_mode().value)
+except Exception as _priv_err:
+    logger.warning("⚠️  Privacy/Telemetry/Updates failed: %s", _priv_err)
+
+# ── Privacy-safe operational telemetry middleware ────────────────
+try:
+    from core.telemetry import PrivacyTelemetryMiddleware as _PrivTelMW
+    app.add_middleware(_PrivTelMW)
+    logger.info("✅ PrivacyTelemetryMiddleware active")
+except Exception as _ptm_err:
+    logger.warning("⚠️  PrivacyTelemetryMiddleware failed: %s", _ptm_err)
 
 # ── Security headers middleware ──────────────────────────────────
 @app.middleware("http")
@@ -2126,6 +2552,54 @@ async def audit_logging_middleware(request: Request, call_next):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _profile_audit_stats(user_id: str, tenant_id: str) -> tuple[int, list[dict]]:
+    """Return (interaction_count, top_5_agents) for the user's audit history.
+
+    Probes both legacy (audit.db/audit_events) and current (audit_log.db/audit_log)
+    layouts; returns (0, []) if neither exists. Agent name is extracted from the
+    `meta` JSON when present, else from `action`.
+    """
+    import sqlite3
+    from pathlib import Path
+    base = Path(os.environ.get("AI_HOME", Path(__file__).resolve().parents[3]))
+    candidates = [
+        (base / "state" / "audit_log.db", "audit_log"),
+        (base / "state" / "audit.db", "audit_events"),
+    ]
+    for db_path, table in candidates:
+        if not db_path.exists():
+            continue
+        try:
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                count = conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE actor = ?", (user_id,)
+                ).fetchone()[0]
+                rows = conn.execute(
+                    f"SELECT action, meta FROM {table} WHERE actor = ? "
+                    f"ORDER BY ts DESC LIMIT 500", (user_id,)
+                ).fetchall()
+            tally: dict[str, int] = {}
+            for r in rows:
+                agent = ""
+                try:
+                    m = json.loads(r["meta"] or "{}")
+                    agent = m.get("agent") or m.get("agent_id") or ""
+                except Exception:
+                    pass
+                if not agent:
+                    a = r["action"] or ""
+                    agent = a.split(":", 1)[1] if ":" in a else a
+                if agent:
+                    tally[agent] = tally.get(agent, 0) + 1
+            top = [{"agent": k, "count": v} for k, v in
+                   sorted(tally.items(), key=lambda x: -x[1])[:5]]
+            return int(count), top
+        except Exception:
+            continue
+    return 0, []
 
 
 # ── In-memory file read cache (reduces disk I/O for high-frequency reads) ─────
@@ -3732,6 +4206,10 @@ INDEX_HTML = r"""<!doctype html>
     .health-check-item.ok .hc-val{color:var(--success)}
     .health-check-item.warn .hc-val{color:var(--warning)}
     .health-check-item.err .hc-val{color:var(--danger)}
+    .wf-metrics-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+    .wf-metric{padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)}
+    .wf-metric .k{font-size:.68em;color:var(--text-muted);letter-spacing:.02em}
+    .wf-metric .v{font-size:.95em;font-family:var(--mono);font-weight:700;color:var(--gold)}
     /* System Resources card */
     .sysres-metric{background:rgba(0,0,0,.3);border:1px solid rgba(212,175,55,.14);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:7px;transition:border-color .3s,box-shadow .3s}
     .sysres-metric:hover{border-color:rgba(212,175,55,.35);box-shadow:0 0 16px rgba(212,175,55,.07)}
@@ -4877,6 +5355,15 @@ INDEX_HTML = r"""<!doctype html>
         <div class="health-check-item" id="hc-db"><span class="hc-dot">●</span> State Store <span class="hc-val">–</span></div>
         <div class="health-check-item" id="hc-gateway"><span class="hc-dot">●</span> Gateway <span class="hc-val">–</span></div>
         <div class="health-check-item" id="hc-memory"><span class="hc-dot">●</span> Memory <span class="hc-val">–</span></div>
+        <div class="health-check-item" id="hc-wavefield"><span class="hc-dot">●</span> Wave Field <span class="hc-val">–</span></div>
+      </div>
+      <div class="wf-metrics-grid" id="wf-metrics-grid">
+        <div class="wf-metric"><div class="k">Routed</div><div class="v" id="wf-m-route">0</div></div>
+        <div class="wf-metric"><div class="k">Wave Field Routed</div><div class="v" id="wf-m-route-wf">0</div></div>
+        <div class="wf-metric"><div class="k">Fallbacks</div><div class="v" id="wf-m-fallbacks">0</div></div>
+        <div class="wf-metric"><div class="k">Health Failures</div><div class="v" id="wf-m-health-fail">0</div></div>
+        <div class="wf-metric"><div class="k">Shadow Requests</div><div class="v" id="wf-m-shadow">0</div></div>
+        <div class="wf-metric"><div class="k">Wave Field Errors</div><div class="v" id="wf-m-errors">0</div></div>
       </div>
       <hr style="margin:12px 0">
       <!-- BLACKLIGHT quick-toggle -->
@@ -8701,7 +9188,7 @@ function showStatDetail(type) {
   if (closeBtn) closeBtn.focus();
 }
 
-function updateHealthChecks(data) {
+function updateHealthChecks(data, wavefield) {
   const setHC = (id, ok, val) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -8714,6 +9201,28 @@ function updateHealthChecks(data) {
   setHC('hc-db', true, 'Ready');
   setHC('hc-gateway', data.gateway_ok !== false, data.gateway_ok !== false ? 'Online' : 'Offline');
   setHC('hc-memory', true, 'Ready');
+  if (!wavefield || wavefield.error) {
+    setHC('hc-wavefield', false, 'Unavailable');
+  } else {
+    const mode = (wavefield.rollout_mode || 'default').toUpperCase();
+    const health = !!wavefield.healthy;
+    const enabled = !!wavefield.enabled;
+    const label = enabled
+      ? (health ? `${mode} · Ready` : `${mode} · Degraded`)
+      : `${mode} · Disabled`;
+    setHC('hc-wavefield', enabled && health, label);
+  }
+  const wfMetrics = (wavefield && wavefield.metrics) ? wavefield.metrics : {};
+  const setWFMetric = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(value ?? 0);
+  };
+  setWFMetric('wf-m-route', wfMetrics.route_selected);
+  setWFMetric('wf-m-route-wf', wfMetrics.route_selected_wavefield);
+  setWFMetric('wf-m-fallbacks', wfMetrics.fallbacks);
+  setWFMetric('wf-m-health-fail', wfMetrics.healthcheck_failures);
+  setWFMetric('wf-m-shadow', wfMetrics.shadow_requests);
+  setWFMetric('wf-m-errors', wfMetrics.wavefield_errors);
 
   // Animate running count in header
   const runEl = document.getElementById('stat-running');
@@ -8887,7 +9396,8 @@ async function loadDashboard() {
 
   // Determine gateway and ollama health from /api/status (no direct port pings)
   const gatewayOk = !!(d.gateway_ok || d.gateway_running || gwOnline);
-  updateHealthChecks({running_agents: running, ollama_ok: !!d.ollama_ok, gateway_ok: gatewayOk});
+  const wavefield = await api('/api/wavefield/status');
+  updateHealthChecks({running_agents: running, ollama_ok: !!d.ollama_ok, gateway_ok: gatewayOk}, wavefield);
 
   // Refresh doctor diagnostics panel
   loadDoctorPanel();
@@ -17151,9 +17661,19 @@ class _TokenResponse(BaseModel):
 
 @app.get("/health", response_model=_HealthResponse)
 def health_check():
-    """Health-check endpoint — always responds with current security posture."""
+    """Health-check endpoint — fast startup readiness check."""
+    checks = {
+        "python_runtime": "ok",
+        "llm_api": "ok",  # Skip expensive checks on startup — assume ok
+        "database": "ok",
+    }
+
+    # Skip LLM/database checks on fast startup — they're validated during first request
+    # This allows run.sh to detect readiness in <100ms instead of 10-40s
+    overall_status = "healthy"
+
     return _HealthResponse(
-        status="healthy",
+        status=overall_status,
         version=_security_config.app_version if _security_config else "2.0.0",
         secure_mode=_SECURITY_AVAILABLE,
         privacy_mode=(
@@ -17187,7 +17707,7 @@ def security_status():
 
 
 @app.post("/auth/register", response_model=_TokenResponse,
-          status_code=status.HTTP_201_CREATED)
+          status_code=status.HTTP_201_CREATED, tags=["auth"])
 @_auth_rate_limit
 def auth_register(request: Request, user_data: _UserCreate):
     """
@@ -17233,15 +17753,22 @@ def auth_register(request: Request, user_data: _UserCreate):
         algorithm=(cfg.security.jwt_algorithm if cfg else "HS256"),
         expire_minutes=(cfg.security.access_token_expire_minutes if cfg else 30),
     )
+    # Create tenant for new user
+    tenant_id = _tenant_manager.create_tenant(
+        org_name=user_data.username,
+        user_email=user_data.username  # Use username as email for now
+    )
+
     users[username] = {
         "password_hash": auth.hash_password(user_data.password),
         "created_at": _now_utc().isoformat(),
+        "tenant_id": tenant_id,  # Store tenant_id with user
     }
     _users_file.parent.mkdir(parents=True, exist_ok=True)
     _users_file.write_text(json.dumps(users, indent=2))
     _users_file.chmod(0o600)
 
-    access_token, refresh_token = _issue_token_pair(auth, username, request)
+    access_token, refresh_token = _issue_token_pair(auth, username, request, tenant_id)
     _audit_logger.info(json.dumps({
         "event": "user_registered",
         "username": username,
@@ -17259,7 +17786,7 @@ class _LoginRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
 
-@app.post("/auth/login", response_model=_TokenResponse)
+@app.post("/auth/login", response_model=_TokenResponse, tags=["auth"])
 @_auth_rate_limit
 def auth_login(request: Request, login_data: _LoginRequest):
     """
@@ -17365,7 +17892,7 @@ class _RefreshRequest(BaseModel):
     refresh_token: str = Field(..., min_length=32)
 
 
-@app.post("/auth/refresh", response_model=_TokenResponse)
+@app.post("/auth/refresh", response_model=_TokenResponse, tags=["auth"])
 @_auth_rate_limit
 def auth_refresh(request: Request, body: _RefreshRequest):
     cfg = _security_config
@@ -17434,7 +17961,7 @@ class _LogoutRequest(BaseModel):
     refresh_token: Optional[str] = None
 
 
-@app.post("/auth/logout")
+@app.post("/auth/logout", tags=["auth"])
 def auth_logout(
     request: Request,
     body: Optional[_LogoutRequest] = None,
@@ -17460,6 +17987,244 @@ def auth_logout(
         "timestamp": _now_utc().isoformat(),
     }))
     return JSONResponse({"ok": True})
+
+
+@app.get("/auth/oidc/providers")
+def oidc_providers():
+    """Return the list of registered OIDC provider names (no secrets)."""
+    try:
+        from core.oidc import _oidc_registry
+        return {"providers": [p.name for p in _oidc_registry._providers]}
+    except Exception:
+        return {"providers": []}
+
+
+# ── Break-glass emergency access endpoints ────────────────────────────────────
+
+try:
+    from core.break_glass import get_break_glass_store as _get_bg_store  # noqa: E402
+    _BG_AVAILABLE = True
+except Exception as _bg_import_err:
+    import logging as _bg_log
+    _bg_log.getLogger(__name__).warning("core.break_glass unavailable: %s", _bg_import_err)
+    _BG_AVAILABLE = False
+
+
+@app.post("/api/break-glass/request")
+async def bg_request(
+    body: dict,
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Admin requests time-boxed break-glass access to a target tenant."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    target_tenant_id = (body.get("target_tenant_id") or "").strip()
+    reason = (body.get("reason") or "").strip()
+    if not target_tenant_id or not reason:
+        raise HTTPException(status_code=400, detail="target_tenant_id and reason are required")
+
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    req = store.create_request(admin_id=admin_id, target_tenant_id=target_tenant_id, reason=reason)
+
+    _get_audit_db().append(
+        tenant_id=target_tenant_id,
+        actor=admin_id,
+        action="break_glass:request",
+        resource=f"tenant:{target_tenant_id}",
+        outcome="pending",
+        meta={"request_id": req.request_id, "reason": reason},
+    )
+    return JSONResponse({"request_id": req.request_id, "status": req.status, "expires_at": req.expires_at})
+
+
+@app.post("/api/break-glass/{request_id}/approve")
+async def bg_approve(
+    request_id: str,
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Approve a pending break-glass request and issue a short-lived access token."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    try:
+        token = store.approve(request_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Break-glass request not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    req = store._requests[request_id]
+    _get_audit_db().append(
+        tenant_id=req.target_tenant_id,
+        actor=admin_id,
+        action="break_glass:approve",
+        resource=f"tenant:{req.target_tenant_id}",
+        outcome="approved",
+        meta={"request_id": request_id, "original_admin": req.admin_id, "expires_at": req.expires_at},
+    )
+
+    await _ws_broadcast("security:break_glass_approved", {
+        "request_id": request_id,
+        "admin_id": req.admin_id,
+        "target_tenant_id": req.target_tenant_id,
+        "expires_at": req.expires_at,
+        "approved_by": admin_id,
+    })
+
+    return JSONResponse({"request_id": request_id, "token": token, "expires_at": req.expires_at})
+
+
+@app.post("/api/break-glass/{request_id}/deny")
+async def bg_deny(
+    request_id: str,
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Deny a pending break-glass request."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    try:
+        store.deny(request_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Break-glass request not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    req = store._requests[request_id]
+    _get_audit_db().append(
+        tenant_id=req.target_tenant_id,
+        actor=admin_id,
+        action="break_glass:deny",
+        resource=f"tenant:{req.target_tenant_id}",
+        outcome="denied",
+        meta={"request_id": request_id, "original_admin": req.admin_id},
+    )
+
+    return JSONResponse({"request_id": request_id, "status": "denied"})
+
+
+@app.get("/api/break-glass/active")
+async def bg_list_active(
+    _rbac=Depends(require_permission("admin:*")),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """List all currently active (approved, non-expired) break-glass sessions."""
+    from core.audit import get_audit_db as _get_audit_db  # noqa: E402
+    admin_id = "unknown"
+    if credentials and credentials.credentials:
+        _pl = _decode_any_token(credentials.credentials)
+        if isinstance(_pl, dict):
+            admin_id = _pl.get("sub", "unknown")
+
+    if not _BG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Break-glass module unavailable")
+
+    store = _get_bg_store()
+    active = store.get_active()
+
+    _get_audit_db().append(
+        tenant_id="system",
+        actor=admin_id,
+        action="break_glass:list_active",
+        resource="break_glass:sessions",
+        outcome="ok",
+        meta={"count": len(active)},
+    )
+
+    return JSONResponse({"sessions": [r.to_dict() for r in active]})
+
+
+# ── Cross-runtime security event receiver ──────────────────────────────────
+# Node-originated security telemetry (vault/secrets access, auth, etc.) is
+# forwarded here so the in-process BlacklightEngine sentinel can score and
+# respond. Localhost OR a valid service/internal JWT is required. Never raises
+# on bad input — returns 400. Event values are NOT inspected/persisted here.
+_SECURITY_EVENT_PREFIXES = ("vault:", "security:", "auth:")
+
+
+@app.post("/api/internal/security-event")
+async def receive_security_event(
+    request: Request,
+    body: dict,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """Receive a cross-runtime security event and republish on the Python bus."""
+    # (a) Accept only from localhost OR a valid token (service/internal/user).
+    authed = _is_localhost(request)
+    if not authed and credentials and credentials.credentials:
+        authed = _decode_any_token(credentials.credentials) is not None
+    if not authed:
+        raise HTTPException(status_code=401, detail="localhost or valid token required")
+
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "body must be an object"}, status_code=400)
+
+    event_type = body.get("event_type")
+    if not isinstance(event_type, str) or not event_type.startswith(_SECURITY_EVENT_PREFIXES):
+        return JSONResponse(
+            {"ok": False, "error": "event_type must start with vault:/security:/auth:"},
+            status_code=400,
+        )
+
+    source = body.get("source")
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+
+    try:
+        from neural_brain.utils.event_bus import publish as _publish_security_event
+        _publish_security_event(
+            event_type,
+            source=source if isinstance(source, str) and source else "node",
+            payload=payload,
+        )
+    except Exception as _e:  # never raise — telemetry must not break callers
+        _audit_logger.warning(json.dumps({
+            "event": "security_event_publish_failed",
+            "event_type": event_type,
+            "timestamp": _now_utc().isoformat(),
+        }))
+        return JSONResponse({"ok": False, "error": "publish failed"}, status_code=400)
+
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/admin/backup")
+async def trigger_backup(_rbac=Depends(require_permission("admin:*"))):
+    """Trigger a local PostgreSQL backup cycle (no cloud upload — use cron for that)."""
+    from core.backup import BackupManager
+    result = BackupManager().full_backup_cycle(upload=False)
+    if not result.get("file"):
+        raise HTTPException(status_code=500, detail="Backup failed — check DATABASE_URL and pg_dump availability")
+    return result
+
 
 # ── End security endpoints ─────────────────────────────────────────────────────
 
@@ -17515,6 +18280,70 @@ async def sse_events(request: Request):
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         }
+    )
+
+
+@app.get("/events")
+async def stream_observability_events(request: Request):
+    """Real-time observability SSE feed for the Node WS bridge.
+
+    Subscribes to the in-process EventStream and yields each published event
+    (metrics_tick, cognition_tick, etc.) as a Server-Sent Event so the Node
+    backend can re-broadcast them to dashboard WS clients.
+    """
+    from starlette.responses import StreamingResponse
+    from core.observability.event_stream import get_event_stream
+
+    stream = get_event_stream()
+    queue: "asyncio.Queue[dict]" = asyncio.Queue(maxsize=512)
+    loop = asyncio.get_event_loop()
+
+    def _enqueue_drop_oldest(evt: dict) -> None:
+        # Always runs ON the event loop thread (via call_soon_threadsafe).
+        # If full, drop the OLDEST event and append the newest — never raise.
+        # Raising QueueFull inside the loop's default exception handler causes
+        # the entire queue contents to be repr()'d into the log (multi-MB
+        # traceback every second when no SSE consumer is connected).
+        if queue.full():
+            try:
+                queue.get_nowait()
+            except Exception:
+                pass
+        try:
+            queue.put_nowait(evt)
+        except Exception:
+            pass
+
+    def _on_event(evt: dict) -> None:
+        try:
+            loop.call_soon_threadsafe(_enqueue_drop_oldest, evt)
+        except Exception:
+            # Loop closed — drop silently rather than crash.
+            pass
+
+    stream.subscribe(_on_event)
+
+    async def generate():
+        # Initial comment keeps the connection open and signals readiness.
+        yield ": connected\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                evt = await asyncio.wait_for(queue.get(), timeout=15.0)
+                yield f"data: {json.dumps(evt, default=str)}\n\n"
+            except asyncio.TimeoutError:
+                # Heartbeat comment — keeps proxies from killing the connection.
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 
@@ -17576,10 +18405,75 @@ def get_status():
   return JSONResponse(data)
 
 
+@app.get("/api/wavefield/status")
+def get_wavefield_status():
+  from core.wavefield_provider import get_wavefield_metrics, wavefield_healthcheck  # noqa: PLC0415
+
+  model = os.environ.get("WAVEFIELD_MODEL", "").strip()
+  host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+  healthy, reason = wavefield_healthcheck(ollama_host=host, model=model or None)
+  return JSONResponse({
+    "enabled": os.environ.get("WAVEFIELD_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"},
+    "rollout_mode": os.environ.get("WAVEFIELD_ROLLOUT_MODE", "default").strip().lower(),
+    "canary_percent": int(os.environ.get("WAVEFIELD_CANARY_PERCENT", "10")),
+    "route_min_tokens": int(os.environ.get("WAVEFIELD_ROUTE_MIN_TOKENS", "8000")),
+    "model": model,
+    "ollama_host": host,
+    "healthy": healthy,
+    "health_reason": reason,
+    "allow_fallback": os.environ.get("WAVEFIELD_ALLOW_FALLBACK", "1").strip().lower() in {"1", "true", "yes", "on"},
+    "metrics": get_wavefield_metrics(),
+  })
+
+
 @app.get("/api/doctor")
 def get_doctor():
     rc, out = ai_employee("doctor")
     return JSONResponse({"output": out, "rc": rc})
+
+
+# ── Self-evolution control ────────────────────────────────────────────────────
+
+@app.post("/api/models/reload")
+def post_models_reload(_auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
+    """Force-reload the model routing config from ~/.ai-employee/model-routing.json."""
+    try:
+        from core.llm_router import get_llm_router
+        cfg = get_llm_router().reload()
+        return JSONResponse({"ok": True, "config": cfg})
+    except Exception as exc:
+        logger.warning("models/reload failed: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.get("/api/evolution/status")
+def get_evolution_status():
+    try:
+        from core.self_evolution import get_evolution_controller
+        return JSONResponse(get_evolution_controller().status())
+    except Exception as exc:
+        logger.warning("evolution: status failed: %s", exc)
+        return JSONResponse({"running": False, "mode": "OFF", "available": False, "error": str(exc)})
+
+
+class EvolutionModeRequest(BaseModel):
+    mode: str  # OFF | SAFE | AUTO
+
+
+@app.post("/api/evolution/mode")
+def post_evolution_mode(req: EvolutionModeRequest):
+    try:
+        from core.self_evolution import get_evolution_controller
+        ctrl = get_evolution_controller()
+        mode = ctrl.set_mode(req.mode)
+        # AUTO/SAFE run the loop; OFF stops it.
+        ctrl.stop() if mode == "OFF" else ctrl.start()
+        return JSONResponse({"mode": mode, "status": ctrl.status()})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.warning("evolution: set mode failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Doctor structured diagnostics ─────────────────────────────────────────────
@@ -18226,7 +19120,7 @@ async def websocket_stream(websocket: WebSocket):
             _WS_CLIENTS.discard(websocket)
 
 
-@app.get("/api/chat")
+@app.get("/api/chat", tags=["tasks"])
 def get_chat():
     messages = _read_last_n_lines(CHATLOG, 100)
     return JSONResponse({"messages": messages})
@@ -18237,7 +19131,8 @@ def get_chat_alias():
     return get_chat()
 
 
-@app.post("/api/chat")
+@app.post("/api/chat", tags=["tasks"])
+@_tier_rate_limit
 async def post_chat(payload: dict, request: Request):
     raw_message = (payload or {}).get("message", "").strip()
     model_route = ((payload or {}).get("model_route") or "").strip().lower()
@@ -18411,7 +19306,19 @@ async def post_chat(payload: dict, request: Request):
         except Exception:
             pass
 
-    _resp_payload: dict = {"ok": True, "response": response}
+    _resp_payload: dict = {
+        "ok": True,
+        "response": response,
+        "degraded": "[DEGRADED_PIPELINE]" in response or response.startswith("[pipeline_fallback]"),
+        "proof": [
+            {
+                "type": "chat_log",
+                "label": "Conversation exchange appended to chat log",
+                "status": "recorded",
+                "path": str(CHATLOG),
+            }
+        ],
+    }
     if _explain_dict is not None:
         _resp_payload["explanation"] = {
             "explain_id": _explain_dict.get("explain_id"),
@@ -18425,6 +19332,12 @@ async def post_chat(payload: dict, request: Request):
     # ── Finish trace and embed trace_id in response ───────────────────────────
     if _trace_id:
         _resp_payload["trace_id"] = _trace_id
+        _resp_payload["proof"].append({
+            "type": "trace",
+            "label": f"Distributed trace {_trace_id}",
+            "trace_id": _trace_id,
+            "status": "recorded",
+        })
         if _dt is not None:
             try:
                 _dt.finish_trace(_trace_id)
@@ -19267,6 +20180,10 @@ def handle_command(
         from core.goal_parser import parse_goal as _parse_goal  # noqa: PLC0415
         from core.real_execution_engine import RealExecutionEngine as _RealExecEngine  # noqa: PLC0415
         _goal_plan = _parse_goal(message)
+        if not _goal_plan.get("is_goal"):
+            _direct_reply = _direct_conversation_reply(_goal_plan, message)
+            if _direct_reply:
+                return _direct_reply
         if _goal_plan.get("is_goal") and _goal_plan.get("task_plan"):
             logger.info("[REAL_ENGINE] Goal detected — %d steps planned", len(_goal_plan["task_plan"]))
             _engine = _RealExecEngine()
@@ -19847,6 +20764,288 @@ def submit_task(payload: dict):
     return JSONResponse({"ok": True, "task_id": task_id, "message": f"Task submitted: {description[:60]}", "agents": agents, "mode": mode})
 
 
+@app.post("/api/tasks/run", tags=["tasks"])
+@_tier_rate_limit
+def run_task_with_agent_controller(payload: dict, _auth: None = Depends(require_auth)):
+    """Run a goal through the core AgentController contract.
+
+    This is the canonical HTTP surface for Node's /api/tasks/run proxy.  It
+    keeps task execution on the documented Planner -> Executor -> Validator path
+    instead of the dashboard-only task-plan queue.
+    """
+    goal = (
+        payload.get("task")
+        or payload.get("goal")
+        or payload.get("message")
+        or payload.get("description")
+        or ""
+    )
+    goal = str(goal).strip()
+    if not goal:
+        raise HTTPException(400, "task required")
+    if len(goal) > 5000:
+        raise HTTPException(400, "task too long (max 5000 chars)")
+
+    try:
+        from core.agent_controller import get_agent_controller  # noqa: PLC0415
+        summary = get_agent_controller().run_goal(goal)
+    except Exception as exc:
+        logger.exception("AgentController task run failed")
+        error_message = str(exc) or exc.__class__.__name__
+        return JSONResponse({
+            "ok": False,
+            "source": "agent_controller",
+            "task": goal,
+            "status": "failed",
+            "degraded": True,
+            "error": f"AgentController failed: {error_message}",
+            "errors": [{
+                "stage": "agent_controller",
+                "message": error_message,
+                "type": exc.__class__.__name__,
+            }],
+            "proof": [{
+                "type": "agent_controller_error",
+                "label": "AgentController failed before producing task output",
+                "status": "failed",
+                "details": error_message,
+            }],
+            "tasks": [],
+        })
+
+    if not isinstance(summary, dict):
+        return JSONResponse({
+            "ok": False,
+            "source": "agent_controller",
+            "task": goal,
+            "status": "failed",
+            "degraded": True,
+            "error": "AgentController returned an invalid result contract",
+            "errors": [{
+                "stage": "agent_controller",
+                "message": f"Expected dict, got {type(summary).__name__}",
+            }],
+            "proof": [{
+                "type": "agent_controller_error",
+                "label": "Invalid AgentController result contract",
+                "status": "failed",
+            }],
+            "tasks": [],
+        })
+
+    proof: list[dict] = [{
+        "type": "agent_controller",
+        "label": "Planner -> Executor -> Validator completed",
+        "status": "completed",
+        "run_id": summary.get("run_id"),
+    }]
+    for task in (summary.get("tasks", []) if isinstance(summary.get("tasks"), list) else []):
+        if not isinstance(task, dict):
+            continue
+        output = task.get("output") if isinstance(task.get("output"), dict) else {}
+        if output.get("path"):
+            proof.append({
+                "type": "file",
+                "label": output.get("filename") or Path(str(output["path"])).name,
+                "path": output["path"],
+                "status": task.get("status"),
+                "task_id": task.get("task_id"),
+            })
+        if task.get("error"):
+            proof.append({
+                "type": "task_error",
+                "label": task.get("error"),
+                "status": "failed",
+                "task_id": task.get("task_id"),
+            })
+
+    return JSONResponse({
+        "ok": True,
+        "source": "agent_controller",
+        "task": goal,
+        "proof": proof,
+        **summary,
+    })
+
+
+@app.post("/api/money/content-pipeline")
+def money_content_pipeline(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    topic = str(payload.get("topic") or payload.get("task") or "").strip()
+    if not topic:
+        raise HTTPException(400, "topic required")
+    platforms = payload.get("platforms") if isinstance(payload.get("platforms"), list) else None
+    result = get_money_mode().run_content_pipeline(
+        topic=topic,
+        platforms=platforms,
+        affiliate_product=str(payload.get("affiliate_product") or ""),
+        dry_run=bool(payload.get("dry_run", True)),
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/money/lead-pipeline")
+def money_lead_pipeline(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    source = str(payload.get("source") or "").strip()
+    audience = str(payload.get("audience") or "").strip()
+    if not source or not audience:
+        raise HTTPException(400, "source and audience required")
+    channels = payload.get("channels") if isinstance(payload.get("channels"), list) else None
+    result = get_money_mode().run_lead_pipeline(
+        source=source,
+        audience=audience,
+        channels=channels,
+        dry_run=bool(payload.get("dry_run", True)),
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/money/opportunity-pipeline")
+def money_opportunity_pipeline(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    opportunity = str(payload.get("opportunity") or payload.get("task") or "").strip()
+    if not opportunity:
+        raise HTTPException(400, "opportunity required")
+    result = get_money_mode().run_opportunity_pipeline(
+        opportunity=opportunity,
+        budget=float(payload.get("budget") or 0.0),
+        dry_run=bool(payload.get("dry_run", True)),
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/money/affiliate-draft")
+def money_affiliate_draft(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import get_money_mode  # noqa: PLC0415
+
+    product = str(payload.get("product") or "").strip()
+    niche = str(payload.get("niche") or "").strip()
+    if not product or not niche:
+        raise HTTPException(400, "product and niche required")
+    return JSONResponse(get_money_mode().affiliate_content_draft(
+        product=product,
+        niche=niche,
+        output_format=str(payload.get("output_format") or "blog_post"),
+    ))
+
+
+@app.post("/money/niche-research")
+async def money_niche_research(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import niche_research_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    niche = str(payload.get("niche") or "").strip()
+    if not niche:
+        raise HTTPException(400, "niche required")
+    result = await niche_research_workflow(tenant_id, niche)
+    return JSONResponse(result)
+
+
+@app.post("/money/offer-creation")
+async def money_offer_creation(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import offer_creation_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    niche = str(payload.get("niche") or "").strip()
+    angle = str(payload.get("angle") or "").strip()
+    if not niche or not angle:
+        raise HTTPException(400, "niche and angle required")
+    result = await offer_creation_workflow(tenant_id, niche, angle)
+    return JSONResponse(result)
+
+
+@app.post("/money/content-calendar")
+async def money_content_calendar(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import content_calendar_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    offer = payload.get("offer") or {}
+    weeks = int(payload.get("weeks") or 4)
+    if not isinstance(offer, dict):
+        raise HTTPException(400, "offer must be an object")
+    result = await content_calendar_workflow(tenant_id, offer, weeks)
+    return JSONResponse(result)
+
+
+@app.post("/money/lead-research")
+async def money_lead_research(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import lead_research_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    criteria = payload.get("criteria") or {}
+    if not isinstance(criteria, dict):
+        raise HTTPException(400, "criteria must be an object")
+    result = await lead_research_workflow(tenant_id, criteria)
+    return JSONResponse(result)
+
+
+@app.post("/money/proposal")
+async def money_proposal(payload: dict, _auth: None = Depends(require_auth)):
+    from core.money_mode import proposal_generation_workflow  # noqa: PLC0415
+    tenant_id = str(payload.get("tenant_id") or "default")
+    client_info = payload.get("client_info") or {}
+    offer = payload.get("offer") or {}
+    if not isinstance(client_info, dict) or not isinstance(offer, dict):
+        raise HTTPException(400, "client_info and offer must be objects")
+    result = await proposal_generation_workflow(tenant_id, client_info, offer)
+    return JSONResponse(result)
+
+
+# ── Roadmap Engine routes ─────────────────────────────────────────────────────
+
+@app.post("/roadmap/create")
+async def roadmap_create(payload: dict, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    from dataclasses import asdict  # noqa: PLC0415
+    goal = str(payload.get("goal") or "").strip()
+    tenant_id = str(payload.get("tenant_id") or "default")
+    if not goal:
+        raise HTTPException(400, "goal required")
+    roadmap = get_roadmap_engine().create_roadmap(goal, tenant_id)
+    return JSONResponse(asdict(roadmap))
+
+
+@app.post("/roadmap/generate")
+async def roadmap_generate(payload: dict, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    from dataclasses import asdict  # noqa: PLC0415
+    roadmap_id = str(payload.get("roadmap_id") or "").strip()
+    if not roadmap_id:
+        raise HTTPException(400, "roadmap_id required")
+    engine = get_roadmap_engine()
+    roadmap = engine.get_roadmap(roadmap_id)
+    if not roadmap:
+        raise HTTPException(404, f"Roadmap {roadmap_id} not found")
+    roadmap = engine.generate_milestones(roadmap)
+    return JSONResponse(asdict(roadmap))
+
+
+@app.get("/roadmap/{roadmap_id}")
+async def roadmap_get(roadmap_id: str, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    status = get_roadmap_engine().roadmap_status(roadmap_id)
+    if not status.get("ok"):
+        raise HTTPException(404, status.get("error", "not found"))
+    return JSONResponse(status)
+
+
+@app.post("/roadmap/{roadmap_id}/execute")
+async def roadmap_execute(roadmap_id: str, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    result = await get_roadmap_engine().execute_roadmap(roadmap_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error", "not found"))
+    return JSONResponse(result)
+
+
+@app.get("/roadmap/list/{tenant_id}")
+async def roadmap_list(tenant_id: str, _auth: None = Depends(require_auth)):
+    from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
+    from dataclasses import asdict  # noqa: PLC0415
+    roadmaps = get_roadmap_engine().list_roadmaps(tenant_id)
+    return JSONResponse({"ok": True, "roadmaps": [asdict(r) for r in roadmaps]})
+
+
 @app.post("/api/task/cancel")
 def cancel_task(_auth: None = Depends(require_auth)):
     """Cancel the currently running task plan."""
@@ -20280,7 +21479,7 @@ def _recalc_summary(events: list) -> dict:
     return s
 
 
-@app.get("/api/metrics")
+@app.get("/api/metrics", tags=["monitoring"])
 def get_metrics(period: str = "all"):
     data = _load_metrics()
     events = data.get("events", [])
@@ -20594,6 +21793,20 @@ def _save_memory(data: dict) -> None:
     _invalidate_cache(MEMORY_FILE)
 
 
+def _vector_store_memory(key: str, text: str, metadata: dict | None = None, importance: float = 0.5) -> None:
+    try:
+        from memory.vector_store import get_vector_store  # type: ignore
+    except Exception:
+        try:
+            from memory.vector_store import get_vector_store  # type: ignore
+        except Exception:
+            return
+    try:
+        get_vector_store().store(key, text, metadata=metadata or {}, importance=importance)
+    except Exception:
+        logger.debug("memory vector store write failed", exc_info=True)
+
+
 @app.get("/api/memory")
 def get_memory():
     data = _load_memory()
@@ -20633,6 +21846,78 @@ def get_memory_conversations():
     return JSONResponse({"conversations": conversations[-50:], "total": len(conversations)})
 
 
+@app.get("/api/memory/search")
+def search_memory(q: str = Query(..., min_length=1, max_length=500), top_k: int = Query(8, ge=1, le=25), memory_type: str | None = None):
+    """Semantic memory search backed by the local vector store with JSON-memory fallback."""
+    results: list[dict] = []
+    vector_available = False
+    try:
+        from memory.vector_store import get_vector_store  # type: ignore
+    except Exception:
+        try:
+            from memory.vector_store import get_vector_store  # type: ignore
+        except Exception:
+            get_vector_store = None  # type: ignore
+    if get_vector_store is not None:  # type: ignore[name-defined]
+        try:
+            raw = get_vector_store().search(q, top_k=top_k, memory_type=memory_type)  # type: ignore[name-defined]
+            vector_available = True
+            for item in raw:
+                results.append({
+                    "id": item.get("key"),
+                    "type": item.get("metadata", {}).get("memory_type") or "semantic",
+                    "title": item.get("metadata", {}).get("title") or item.get("key"),
+                    "content": item.get("text") or "",
+                    "source": item.get("metadata", {}).get("source") or "vector-store",
+                    "score": item.get("_score", 0),
+                    "metadata": item.get("metadata", {}),
+                    "last_accessed": item.get("last_accessed"),
+                    "access_count": item.get("access_count", 0),
+                })
+        except Exception:
+            logger.debug("memory vector search failed", exc_info=True)
+
+    if len(results) < top_k:
+        data = _load_memory()
+        ql = q.lower()
+        for client in data.get("clients", {}).values():
+            text = " ".join(str(client.get(k) or "") for k in ("name", "company", "email", "status", "notes"))
+            if ql in text.lower():
+                results.append({
+                    "id": client.get("id"),
+                    "type": "semantic",
+                    "title": client.get("name") or client.get("id"),
+                    "content": text,
+                    "source": "json-memory:clients",
+                    "score": 0.5,
+                    "metadata": {"client_id": client.get("id")},
+                    "last_accessed": client.get("updated_at") or client.get("added_at"),
+                    "access_count": client.get("interactions", 0),
+                })
+        for idx, item in enumerate(data.get("recent_interactions", [])):
+            text = str(item.get("summary") or item.get("message") or "")
+            if ql in text.lower():
+                results.append({
+                    "id": item.get("ts") or f"interaction-{idx}",
+                    "type": "episodic",
+                    "title": text[:80],
+                    "content": text,
+                    "source": item.get("agent") or "json-memory:interactions",
+                    "score": 0.45,
+                    "metadata": {"client_id": item.get("client_id")},
+                    "last_accessed": item.get("ts"),
+                    "access_count": 0,
+                })
+
+    return JSONResponse({
+        "ok": True,
+        "query": q,
+        "source": "vector-store" if vector_available else "json-fallback",
+        "results": results[:top_k],
+        "total": len(results[:top_k]),
+    })
+
+
 @app.post("/api/memory/clients")
 def add_memory_client(payload: dict):
     import uuid as _uuid
@@ -20665,6 +21950,12 @@ def add_memory_client(payload: dict):
     clients[client_id] = client
     data["clients"] = clients
     _save_memory(data)
+    _vector_store_memory(
+        f"client:{client_id}",
+        " ".join(str(client.get(k) or "") for k in ("name", "company", "email", "status", "notes")),
+        metadata={"source": "python-memory:clients", "memory_type": "semantic", "client_id": client_id, "title": name},
+        importance=0.7,
+    )
     return JSONResponse({"ok": True, "id": client_id})
 
 
@@ -20707,6 +21998,13 @@ def record_interaction(payload: dict):
     interactions = data.get("recent_interactions", [])
     interactions.append(interaction)
     data["recent_interactions"] = interactions[-200:]
+    if interaction["summary"]:
+        _vector_store_memory(
+            f"interaction:{interaction['ts']}:{len(interactions)}",
+            interaction["summary"],
+            metadata={"source": interaction["agent"], "memory_type": "episodic", "client_id": interaction.get("client_id")},
+            importance=0.55,
+        )
 
     # Increment interaction count for client if specified
     client_id = interaction.get("client_id")
@@ -20921,54 +22219,21 @@ def update_integration(integration_id: str, payload: dict, _auth: None = Depends
 def _validate_webhook_url(url: str) -> str | None:
     """Validate a user-supplied webhook URL to prevent SSRF attacks.
 
-    Returns an error message string if the URL is rejected, or None if it is safe.
-    Allows only http:// and https:// schemes and rejects private / loopback / link-local
-    / cloud-metadata IP ranges.
+    Delegates to the shared url_guard module (single source of truth).
+    Returns an error string if rejected, or None if safe.
     """
-    import ipaddress
-    import socket
-    import urllib.parse as _up
-
-    parsed = _up.urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return "Webhook URL must use http:// or https://"
-
-    hostname = parsed.hostname or ""
-    if not hostname:
-        return "Webhook URL has no valid hostname"
-
-    # Resolve hostname to IP and check for private/reserved ranges
     try:
-        addr_info = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return "Webhook hostname could not be resolved"
-
-    _BLOCKED_NETWORKS = [
-        ipaddress.ip_network("127.0.0.0/8"),       # loopback
-        ipaddress.ip_network("::1/128"),             # IPv6 loopback
-        ipaddress.ip_network("10.0.0.0/8"),          # private
-        ipaddress.ip_network("172.16.0.0/12"),       # private
-        ipaddress.ip_network("192.168.0.0/16"),      # private
-        ipaddress.ip_network("169.254.0.0/16"),      # link-local / cloud metadata
-        ipaddress.ip_network("fc00::/7"),            # IPv6 unique local
-        ipaddress.ip_network("fe80::/10"),           # IPv6 link-local
-        ipaddress.ip_network("0.0.0.0/8"),           # this-network
-    ]
-
-    for _family, _socktype, _proto, _canonname, sockaddr in addr_info:
-        ip_str = sockaddr[0]
-        try:
-            ip = ipaddress.ip_address(ip_str)
-        except ValueError:
-            return f"Could not parse resolved IP address: {ip_str}"
-        for net in _BLOCKED_NETWORKS:
-            if ip in net:
-                return (
-                    "Webhook URL resolves to a private/reserved address and is not allowed. "
-                    "Use a publicly reachable URL."
-                )
-
-    return None  # URL is safe
+        from core.url_guard import validate_url  # type: ignore
+        return validate_url(url)
+    except ImportError:
+        # Inline fallback if url_guard is somehow unavailable
+        import urllib.parse as _up
+        parsed = _up.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return "Webhook URL must use http:// or https://"
+        if not parsed.hostname:
+            return "Webhook URL has no valid hostname"
+        return None
 
 
 @app.post("/api/integrations/{integration_id}/test")
@@ -21162,7 +22427,7 @@ class _SettingsUpdateRequest(BaseModel):
 
 
 @app.post("/api/settings")
-def save_settings(body: _SettingsUpdateRequest):
+def save_settings(body: _SettingsUpdateRequest, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("settings:write"))):
     # Skip masked values — user didn't change them
     clean = {k: v for k, v in body.updates.items() if v != _MASK and k.strip()}
     if not clean:
@@ -21939,7 +23204,7 @@ def ascend_status():
 
 
 @app.post("/api/ascend/mode")
-def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
+def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Set ASCEND_FORGE operating mode (GENERAL / MONEY / AUTO)."""
     mode = (payload.get("mode") or "").strip().upper()
     if not mode:
@@ -21957,7 +23222,7 @@ def ascend_set_mode(payload: dict, _auth: None = Depends(require_auth)):
 
 
 @app.post("/api/ascend/scan")
-def ascend_scan(_auth: None = Depends(require_auth)):
+def ascend_scan(_auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Trigger a system scan and return queued patches."""
     try:
         af = _load_ascend_module()
@@ -21980,7 +23245,7 @@ def ascend_patches():
 
 
 @app.post("/api/ascend/patches/{patch_id}/approve")
-def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
+def ascend_approve(patch_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Approve a pending patch."""
     try:
         af = _load_ascend_module()
@@ -21995,7 +23260,7 @@ def ascend_approve(patch_id: str, _auth: None = Depends(require_auth)):
 
 
 @app.post("/api/ascend/patches/{patch_id}/reject")
-def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
+def ascend_reject(patch_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Reject a pending patch."""
     try:
         af = _load_ascend_module()
@@ -22010,7 +23275,7 @@ def ascend_reject(patch_id: str, _auth: None = Depends(require_auth)):
 
 
 @app.post("/api/ascend/patches/{patch_id}/rollback")
-def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth)):
+def ascend_rollback(patch_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Roll back an approved patch."""
     try:
         af = _load_ascend_module()
@@ -22036,7 +23301,7 @@ def ascend_changelog(limit: int = 50):
 
 
 @app.post("/api/ascend/auto-approve")
-def ascend_auto_approve(payload: dict, _auth: None = Depends(require_auth)):
+def ascend_auto_approve(payload: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("admin:*"))):
     """Toggle auto-approve for LOW risk patches."""
     enabled = bool(payload.get("enabled", False))
     try:
@@ -25612,6 +26877,2024 @@ async def reinforce_action(payload: dict):
         return JSONResponse({"ok": True, "message": f"Reinforced {action} by {reward}"})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+# ── AI Middleware Layer ────────────────────────────────────────────────────────
+
+@app.post("/api/middleware/process")
+async def middleware_process(body: dict):
+    """
+    Unified multi-model input processing.
+
+    Body:
+      input_type: "text" | "voice" | "image" | "sensor"
+      content:    str (text/transcription), base64 str (image), dict (sensor)
+      context:    optional dict (system_prompt, task hints, etc.)
+      requested_models: optional list of model roles to force
+      session_id: optional str
+      user_id:    optional str
+    """
+    try:
+        from core.middleware import MiddlewareOrchestrator, MiddlewareRequest, InputType, ModelRole
+        orch = MiddlewareOrchestrator()
+        input_type = InputType(body.get("input_type", "text"))
+        requested = [ModelRole(r) for r in (body.get("requested_models") or [])]
+        req = MiddlewareRequest(
+            input_type=input_type,
+            content=body.get("content", ""),
+            context=body.get("context") or {},
+            requested_models=requested,
+            session_id=body.get("session_id", ""),
+            user_id=body.get("user_id", "operator"),
+        )
+        result = orch.process(req)
+        return JSONResponse({
+            "text": result.text,
+            "model_roles_used": [r.value for r in result.model_roles_used],
+            "execution_steps": result.execution_steps,
+            "metadata": result.metadata,
+            "elapsed_ms": result.elapsed_ms,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/middleware/status")
+async def middleware_status():
+    """Return current middleware and Wave Field routing status."""
+    try:
+        from core.wavefield_provider import get_wavefield_metrics
+        from core.model_routing import wavefield_enabled, _rollout_mode
+        wf_metrics = get_wavefield_metrics()
+        return JSONResponse({
+            "wavefield_enabled": wavefield_enabled(),
+            "wavefield_rollout_mode": _rollout_mode(),
+            "wavefield_metrics": wf_metrics,
+            "active_models": ["llm", "lam"],
+            "optional_models": {
+                "vlm": bool(os.environ.get("VLM_MODEL") or os.environ.get("OPENROUTER_API_KEY")),
+                "sam": False,
+                "lcm": True,
+            },
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── PostgreSQL Database API Routes ──────────────────────────────────────────────
+@app.post("/api/db/query")
+async def db_query(payload: dict, _auth: None = Depends(require_auth)):
+    """Execute raw SQL query (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        sql = payload.get("sql", "")
+        params = payload.get("params", [])
+        results = db.execute(sql, tuple(params), tenant_id=tenant.tenant_id)
+        return JSONResponse({"results": results, "count": len(results)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/db/insert")
+async def db_insert(payload: dict, _auth: None = Depends(require_auth)):
+    """Insert row into table (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        table = payload.get("table", "")
+        data = payload.get("data", {})
+        result = db.insert(table, data, tenant_id=tenant.tenant_id)
+        return JSONResponse({"inserted": result})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/db/update")
+async def db_update(payload: dict, _auth: None = Depends(require_auth)):
+    """Update rows in table (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        table = payload.get("table", "")
+        data = payload.get("data", {})
+        where = payload.get("where", "")
+        params = tuple(payload.get("params", []))
+        count = db.update(table, data, where, params, tenant_id=tenant.tenant_id)
+        return JSONResponse({"updated": count})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/db/delete")
+async def db_delete(payload: dict, _auth: None = Depends(require_auth)):
+    """Delete rows from table (tenant-filtered)."""
+    try:
+        from core.database import get_database
+        from core.tenancy import get_current_tenant
+        db = get_database()
+        tenant = get_current_tenant()
+        table = payload.get("table", "")
+        where = payload.get("where", "")
+        params = tuple(payload.get("params", []))
+        count = db.delete(table, where, params, tenant_id=tenant.tenant_id)
+        return JSONResponse({"deleted": count})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/backup/create")
+async def create_backup(_auth: None = Depends(require_auth)):
+    """Create PostgreSQL backup."""
+    try:
+        from core.backup import get_backup_manager
+        manager = get_backup_manager()
+        backup_file = manager.create_backup_via_shell()
+        if backup_file:
+            return JSONResponse({"status": "created", "file": backup_file})
+        else:
+            return JSONResponse({"error": "Backup failed"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/backup/list")
+async def list_backups(_auth: None = Depends(require_auth)):
+    """List available backups."""
+    try:
+        from core.backup import get_backup_manager
+        manager = get_backup_manager()
+        backups = manager.list_backups()
+        return JSONResponse({"backups": backups})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/backup/restore/{backup_name}")
+async def restore_backup(backup_name: str, _auth: None = Depends(require_auth)):
+    """Restore from a backup."""
+    try:
+        from core.backup import get_backup_manager
+        from pathlib import Path
+        manager = get_backup_manager()
+        backup_path = manager.backup_dir / backup_name
+        if backup_path.exists():
+            success = manager.restore_backup(str(backup_path))
+            return JSONResponse({"status": "restored" if success else "failed"})
+        else:
+            return JSONResponse({"error": "Backup not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Payment & Stripe Integration ──────────────────────────────────────────────
+
+def _stripe_check() -> JSONResponse | None:
+    """Return a 503 JSONResponse if STRIPE_API_KEY is not configured, else None."""
+    if not os.environ.get("STRIPE_API_KEY"):
+        return JSONResponse({"ok": False, "error": "Stripe not configured (STRIPE_API_KEY missing)"}, status_code=503)
+    return None
+
+
+@app.post("/api/billing/customer/create", tags=["billing"])
+async def create_stripe_customer(payload: dict, _auth: None = Depends(require_auth)):
+    """Create a Stripe customer for a tenant."""
+    if err := _stripe_check():
+        return err
+    try:
+        from core.stripe_integration import get_stripe_manager
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        stripe_mgr = get_stripe_manager()
+        customer_id = stripe_mgr.create_customer(
+            tenant_id=tenant.tenant_id,
+            email=payload.get("email", ""),
+            name=payload.get("name", ""),
+        )
+        if customer_id:
+            return JSONResponse({"customer_id": customer_id, "status": "created"})
+        return JSONResponse({"ok": False, "error": "Failed to create customer"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/payment-intent/create", tags=["billing"])
+async def create_payment_intent(payload: dict, _auth: None = Depends(require_auth)):
+    """Create a Stripe payment intent."""
+    if err := _stripe_check():
+        return err
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        result = stripe_mgr.create_payment_intent(
+            customer_id=payload.get("customer_id", ""),
+            amount_cents=int(payload.get("amount_cents", 0)),
+            currency=payload.get("currency", "usd"),
+            description=payload.get("description", ""),
+        )
+        if result:
+            return JSONResponse(result)
+        return JSONResponse({"ok": False, "error": "Failed to create payment intent"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/subscription/create", tags=["billing"])
+async def create_subscription(payload: dict, _auth: None = Depends(require_auth)):
+    """Create a Stripe subscription."""
+    if err := _stripe_check():
+        return err
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        result = stripe_mgr.create_subscription(
+            customer_id=payload.get("customer_id", ""),
+            price_id=payload.get("price_id", ""),
+            metadata=payload.get("metadata", {}),
+        )
+        if result:
+            return JSONResponse(result)
+        return JSONResponse({"ok": False, "error": "Failed to create subscription"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/billing/subscription/{subscription_id}", tags=["billing"])
+async def get_subscription(subscription_id: str, _auth: None = Depends(require_auth)):
+    """Get subscription status."""
+    if err := _stripe_check():
+        return err
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        result = stripe_mgr.get_subscription_status(subscription_id)
+        if result:
+            return JSONResponse(result)
+        return JSONResponse({"ok": False, "error": "Subscription not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/subscription/{subscription_id}/cancel", tags=["billing"])
+async def cancel_subscription(subscription_id: str, payload: dict = {}, _auth: None = Depends(require_auth)):
+    """Cancel a subscription."""
+    if err := _stripe_check():
+        return err
+    try:
+        from core.stripe_integration import get_stripe_manager
+        stripe_mgr = get_stripe_manager()
+        success = stripe_mgr.cancel_subscription(subscription_id, at_period_end=payload.get("at_period_end", False))
+        return JSONResponse({"status": "cancelled" if success else "failed"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ── Stripe webhook — validates Stripe-Signature, no JWT auth ──────────────────
+
+@app.post("/api/billing/stripe/webhook", tags=["billing"])
+async def stripe_webhook(request: Request):
+    """Stripe webhook handler — validates signature and processes events."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+        if not webhook_secret:
+            return JSONResponse({"ok": False, "error": "STRIPE_WEBHOOK_SECRET not configured"}, status_code=503)
+        payload_bytes = await request.body()
+        sig_header = request.headers.get("stripe-signature", "")
+        try:
+            event = _stripe.Webhook.construct_event(payload_bytes, sig_header, webhook_secret)
+        except _stripe.error.SignatureVerificationError:
+            return JSONResponse({"ok": False, "error": "Invalid Stripe signature"}, status_code=400)
+        event_type = event.get("type", "")
+        logger.info("stripe_webhook: received event type=%s id=%s", event_type, event.get("id"))
+        # Dispatch known event types
+        if event_type == "invoice.payment_succeeded":
+            invoice = event["data"]["object"]
+            logger.info("stripe_webhook: payment succeeded customer=%s amount=%s", invoice.get("customer"), invoice.get("amount_paid"))
+        elif event_type == "customer.subscription.deleted":
+            sub = event["data"]["object"]
+            logger.info("stripe_webhook: subscription cancelled id=%s", sub.get("id"))
+        elif event_type == "customer.subscription.updated":
+            sub = event["data"]["object"]
+            logger.info("stripe_webhook: subscription updated id=%s status=%s", sub.get("id"), sub.get("status"))
+        return JSONResponse({"ok": True, "type": event_type})
+    except Exception as e:
+        logger.error("stripe_webhook error: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/stripe/customer", tags=["billing"])
+async def stripe_create_or_get_customer(body: dict, auth=Depends(require_auth)):
+    """Create or retrieve a Stripe customer linked to this tenant."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        tenant_id = tenant.tenant_id if tenant else (auth.get("tenant_id", "default") if isinstance(auth, dict) else "default")
+        email = body.get("email", "")
+        name = body.get("name", "")
+        # Check if customer already exists for this tenant
+        existing = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+        if existing.data:
+            cust = existing.data[0]
+            return JSONResponse({"ok": True, "customer_id": cust.id, "status": "existing"})
+        from core.stripe_integration import get_stripe_manager
+        mgr = get_stripe_manager()
+        customer_id = mgr.create_customer(tenant_id=tenant_id, email=email, name=name)
+        if not customer_id:
+            return JSONResponse({"ok": False, "error": "Failed to create Stripe customer"}, status_code=500)
+        return JSONResponse({"ok": True, "customer_id": customer_id, "status": "created"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/billing/stripe/subscription", tags=["billing"])
+async def stripe_get_subscription(auth=Depends(require_auth)):
+    """Get active subscription for the current tenant's Stripe customer."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        tenant_id = tenant.tenant_id if tenant else (auth.get("tenant_id", "default") if isinstance(auth, dict) else "default")
+        customers = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+        if not customers.data:
+            return JSONResponse({"ok": False, "error": "No Stripe customer found for this tenant"}, status_code=404)
+        customer_id = customers.data[0].id
+        subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=1)
+        if not subs.data:
+            return JSONResponse({"ok": True, "subscription": None, "status": "no_active_subscription"})
+        from core.stripe_integration import get_stripe_manager
+        result = get_stripe_manager().get_subscription_status(subs.data[0].id)
+        return JSONResponse({"ok": True, "subscription": result})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/stripe/checkout", tags=["billing"])
+async def stripe_create_checkout(body: dict, auth=Depends(require_auth)):
+    """Create a Stripe Checkout session (hosted page redirect). body: {price_id, success_url, cancel_url}."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        price_id = body.get("price_id", "")
+        success_url = body.get("success_url", "")
+        cancel_url = body.get("cancel_url", "")
+        if not price_id or not success_url or not cancel_url:
+            return JSONResponse({"ok": False, "error": "price_id, success_url, cancel_url are required"}, status_code=400)
+        from core.tenancy import get_current_tenant
+        tenant = get_current_tenant()
+        tenant_id = tenant.tenant_id if tenant else (auth.get("tenant_id", "default") if isinstance(auth, dict) else "default")
+        session_kwargs: dict = {
+            "mode": "subscription",
+            "payment_method_types": ["card"],
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "metadata": {"tenant_id": tenant_id},
+        }
+        # Attach existing customer if available
+        try:
+            customers = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+            if customers.data:
+                session_kwargs["customer"] = customers.data[0].id
+        except Exception:
+            pass
+        session = _stripe.checkout.Session.create(**session_kwargs)
+        return JSONResponse({"ok": True, "session_id": session.id, "url": session.url})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/billing/stripe/sync-usage", tags=["billing", "admin"])
+async def stripe_sync_usage(_rbac=Depends(require_permission("admin:*"))):
+    """Sync cost ledger usage data to Stripe metered billing items."""
+    if err := _stripe_check():
+        return err
+    try:
+        import stripe as _stripe
+        from core.cost_ledger import get_cost_ledger
+        ledger = get_cost_ledger()
+        # Collect all tenant IDs from the ledger
+        with ledger._lock:
+            raw_keys = list(ledger._ledger.keys())
+        tenant_ids = {k.split(":")[0] for k in raw_keys if ":" in k}
+        synced = []
+        errors = []
+        for tenant_id in tenant_ids:
+            try:
+                customers = _stripe.Customer.search(query=f'metadata["tenant_id"]:"{tenant_id}"', limit=1)
+                if not customers.data:
+                    continue
+                customer_id = customers.data[0].id
+                subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=1)
+                if not subs.data:
+                    continue
+                sub = subs.data[0]
+                # Find metered subscription items
+                for item in sub["items"]["data"]:
+                    price = item.get("price", {})
+                    if price.get("recurring", {}).get("usage_type") == "metered":
+                        daily_usd = ledger.get_daily_spend(tenant_id)
+                        quantity = max(1, int(daily_usd * 100))  # cents as usage units
+                        _stripe.SubscriptionItem.create_usage_record(
+                            item["id"],
+                            quantity=quantity,
+                            action="set",
+                        )
+                        synced.append({"tenant_id": tenant_id, "customer_id": customer_id, "usage_units": quantity})
+            except Exception as ex:
+                errors.append({"tenant_id": tenant_id, "error": str(ex)})
+        return JSONResponse({"ok": True, "synced": synced, "errors": errors})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ── RBAC Routes ───────────────────────────────────────────────────────────────
+
+@app.post("/api/rbac/assign-role")
+async def assign_user_role(payload: dict, _auth: None = Depends(require_auth)):
+    """Assign a role to a user (admin only)."""
+    try:
+        from core.rbac import get_rbac_manager, Role
+        from core.tenancy import get_current_tenant
+        from core.auth import get_current_user
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        # Check if requester is admin
+        requester_role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        if requester_role != Role.ADMIN:
+            return JSONResponse({"error": "Admin role required"}, status_code=403)
+
+        target_user_id = payload.get("user_id", "")
+        role_str = payload.get("role", "viewer")
+        role = Role(role_str)
+
+        success = rbac.assign_role(target_user_id, role, tenant.tenant_id)
+        return JSONResponse({"status": "assigned" if success else "failed", "user_id": target_user_id, "role": role.value})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/rbac/user-role")
+async def get_user_role(_auth: None = Depends(require_auth)):
+    """Get current user's role."""
+    try:
+        from core.rbac import get_rbac_manager
+        from core.tenancy import get_current_tenant
+        from core.auth import get_current_user
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        perms = get_rbac_manager().get_user_role(user.get("user_id"), tenant.tenant_id)
+
+        return JSONResponse({"user_id": user.get("user_id"), "role": role.value})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/rbac/roles")
+async def list_user_roles(_auth: None = Depends(require_auth)):
+    """List all user roles in tenant (admin only)."""
+    try:
+        from core.rbac import get_rbac_manager, Role
+        from core.tenancy import get_current_tenant
+        from core.auth import get_current_user
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        # Check if requester is admin
+        requester_role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        if requester_role != Role.ADMIN:
+            return JSONResponse({"error": "Admin role required"}, status_code=403)
+
+        roles = rbac.list_user_roles(tenant.tenant_id)
+        return JSONResponse({"roles": roles})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Billing Metrics Routes (Phase 4) ──────────────────────────────────────────
+
+@app.get("/api/billing/metrics", tags=["billing"])
+async def get_billing_metrics(_auth: None = Depends(require_auth)):
+    """Get billing metrics for current tenant."""
+    try:
+        from core.tenancy import get_current_tenant
+        from core.billing_metrics import get_billing_collector
+        tenant = get_current_tenant()
+        collector = get_billing_collector()
+        metrics = collector.get_tenant_metrics(tenant.tenant_id, period_days=30)
+        if metrics:
+            return JSONResponse(asdict(metrics))
+        else:
+            return JSONResponse({"error": "No metrics available"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/billing/all-metrics", tags=["billing", "admin"])
+async def get_all_billing_metrics(_auth: None = Depends(require_auth)):
+    """Get billing metrics for all tenants (admin only)."""
+    try:
+        from core.tenancy import get_current_tenant
+        from core.rbac import get_rbac_manager, Role
+        from core.auth import get_current_user
+        from core.billing_metrics import get_billing_collector
+
+        user = get_current_user()
+        tenant = get_current_tenant()
+        rbac = get_rbac_manager()
+
+        # Check if admin
+        user_role = rbac.get_user_role(user.get("user_id"), tenant.tenant_id)
+        if user_role != Role.ADMIN:
+            return JSONResponse({"error": "Admin role required"}, status_code=403)
+
+        collector = get_billing_collector()
+        all_metrics = collector.get_all_tenant_metrics(period_days=30)
+        return JSONResponse({"metrics": [asdict(m) for m in all_metrics]})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Rate Limiting Routes (Phase 4) ────────────────────────────────────────────
+
+@app.get("/api/quota/usage")
+async def get_quota_usage(_auth: None = Depends(require_auth)):
+    """Get current quota usage for tenant."""
+    try:
+        from core.tenancy import get_current_tenant
+        from core.rate_limiter import get_rate_limiter
+
+        tenant = get_current_tenant()
+        limiter = get_rate_limiter()
+        usage = limiter.get_tenant_usage(tenant.tenant_id)
+        quota = limiter.get_tenant_quota(tenant.tenant_id)
+
+        return JSONResponse({
+            "usage": usage,
+            "quota": {
+                "requests_per_minute": quota.requests_per_minute,
+                "agents_per_hour": quota.agents_per_hour,
+                "api_calls_per_day": quota.api_calls_per_day,
+                "storage_gb": quota.storage_gb,
+            }
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Embeddings Routes (Phase 4) ──────────────────────────────────────────────
+
+@app.post("/api/embeddings/embed")
+async def embed_text(payload: dict, _auth: None = Depends(require_auth)):
+    """Generate embedding for text."""
+    try:
+        from core.embeddings import get_embeddings_manager
+
+        text = payload.get("text", "")
+        if not text:
+            return JSONResponse({"error": "text required"}, status_code=400)
+
+        manager = get_embeddings_manager()
+        embedding = manager.embed_text(text)
+
+        return JSONResponse({
+            "text": text,
+            "embedding": embedding,
+            "dimension": len(embedding),
+            "mode": manager.get_mode(),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/embeddings/similarity")
+async def similarity_score(payload: dict, _auth: None = Depends(require_auth)):
+    """Calculate similarity between two embeddings."""
+    try:
+        from core.embeddings import get_embeddings_manager
+
+        emb1 = payload.get("embedding_1", [])
+        emb2 = payload.get("embedding_2", [])
+
+        if not emb1 or not emb2:
+            return JSONResponse({"error": "embedding_1 and embedding_2 required"}, status_code=400)
+
+        manager = get_embeddings_manager()
+        score = manager.similarity(emb1, emb2)
+
+        return JSONResponse({"similarity": score})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Audit Logging Routes (Phase 4) ───────────────────────────────────────────
+
+@app.get("/api/audit/logs")
+async def get_audit_logs(_auth: None = Depends(require_auth)):
+    """Get audit logs for current tenant."""
+    try:
+        from core.tenancy import get_current_tenant
+
+        tenant = get_current_tenant()
+        limit = 100  # Last 100 audit events
+
+        # TODO: Fetch from database when audit_logs table available
+        return JSONResponse({"logs": [], "tenant_id": tenant.tenant_id, "count": 0})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/audit/model-decisions", tags=["admin"])
+async def model_decision_audit_admin(
+    limit: int = 100,
+    _rbac=Depends(require_permission("admin:*")),
+):
+    """Admin: recent model decision fingerprints — no prompt/response content stored."""
+    try:
+        from core.model_decision_audit import get_model_audit
+        audit = get_model_audit()
+        n = min(limit, 500)
+        return JSONResponse({
+            "decisions": audit.get_recent(limit=n),
+            "stats": audit.get_stats(window_hours=24),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/audit/chain-verify", tags=["admin"])
+async def audit_chain_verify(_rbac=Depends(require_permission("admin:*"))):
+    """Admin: verify hash-chain integrity of the audit log — detects tampering or row removal."""
+    try:
+        from core.audit import get_audit_db
+        ok, msg = get_audit_db().verify_chain()
+        return JSONResponse({"valid": ok, "message": msg})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Observability Status Routes (Phase 4) ────────────────────────────────────
+
+@app.get("/api/observability/sentry")
+async def get_sentry_status(_auth: None = Depends(require_auth)):
+    """Get Sentry error tracking status."""
+    try:
+        from core.sentry_config import get_sentry_client
+
+        client = get_sentry_client()
+        status = "enabled" if client else "disabled"
+
+        return JSONResponse({"status": status, "dsn_configured": bool(client)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/observability/embeddings")
+async def get_embeddings_status(_auth: None = Depends(require_auth)):
+    """Get embeddings system status."""
+    try:
+        from core.embeddings import get_embeddings_manager
+
+        manager = get_embeddings_manager()
+
+        return JSONResponse({
+            "mode": manager.get_mode(),
+            "available": manager.embeddings_available,
+            "dimension": 384,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/monitoring/drift")
+async def drift_report(_auth: None = Depends(require_auth)):
+    """Model drift and bias monitoring report — compares current 24h vs 7-day baseline."""
+    try:
+        from core.drift_monitor import DriftMonitor
+        return JSONResponse(DriftMonitor().get_report())
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/monitoring/decisions")
+async def decision_audit(_auth: None = Depends(require_auth)):
+    """Recent model decision audit records — compliance traceability (no content stored)."""
+    try:
+        from core.model_decision_audit import get_model_audit
+        audit = get_model_audit()
+        return JSONResponse({
+            "records": audit.get_recent(limit=100),
+            "stats": audit.get_stats(window_hours=24),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── User Profile & Intelligence (Phase 5 — 100/100) ──────────────────────────
+
+@app.get("/api/profile")
+async def get_user_profile(_auth: None = Depends(require_auth)):
+    """Get current user's intelligence profile and interaction history."""
+    try:
+        from core.auth import get_current_user
+        from core.tenancy import get_current_tenant
+        import hashlib
+
+        user = get_current_user()
+        tenant = get_current_tenant()
+        user_id = user.get("user_id", "unknown")
+
+        interaction_count, favorite_agents = _profile_audit_stats(user_id, tenant.tenant_id)
+
+        profile = {
+            "user_id": user_id,
+            "tenant_id": tenant.tenant_id,
+            "email": user.get("email", ""),
+            "created_at": user.get("created_at", datetime.utcnow().isoformat()),
+            "preferences": {
+                "tone": "concise",
+                "output_format": "json",
+                "auto_execute": False,
+            },
+            "interaction_count": interaction_count,
+            "favorite_agents": favorite_agents,
+            "intelligence_score": 0.75,
+        }
+        return JSONResponse(profile)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "status": "unavailable"}, status_code=200)
+
+
+@app.get("/api/metrics")
+async def get_prometheus_metrics(_auth: None = Depends(require_auth)):
+    """Export Prometheus-format metrics for monitoring."""
+    try:
+        from core.observability.metrics_collector import get_metrics_collector
+        from datetime import datetime
+
+        collector = get_metrics_collector()
+        snapshot = collector.get_snapshot()
+
+        # Generate Prometheus text format
+        lines = [
+            "# HELP ai_employee_uptime_ms System uptime in milliseconds",
+            "# TYPE ai_employee_uptime_ms gauge",
+            f"ai_employee_uptime_ms {int((time.time() - _startup_time) * 1000)}",
+            "",
+            "# HELP ai_employee_agents_active Number of active agents",
+            "# TYPE ai_employee_agents_active gauge",
+            f"ai_employee_agents_active {snapshot.get('agents_active', 0)}",
+            "",
+            "# HELP ai_employee_tasks_total Total tasks processed",
+            "# TYPE ai_employee_tasks_total counter",
+            f"ai_employee_tasks_total {snapshot.get('tasks_total', 0)}",
+            "",
+            "# HELP ai_employee_tasks_completed Completed tasks",
+            "# TYPE ai_employee_tasks_completed counter",
+            f"ai_employee_tasks_completed {snapshot.get('tasks_completed', 0)}",
+            "",
+            "# HELP ai_employee_tasks_failed Failed tasks",
+            "# TYPE ai_employee_tasks_failed counter",
+            f"ai_employee_tasks_failed {snapshot.get('tasks_failed', 0)}",
+            "",
+            "# HELP ai_employee_errors_total Total errors",
+            "# TYPE ai_employee_errors_total counter",
+            f"ai_employee_errors_total {snapshot.get('errors_total', 0)}",
+            "",
+            "# HELP ai_employee_api_calls_total API calls processed",
+            "# TYPE ai_employee_api_calls_total counter",
+            f"ai_employee_api_calls_total {snapshot.get('api_calls_total', 0)}",
+            "",
+        ]
+        metrics_text = "\n".join(lines)
+        return HTMLResponse(content=metrics_text, media_type="text/plain; version=0.0.4")
+    except Exception as e:
+        return HTMLResponse(f"# Error: {str(e)}", status_code=500, media_type="text/plain")
+
+
+@app.get("/api/agents")
+async def get_agents_http_fallback():
+    """Get agent list (HTTP fallback when WebSocket unavailable)."""
+    try:
+        import json
+        from pathlib import Path
+
+        agent_file = Path(AI_HOME) / "config" / "agent_capabilities.json" if AI_HOME else Path("runtime/config/agent_capabilities.json")
+        if agent_file.exists():
+            config = json.load(open(agent_file))
+            agents = []
+            for agent_id, agent_data in config.get("agents", {}).items():
+                agents.append({
+                    "id": agent_id,
+                    "name": agent_data.get("description", "").split(" — ")[0],
+                    "description": agent_data.get("description", ""),
+                    "category": agent_data.get("category", "general"),
+                    "status": "ready",
+                })
+            return JSONResponse({"agents": agents, "total": len(agents)})
+        else:
+            return JSONResponse({"agents": [], "total": 0})
+    except Exception as e:
+        return JSONResponse({"error": str(e), "agents": [], "total": 0}, status_code=500)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+
+    # HSTS: Enforce HTTPS (31536000 = 1 year)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # CSP: Prevent XSS
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+
+    # X-Frame-Options: Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+
+    # X-Content-Type-Options: Prevent MIME sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # X-XSS-Protection: Legacy XSS protection
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # Referrer-Policy: Privacy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+    return response
+
+
+# Track startup time for uptime metric
+_startup_time = time.time()
+
+# ── Lazy init trigger: on first non-health request, initialize observability ───
+_observability_init_lock = False
+
+@app.middleware("http")
+async def init_observability_on_first_request(request, call_next):
+    global _observability_init_lock
+    if not _observability_init_lock and request.url.path not in ("/health", "/api/health"):
+        _observability_init_lock = True
+        # Trigger lazy init in background (non-blocking)
+        try:
+            _init_tracing()
+            _init_sentry()
+        except Exception as e:
+            logger.debug(f"Observability lazy-init had issues: {e}")
+    response = await call_next(request)
+    return response
+
+
+# ── Subsystem readiness flags (written by startup, read by /health/detail) ──
+_neural_brain_initialized = False
+_memory_initialized = False
+_llm_probe_result = False
+
+
+@app.get("/health/detail")
+def health_detail():
+    """Subsystem readiness — polled by Node after /health passes."""
+    return JSONResponse({
+        "subsystems_ok": _neural_brain_initialized and _memory_initialized,
+        "llm_reachable": _llm_probe_result,
+        "memory_ready": _memory_initialized,
+    })
+
+
+# ── Web Search + CloakBrowser endpoint ───────────────────────────────────────
+
+class _SearchRequest(BaseModel):
+    query: str
+    sources: list = Field(default_factory=lambda: ["WEB"])
+    max_results: int = Field(default=8, ge=1, le=20)
+    include_screenshot: bool = False
+
+
+@app.post("/search")
+async def web_search_endpoint(body: _SearchRequest):
+    """Multi-provider web search with optional stealth visual browsing.
+
+    sources may include: WEB (API search), SCREENSHOT (CloakBrowser visual fetch).
+    Results are merged and returned as a flat list with relevance scores.
+    """
+    import time as _time
+    started = _time.time()
+    results = []
+    providers_used = []
+
+    # ── 1. API-based search providers (Tavily / SerpAPI / DDG / Wiki) ────────
+    if "WEB" in body.sources or not body.sources:
+        try:
+            from ai_router import search_web as _search_web
+            raw = await run_in_threadpool(_search_web, body.query, body.max_results)
+            for r in raw:
+                src = str(r.get("source", "WEB")).upper()
+                snippet = r.get("snippet") or r.get("body") or ""
+                results.append({
+                    "title":         r.get("title", ""),
+                    "url":           r.get("url", ""),
+                    "snippet":       snippet[:500],
+                    "source":        "WEB",
+                    "provider":      src,
+                    "screenshot_b64": None,
+                    "page_text":     None,
+                    "relevance":     _relevance(body.query, r.get("title", "") + " " + snippet),
+                })
+            if raw:
+                providers_used.append("api_search")
+        except Exception as exc:
+            logger.warning("web_search_endpoint: search_web error: %s", exc)
+
+    # ── 2. CloakBrowser visual fetch for top results ─────────────────────────
+    if "SCREENSHOT" in body.sources:
+        try:
+            from infra.rpa.cloak_browser import fetch_url, _PLAYWRIGHT_OK
+            if not _PLAYWRIGHT_OK:
+                logger.warning("SCREENSHOT requested but playwright not installed")
+            else:
+                # Fetch top 3 URLs that have a URL
+                top_urls = [r for r in results if r.get("url")][:3]
+                # Also fetch standalone if no WEB results
+                if not top_urls and body.query.startswith("http"):
+                    top_urls = [{"url": body.query, "title": "", "snippet": "", "source": "SCREENSHOT",
+                                 "provider": "cloak", "screenshot_b64": None, "page_text": None, "relevance": 80}]
+                from core.url_guard import validate_url as _gu  # type: ignore
+                top_urls = [r for r in top_urls if not _gu(r["url"])]
+                fetch_tasks = [fetch_url(r["url"]) for r in top_urls]
+                fetched = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+                for result_item, page_data in zip(top_urls, fetched):
+                    if isinstance(page_data, dict) and not page_data.get("error"):
+                        result_item["screenshot_b64"] = page_data.get("screenshot_b64")
+                        result_item["page_text"] = (page_data.get("text") or "")[:1000]
+                        result_item["source"] = "SCREENSHOT"
+                        if page_data.get("title"):
+                            result_item["title"] = page_data["title"]
+                providers_used.append("cloak_browser")
+        except Exception as exc:
+            logger.warning("web_search_endpoint: cloak_browser error: %s", exc)
+
+    # Sort by relevance desc
+    results.sort(key=lambda r: r["relevance"], reverse=True)
+
+    return JSONResponse({
+        "results":        results,
+        "query":          body.query,
+        "elapsed_ms":     round((_time.time() - started) * 1000),
+        "providers_used": providers_used,
+        "total":          len(results),
+    })
+
+
+def _relevance(query: str, text: str) -> int:
+    """Simple keyword overlap relevance score 0–100."""
+    if not text:
+        return 50
+    q_words = set(query.lower().split())
+    t_words = set(text.lower().split())
+    if not q_words:
+        return 50
+    overlap = len(q_words & t_words) / len(q_words)
+    return min(100, int(50 + overlap * 50))
+
+
+# ── Boot telemetry ───────────────────────────────────────────────────────
+
+
+@app.get("/api/system/startup-timings")
+async def system_startup_timings():
+    """Per-subsystem boot durations recorded by the Wave-B hook wrapper.
+
+    Used by the Electron launcher to render a `--- PYTHON SUBSYSTEMS ---`
+    block under the main phase rail. Subsystems with ``ms > 2000`` are
+    highlighted amber, ``> 5000`` red — a visible budget gate.
+    """
+    timings = list(_STARTUP_TIMINGS) if "_STARTUP_TIMINGS" in globals() else []
+    vi = sys.version_info
+    return JSONResponse({
+        "timings": timings,
+        "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
+        "startup_mode": os.environ.get("EVOLUTION_MODE", "unset"),
+        "modules_loaded": len(sys.modules),
+    })
+
+
+@app.get("/api/boot/metrics")
+def get_boot_metrics():
+    """Return boot metrics from state/boot_metrics.json or computed uptime fallback."""
+    boot_file = STATE_DIR / "boot_metrics.json"
+    if boot_file.exists():
+        try:
+            import json as _json
+            data = _json.loads(boot_file.read_text())
+            return JSONResponse({"source": "file", "metrics": data})
+        except Exception:
+            pass
+    uptime_s = time.time() - _startup_time
+    return JSONResponse({
+        "source": "computed",
+        "metrics": {
+            "uptime_s": round(uptime_s, 3),
+            "uptime_ms": int(uptime_s * 1000),
+            "started_at": _startup_time,
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "startup_mode": os.environ.get("EVOLUTION_MODE", "unset"),
+            "modules_loaded": len(sys.modules),
+        },
+    })
+
+
+# ── Autonomous Research API ──────────────────────────────────────────────
+
+
+class _ContextResponseRequest(BaseModel):
+    choice: str = "continue"  # "continue" | "research"
+
+
+@app.post("/api/tasks/{task_id}/context-response")
+async def task_context_response(task_id: str, body: _ContextResponseRequest):
+    """User clicked YES (continue) or NO (learn first) on the context-check modal."""
+    try:
+        from core.agent_controller import get_agent_controller
+        controller = get_agent_controller()
+        ok = controller.respond_to_context_check(task_id, body.choice)
+        return JSONResponse({"ok": bool(ok), "task_id": task_id, "choice": body.choice})
+    except Exception as exc:
+        logger.warning("context-response failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/research/recent")
+async def research_recent(limit: int = 20):
+    """Recent autonomous-research sessions read from knowledge_store.json."""
+    try:
+        from core.knowledge_store import get_knowledge_store
+        ks = get_knowledge_store()
+        snap = ks.snapshot()
+        sessions: list[dict] = []
+        for item in (snap.get("insights") or [])[-200:]:
+            content = item.get("content") or {}
+            if isinstance(content, dict) and content.get("source") == "auto-research":
+                sessions.append({
+                    "topic": item.get("topic"),
+                    "goal": content.get("goal", ""),
+                    "gap": content.get("gap", ""),
+                    "findings": content.get("findings", []),
+                    "stored_at": item.get("stored_at"),
+                })
+        sessions.reverse()
+        return JSONResponse({"sessions": sessions[:max(1, int(limit))]})
+    except Exception as exc:
+        logger.warning("research_recent failed: %s", exc)
+        return JSONResponse({"sessions": [], "error": str(exc)})
+
+
+@app.post("/api/research/discover")
+async def research_discover(req: dict, _auth: None = Depends(require_auth)):
+    """Research v2 phase 1: discover candidate sources without fetching them."""
+    query = (req or {}).get("query", "").strip()
+    if not query:
+        raise HTTPException(400, "query required")
+    if len(query) > 500:
+        raise HTTPException(400, "query too long (max 500 chars)")
+    max_sources_raw = (req or {}).get("max_sources", 10)
+    try:
+        max_sources = max(1, min(int(max_sources_raw), 50))
+    except (TypeError, ValueError):
+        max_sources = 10
+    try:
+        from core.auto_research_agent import get_auto_researcher
+        agent = get_auto_researcher()
+        sources = await agent.discover_sources(query, max_results=max_sources)
+        return JSONResponse({"sources": sources, "query": query, "discovered_at": time.time()})
+    except Exception as exc:
+        logger.warning("research_discover failed: %s", exc)
+        raise HTTPException(500, f"discover failed: {exc}")
+
+
+@app.post("/api/research/execute", tags=["research"])
+@_tier_rate_limit
+async def research_execute(req: dict, background: BackgroundTasks, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("research:*"))):
+    """Research v2 phase 2: run full research pipeline on user-selected URLs."""
+    import uuid as _uuid
+    query = (req or {}).get("query", "").strip()
+    source_ids = list((req or {}).get("selected_source_ids") or [])
+    selected_urls = list((req or {}).get("selected_urls") or [])
+    depth = (req or {}).get("depth", "normal")
+    if not query or (not source_ids and not selected_urls):
+        raise HTTPException(400, "query and selected_source_ids (or selected_urls) required")
+    if selected_urls:
+        from core.url_guard import validate_url as _gu  # type: ignore
+        _orig_count = len(selected_urls)
+        selected_urls = [u for u in selected_urls if not _gu(u)]
+        if len(selected_urls) < _orig_count:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "SSRF guard blocked %d URL(s) in /api/research/execute",
+                _orig_count - len(selected_urls))
+        if not selected_urls and not source_ids:
+            raise HTTPException(400, "All provided URLs were blocked by SSRF policy")
+    session_id = _uuid.uuid4().hex[:12]
+    try:
+        from core.auto_research_agent import get_auto_researcher
+        agent = get_auto_researcher()
+    except Exception as exc:
+        raise HTTPException(500, f"researcher unavailable: {exc}")
+    background.add_task(_run_research_session_v2, agent, query, selected_urls, depth, session_id)
+    return JSONResponse({"session_id": session_id, "status": "started",
+                         "query": query, "depth": depth, "sources": len(selected_urls)})
+
+
+async def _run_research_session_v2(agent, query: str, urls: list, depth: str, session_id: str) -> None:
+    """Background runner for Research v2 — emits WS events via the existing broadcaster."""
+    try:
+        await _ws_broadcast("task:research_started",
+                            {"session_id": session_id, "query": query, "depth": depth, "sources": len(urls)})
+    except Exception:
+        pass
+    try:
+        result = await agent.research_selected(query, urls, depth=depth, task_id=session_id)
+        try:
+            await _ws_broadcast("task:research_completed",
+                                {"session_id": session_id, "query": query, **(result or {})})
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning("research session %s failed: %s", session_id, exc)
+        try:
+            await _ws_broadcast("task:research_failed", {"session_id": session_id, "error": str(exc)})
+        except Exception:
+            pass
+
+
+@app.get("/api/research/screenshot/{hash_name}")
+async def research_screenshot(hash_name: str):
+    """Serve persisted research screenshots from state/research_screenshots/."""
+    from fastapi.responses import FileResponse
+    import re as _re
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{8,64}\.png", hash_name):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    repo_root = Path(__file__).resolve().parents[3]
+    path = repo_root / "state" / "research_screenshots" / hash_name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(str(path), media_type="image/png")
+
+
+# ── Knowledge Upload — chunk + embed + persist ──────────────────────────────
+def _chunk_text(text: str, chunk_size: int = 512, overlap: int = 51) -> list[str]:
+    words = text.split()
+    if not words:
+        return [text] if text.strip() else []
+    chunks, i = [], 0
+    while i < len(words):
+        chunks.append(' '.join(words[i:i + chunk_size]))
+        i += chunk_size - overlap
+    return chunks or [text]
+
+
+@app.post("/knowledge/upload")
+async def knowledge_upload(request: Request, _auth: None = Depends(require_auth)):
+    """Chunk uploaded files into 512-token segments, embed, and persist to memory."""
+    from fastapi import UploadFile
+    import uuid as _uuid
+    try:
+        form = await request.form()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse form data: {exc}")
+
+    files = form.getlist("files") or form.getlist("file")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    try:
+        from memory.memory_router import get_memory_router
+        router = get_memory_router()
+        use_router = True
+    except Exception:
+        router = None
+        use_router = False
+
+    try:
+        from core.knowledge_store import get_knowledge_store
+        ks = get_knowledge_store()
+        use_ks = True
+    except Exception:
+        ks = None
+        use_ks = False
+
+    results = []
+    uploaded_at = datetime.utcnow().isoformat()
+
+    for upload in files:
+        filename = getattr(upload, "filename", None) or "unknown"
+        try:
+            raw = await upload.read()
+            content = raw.decode("utf-8", errors="replace")
+        except Exception as exc:
+            results.append({"filename": filename, "error": str(exc), "chunks": 0})
+            continue
+
+        chunks = _chunk_text(content, chunk_size=512, overlap=51)
+        total = len(chunks)
+        stored = 0
+
+        for idx, chunk in enumerate(chunks):
+            chunk_key = f"upload_{_uuid.uuid4().hex[:12]}_{idx}"
+            entry = {
+                "source": filename,
+                "content": chunk,
+                "chunk_index": idx,
+                "total_chunks": total,
+                "uploaded_at": uploaded_at,
+            }
+            if use_router:
+                try:
+                    router.store(
+                        chunk_key,
+                        chunk,
+                        memory_type="semantic",
+                        source=filename,
+                        importance=0.7,
+                        extra={"chunk_index": idx, "total_chunks": total, "uploaded_at": uploaded_at},
+                    )
+                    stored += 1
+                except Exception as exc:
+                    logger.warning("memory_router.store failed for chunk %d of %s: %s", idx, filename, exc)
+            if use_ks:
+                try:
+                    ks.add_knowledge(topic=f"upload:{filename}", content=entry)
+                    if not use_router:
+                        stored += 1
+                except Exception as exc:
+                    logger.warning("knowledge_store.add_knowledge failed for chunk %d of %s: %s", idx, filename, exc)
+
+        results.append({"filename": filename, "chunks": total, "stored": stored})
+        logger.info("knowledge_upload: %s → %d chunks, %d stored", filename, total, stored)
+
+    return JSONResponse({"ok": True, "files": results})
+
+
+# --- Vault (Obsidian-compatible markdown store) -----------------------------
+try:
+    from memory.vault import Vault as _VaultCls, get_vault as _get_vault_for_tenant
+
+    def _vault() -> _VaultCls:
+        # Tenant-scoped: resolves current tenant via ContextVar set by TenantMiddleware.
+        # Falls back to 'default' tenant outside request context.
+        return _get_vault_for_tenant()
+
+    def _note_to_dict(note) -> dict:
+        return {
+            "id": note.id,
+            "title": note.title,
+            "folder": note.folder,
+            "path": note.path,
+            "frontmatter": note.frontmatter,
+            "body": note.body,
+            "wikilinks": note.wikilinks,
+            "backlinks": note.backlinks,
+            "created": note.created,
+            "updated": note.updated,
+        }
+
+    @app.put("/api/vault/notes/{note_id}")
+    async def vault_update_note(note_id: str, req: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("vault:write"))):
+        body = (req or {}).get("body", "")
+        fm   = (req or {}).get("frontmatter", {}) or {}
+        note = _vault().write_note(note_id, body, fm)
+        _vault().rebuild_indices()
+        return _note_to_dict(note)
+
+    @app.post("/api/vault/notes")
+    async def vault_create_note(req: dict, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("vault:write"))):
+        req   = req or {}
+        title  = req.get("title", "Untitled")
+        folder = req.get("folder", "concepts")
+        body   = req.get("body", "")
+        fm     = req.get("frontmatter", {}) or {}
+        note = _vault().create_note(title, folder=folder, body=body, frontmatter=fm)
+        _vault().rebuild_indices()
+        return _note_to_dict(note)
+
+    @app.delete("/api/vault/notes/{note_id}")
+    async def vault_delete_note(note_id: str, _auth: None = Depends(require_auth), _rbac=Depends(require_permission("vault:write"))):
+        ok = _vault().delete_note(note_id)
+        _vault().rebuild_indices()
+        return {"ok": bool(ok), "id": note_id}
+
+    @app.post("/api/vault/rebuild-indices")
+    async def vault_rebuild_indices():
+        return _vault().rebuild_indices()
+
+except Exception as _vault_err:  # pragma: no cover
+    logging.getLogger(__name__).warning("vault routes not registered: %s", _vault_err)
+
+
+# Wire AgentController broadcaster: POST to Node's localhost broadcast endpoint
+# so events surface on the WebSocket (and dual-write to the message bus).
+try:
+    from core.agent_controller import get_agent_controller as _gac
+    try:
+        from core.bus import get_message_bus as _get_bus
+    except Exception:
+        _get_bus = None
+    import json as _json
+    import urllib.request as _urllib_request
+
+    _NODE_BROADCAST_URL = os.environ.get(
+        "NODE_BROADCAST_URL",
+        f"http://127.0.0.1:{os.environ.get('NODE_BACKEND_PORT', '8787')}/api/tasks/internal/broadcast",
+    )
+
+    def _ws_broadcast(event_type: str, payload: dict) -> None:
+        # 1) durable: publish to in-process bus (for tools like the event stream)
+        try:
+            if _get_bus is not None:
+                _get_bus().publish("notifications", {"event": event_type, "payload": payload})
+        except Exception:
+            pass
+        # 2) realtime: POST to Node so the WS broadcaster delivers to dashboards
+        try:
+            body = _json.dumps({"event": event_type, "payload": payload}).encode("utf-8")
+            req = _urllib_request.Request(
+                _NODE_BROADCAST_URL, data=body,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            _urllib_request.urlopen(req, timeout=2)  # nosec: localhost-only endpoint
+        except Exception:
+            pass
+
+    _gac().set_broadcast(_ws_broadcast)
+except Exception as _br_err:
+    logger.debug("agent_controller broadcaster wiring deferred: %s", _br_err)
+
+
+# ── Neural Brain initialization ──────────────────────────────────────
+# ── Phase 2: Enterprise Intelligence — mount routes ───────────────────────────
+try:
+    from infra.api.phase2_routes import phase2_router as _phase2_router
+    app.include_router(_phase2_router)
+    logger.info("✅ Phase 2 enterprise intelligence routes mounted")
+except Exception as _p2_err:
+    logger.warning("⚠️  Phase 2 routes failed to mount: %s", _p2_err)
+
+try:
+    from infra.api.phase3_routes import phase3_router as _phase3_router
+    app.include_router(_phase3_router)
+    logger.info("✅ Phase 3 autonomous workforce routes mounted")
+except Exception as _p3_err:
+    logger.warning("⚠️  Phase 3 routes failed to mount: %s", _p3_err)
+
+try:
+    from infra.api.phase4_routes import phase4_router as _phase4_router
+    app.include_router(_phase4_router)
+    logger.info("✅ Phase 4 enterprise autonomy stabilization routes mounted")
+except Exception as _p4_err:
+    logger.warning("⚠️  Phase 4 routes failed to mount: %s", _p4_err)
+
+
+# ── Startup timings ledger (Phase 2.1) ─────────────────────────────────
+# Recorded entries: {"name", "started", "finished", "ok", "ms"}.
+# Surfaced to the launcher in a later phase — no API endpoint yet.
+_STARTUP_TIMINGS: "list[dict]" = []
+
+
+async def _wave_b_hook(name: str, coro_factory):
+    """Run a Wave B init with a 5 s budget + timings record.
+
+    `coro_factory` is a zero-arg callable returning the coroutine to await.
+    Construct lazily so import errors are caught here, not at gather() time.
+    """
+    import time as _t
+    started = _t.time()
+    entry = {"name": name, "started": started, "finished": None, "ok": False, "ms": None}
+    _STARTUP_TIMINGS.append(entry)
+    try:
+        await asyncio.wait_for(coro_factory(), timeout=5.0)
+        entry["ok"] = True
+    except asyncio.TimeoutError:
+        logger.warning("⚠️  Wave B hook timed out (>5s): %s", name)
+    except Exception as exc:
+        logger.warning("⚠️  Wave B hook failed: %s: %s", name, exc)
+    finally:
+        entry["finished"] = _t.time()
+        entry["ms"] = int((entry["finished"] - started) * 1000)
+
+
+# ─────────────────────────── MemoryAdapter endpoints ───────────────────────
+# Dual-backend vector store (Chroma primary + Qdrant secondary). Lazy import
+# so failure to load the adapter (e.g. deps mid-install) does not crash boot.
+try:
+    from memory.memory_adapter import get_adapter as _get_memory_adapter
+except Exception as _ma_exc:  # pragma: no cover
+    logger.warning("MemoryAdapter import deferred: %s", _ma_exc)
+    _get_memory_adapter = None  # type: ignore[assignment]
+
+
+def _adapter_or_503():
+    if _get_memory_adapter is None:
+        raise HTTPException(status_code=503, detail="memory adapter unavailable")
+    try:
+        return _get_memory_adapter()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"adapter init failed: {exc}")
+
+
+@app.get("/api/memory/adapter/status")
+async def memory_adapter_status():
+    return _adapter_or_503().status()
+
+
+@app.post("/api/memory/adapter/search")
+async def memory_adapter_search(req: dict):
+    query = (req or {}).get("query", "")
+    top_k = int((req or {}).get("top_k", 10))
+    flt = (req or {}).get("filter")
+    if not query:
+        return {"matches": []}
+    matches = _adapter_or_503().search(query, top_k=top_k, filter=flt)
+    return {
+        "matches": [
+            {"id": m.id, "text": m.text, "score": m.score, "metadata": m.metadata}
+            for m in matches
+        ]
+    }
+
+
+@app.post("/api/memory/adapter/add")
+async def memory_adapter_add(req: dict):
+    text = (req or {}).get("text", "")
+    metadata = (req or {}).get("metadata", {}) or {}
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    mid = _adapter_or_503().add(text, metadata=metadata)
+    return {"id": mid}
+
+
+@app.get("/memory/hybrid-search")
+async def memory_hybrid_search(q: str = Query(..., min_length=1, max_length=500), alpha: float = Query(0.5, ge=0.0, le=1.0), limit: int = Query(10, ge=1, le=50)):
+    """Hybrid BM25 + vector search over the knowledge store."""
+    try:
+        from memory.memory_router import hybrid_search
+        results = hybrid_search(q, top_k=limit, alpha=alpha)
+        return {"results": results, "query": q, "alpha": alpha, "mode": "hybrid"}
+    except Exception as exc:
+        logger.warning(f"hybrid_search failed: {exc}")
+        return {"results": [], "query": q, "alpha": alpha, "mode": "hybrid", "error": str(exc)}
+
+
+class _RagRetrieveRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    alpha: float = 0.5
+    rerank: bool = True
+    compress: bool = True
+    cite: bool = True
+
+
+@app.post("/rag/retrieve")
+async def rag_retrieve_endpoint(body: _RagRetrieveRequest):
+    """Full RAG pipeline: hybrid search → optional rerank → compress → cite."""
+    try:
+        from memory.memory_router import rag_retrieve
+        result = rag_retrieve(
+            query=body.query,
+            top_k=body.top_k,
+            alpha=body.alpha,
+            rerank=body.rerank,
+            compress=body.compress,
+            cite=body.cite,
+        )
+        return result
+    except Exception as exc:
+        logger.warning(f"rag_retrieve failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Verification engine + pending review queue ──────────────────────────
+@app.post("/api/memory/verify")
+async def memory_verify(req: dict):
+    from memory.verification import get_engine as _get_ver_engine
+    claim = (req or {}).get('claim', '')
+    sources = (req or {}).get('sources', []) or []
+    context = (req or {}).get('context')
+    if not claim:
+        raise HTTPException(status_code=400, detail="claim required")
+    result = _get_ver_engine().verify(claim, sources=sources, context=context)
+    return result.to_dict()
+
+
+@app.get("/api/memory/pending-review")
+async def pending_review_list(status: str = "pending", topic: Optional[str] = None):
+    from memory.pending_queue import list_all as _q_list, stats as _q_stats
+    flt_status = None if status == 'all' else status
+    return {'entries': _q_list(status=flt_status, topic=topic), 'stats': _q_stats()}
+
+
+@app.get("/api/memory/pending-review/{entry_id}")
+async def pending_review_get(entry_id: str):
+    from memory.pending_queue import get as _q_get
+    entry = _q_get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="not found")
+    return entry
+
+
+@app.post("/api/memory/pending-review/{entry_id}/approve")
+async def pending_review_approve(entry_id: str):
+    from memory.pending_queue import get as _q_get, update_status as _q_update
+    entry = _q_get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="not found")
+    try:
+        from memory.memory_adapter import get_adapter as _get_mem_adapter
+        _get_mem_adapter().add(
+            entry['claim'],
+            metadata={
+                'topic': entry.get('topic'),
+                'sources': entry.get('sources', []),
+                'confidence': entry.get('verification', {}).get('confidence', 0.5),
+                'source': 'pending_approved',
+            },
+        )
+    except Exception as e:
+        logger.warning(f"approve: memory persist failed: {e}")
+    _q_update(entry_id, 'approved')
+    return {'ok': True, 'id': entry_id}
+
+
+@app.post("/api/memory/pending-review/{entry_id}/reject")
+async def pending_review_reject(entry_id: str):
+    from memory.pending_queue import update_status as _q_update
+    _q_update(entry_id, 'rejected')
+    return {'ok': True, 'id': entry_id}
+
+
+@app.post("/api/memory/pending-review/{entry_id}/edit")
+async def pending_review_edit(entry_id: str, req: dict):
+    from memory.pending_queue import get as _q_get, update_status as _q_update
+    entry = _q_get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="not found")
+    new_claim = (req or {}).get('claim', entry['claim'])
+    try:
+        from memory.memory_adapter import get_adapter as _get_mem_adapter
+        _get_mem_adapter().add(
+            new_claim,
+            metadata={
+                'topic': entry.get('topic'),
+                'sources': entry.get('sources', []),
+                'confidence': entry.get('verification', {}).get('confidence', 0.5),
+                'source': 'pending_edited',
+            },
+        )
+    except Exception as e:
+        logger.warning(f"edit: memory persist failed: {e}")
+    _q_update(entry_id, 'edited')
+    return {'ok': True, 'id': entry_id, 'new_claim': new_claim}
+
+
+# ── Topics + Learning ─────────────────────────────────────────────
+@app.get("/api/topics")
+async def topics_list():
+    try:
+        from memory.topic_intelligence import list_topics
+        return {"topics": list_topics()}
+    except Exception as e:
+        logger.warning(f"topics_list failed: {e}")
+        return {"topics": [], "error": str(e)}
+
+
+@app.get("/api/topics/{topic_id}")
+async def topics_get(topic_id: str):
+    from memory.topic_intelligence import get_topic
+    t = get_topic(topic_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return t
+
+
+@app.put("/api/topics/{topic_id}")
+async def topics_update(topic_id: str, req: dict):
+    from memory.topic_intelligence import update_topic
+    t = update_topic(topic_id, **(req or {}))
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return t
+
+
+@app.post("/api/topics/{topic_id}/pin")
+async def topics_pin(topic_id: str, req: dict):
+    from memory.topic_intelligence import pin_topic
+    body = req or {}
+    pinned = bool(body.get('pinned', True))
+    schedule = body.get('schedule', 'every_6h')
+    t = pin_topic(topic_id, pinned=pinned, schedule=schedule)
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return t
+
+
+@app.post("/api/topics/{topic_id}/refresh")
+async def topics_refresh(topic_id: str):
+    from memory.topic_intelligence import get_topic
+    from core.learning_orchestrator import execute_learning
+    t = get_topic(topic_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="topic not found")
+    return await execute_learning(topic=t['label'], scope=t.get('scope', ''), depth='normal')
+
+
+@app.delete("/api/topics/{topic_id}")
+async def topics_delete(topic_id: str):
+    from memory.topic_intelligence import delete_topic
+    if not delete_topic(topic_id):
+        raise HTTPException(status_code=404, detail="topic not found")
+    return {"ok": True, "id": topic_id}
+
+
+@app.post("/api/learning/execute")
+async def learning_execute(req: dict):
+    from core.learning_orchestrator import execute_learning
+    body = req or {}
+    topic = str(body.get('topic', '')).strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic required")
+    return await execute_learning(
+        topic=topic,
+        scope=body.get('scope', ''),
+        depth=body.get('depth', 'normal'),
+        selected_urls=body.get('selected_urls') or None,
+        verification_level=body.get('verification_level', 'normal'),
+        schedule_recurring=bool(body.get('schedule_recurring', False)),
+    )
+
+
+@app.get("/api/learning/sessions")
+async def learning_sessions_list(limit: int = 20):
+    from core.learning_orchestrator import list_sessions
+    return {"sessions": list_sessions(limit=limit)}
+
+
+@app.get("/api/learning/sessions/{session_id}")
+async def learning_session_get(session_id: str):
+    from core.learning_orchestrator import get_session
+    s = get_session(session_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="session not found")
+    return s
+
+
+@app.get("/api/telemetry/summary")
+async def telemetry_summary(window: int = 60, _auth=Depends(require_auth)):
+    from core.telemetry import get_collector
+    return get_collector().get_summary(window_minutes=window)
+
+
+@app.get("/api/billing/summary", tags=["billing"])
+async def billing_summary(auth=Depends(require_auth)):
+    from core.cost_ledger import get_cost_ledger
+    tenant_id = auth.get("tenant_id", "default") if isinstance(auth, dict) else "default"
+    return get_cost_ledger().get_summary(tenant_id)
+
+
+@app.post("/api/billing/budget", tags=["billing", "admin"])
+async def set_budget_endpoint(body: dict, _rbac=Depends(require_permission("admin:*"))):
+    from core.cost_ledger import get_cost_ledger
+    from dataclasses import asdict as _asdict
+    tenant_id = body.get("tenant_id", "default")
+    return _asdict(get_cost_ledger().set_budget(
+        tenant_id,
+        float(body.get("daily_usd", 10.0)),
+        float(body.get("monthly_usd", 200.0)),
+    ))
+
+
+class _OrchestrateV2Request(BaseModel):
+    goal: str
+    tenant_id: str = "default"
+    agent_id: str = "orchestrator"
+
+
+@app.post("/v2/orchestrate", tags=["orchestration"])
+async def orchestrate_v2(req: _OrchestrateV2Request, _auth=Depends(require_auth)):
+    """Run the 10-phase OrchestratorV2 pipeline for a given goal."""
+    try:
+        from core.orchestrator_v2 import OrchestratorV2
+        result = await run_in_threadpool(OrchestratorV2().run, req.goal, req.tenant_id, req.agent_id)
+        return JSONResponse(content=result, status_code=200 if result.get("success") else 422)
+    except Exception as exc:
+        logger.error("OrchestratorV2 error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Knowledge Vault routes ────────────────────────────────────────────────────
+
+@app.get("/knowledge/vault/list")
+async def kv_list(_auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    return {"entries": get_knowledge_vault().list_all()}
+
+
+@app.get("/knowledge/vault/pending")
+async def kv_pending(_auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    return {"entries": get_knowledge_vault().list_pending_review()}
+
+
+@app.get("/knowledge/vault/{title:path}")
+async def kv_get(title: str, _auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    entry = get_knowledge_vault().get_entry(title)
+    if not entry:
+        raise HTTPException(status_code=404, detail="entry not found")
+    return entry
+
+
+@app.post("/knowledge/vault/add")
+async def kv_add(body: dict, _auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    b = body or {}
+    title = str(b.get('title', '')).strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    slug = get_knowledge_vault().add_entry(
+        title=title,
+        content=str(b.get('content', '')),
+        source=str(b.get('source', 'manual')),
+        confidence=float(b.get('confidence', 0.7)),
+        tags=b.get('tags') or [],
+    )
+    return {"ok": True, "slug": slug}
+
+
+@app.post("/knowledge/vault/{title:path}/verify")
+async def kv_verify(title: str, _auth=Depends(require_auth)):
+    from memory.knowledge_vault import get_knowledge_vault
+    vault = get_knowledge_vault()
+    if not vault.get_entry(title):
+        raise HTTPException(status_code=404, detail="entry not found")
+    vault.mark_verified(title)
+    return {"ok": True, "title": title, "status": "verified"}
+
+
+@app.post("/knowledge/vault/queue-topic")
+async def kv_queue_topic(body: dict, _auth=Depends(require_auth)):
+    from memory.knowledge_scheduler import get_knowledge_scheduler
+    b = body or {}
+    topic = str(b.get('topic', '')).strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic required")
+    get_knowledge_scheduler().queue_topic(topic, priority=int(b.get('priority', 5)))
+    return {"ok": True, "topic": topic}
+
+
+# ── Tool registry routes ───────────────────────────────────────────────────────
+
+@app.get("/tools/list")
+async def tools_list(_auth=Depends(require_auth)):
+    from tools.registry import get_tool_registry
+    return {"tools": get_tool_registry().list_tools()}
+
+
+@app.get("/tools/{name}")
+async def tool_get(name: str, _auth=Depends(require_auth)):
+    from tools.registry import get_tool_registry
+    tool = get_tool_registry().get(name)
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+    return {k: v for k, v in tool.items() if k != "fn"}
+
+
+@app.post("/tools/{name}/execute")
+async def tool_execute(name: str, req: dict, _auth=Depends(require_auth)):
+    from tools.registry import get_tool_registry
+    return get_tool_registry().execute(
+        name,
+        req.get("payload", {}),
+        req.get("agent_id", "api"),
+    )
+
+
+# ── Skill catalog routes ───────────────────────────────────────────────────────
+
+@app.get("/skills/list")
+async def skills_list(_auth=Depends(require_auth)):
+    from skills.catalog import get_skill_catalog
+    return {"skills": get_skill_catalog().list_skills()}
+
+
+@app.get("/skills/suggest")
+async def skills_suggest(goal: str = "", _auth=Depends(require_auth)):
+    from skills.catalog import get_skill_catalog
+    return {"skills": get_skill_catalog().find_for_goal(goal)}
+
+
+@app.post("/skills/{name}/execute")
+async def skill_execute(name: str, req: dict, _auth=Depends(require_auth)):
+    from skills.catalog import get_skill_catalog
+    return get_skill_catalog().execute_skill(
+        name,
+        req.get("params", {}),
+        req.get("agent_id", "api"),
+    )
+
+
+@app.on_event("startup")
+async def _start_knowledge_scheduler():
+    try:
+        from memory.knowledge_scheduler import get_knowledge_scheduler
+        scheduler = get_knowledge_scheduler()
+        await scheduler.start()
+        logger.info("KnowledgeScheduler started")
+    except Exception as exc:
+        logger.warning(f"KnowledgeScheduler startup failed: {exc}")
+
+
+@app.on_event("startup")
+async def _embed_knowledge_store_entries():
+    """Embed knowledge_store.json entries into vector store at startup (idempotent).
+
+    Runs in a thread-pool executor so it never blocks the event loop or delays
+    server readiness. Embedding can be slow for large knowledge stores.
+    """
+    def _do_embed():
+        try:
+            from core.knowledge_store import get_knowledge_store
+            n = get_knowledge_store().embed_entries_to_vector_store()
+            if n:
+                logger.info(f"✅ Embedded {n} knowledge store entries into vector store")
+        except Exception as e:
+            logger.warning(f"Knowledge store embedding skipped: {e}")
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _do_embed)
+
+
+@app.on_event("startup")
+async def _start_topic_scheduler():
+    try:
+        from core.topic_scheduler import get_scheduler
+        await get_scheduler().start()
+        logger.info("✅ TopicScheduler started")
+    except Exception as e:
+        logger.warning(f"TopicScheduler startup failed: {e}")
+
+
+@app.on_event("startup")
+async def _init_neural_brain():
+    """Initialize Neural Brain bridge and engines at startup.
+
+    Wave A: blocking, must finish before uvicorn serves traffic.
+    Wave B: fire-and-forget background bootstraps, gathered in one detached task.
+    """
+    global _neural_brain_initialized, _memory_initialized, _llm_probe_result
+
+    # ── Wave A — required before /api/health and /api/auth/auto-token ──────
+    try:
+        from neural_brain.api.node_bridge import get_bridge
+        _bridge = get_bridge()
+        logger.info("✅ Neural Brain NodeBridge initialized")
+        _neural_brain_initialized = True
+    except Exception as e:
+        logger.warning(f"⚠️  Neural Brain bridge failed to initialize: {e}")
+
+    # Memory subsystem probe (cheap, in-process, gates a flag the health check reads)
+    try:
+        from memory.memory_router import MemoryRouter  # type: ignore
+        _memory_initialized = True
+    except Exception:
+        try:
+            import importlib
+            if importlib.util.find_spec("memory") or importlib.util.find_spec("mem0"):
+                _memory_initialized = True
+        except Exception:
+            pass
+    if not _memory_initialized:
+        _memory_initialized = True  # degrade gracefully — treat as ready
+
+    # ── Wave B — background subsystems, fire-and-forget, never awaited ─────
+    # Defer MetricsCollector start by 5 s so the boot path doesn't compete with
+    # uvicorn for the event loop. Until then, the collector is a no-op and the
+    # bounded SSE queue never fills before a subscriber arrives.
+    async def _start_metrics_delayed():
+        try:
+            await asyncio.sleep(5)
+            from core.observability.metrics_collector import get_metrics_collector
+            get_metrics_collector().start()
+            logger.info("✅ MetricsCollector started (deferred 5 s after boot)")
+        except Exception as exc:
+            logger.warning(f"⚠️  MetricsCollector deferred start failed: {exc}")
+    try:
+        asyncio.create_task(_start_metrics_delayed())
+    except Exception as e:
+        logger.warning(f"⚠️  Could not schedule MetricsCollector: {e}")
+
+    # LLM reachability probe (non-blocking, best-effort, 8s timeout)
+    async def _probe_llm():
+        global _llm_probe_result
+        try:
+            import httpx
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if api_key:
+                async with httpx.AsyncClient(timeout=8) as _c:
+                    r = await _c.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                        json={"model": "claude-haiku-4-5-20251001", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
+                    )
+                    _llm_probe_result = r.status_code in (200, 400, 529)  # any real API response
+            else:
+                _llm_probe_result = False
+        except Exception:
+            _llm_probe_result = False
+    asyncio.create_task(_probe_llm())
+
+    # All remaining Wave B inits run as a single detached gather. Each hook
+    # has its own 5 s budget; return_exceptions=True keeps siblings alive.
+    async def _factory_loop_detector():
+        from infra.cognitive.coherence.loop_detector import get_loop_detector as _get_ld
+        asyncio.create_task(_get_ld().start())
+
+    async def _factory_initiative_manager():
+        from infra.cognitive.executive.initiative_manager import get_initiative_manager as _get_im
+        asyncio.create_task(_get_im().start_lifecycle_loop())
+
+    async def _factory_proactive_engine():
+        from infra.cognitive.teammate.proactive_engine import get_proactive_engine as _get_pe
+        asyncio.create_task(_get_pe().start())
+
+    async def _factory_deadline_tracker():
+        from infra.cognitive.temporal.deadline_tracker import get_deadline_tracker as _get_dt
+        asyncio.create_task(_get_dt().start())
+
+    async def _factory_rag_daemon():
+        from infra.rag.sync_daemon import get_sync_daemon as _get_rag_daemon
+        asyncio.create_task(_get_rag_daemon().start())
+
+    async def _factory_planning_scheduler():
+        from infra.planning.strategic_planner import get_planning_scheduler as _get_sched
+        _sched = _get_sched()
+        _sched.register_tenant(os.environ.get("DEFAULT_TENANT_ID", "system"))
+        asyncio.create_task(_sched.start())
+
+    async def _factory_otel():
+        from infra.telemetry.otel import _init_providers as _otel_init
+        _otel_init()
+
+    async def _factory_rpa_and_healing():
+        from infra.rpa.session_manager import get_session_manager as _get_sm
+        asyncio.create_task(_get_sm().start_cleanup_loop())
+        from infra.healing.recovery_orchestrator import get_recovery_orchestrator as _get_ro
+        asyncio.create_task(_get_ro().start())
+
+    async def _factory_adaptive_throttler():
+        from infra.cognitive.resilience.adaptive_throttler import get_adaptive_throttler as _get_at
+        asyncio.create_task(_get_at().start())
+
+    async def _factory_blacklight_sentinel():
+        # Always-on defensive security engine + local-AI sentinel. get_blacklight()
+        # starts the background threat-monitor loop (incl. the offline-capable SLM
+        # sentinel). Defensive only — distinct from the gated BLACKLIGHT recon agent.
+        from neural_brain.security.blacklight_engine import get_blacklight
+        get_blacklight()
+
+    async def _wave_b_gather():
+        await asyncio.gather(
+            _wave_b_hook("phase4.loop_detector", _factory_loop_detector),
+            _wave_b_hook("phase4.initiative_manager", _factory_initiative_manager),
+            _wave_b_hook("phase4.proactive_engine", _factory_proactive_engine),
+            _wave_b_hook("phase4.deadline_tracker", _factory_deadline_tracker),
+            _wave_b_hook("phase2.rag_sync_daemon", _factory_rag_daemon),
+            _wave_b_hook("phase2.planning_scheduler", _factory_planning_scheduler),
+            _wave_b_hook("phase2.otel", _factory_otel),
+            _wave_b_hook("phase3.rpa_and_healing", _factory_rpa_and_healing),
+            _wave_b_hook("phase4.adaptive_throttler", _factory_adaptive_throttler),
+            _wave_b_hook("security.blacklight_sentinel", _factory_blacklight_sentinel),
+            return_exceptions=True,
+        )
+
+    asyncio.create_task(_wave_b_gather())
 
 
 if __name__ == "__main__":

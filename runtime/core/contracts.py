@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-TaskStatus = Literal["pending", "running", "success", "failed"]
+TaskStatus = Literal["pending", "planning", "executing", "testing", "reviewing", "waiting_approval", "completed", "running", "success", "failed"]
+
+AgentName = Literal["planner", "coder", "tester", "reviewer"]
 
 
 @dataclass
@@ -26,6 +28,9 @@ class TaskNode:
     passed: bool = False
     started_at: str = ""
     finished_at: str = ""
+    needs_research: bool = False
+    research_findings: dict[str, Any] = field(default_factory=dict)
+    context_score: float = 0.0
 
     def to_contract(self) -> dict[str, Any]:
         return {
@@ -39,6 +44,9 @@ class TaskNode:
             "error": self.error,
             "score": self.score,
             "passed": self.passed,
+            "needs_research": self.needs_research,
+            "context_score": self.context_score,
+            "research_findings": self.research_findings,
         }
 
 
@@ -81,6 +89,28 @@ class TaskGraph:
             "run_id": self.run_id,
             "goal": self.goal,
             "tasks": [task.to_contract() for task in self.tasks],
+        }
+
+
+@dataclass
+class ForgeAgentResult:
+    """Result from a single forge agent stage within an agentic run iteration."""
+
+    agent: str  # planner | coder | tester | reviewer
+    status: str  # running | done | failed | skipped
+    output: dict[str, Any] = field(default_factory=dict)
+    duration_ms: int = 0
+    started_at: str = ""
+    finished_at: str = ""
+
+    def to_contract(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "status": self.status,
+            "output": self.output,
+            "duration_ms": self.duration_ms,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
         }
 
 

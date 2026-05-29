@@ -34,13 +34,45 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+import urllib.request
+import urllib.error
+
+# Module-level auth token — obtained once via register/login on first use
+_AUTH_TOKEN: str | None = None
+
+
+def _get_auth_token() -> str | None:
+    global _AUTH_TOKEN
+    if _AUTH_TOKEN:
+        return _AUTH_TOKEN
+    try:
+        # Use the localhost auto-token endpoint (no credentials needed from localhost)
+        req = urllib.request.Request(f"{BASE_URL}/api/auth/auto-token")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            token = data.get("token") or data.get("access_token") or data.get("accessToken")
+            if token:
+                _AUTH_TOKEN = f"Bearer {token}"
+                return _AUTH_TOKEN
+    except Exception:
+        pass
+    return None
+
+
+def _headers(extra: dict | None = None) -> dict:
+    h = {"Accept": "application/json"}
+    tok = _get_auth_token()
+    if tok:
+        h["Authorization"] = tok
+    if extra:
+        h.update(extra)
+    return h
+
+
 def _get(path: str) -> "tuple[int, dict | list | str]":
-    """Perform a simple GET request using urllib (no extra deps)."""
-    import urllib.request
-    import urllib.error
     url = f"{BASE_URL}{path}"
     try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        req = urllib.request.Request(url, headers=_headers())
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = resp.read().decode("utf-8")
             try:
@@ -58,16 +90,12 @@ def _get(path: str) -> "tuple[int, dict | list | str]":
 
 
 def _post(path: str, body: dict | None = None) -> "tuple[int, dict | list | str]":
-    """Perform a simple POST request using urllib."""
-    import urllib.request
-    import urllib.error
     url = f"{BASE_URL}{path}"
     payload = json.dumps(body or {}).encode("utf-8")
     try:
         req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            url, data=payload,
+            headers=_headers({"Content-Type": "application/json"}),
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

@@ -86,12 +86,27 @@ def main() -> None:
         if structured.get("action"):
             reply = f"Executing: **{structured['action']}**\n\n" + reply
         attachments = engine.extract_attachments(result)
+        proof = result.get("proof") or engine.extract_proof(result)
         step_actions = [
-            {"action": s.get("action", ""), "status": s.get("status", "")}
+            {
+                "action": s.get("action", ""),
+                "status": s.get("status", ""),
+                "output": s.get("output") if isinstance(s.get("output"), dict) else None,
+                "error": s.get("error", ""),
+            }
             for s in (result.get("results") or [])
             if isinstance(s, dict) and s.get("action")
         ][:8]
-        _out({"is_goal": True, "reply": reply, "success": result["success"], "steps": result["completed"], "attachments": attachments, "step_actions": step_actions})
+        _out({
+            "is_goal": True,
+            "reply": reply,
+            "success": result["success"],
+            "steps": result["completed"],
+            "attachments": attachments,
+            "proof": proof,
+            "step_actions": step_actions,
+            "goal_id": result.get("goal_id"),
+        })
     except Exception as exc:
         _fail(f"engine_failed: {exc}")
 

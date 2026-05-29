@@ -1,0 +1,116 @@
+.nas-strip {
+  display: grid;
+  grid-template-columns: 200px 1fr 720px;
+  gap: 16px;
+  align-items: center;
+  background: rgba(13, 13, 24, 0.6);
+  border: 1px solid rgba(229, 199, 107, 0.12);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  min-height: 84px;
+}
+
+.nas-leds {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nas-leds__label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 1.5px;
+  margin-right: 8px;
+}
+.nas-led {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.55;
+  transition: opacity 200ms;
+}
+.nas-led--active { opacity: 1; }
+.nas-led__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--led-color);
+  box-shadow: 0 0 8px var(--led-color);
+}
+.nas-led--active .nas-led__dot { animation: nas-led-pulse 600ms ease-out; }
+.nas-led__name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: var(--led-color);
+  letter-spacing: 1px;
+}
+@keyframes nas-led-pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.5); }
+  100% { transform: scale(1); }
+}
+
+.nas-ticker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+.nas-ticker__label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(229, 199, 107, 0.65);
+  letter-spacing: 1.5px;
+}
+.nas-ticker__rail {
+  overflow: hidden;
+  height: 24px;
+  position: relative;
+}
+.nas-ticker__scroll {
+  display: flex;
+  gap: 32px;
+  animation: nas-ticker-scroll 60s linear infinite;
+  white-space: nowrap;
+}
+.nas-ticker__entry {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.nas-ticker__tag {
+  color: rgba(34, 211, 238, 0.7);
+  margin-right: 8px;
+  text-transform: uppercase;
+  font-size: 9px;
+}
+.nas-ticker__text {
+  color: rgba(255, 255, 255, 0.7);
+}
+.nas-ticker__idle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  letter-spacing: 1px;
+}
+@keyframes nas-ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.nas-waves {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  height: 56px;
+}
+
+@media (max-width: 1280px) {
+  .nas-strip { grid-template-columns: 180px 1fr 480px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nas-led--active .nas-led__dot { animation: none; }
+  .nas-ticker__scroll { animation: none; }
+}

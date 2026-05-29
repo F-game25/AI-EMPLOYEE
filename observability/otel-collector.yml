@@ -1,0 +1,87 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://localhost:*"
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Drop internal telemetry noise from the collector itself
+  filter/drop_collector_internal:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["http.target"] == "/metrics"'
+
+exporters:
+  # Prometheus exporter — scraped by Prometheus on :8889
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: otel
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+
+  # Forward logs to Loki
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    default_labels_enabled:
+      exporter: false
+      job: true
+    headers:
+      X-Scope-OrgID: ai-employee
+
+  # Debug logging (stdout) — helpful during setup, set verbosity to basic in prod
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  extensions: [health_check, pprof]
+
+  pipelines:
+    # Traces: receive → memory_limiter → batch → log to stdout
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/drop_collector_internal, batch]
+      exporters: [debug]
+
+    # Metrics: receive → memory_limiter → batch → Prometheus exporter
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+
+    # Logs: receive → memory_limiter → batch → Loki
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [loki]
+
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      level: basic
+      address: 0.0.0.0:8888

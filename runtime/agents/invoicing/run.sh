@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
-# invoicing — Invoice management and billing automation
-# Runs as an embedded service within the AI Employee server.
-echo "invoicing is running as an embedded service in the AI Employee server."
+set -euo pipefail
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+AGENT_HOME="$AI_HOME/agents/invoicing"
+if [[ -f "$AI_HOME/.env" ]]; then set -a; source "$AI_HOME/.env"; set +a; fi
+if [[ -f "$AI_HOME/config/invoicing.env" ]]; then set -a; source "$AI_HOME/config/invoicing.env"; set +a; fi
+exec python3 "$AGENT_HOME/invoicing.py"

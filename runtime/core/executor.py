@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from analytics.structured_logger import StructuredLogger
 from core.contracts import TaskGraph, TaskNode
-from security.policy import SecurityPolicy
 from skills.catalog import SkillCatalog
+
+if TYPE_CHECKING:
+    # Annotation-only (PEP 563 deferred annotations); avoids importing the
+    # `security` package at runtime, which can be shadowed by a flat `security.py`
+    # on the server's sys.path. The real policy instance is injected by the caller.
+    from security.policy import SecurityPolicy
 
 
 class Executor:
@@ -115,6 +120,10 @@ class Executor:
         required_output_keys = list(skill.output_schema.get("required", []))
         self._policy.validate_output(output, required_output_keys)
         task.output = output
+        # Honest status: a skill that reports failure must fail the task (with retry),
+        # not be silently recorded as success by the no-exception path below.
+        if isinstance(output, dict) and output.get("status") == "failed":
+            raise RuntimeError(output.get("error") or "skill reported failure")
 
     def _run_action(self, action: str, payload: dict) -> dict:
         self._policy.validate_payload(payload)

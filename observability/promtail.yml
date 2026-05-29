@@ -1,0 +1,166 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    tenant_id: ai-employee
+    batchwait: 1s
+    batchsize: 1048576  # 1MiB
+    timeout: 10s
+
+scrape_configs:
+  # ── Python agent log files (/ai-employee/logs/*.log) ──────────────────────
+  - job_name: agent-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: ai-employee
+          service: python-backend
+          __path__: /ai-employee/logs/*.log
+    pipeline_stages:
+      # Attempt JSON parse; fall back silently for plain-text lines
+      - json:
+          expressions:
+            level: level
+            component: component
+            action: action
+            ts: ts
+      - labels:
+          level:
+          component:
+          action:
+      # Normalise timestamp when present in the log line
+      - timestamp:
+          source: ts
+          format: RFC3339
+          fallback_formats:
+            - "2006-01-02T15:04:05Z07:00"
+            - "2006-01-02T15:04:05.999999999Z07:00"
+          action_on_failure: skip
+
+  # ── Python backend runtime log (state/*.log) ──────────────────────────────
+  - job_name: python-backend-state-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: ai-employee
+          service: python-backend
+          __path__: /ai-employee/state/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            component: component
+            action: action
+      - labels:
+          level:
+          component:
+          action:
+
+  # ── Telemetry JSONL ────────────────────────────────────────────────────────
+  - job_name: telemetry
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: telemetry
+          service: ai-employee
+          __path__: /ai-employee/state/telemetry.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            component: component
+            action: action
+            event_type: event_type
+            ts: ts
+      - labels:
+          level:
+          component:
+          action:
+          event_type:
+      - timestamp:
+          source: ts
+          format: RFC3339
+          action_on_failure: skip
+
+  # ── Operations / changelog JSONL ───────────────────────────────────────────
+  - job_name: operations
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: operations
+          service: ai-employee
+          __path__: /ai-employee/state/operations.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            actor: actor
+            action_type: action_type
+            outcome: outcome
+            ts: timestamp
+      - labels:
+          level:
+          actor:
+          action_type:
+          outcome:
+      - timestamp:
+          source: ts
+          format: RFC3339
+          action_on_failure: skip
+
+  # ── Activity log JSONL (actual file present on disk) ─────────────────────
+  - job_name: activity-log
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: operations
+          service: ai-employee
+          log_type: activity
+          __path__: /ai-employee/state/activity_log.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            event_type: event_type
+            source: source
+            ts: ts
+      - labels:
+          event_type:
+          source:
+      - timestamp:
+          source: ts
+          format: RFC3339
+          fallback_formats:
+            - "2006-01-02T15:04:05.999999999Z07:00"
+          action_on_failure: skip
+
+  # ── Changelog JSONL ────────────────────────────────────────────────────────
+  - job_name: changelog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: operations
+          service: ai-employee
+          log_type: changelog
+          __path__: /ai-employee/changelog.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            actor: actor
+            action_type: action_type
+      - labels:
+          level:
+          actor:
+          action_type:

@@ -1,0 +1,19 @@
+{
+  "name": "NEXUS OS",
+  "short_name": "NEXUS",
+  "description": "Aeternus Nexus — AI Command Operating System",
+  "start_url": "/?pwa=1",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#08090C",
+  "theme_color": "#D4AF37",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"]
+}

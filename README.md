@@ -9,6 +9,17 @@ Enterprise-grade AI operations platform for founders, agencies, and lean teams t
 
 ---
 
+## ⚡ Quick Start (No Terminal Required)
+
+**Windows**: Double-click `run.bat`  
+**macOS/Linux**: Double-click `run.sh` (or `bash run.sh`)
+
+Your browser will open automatically. Follow the setup wizard (installs everything automatically) and you're ready to go.
+
+👉 **[Full Getting Started Guide →](GETTING_STARTED.md)**
+
+---
+
 ## Why teams use AI Employee
 
 - **Save time on repetitive work**: automate lead discovery, content drafting, outreach workflows, and operational reporting.

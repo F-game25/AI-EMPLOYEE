@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aeternus-nexus.fullname" . }}-node
+  labels:
+    app.kubernetes.io/component: node-backend
+    {{- include "aeternus-nexus.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.node.type }}
+  ports:
+    - port: {{ .Values.service.node.port }}
+      targetPort: {{ .Values.service.node.port }}
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/component: node-backend
+    {{- include "aeternus-nexus.selectorLabels" . | nindent 4 }}

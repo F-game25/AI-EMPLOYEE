@@ -1,0 +1,23 @@
+[
+  {
+    "id": "ascend-forge",
+    "label": "Ascend Forge",
+    "description": "Build & deploy workflow agent",
+    "default_provider": "anthropic",
+    "default_model": "claude-sonnet-4-6"
+  },
+  {
+    "id": "blacklight",
+    "label": "Blacklight",
+    "description": "OSINT & security automation",
+    "default_provider": "anthropic",
+    "default_model": "claude-opus-4-7"
+  },
+  {
+    "id": "money-mode",
+    "label": "Money Mode",
+    "description": "Revenue pipelines (content / scrape / outreach)",
+    "default_provider": "ollama",
+    "default_model": "llama3.2"
+  }
+]

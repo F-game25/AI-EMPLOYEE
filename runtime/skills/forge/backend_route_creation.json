@@ -1,0 +1,34 @@
+{
+  "skill_id": "backend_route_creation",
+  "name": "Backend Route Creation",
+  "description": "Add new Express REST API routes with proper validation, error handling, and auth middleware.",
+  "triggers": ["route", "endpoint", "api", "backend", "server", "express", "rest", "crud", "get", "post", "patch", "delete", "handler"],
+  "required_context": ["server_js", "existing_routes", "auth_middleware"],
+  "allowed_tools": ["read_file", "write_file", "run_lint", "node_check"],
+  "blocked_tools": ["database_drop", "rm_rf", "git_push_force"],
+  "checklist": [
+    "Add requireAuth middleware to all new routes",
+    "Validate all required input fields with early 400 return",
+    "Return { ok: true, ... } on success and { ok: false, error: '...' } on failure",
+    "Use existing findProject() / findRun() helpers for lookups",
+    "Return 404 if resource not found",
+    "Add route inside createForgeRouter() closure (not outside)",
+    "Run node --check after every edit",
+    "Use forgeRunStore methods for persistence — never write JSON directly",
+    "Log significant events via forgeRunStore.recordAudit()",
+    "Never expose raw filesystem paths in API responses"
+  ],
+  "verification_commands": ["node --check backend/routes/forge.js", "node --check backend/server.js"],
+  "example_tasks": [
+    "Add GET /api/forge/projects/:id/backlog endpoint",
+    "Add POST /api/forge/suggestions/:id/accept endpoint",
+    "Add PATCH /api/forge/models/:modelId with enabled toggle"
+  ],
+  "common_failure_modes": [
+    "Route defined outside createForgeRouter() closure (no access to helpers)",
+    "Missing requireAuth causes unauthenticated access",
+    "Path parameter name mismatch between route and req.params",
+    "Forgetting to handle the 404 case when resource not found"
+  ],
+  "output_format": "Express router.verb() call inside createForgeRouter closure"
+}

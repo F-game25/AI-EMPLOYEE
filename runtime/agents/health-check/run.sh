@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
-# health-check — System health monitoring and diagnostics
-# Runs as an embedded service within the AI Employee server.
-echo "health-check is running as an embedded service in the AI Employee server."
+set -euo pipefail
+AI_HOME="${AI_HOME:-$HOME/.ai-employee}"
+AGENT_HOME="$AI_HOME/agents/health-check"
+if [[ -f "$AI_HOME/.env" ]]; then set -a; source "$AI_HOME/.env"; set +a; fi
+if [[ -f "$AI_HOME/config/health-check.env" ]]; then set -a; source "$AI_HOME/config/health-check.env"; set +a; fi
+exec python3 "$AGENT_HOME/health_check.py"

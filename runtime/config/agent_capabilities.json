@@ -2,8 +2,8 @@
     "_meta": {
         "version": "2.1",
         "description": "Capabilities map for all AI agents \u2014 used by task-orchestrator for intelligent routing",
-        "total_agents": 56,
-        "updated_at": "2026-04-09",
+        "total_agents": 106,
+        "updated_at": "2026-05-28",
         "model_routing": {
             "sales": {
                 "provider": "openai",
@@ -47,6 +47,46 @@
                 "task decomposition",
                 "agent selection",
                 "result aggregation"
+            ],
+            "parallel_capable": true
+        },
+        "task-orchestrator": {
+            "description": "Task Orchestrator \u2014 durable planner and multi-agent coordinator for enterprise upgrade missions, task decomposition, agent dispatch, budget checks, progress tracking, and result synthesis",
+            "category": "coordination",
+            "skills": [
+                "task_decomposition",
+                "agent_dispatch",
+                "workflow_planning",
+                "progress_tracking",
+                "result_synthesis",
+                "model_budget_planning",
+                "memory_writeback"
+            ],
+            "commands": [
+                "task",
+                "orchestrate",
+                "assign",
+                "agents",
+                "task list",
+                "task status"
+            ],
+            "specialties": [
+                "durable task plans",
+                "multi-agent coordination",
+                "cost-aware model routing",
+                "memory writeback",
+                "enterprise mission tracking"
+            ],
+            "workflows": [
+                "task_decomposition",
+                "agent_dispatch",
+                "result_synthesis",
+                "peer_review"
+            ],
+            "hooks": [
+                "before_dispatch:budget_check",
+                "after_subtask:memory_write",
+                "on_failure:retry_or_escalate"
             ],
             "parallel_capable": true
         },
@@ -687,33 +727,29 @@
             "parallel_capable": true
         },
         "lead-hunter-elite": {
-            "description": "LeadHunterElite \u2014 B2B lead generation specialist that finds, qualifies and enriches leads from public sources with ICP scoring and outreach script generation",
+            "description": "Lead Hunter Elite \u2014 advanced B2B lead hunting with ICP definition, LinkedIn/web scraping simulation, email pattern guessing, and scored prospect lists with outreach-ready profiles",
             "category": "sales",
             "model_provider": "openai",
             "model": "gpt-4o",
             "skills": [
-                "lead_scraping",
-                "qualification_scoring",
-                "crm_enrichment",
-                "outreach_script_generator"
+                "lead_generation",
+                "prospect_research",
+                "icp_matching",
+                "email_personalization",
+                "linkedin_prospecting"
             ],
             "commands": [
-                "leadelite scrape",
-                "leadelite qualify",
-                "leadelite enrich",
-                "leadelite outreach",
-                "leadelite hunt"
+                "hunt icp",
+                "hunt prospects",
+                "hunt score",
+                "hunt outreach",
+                "hunt report"
             ],
             "specialties": [
-                "B2B lead scraping",
-                "ICP qualification scoring",
-                "CRM enrichment",
-                "outreach script generation",
-                "LinkedIn prospecting"
-            ],
-            "collaborates_with": [
-                "lead-generator",
-                "email-ninja"
+                "ICP-driven lead hunting",
+                "LinkedIn prospecting",
+                "email pattern guessing",
+                "prospect scoring"
             ],
             "parallel_capable": true
         },
@@ -1088,14 +1124,19 @@
             "parallel_capable": false
         },
         "ascend-forge": {
-            "description": "ASCEND FORGE \u2014 top-layer self-improver: GENERAL/MONEY/AUTO modes, BLACKLIGHT override, prompt scanner, patch/approval/rollback/changelog system, failsafe",
+            "description": "ASCEND FORGE \u2014 system overseer, vibecoding engineer, security specialist, patch/approval/rollback owner, and enterprise upgrade mission coordinator",
             "category": "orchestrator",
             "skills": [
                 "self_improvement",
                 "patch_management",
                 "prompt_scanning",
                 "rollback_management",
-                "changelog_generation"
+                "changelog_generation",
+                "system_architecture",
+                "secure_local_builds",
+                "agent_skill_generation",
+                "workflow_generation",
+                "token_budget_planning"
             ],
             "commands": [
                 "ascend run",
@@ -1106,21 +1147,43 @@
             ],
             "specialties": [
                 "autonomous self-improvement",
+                "enterprise desktop packaging",
+                "offline-first local runtime builds",
+                "multi-agent workflow design",
+                "security review",
                 "GENERAL/MONEY/AUTO modes",
                 "BLACKLIGHT override",
                 "patch approval workflow",
                 "safe rollback"
             ],
+            "workflows": [
+                "project_scaffold",
+                "code_change_plan",
+                "sandboxed_patch",
+                "security_review",
+                "agent_skill_generation",
+                "workflow_generation",
+                "rollback_preparation"
+            ],
+            "hooks": [
+                "before_patch:create_snapshot",
+                "before_external_write:require_approval",
+                "after_patch:run_tests",
+                "after_failure:create_diagnostics",
+                "security_scan:on_submit"
+            ],
             "parallel_capable": false
         },
         "blacklight": {
-            "description": "BLACKLIGHT Autonomous Intelligence \u2014 darknet & blockchain monitoring, autonomous goal\u2192execute loop running 24/7",
+            "description": "BLACKLIGHT Security Operations \u2014 defensive OSINT, security posture analysis, policy-gated recon, audit logging, and high-risk tool blocking for enterprise safety",
             "category": "intelligence",
             "skills": [
-                "autonomous_goal_execution",
-                "opportunity_identification",
-                "strategic_planning",
-                "self_improvement",
+                "defensive_osint",
+                "security_posture_analysis",
+                "tool_policy_gating",
+                "threat_intelligence",
+                "audit_logging",
+                "approval_workflows",
                 "multi_agent_coordination"
             ],
             "commands": [
@@ -1128,12 +1191,29 @@
                 "bl start",
                 "bl stop",
                 "bl status",
-                "bl logs"
+                "bl logs",
+                "bl tools",
+                "bl search"
             ],
             "specialties": [
-                "darknet monitoring",
-                "blockchain analysis",
-                "autonomous intelligence"
+                "defensive OSINT catalog",
+                "safe local analyzers",
+                "network recon approval gates",
+                "blocked exploit and DDoS controls",
+                "security audit trails"
+            ],
+            "workflows": [
+                "tool_discovery",
+                "safe_local_analysis",
+                "network_approval_gate",
+                "blocked_capability_audit",
+                "defensive_remediation_plan"
+            ],
+            "hooks": [
+                "before_tool_run:policy_check",
+                "after_tool_run:audit_event",
+                "on_blocked_tool:create_security_alert",
+                "before_network_osint:require_approval"
             ],
             "parallel_capable": true
         },
@@ -1482,6 +1562,1184 @@
                 "approval gates",
                 "risk management",
                 "compliance"
+            ],
+            "parallel_capable": false
+        },
+        "ecom-agent": {
+            "description": "E-Commerce Agent \u2014 product research, AI listing copy for Shopify/Etsy, email marketing flows, Facebook/Google ad copy, and customer service reply templates",
+            "category": "ecommerce",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "product_research",
+                "listing_creation",
+                "email_copywriting",
+                "ad_copywriting",
+                "customer_service"
+            ],
+            "commands": [
+                "ecom research",
+                "ecom listing",
+                "ecom email",
+                "ecom service",
+                "ecom ads",
+                "ecom trends"
+            ],
+            "specialties": [
+                "Shopify listings",
+                "Etsy copy",
+                "product research",
+                "email flows",
+                "ad copy"
+            ],
+            "parallel_capable": true
+        },
+        "ceo-briefing": {
+            "description": "CEO Briefing \u2014 daily executive summary: recent tasks, agent health, pipeline movements, revenue metrics, pending actions, and system alerts compiled into a concise AI briefing",
+            "category": "analytics",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "report_generation",
+                "data_analysis",
+                "kpi_tracking",
+                "executive_summary"
+            ],
+            "commands": [
+                "brief today",
+                "brief generate",
+                "brief status"
+            ],
+            "specialties": [
+                "executive briefings",
+                "KPI summaries",
+                "system health reports",
+                "pipeline status"
+            ],
+            "parallel_capable": false
+        },
+        "social-media-manager": {
+            "description": "Social Media Manager \u2014 full-pipeline content: brief intake, trend research, multi-platform content strategy, scripts, captions, AI image prompts, hashtag sets, and content packages",
+            "category": "social",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "social_captions",
+                "content_strategy",
+                "hashtag_research",
+                "video_scripts",
+                "influencer_outreach",
+                "visual_prompts"
+            ],
+            "commands": [
+                "social brief",
+                "social create",
+                "social hashtags",
+                "social script",
+                "social schedule"
+            ],
+            "specialties": [
+                "Instagram",
+                "TikTok",
+                "LinkedIn",
+                "Twitter/X",
+                "YouTube Shorts",
+                "content packages"
+            ],
+            "parallel_capable": true
+        },
+        "qualification-agent": {
+            "description": "Lead Qualification Agent \u2014 scores leads 0\u201310 on Budget/Interest/Need dimensions, flags unqualified leads, and focuses sales effort on high-value opportunities",
+            "category": "sales",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "lead_scoring",
+                "icp_matching",
+                "qualification_frameworks",
+                "crm_management"
+            ],
+            "commands": [
+                "qualify run",
+                "qualify lead",
+                "qualify report"
+            ],
+            "specialties": [
+                "BANT qualification",
+                "lead scoring",
+                "ICP matching",
+                "pipeline hygiene"
+            ],
+            "parallel_capable": true
+        },
+        "lead-crm": {
+            "description": "Lead CRM \u2014 full sales pipeline management: deal stages (new\u2192qualified\u2192proposal\u2192negotiation\u2192closed), AI lead scoring 0\u2013100, follow-up scheduling, and pipeline analytics",
+            "category": "sales",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "crm_management",
+                "pipeline_management",
+                "lead_scoring",
+                "follow_up_sequences"
+            ],
+            "commands": [
+                "crm add",
+                "crm pipeline",
+                "crm score",
+                "crm followup",
+                "crm report"
+            ],
+            "specialties": [
+                "deal pipeline",
+                "lead scoring",
+                "follow-up automation",
+                "pipeline analytics"
+            ],
+            "parallel_capable": false
+        },
+        "competitor-watch": {
+            "description": "Competitor Watch \u2014 competitive intelligence monitoring: competitor records, AI-powered analysis and positioning, alert system for new insights, and landscape overview",
+            "category": "research",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "competitive_analysis",
+                "market_positioning",
+                "web_monitoring",
+                "swot_analysis"
+            ],
+            "commands": [
+                "watch add",
+                "watch analyze",
+                "watch report",
+                "watch alerts",
+                "watch landscape"
+            ],
+            "specialties": [
+                "competitor tracking",
+                "positioning analysis",
+                "SWOT frameworks",
+                "market intelligence"
+            ],
+            "parallel_capable": true
+        },
+        "meeting-intelligence": {
+            "description": "Meeting Intelligence \u2014 meeting management and AI summarization: records transcripts, extracts key points/decisions/action items, generates follow-up emails to attendees",
+            "category": "operations",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "meeting_summarization",
+                "action_item_extraction",
+                "follow_up_generation",
+                "transcript_analysis"
+            ],
+            "commands": [
+                "meeting record",
+                "meeting summarize",
+                "meeting followup",
+                "meeting search",
+                "meeting history"
+            ],
+            "specialties": [
+                "meeting summaries",
+                "action item extraction",
+                "follow-up emails",
+                "decision logging"
+            ],
+            "parallel_capable": false
+        },
+        "polymarket-trader": {
+            "description": "Polymarket Trader \u2014 prediction market trading with MiroFish swarm simulation for probability estimates, paper/live modes, risk management, and performance tracking",
+            "category": "trading",
+            "skills": [
+                "prediction_market_analysis",
+                "swarm_simulation",
+                "risk_management",
+                "portfolio_tracking"
+            ],
+            "commands": [
+                "poly markets",
+                "poly trade",
+                "poly portfolio",
+                "poly signals",
+                "poly status"
+            ],
+            "specialties": [
+                "Polymarket",
+                "prediction markets",
+                "probability estimation",
+                "MiroFish swarm"
+            ],
+            "parallel_capable": false
+        },
+        "chatbot-builder": {
+            "description": "Chatbot Builder \u2014 generates complete chatbot templates for niches (fitness, recipes, dating, customer service, coaching): persona, system prompts, FAQ libraries, conversation flows, SaaS pricing tiers",
+            "category": "development",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "chatbot_design",
+                "conversation_flows",
+                "persona_creation",
+                "pricing_strategy"
+            ],
+            "commands": [
+                "chatbot create",
+                "chatbot persona",
+                "chatbot flows",
+                "chatbot faq",
+                "chatbot pricing"
+            ],
+            "specialties": [
+                "chatbot templates",
+                "conversation design",
+                "SaaS pricing",
+                "persona building"
+            ],
+            "parallel_capable": true
+        },
+        "content-calendar": {
+            "description": "Content Calendar \u2014 plans and schedules content across channels: generates topic ideas, assigns publish dates, content types, and platform targets for 30/60/90-day horizons",
+            "category": "content",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "content_calendar",
+                "content_strategy",
+                "topic_research",
+                "scheduling"
+            ],
+            "commands": [
+                "calendar plan",
+                "calendar monthly",
+                "calendar ideas",
+                "calendar schedule"
+            ],
+            "specialties": [
+                "editorial calendars",
+                "content planning",
+                "multi-channel scheduling",
+                "topic ideation"
+            ],
+            "parallel_capable": true
+        },
+        "email-marketing": {
+            "description": "Email Marketing \u2014 full email marketing automation: campaign planning, list segmentation, A/B test design, drip sequences, performance analysis, and deliverability optimization",
+            "category": "sales",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "email_campaigns",
+                "list_segmentation",
+                "a_b_testing_emails",
+                "drip_sequences",
+                "deliverability_optimization"
+            ],
+            "commands": [
+                "email campaign",
+                "email segment",
+                "email drip",
+                "email abtest",
+                "email analyze"
+            ],
+            "specialties": [
+                "email automation",
+                "list segmentation",
+                "A/B testing",
+                "deliverability",
+                "campaign analytics"
+            ],
+            "parallel_capable": true
+        },
+        "analytics-bi": {
+            "description": "Analytics BI \u2014 business intelligence dashboard: reads system state files to produce KPI summaries, revenue trends, pipeline health, anomaly detection, and executive-ready reports",
+            "category": "analytics",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "data_analysis",
+                "kpi_tracking",
+                "report_generation",
+                "anomaly_detection",
+                "trend_analysis"
+            ],
+            "commands": [
+                "bi dashboard",
+                "bi kpis",
+                "bi revenue",
+                "bi pipeline",
+                "bi report"
+            ],
+            "specialties": [
+                "KPI dashboards",
+                "revenue analytics",
+                "pipeline health",
+                "anomaly detection",
+                "executive reports"
+            ],
+            "parallel_capable": false
+        },
+        "crm-pipeline": {
+            "description": "CRM Pipeline \u2014 deal pipeline manager: tracks deals through stages, flags stale deals, sends follow-up reminders, calculates conversion rates and expected revenue",
+            "category": "sales",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "pipeline_management",
+                "crm_management",
+                "follow_up_sequences",
+                "sales_forecasting"
+            ],
+            "commands": [
+                "crm view",
+                "crm advance",
+                "crm stale",
+                "crm forecast",
+                "crm stats"
+            ],
+            "specialties": [
+                "deal tracking",
+                "pipeline stages",
+                "stale deal alerts",
+                "revenue forecasting"
+            ],
+            "parallel_capable": false
+        },
+        "customer-support": {
+            "description": "Customer Support \u2014 support ticket triage: classifies issues (refund/bug/billing/onboarding), drafts empathetic reply templates, sets priority, and flags escalations",
+            "category": "support",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "ticket_classification",
+                "response_templates",
+                "escalation_routing",
+                "sentiment_analysis",
+                "faq_handling"
+            ],
+            "commands": [
+                "support triage",
+                "support reply",
+                "support escalate",
+                "support faq",
+                "support status"
+            ],
+            "specialties": [
+                "ticket triage",
+                "empathetic replies",
+                "escalation routing",
+                "FAQ drafting"
+            ],
+            "parallel_capable": true
+        },
+        "invoicing": {
+            "description": "Invoicing \u2014 generates professional invoice drafts from deal data: line items, tax calculation, totals, payment terms, and email-ready invoice copy",
+            "category": "finance",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "invoice_generation",
+                "tax_calculation",
+                "payment_tracking",
+                "financial_reporting"
+            ],
+            "commands": [
+                "invoice create",
+                "invoice list",
+                "invoice send",
+                "invoice overdue",
+                "invoice report"
+            ],
+            "specialties": [
+                "invoice generation",
+                "payment tracking",
+                "tax calculation",
+                "accounts receivable"
+            ],
+            "parallel_capable": false
+        },
+        "personal-brand": {
+            "description": "Personal Brand \u2014 builds complete personal brand: LinkedIn bio/headline/about, thought leadership content, speaking topics, brand voice guide, and 30-day content plan",
+            "category": "social",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "brand_voice",
+                "linkedin_optimization",
+                "content_strategy",
+                "thought_leadership"
+            ],
+            "commands": [
+                "brand audit",
+                "brand bio",
+                "brand linkedin",
+                "brand content",
+                "brand voice"
+            ],
+            "specialties": [
+                "LinkedIn optimization",
+                "personal branding",
+                "thought leadership",
+                "brand voice"
+            ],
+            "parallel_capable": false
+        },
+        "social-scheduler": {
+            "description": "Social Scheduler \u2014 schedules social media posts with timestamps, tracks posting status, generates AI content drafts, and manages multi-platform queues",
+            "category": "social",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "social_captions",
+                "scheduling",
+                "content_calendar",
+                "multi_platform_posting"
+            ],
+            "commands": [
+                "schedule add",
+                "schedule list",
+                "schedule queue",
+                "schedule generate",
+                "schedule post"
+            ],
+            "specialties": [
+                "post scheduling",
+                "multi-platform queues",
+                "auto-posting",
+                "content generation"
+            ],
+            "parallel_capable": true
+        },
+        "team-management": {
+            "description": "Team Management \u2014 manages team roster, assigns tasks to members, tracks workload, generates standup reports, and monitors capacity across projects",
+            "category": "hr",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "team_coordination",
+                "task_assignment",
+                "workload_tracking",
+                "standup_reports"
+            ],
+            "commands": [
+                "team roster",
+                "team assign",
+                "team workload",
+                "team standup",
+                "team status"
+            ],
+            "specialties": [
+                "team roster management",
+                "task assignment",
+                "workload balancing",
+                "standup automation"
+            ],
+            "parallel_capable": false
+        },
+        "website-builder": {
+            "description": "Website Builder \u2014 generates complete landing page copy and structure: hero section, feature blocks, social proof, pricing tables, FAQ, and CTA sections with conversion-focused writing",
+            "category": "development",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "landing_page_copy",
+                "conversion_optimization",
+                "seo_optimization",
+                "ux_writing"
+            ],
+            "commands": [
+                "site hero",
+                "site features",
+                "site pricing",
+                "site faq",
+                "site full"
+            ],
+            "specialties": [
+                "landing page copy",
+                "hero sections",
+                "pricing tables",
+                "conversion writing"
+            ],
+            "parallel_capable": true
+        },
+        "workflow-builder": {
+            "description": "Workflow Builder \u2014 designs automation workflows: trigger\u2192condition\u2192action chains, saves as reusable JSON recipes, supports webhook/cron/event triggers",
+            "category": "operations",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "workflow_design",
+                "automation_planning",
+                "trigger_configuration",
+                "integration_mapping"
+            ],
+            "commands": [
+                "workflow create",
+                "workflow list",
+                "workflow run",
+                "workflow template",
+                "workflow status"
+            ],
+            "specialties": [
+                "automation workflows",
+                "trigger/condition/action logic",
+                "webhook integration",
+                "workflow templates"
+            ],
+            "parallel_capable": true
+        },
+        "export-backup": {
+            "description": "Export & Backup \u2014 exports system state as CSV/JSON: leads, tasks, revenue, activity logs; creates dated backup archives with integrity checksums",
+            "category": "operations",
+            "skills": [
+                "data_export",
+                "backup_management",
+                "csv_generation",
+                "archive_creation"
+            ],
+            "commands": [
+                "export leads",
+                "export tasks",
+                "export revenue",
+                "backup create",
+                "backup restore"
+            ],
+            "specialties": [
+                "CSV exports",
+                "JSON backups",
+                "state archiving",
+                "data portability"
+            ],
+            "parallel_capable": false
+        },
+        "health-check": {
+            "description": "Health Check \u2014 system health monitor: checks all services, verifies state file integrity, validates API keys, measures response times, and returns a grade (A/B/C/D) with remediation steps",
+            "category": "operations",
+            "skills": [
+                "system_health_monitoring",
+                "service_validation",
+                "api_key_verification",
+                "diagnostic_reporting"
+            ],
+            "commands": [
+                "health check",
+                "health services",
+                "health keys",
+                "health grade",
+                "health fix"
+            ],
+            "specialties": [
+                "service health",
+                "API key validation",
+                "response time monitoring",
+                "health grading"
+            ],
+            "parallel_capable": false
+        },
+        "seo-agent": {
+            "description": "SEO Agent \u2014 full on-page SEO: audits title/meta/headings/internal links, keyword clustering by intent, content gap analysis, schema markup suggestions, and page-by-page optimization plans",
+            "category": "marketing",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "seo_audit",
+                "keyword_research",
+                "content_optimization",
+                "technical_seo",
+                "schema_markup"
+            ],
+            "commands": [
+                "seo audit",
+                "seo keywords",
+                "seo gaps",
+                "seo meta",
+                "seo schema",
+                "seo report"
+            ],
+            "specialties": [
+                "on-page SEO",
+                "keyword clustering",
+                "meta tag optimization",
+                "content gap analysis",
+                "schema markup"
+            ],
+            "parallel_capable": true
+        },
+        "contract-drafter": {
+            "description": "Contract Drafter \u2014 generates professional legal documents: NDAs, SOWs, SLAs, freelance contracts, partnership agreements with variable substitution and plain-English summaries",
+            "category": "operations",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "contract_drafting",
+                "document_generation",
+                "legal_review",
+                "template_management"
+            ],
+            "commands": [
+                "contract nda",
+                "contract sow",
+                "contract sla",
+                "contract freelance",
+                "contract review"
+            ],
+            "specialties": [
+                "NDA drafting",
+                "SOW/SLA templates",
+                "freelance contracts",
+                "partnership agreements",
+                "plain-English summaries"
+            ],
+            "parallel_capable": true
+        },
+        "pitch-deck-builder": {
+            "description": "Pitch Deck Builder \u2014 builds investor-grade pitch decks: problem/solution/market/traction/team/financials/ask slides with narrative arc, data placeholders, and design notes",
+            "category": "strategy",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "pitch_writing",
+                "financial_modeling",
+                "market_research",
+                "storytelling",
+                "investor_relations"
+            ],
+            "commands": [
+                "pitch outline",
+                "pitch slide",
+                "pitch narrative",
+                "pitch financials",
+                "pitch full"
+            ],
+            "specialties": [
+                "investor pitch decks",
+                "slide narratives",
+                "market sizing",
+                "financial projections",
+                "funding asks"
+            ],
+            "parallel_capable": false
+        },
+        "ad-copy-tester": {
+            "description": "Ad Copy Tester \u2014 generates 3\u20135 variants per angle for Facebook/Google/LinkedIn ads, scores each by estimated CTR-likelihood, and outputs a structured A/B split-test plan",
+            "category": "marketing",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "ad_copywriting",
+                "a_b_testing",
+                "conversion_optimization",
+                "performance_prediction"
+            ],
+            "commands": [
+                "adtest variants",
+                "adtest score",
+                "adtest plan",
+                "adtest headlines",
+                "adtest angles"
+            ],
+            "specialties": [
+                "ad copy variants",
+                "CTR prediction",
+                "A/B test planning",
+                "headline testing",
+                "angle optimization"
+            ],
+            "parallel_capable": true
+        },
+        "data-scraper": {
+            "description": "Data Scraper \u2014 scrapes public web data via DuckDuckGo/Tavily: LinkedIn-style profiles, G2 reviews, news articles, product listings, pricing pages; returns structured enriched datasets",
+            "category": "research",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "web_search",
+                "data_extraction",
+                "lead_enrichment",
+                "structured_output"
+            ],
+            "commands": [
+                "scrape profiles",
+                "scrape reviews",
+                "scrape news",
+                "scrape products",
+                "scrape pricing"
+            ],
+            "specialties": [
+                "web data extraction",
+                "lead enrichment",
+                "review mining",
+                "pricing intelligence",
+                "news aggregation"
+            ],
+            "parallel_capable": true
+        },
+        "email-warmup": {
+            "description": "Email Warmup \u2014 email deliverability advisor: checks SPF/DKIM/DMARC configuration, estimates spam scores, generates warmup sequence advice, and produces a deliverability audit report",
+            "category": "sales",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "email_deliverability",
+                "spam_analysis",
+                "dns_verification",
+                "warmup_planning"
+            ],
+            "commands": [
+                "warmup check",
+                "warmup spf",
+                "warmup spam",
+                "warmup plan",
+                "warmup report"
+            ],
+            "specialties": [
+                "SPF/DKIM/DMARC checks",
+                "spam score estimation",
+                "inbox placement",
+                "warmup sequences",
+                "deliverability audit"
+            ],
+            "parallel_capable": false
+        },
+        "report-generator": {
+            "description": "Report Generator \u2014 compiles weekly/monthly business reports from system state: revenue, pipeline, content activity, agent performance \u2192 formatted Markdown reports ready to share",
+            "category": "analytics",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "report_generation",
+                "data_analysis",
+                "kpi_tracking",
+                "executive_summary"
+            ],
+            "commands": [
+                "report weekly",
+                "report monthly",
+                "report revenue",
+                "report pipeline",
+                "report agents"
+            ],
+            "specialties": [
+                "weekly reports",
+                "monthly summaries",
+                "revenue reporting",
+                "agent performance",
+                "executive dashboards"
+            ],
+            "parallel_capable": false
+        },
+        "customer-journey-mapper": {
+            "description": "Customer Journey Mapper \u2014 maps full buyer journeys: awareness\u2192consideration\u2192decision touchpoints, friction points, emotional states, channel mix, and prioritized improvement recommendations",
+            "category": "marketing",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "funnel_analysis",
+                "customer_research",
+                "conversion_optimization",
+                "touchpoint_mapping"
+            ],
+            "commands": [
+                "journey map",
+                "journey friction",
+                "journey touchpoints",
+                "journey improve",
+                "journey report"
+            ],
+            "specialties": [
+                "customer journey mapping",
+                "touchpoint analysis",
+                "friction identification",
+                "conversion optimization",
+                "persona journeys"
+            ],
+            "parallel_capable": true
+        },
+        "api-tester": {
+            "description": "API Tester \u2014 generates HTTP test suites for REST APIs: validates responses, checks auth/rate limits, tests edge cases, produces Postman-style collections and security review notes",
+            "category": "development",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "api_testing",
+                "security_review",
+                "test_case_generation",
+                "documentation"
+            ],
+            "commands": [
+                "api test",
+                "api validate",
+                "api security",
+                "api collection",
+                "api docs"
+            ],
+            "specialties": [
+                "REST API testing",
+                "auth validation",
+                "rate limit testing",
+                "Postman collections",
+                "OpenAPI spec review"
+            ],
+            "parallel_capable": true
+        },
+        "risk-analyst": {
+            "description": "Risk Analyst \u2014 business and project risk assessment: SWOT analysis, risk register with likelihood/impact matrix (1\u20135 scale), mitigation strategies, and priority action plans",
+            "category": "strategy",
+            "model_provider": "anthropic",
+            "model": "claude-opus-4-5",
+            "skills": [
+                "risk_assessment",
+                "swot_analysis",
+                "strategic_analysis",
+                "mitigation_planning"
+            ],
+            "commands": [
+                "risk assess",
+                "risk swot",
+                "risk register",
+                "risk mitigate",
+                "risk report"
+            ],
+            "specialties": [
+                "risk registers",
+                "SWOT analysis",
+                "likelihood/impact matrices",
+                "mitigation strategies",
+                "scenario planning"
+            ],
+            "parallel_capable": true
+        },
+        "recruiter": {
+            "description": "Recruiter \u2014 recruitment automation: CV screening, candidate outreach, and interview scheduling",
+            "category": "hr",
+            "skills": [
+                "cv_screening",
+                "candidate_outreach",
+                "interview_scheduling"
+            ],
+            "commands": [
+                "screen",
+                "source",
+                "schedule"
+            ],
+            "specialties": [
+                "resume parsing",
+                "outreach sequencing",
+                "pipeline tracking"
+            ],
+            "parallel_capable": true
+        },
+        "follow-up-agent": {
+            "description": "Follow-up Agent \u2014 sends 2\u20135 personalised follow-ups and adapts tone based on engagement",
+            "category": "sales",
+            "skills": [
+                "follow_up_sequencing",
+                "tone_adaptation",
+                "engagement_tracking"
+            ],
+            "commands": [
+                "follow_up",
+                "nudge",
+                "sequence"
+            ],
+            "specialties": [
+                "multi-touch cadence",
+                "reply detection",
+                "personalisation"
+            ],
+            "parallel_capable": true
+        },
+        "offer-agent": {
+            "description": "Offer Agent \u2014 crafts a personalised pitch and offer per niche",
+            "category": "sales",
+            "skills": [
+                "offer_crafting",
+                "niche_targeting",
+                "pitch_writing"
+            ],
+            "commands": [
+                "offer",
+                "pitch"
+            ],
+            "specialties": [
+                "value proposition",
+                "niche research",
+                "pricing framing"
+            ],
+            "parallel_capable": true
+        },
+        "creator-agency": {
+            "description": "Creator Agency \u2014 creator/personal-brand automation: content planning, scripting, and scheduling",
+            "category": "content",
+            "skills": [
+                "content_planning",
+                "scripting",
+                "scheduling"
+            ],
+            "commands": [
+                "plan",
+                "script",
+                "schedule"
+            ],
+            "specialties": [
+                "personal brand",
+                "content calendar",
+                "hook writing"
+            ],
+            "parallel_capable": true
+        },
+        "print-on-demand": {
+            "description": "Print-on-Demand \u2014 merch automation for Printful, Teespring, and similar platforms",
+            "category": "ecommerce",
+            "skills": [
+                "product_design",
+                "listing_automation",
+                "order_routing"
+            ],
+            "commands": [
+                "design",
+                "list",
+                "fulfil"
+            ],
+            "specialties": [
+                "merch generation",
+                "POD integrations",
+                "mockups"
+            ],
+            "parallel_capable": true
+        },
+        "financial-tools": {
+            "description": "Financial Tools \u2014 invoice management, quotes, P&L, and payment reminders",
+            "category": "finance",
+            "skills": [
+                "invoicing",
+                "quoting",
+                "pnl",
+                "payment_reminders"
+            ],
+            "commands": [
+                "invoice",
+                "quote",
+                "pnl",
+                "remind"
+            ],
+            "specialties": [
+                "billing",
+                "cashflow",
+                "reminders"
+            ],
+            "parallel_capable": true
+        },
+        "ticket-system": {
+            "description": "Ticket System \u2014 task tracking with an immutable audit trail",
+            "category": "support",
+            "skills": [
+                "ticket_tracking",
+                "audit_trail",
+                "status_updates"
+            ],
+            "commands": [
+                "open",
+                "update",
+                "close",
+                "audit"
+            ],
+            "specialties": [
+                "queue management",
+                "SLA tracking",
+                "audit logging"
+            ],
+            "parallel_capable": true
+        },
+        "org-chart": {
+            "description": "Org Chart \u2014 agent hierarchy and reporting-structure management",
+            "category": "operations",
+            "skills": [
+                "hierarchy_modeling",
+                "reporting_lines",
+                "role_mapping"
+            ],
+            "commands": [
+                "chart",
+                "assign",
+                "report"
+            ],
+            "specialties": [
+                "org design",
+                "reporting structure",
+                "role definitions"
+            ],
+            "parallel_capable": false
+        },
+        "mirofish-researcher": {
+            "description": "MiroFish Researcher \u2014 standalone market-research agent (crowd-intelligence informed)",
+            "category": "research",
+            "skills": [
+                "market_research",
+                "trend_analysis",
+                "source_synthesis"
+            ],
+            "commands": [
+                "research",
+                "analyze"
+            ],
+            "specialties": [
+                "market sizing",
+                "competitor scan",
+                "signal synthesis"
+            ],
+            "parallel_capable": true
+        },
+        "discord-bot": {
+            "description": "Discord Bot \u2014 admin control panel and notifications for the AI follow-up system over Discord",
+            "category": "communication",
+            "skills": [
+                "discord_integration",
+                "notifications",
+                "command_handling"
+            ],
+            "commands": [
+                "notify",
+                "control",
+                "status"
+            ],
+            "specialties": [
+                "Discord API",
+                "admin commands",
+                "alerts"
+            ],
+            "parallel_capable": false
+        },
+        "whatsapp-webhook": {
+            "description": "WhatsApp Webhook \u2014 receives inbound Twilio WhatsApp messages and routes them into the system",
+            "category": "communication",
+            "skills": [
+                "whatsapp_inbound",
+                "twilio_integration",
+                "message_routing"
+            ],
+            "commands": [
+                "receive",
+                "route"
+            ],
+            "specialties": [
+                "Twilio webhook",
+                "inbound parsing",
+                "conversation routing"
+            ],
+            "parallel_capable": false
+        },
+        "discovery": {
+            "description": "Discovery Bot \u2014 scans skill gaps and market opportunities, proposes new skills or workflows using AI-powered analysis; all proposals require explicit user approval before any changes",
+            "category": "research",
+            "skills": [
+                "skill_gap_analysis",
+                "market_research",
+                "improvement_proposals",
+                "ai_powered_scanning"
+            ],
+            "commands": [
+                "discover",
+                "improvements",
+                "scan gaps"
+            ],
+            "specialties": [
+                "skill gap detection",
+                "market opportunity research",
+                "safe proposal generation"
+            ],
+            "parallel_capable": false
+        },
+        "feedback-loop": {
+            "description": "Feedback Loop \u2014 tracks outreach message effectiveness by scoring templates based on reply/conversion outcomes, surfaces best-performing templates for reuse, and automatically updates scores from CRM status changes",
+            "category": "analytics",
+            "skills": [
+                "message_performance_tracking",
+                "template_scoring",
+                "crm_outcome_monitoring",
+                "prompt_optimization"
+            ],
+            "commands": [
+                "feedback status",
+                "feedback top",
+                "feedback reset"
+            ],
+            "specialties": [
+                "outreach template scoring",
+                "reply rate tracking",
+                "CRM integration",
+                "prompt optimization"
+            ],
+            "parallel_capable": false
+        },
+        "lead-generator": {
+            "description": "Lead Generator Bot \u2014 finds local business and real estate leads via web search, generates personalised cold emails using AI, manages a JSON CRM, and schedules follow-ups automatically",
+            "category": "sales",
+            "model_provider": "openai",
+            "model": "gpt-4o",
+            "skills": [
+                "lead_generation",
+                "cold_email_writing",
+                "crm_management",
+                "follow_up_automation",
+                "web_scraping"
+            ],
+            "commands": [
+                "leads",
+                "outreach",
+                "leads status",
+                "leads pipeline",
+                "leads followup",
+                "leads export"
+            ],
+            "specialties": [
+                "local business lead generation",
+                "real estate leads",
+                "AI cold email personalisation",
+                "CRM pipeline management"
+            ],
+            "parallel_capable": false
+        },
+        "scheduler-runner": {
+            "description": "Scheduler Runner \u2014 reads a schedules config and triggers tasks (bot start/stop, chat commands, status reports) at defined intervals or daily/weekly times; supports graceful shutdown",
+            "category": "coordination",
+            "skills": [
+                "task_scheduling",
+                "cron_management",
+                "bot_lifecycle",
+                "chat_task_dispatch"
+            ],
+            "commands": [
+                "schedule",
+                "scheduler status"
+            ],
+            "specialties": [
+                "interval and cron scheduling",
+                "bot start/stop automation",
+                "scheduled chat task dispatch"
+            ],
+            "parallel_capable": false
+        },
+        "status-reporter": {
+            "description": "Status Reporter \u2014 generates compact hourly system-health summaries and delivers them via WhatsApp and Discord; aggregates bot states, trading activity, and pending improvement proposals",
+            "category": "coordination",
+            "skills": [
+                "system_health_reporting",
+                "whatsapp_notifications",
+                "discord_notifications",
+                "state_aggregation"
+            ],
+            "commands": [
+                "status",
+                "report"
+            ],
+            "specialties": [
+                "system health summarisation",
+                "WhatsApp status delivery",
+                "Discord notifications",
+                "multi-bot state aggregation"
             ],
             "parallel_capable": false
         }

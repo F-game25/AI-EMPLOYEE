@@ -164,20 +164,64 @@ def list_skills(category: str | None = None):
 # ── Task engine ───────────────────────────────────────────────────────────────
 
 class RunGoalRequest(BaseModel):
-    goal: str
+    # Flexible input: Node/turn-runner sends `task` (+ mirrored `goal`); the dashboard
+    # composer may send `goal`/`message`/`description`. Any one is accepted.
+    goal: str | None = None
+    task: str | None = None
+    message: str | None = None
+    description: str | None = None
 
 
 @router.post("/tasks/run")
 def run_goal(body: RunGoalRequest):
-    """Run a goal through the central controller pipeline."""
+    """Run a goal through the central controller pipeline.
+
+    Returns the contract the Node turn-runner expects: ``ok`` + ``tasks[]`` +
+    ``proof[]`` + scores. A failed phase degrades into ``ok:false`` with a real
+    reason — never a fake success.
+    """
+    goal = (body.goal or body.task or body.message or body.description or "").strip()
+    if not goal:
+        raise HTTPException(status_code=400, detail="task/goal required")
     try:
         from api.contracts import normalize_task_response
         from core.agent_controller import get_agent_controller
-        result = get_agent_controller().run_goal(body.goal)
-        return JSONResponse(normalize_task_response(result))
-    except Exception:
+        result = get_agent_controller().run_goal(goal)
+        norm = normalize_task_response(result)
+        tasks = norm.get("tasks", []) or []
+        any_ok = any((t or {}).get("status") == "success" for t in tasks)
+        proof: list[dict] = [{
+            "type": "agent_controller",
+            "label": "Planner → Executor → Validator",
+            "status": "completed" if any_ok else "failed",
+            "run_id": norm.get("run_id"),
+        }]
+        for t in tasks:
+            if not isinstance(t, dict):
+                continue
+            out = t.get("output") if isinstance(t.get("output"), dict) else {}
+            if out.get("path"):
+                proof.append({"type": "file", "label": out.get("filename") or out["path"],
+                              "path": out["path"], "status": t.get("status"), "task_id": t.get("task_id")})
+            if t.get("error"):
+                proof.append({"type": "task_error", "label": str(t.get("error")),
+                              "status": "failed", "task_id": t.get("task_id")})
+        return JSONResponse({
+            "ok": bool(any_ok),
+            "source": "agent_controller",
+            "task": goal,
+            "proof": proof,
+            **norm,
+        })
+    except Exception as exc:
         _log.exception("run_goal failed")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # Degrade with a real reason instead of a bare 500 so the UI shows the truth.
+        return JSONResponse(status_code=200, content={
+            "ok": False, "source": "agent_controller", "task": goal,
+            "tasks": [], "proof": [{"type": "task_error", "label": str(exc), "status": "failed"}],
+            "performance_score": 0.0, "success_rate": 0.0,
+            "error": str(exc), "degraded": True,
+        })
 
 
 def _brain_status_payload() -> dict:

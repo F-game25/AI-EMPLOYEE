@@ -1,0 +1,76 @@
+/* ════════════════════════════════════════════════════════════════════
+   <ClockModule> — Top-center timestamp module
+   Anatomy:
+            UTC
+       12 : 47 : 03
+       MON · 30 APR 2026
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-clock {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 16px;
+  position: relative;
+  user-select: none;
+}
+
+/* Faint chamfered surround so it reads as a "module" not floating text */
+.nx-clock::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg,
+      rgba(229,199,107,0.04) 0%,
+      transparent 30%,
+      transparent 70%,
+      rgba(229,199,107,0.04) 100%);
+  pointer-events: none;
+}
+
+.nx-clock__label {
+  font-family: var(--nx-font-display);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: var(--nx-text-dim);
+  margin-bottom: 1px;
+}
+
+.nx-clock__time {
+  font-family: var(--nx-font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  color: var(--nx-text);
+  font-variant-numeric: tabular-nums;
+  background: var(--nx-gold-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.05;
+}
+
+.nx-clock__date {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: var(--nx-text-dim);
+  margin-top: 1px;
+}
+
+/* ── Compact (single row) ─────────────────────────────────────────── */
+.nx-clock--compact {
+  flex-direction: row;
+  gap: 10px;
+  align-items: baseline;
+}
+.nx-clock--compact .nx-clock__label { margin-bottom: 0; }
+.nx-clock--compact .nx-clock__time { font-size: 13px; }
+.nx-clock--compact .nx-clock__date { margin-top: 0; }

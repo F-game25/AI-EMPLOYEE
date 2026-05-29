@@ -1,17 +1,48 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
 import { API_URL } from '../config/api'
+import './BootSequence.css'
 
-// Particle system for immersive boot background
+const BOOT_STEPS = [
+  { id: 'launcher', label: 'Launcher supervisor', detail: 'Nexus OS runtime connected' },
+  { id: 'health', label: 'Backend health', detail: 'Waiting for Node gateway' },
+  { id: 'agents', label: 'Agent registry', detail: 'Counting active agents' },
+  { id: 'auth', label: 'Secure session', detail: 'Binding operator token' },
+  { id: 'websocket', label: 'Realtime bus', detail: 'Bootstrapping event stream' },
+  { id: 'dashboard', label: 'Dashboard render', detail: 'Mounting command center' },
+]
+
+// Cinematic flash lines — scripted messages that appear 400ms apart
+const CINEMATIC_LINES = [
+  'LOADING NEURAL CORE...',
+  'INITIALIZING COGNITIVE MESH',
+  'AGENTS ONLINE',
+  'SECURE MODE ACTIVE',
+  'MEMORY FABRIC LINKED',
+  'REALTIME BUS READY',
+]
+
+const PHASE_TO_STEP = {
+  'app-init': 'launcher',
+  auth: 'auth',
+  health: 'health',
+  'websocket-bootstrap': 'websocket',
+  'dashboard-lazy-load': 'dashboard',
+  'dashboard-timeout': 'dashboard',
+  handoff: 'dashboard',
+}
+
 class BootParticleSystem {
-  constructor(canvasRef) {
-    this.canvas = canvasRef.current
-    if (!this.canvas) return
-    this.ctx = this.canvas.getContext('2d')
+  constructor(canvas) {
+    this.canvas = canvas
+    this.ctx = canvas?.getContext('2d')
     this.particles = []
     this.animId = null
+    this.onResize = this.resizeCanvas.bind(this)
+    this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (!this.canvas || !this.ctx) return
     this.resizeCanvas()
-    window.addEventListener('resize', () => this.resizeCanvas())
+    window.addEventListener('resize', this.onResize)
   }
 
   resizeCanvas() {
@@ -20,36 +51,35 @@ class BootParticleSystem {
   }
 
   init() {
-    this.particles = []
-    for (let i = 0; i < 60; i++) {
-      this.particles.push({
-        x: Math.random() * this.canvas.width,
-        y: Math.random() * this.canvas.height,
-        vx: (Math.random() - 0.5) * 0.2,
-        vy: (Math.random() - 0.5) * 0.2,
-        radius: Math.random() * 0.8 + 0.3,
-        color: Math.random() > 0.5 ? 'rgba(32,214,199,' : 'rgba(229,199,107,',
-      })
-    }
+    const count = this.reducedMotion ? 18 : 46
+    this.particles = Array.from({ length: count }, () => ({
+      x: Math.random() * this.canvas.width,
+      y: Math.random() * this.canvas.height,
+      vx: (Math.random() - 0.5) * 0.18,
+      vy: (Math.random() - 0.5) * 0.18,
+      radius: Math.random() * 0.9 + 0.25,
+      color: Math.random() > 0.55 ? 'rgba(229,199,107,' : 'rgba(32,214,199,',
+    }))
     this.animate()
   }
 
   animate() {
-    this.ctx.fillStyle = 'rgba(7,8,16,1)'
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
+    if (!this.ctx) return
+    const { ctx, canvas } = this
+    ctx.fillStyle = 'rgba(5,6,8,1)'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
 
     this.particles.forEach(p => {
-      p.x += p.vx
-      p.y += p.vy
-      if (p.x < 0 || p.x > this.canvas.width) p.vx *= -1
-      if (p.y < 0 || p.y > this.canvas.height) p.vy *= -1
-      p.x = Math.max(0, Math.min(this.canvas.width, p.x))
-      p.y = Math.max(0, Math.min(this.canvas.height, p.y))
-
-      this.ctx.fillStyle = p.color + '0.5)'
-      this.ctx.beginPath()
-      this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2)
-      this.ctx.fill()
+      if (!this.reducedMotion) {
+        p.x += p.vx
+        p.y += p.vy
+      }
+      if (p.x < 0 || p.x > canvas.width) p.vx *= -1
+      if (p.y < 0 || p.y > canvas.height) p.vy *= -1
+      ctx.fillStyle = `${p.color}0.55)`
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2)
+      ctx.fill()
     })
 
     this.animId = requestAnimationFrame(() => this.animate())
@@ -57,277 +87,259 @@ class BootParticleSystem {
 
   stop() {
     if (this.animId) cancelAnimationFrame(this.animId)
+    window.removeEventListener('resize', this.onResize)
   }
 }
 
-function buildBootLines(agentCount) {
-  return [
-    { text: '> INITIALIZING ULTRON OS v2.0...', delay: 0 },
-    { text: '> Loading neural core modules...', delay: 320 },
-    { text: '> Establishing secure channels...', delay: 640 },
-    { text: `> Calibrating agent network [${agentCount} agents]...`, delay: 960 },
-    { text: '> Scanning for anomalies... [CLEAR]', delay: 1280 },
-    { text: '> Synchronizing orchestrator...', delay: 1600 },
-    { text: '> Verifying memory integrity... [OK]', delay: 1920 },
-    { text: '> All systems nominal. BOOT COMPLETE.', delay: 2240 },
-  ]
+function statusForStep(step, checks) {
+  if (checks[step.id] === 'ok') return 'ok'
+  if (checks[step.id] === 'fail') return 'fail'
+  return 'running'
 }
 
-function GlitchText({ children, style, className }) {
-  const [glitch, setGlitch] = useState(false)
-  useEffect(() => {
-    const t1 = setTimeout(() => setGlitch(true), 200)
-    const t2 = setTimeout(() => setGlitch(false), 350)
-    const t3 = setTimeout(() => setGlitch(true), 500)
-    const t4 = setTimeout(() => setGlitch(false), 580)
-    return () => [t1, t2, t3, t4].forEach(clearTimeout)
-  }, [])
-  return (
-    <span className={className} style={{ position: 'relative', display: 'inline-block', ...style }}>
-      {children}
-      {glitch && (
-        <span
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            color: 'var(--error)',
-            clipPath: 'inset(30% 0 40% 0)',
-            transform: 'translate(-3px, 0)',
-            opacity: 0.7,
-          }}
-        >
-          {children}
-        </span>
-      )}
-      {glitch && (
-        <span
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            color: '#00e676',
-            clipPath: 'inset(55% 0 10% 0)',
-            transform: 'translate(3px, 0)',
-            opacity: 0.7,
-          }}
-        >
-          {children}
-        </span>
-      )}
-    </span>
-  )
-}
-
-export default function BootSequence({ onComplete }) {
-  const [visibleLines, setVisibleLines] = useState([])
-  const [progress, setProgress] = useState(0)
-  const [showLogo, setShowLogo] = useState(false)
-  const [logoReady, setLogoReady] = useState(false)
+export default function BootSequence({ onComplete, subState }) {
+  const [progress, setProgress] = useState(8)
+  const [checks, setChecks] = useState({ launcher: 'running', health: 'running', agents: 'running', auth: 'running', websocket: 'running', dashboard: 'running' })
+  const [lines, setLines] = useState(['> AETERNUS NEXUS boot supervisor engaged'])
+  const [cinematicIdx, setCinematicIdx] = useState(0)
+  const [agentCount, setAgentCount] = useState(null)
+  const [launchMessage, setLaunchMessage] = useState(() => (
+    typeof window !== 'undefined' && window.ai
+      ? 'Synchronizing with desktop launcher'
+      : 'Browser runtime connected'
+  ))
 
   const canvasRef = useRef(null)
-  const particleSystemRef = useRef(null)
-
-  // Detect Electron launch for faster boot
-  const isElectronLaunch = typeof window !== 'undefined' && window.navigator.userAgent.includes('Electron')
-
-  // Keep a stable ref to the latest onComplete so the timer effect below
-  // never needs to re-run (and reset all timers) when the parent re-renders
-  // due to unrelated state changes (e.g. WebSocket events).
+  const particlesRef = useRef(null)
   const onCompleteRef = useRef(onComplete)
+  const completedRef = useRef(false)
+  const startedAtRef = useRef(0)
+  const isElectron = typeof window !== 'undefined' && !!window.ai
+
   useLayoutEffect(() => { onCompleteRef.current = onComplete })
 
+  const activeIndex = useMemo(() => {
+    const firstRunning = BOOT_STEPS.findIndex(step => checks[step.id] !== 'ok')
+    return firstRunning === -1 ? BOOT_STEPS.length - 1 : firstRunning
+  }, [checks])
+
   useEffect(() => {
-    if (canvasRef.current && !particleSystemRef.current) {
-      particleSystemRef.current = new BootParticleSystem(canvasRef)
-      particleSystemRef.current.init()
-    }
+    if (!canvasRef.current || particlesRef.current) return
+    particlesRef.current = new BootParticleSystem(canvasRef.current)
+    particlesRef.current.init()
+    return () => particlesRef.current?.stop()
   }, [])
+
+  // Cinematic flash lines — cycle through CINEMATIC_LINES every 400ms
+  useEffect(() => {
+    if (cinematicIdx >= CINEMATIC_LINES.length) return
+    const id = setTimeout(() => {
+      setCinematicIdx(i => i + 1)
+    }, 400)
+    return () => clearTimeout(id)
+  }, [cinematicIdx])
 
   useEffect(() => {
     let cancelled = false
     const timers = []
 
-    // Fetch actual agent count from backend, fall back to 57
-    const startBoot = (agentCount) => {
-      if (cancelled) return
-      const BOOT_LINES = buildBootLines(agentCount)
-
-      BOOT_LINES.forEach((line, i) => {
-        timers.push(
-          setTimeout(() => {
-            if (cancelled) return
-            setVisibleLines(prev => [...prev, line.text])
-            setProgress(Math.round(((i + 1) / BOOT_LINES.length) * 100))
-          }, line.delay)
-        )
-      })
-
-      const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay
-      const speedup = isElectronLaunch ? 0.3 : 1.0 // 3x faster boot when launched from Electron
-      timers.push(setTimeout(() => { if (!cancelled) setShowLogo(true) }, (lastDelay + 300) * speedup))
-      timers.push(setTimeout(() => { if (!cancelled) setLogoReady(true) }, (lastDelay + 700) * speedup))
-      timers.push(setTimeout(() => { if (!cancelled) onCompleteRef.current?.() }, (lastDelay + 1400) * speedup))
+    const appendLine = text => {
+      setLines(prev => [...prev.slice(-6), text])
+    }
+    const setStep = (id, value, line) => {
+      setChecks(prev => ({ ...prev, [id]: value }))
+      if (line) appendLine(line)
     }
 
-    fetch(`${API_URL}/agents`)
-      .then(r => r.json())
-      .then(data => startBoot(data?.agents?.length || 57))
-      .catch(() => startBoot(57))
+    setStep('launcher', 'ok', isElectron ? '> Electron supervisor linked' : '> Browser launch detected')
+
+    const onBootPhase = event => {
+      const detail = event.detail || {}
+      const stepId = PHASE_TO_STEP[detail.phase]
+      if (!stepId) return
+      const status = detail.status === 'pending'
+        ? 'running'
+        : detail.status === 'degraded' || detail.status === 'fail'
+        ? 'fail'
+        : 'ok'
+      setStep(stepId, status, `> ${detail.message || detail.phase}`)
+      if (stepId === 'auth') setProgress(p => Math.max(p, status === 'ok' ? 78 : 68))
+      if (stepId === 'websocket') setProgress(p => Math.max(p, 86))
+      if (stepId === 'dashboard') setProgress(p => Math.max(p, 94))
+    }
+    window.addEventListener('nx:boot-phase', onBootPhase)
+
+    if (isElectron) {
+      window.ai.getLaunchStatus?.()
+        .then(status => {
+          if (cancelled) return
+          if (status?.message) setLaunchMessage(status.message)
+          if (status?.readiness?.ready || status?.readiness?.degraded) {
+            setStep('launcher', 'ok', `> ${status.message || 'Launcher ready'}`)
+          }
+        })
+        .catch(() => {})
+      window.ai.onUiLoadStatus?.(status => {
+        if (cancelled || !status?.message) return
+        setLaunchMessage(status.message)
+        appendLine(`> ${status.message}`)
+      })
+    }
+
+    fetch('/health', { signal: AbortSignal.timeout(4500) })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`health ${r.status}`)))
+      .then(data => {
+        if (cancelled) return
+        const pythonOk = !!(data.python_backend || data.python_ok || data.ai_backend)
+        setStep('health', 'ok', pythonOk ? '> Node gateway and Python backend online' : '> Node gateway online; Python degraded')
+        setProgress(p => Math.max(p, pythonOk ? 46 : 38))
+      })
+      .catch(err => {
+        if (cancelled) return
+        setStep('health', 'fail', `> Backend health delayed: ${err.message || 'timeout'}`)
+        setProgress(p => Math.max(p, 30))
+      })
+
+    const storedToken = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt')
+    fetch(`${API_URL}/agents`, {
+      signal: AbortSignal.timeout(4500),
+      headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : {},
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`agents ${r.status}`)))
+      .then(data => {
+        if (cancelled) return
+        const count = data?.agents?.length || data?.count || 0
+        setAgentCount(count)
+        setStep('agents', 'ok', `> Agent registry synchronized [${count || 'unknown'} agents]`)
+        setProgress(p => Math.max(p, 62))
+      })
+      .catch(err => {
+        if (cancelled) return
+        setStep('agents', 'fail', `> Agent registry delayed: ${err.message || 'timeout'}`)
+        setProgress(p => Math.max(p, 54))
+      })
+
+    fetch('/api/auth/auto-token', { signal: AbortSignal.timeout(4500) })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`auth ${r.status}`)))
+      .then(data => {
+        if (cancelled) return
+        setStep('auth', data?.token ? 'ok' : 'fail', data?.token ? '> Secure operator token acquired' : '> Secure token unavailable')
+        setProgress(p => Math.max(p, data?.token ? 78 : 68))
+      })
+      .catch(err => {
+        if (cancelled) return
+        setStep('auth', 'fail', `> Auth bootstrap delayed: ${err.message || 'timeout'}`)
+        setProgress(p => Math.max(p, 68))
+      })
+
+    timers.push(setTimeout(() => {
+      if (cancelled) return
+      setStep('dashboard', 'ok', '> Command center visual systems online')
+      setProgress(100)
+    }, isElectron ? 3000 : 2200))
+
+    timers.push(setTimeout(() => {
+      if (cancelled || completedRef.current) return
+      completedRef.current = true
+      onCompleteRef.current?.()
+    }, isElectron ? 3800 : 2600))
 
     return () => {
       cancelled = true
+      window.removeEventListener('nx:boot-phase', onBootPhase)
       timers.forEach(clearTimeout)
     }
-  }, []) // empty deps — run once on mount; onComplete accessed via stable ref
+  }, [isElectron])
+
+  useEffect(() => {
+    startedAtRef.current = Date.now()
+    const t = setInterval(() => {
+      const elapsed = Date.now() - startedAtRef.current
+      setProgress(prev => {
+        if (prev >= 96) return prev
+        const floor = Math.min(92, 10 + Math.round(elapsed / 80))
+        return Math.max(prev, floor)
+      })
+    }, 300)
+    return () => clearInterval(t)
+  }, [])
 
   return (
     <motion.div
-      className="fixed inset-0 flex flex-col items-center justify-center"
-      style={{ background: 'var(--bg-base)', overflow: 'hidden' }}
+      className="boot-sequence"
       initial={{ opacity: 1 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
     >
-      {/* Particle canvas background */}
-      <canvas
-        ref={canvasRef}
-        style={{ position: 'absolute', inset: 0, zIndex: 1 }}
-      />
+      <canvas ref={canvasRef} className="boot-sequence__canvas" />
+      <div className="boot-sequence__grid" />
+      <div className="boot-sequence__stage">
+        <div className="boot-eye" data-state={subState || 'boot'}>
+          <div className="boot-eye__orbit boot-eye__orbit--one" />
+          <div className="boot-eye__orbit boot-eye__orbit--two" />
+          <div className="boot-eye__orbit boot-eye__orbit--three" />
+          <div className="boot-eye__aperture" />
+          <div className="boot-eye__iris">
+            <div className="boot-eye__pupil" />
+          </div>
+          <div className="boot-eye__scan" />
+        </div>
 
-      {/* Scanline effect */}
-      <motion.div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'linear-gradient(transparent 50%, rgba(32,214,199,0.015) 50%)',
-          backgroundSize: '100% 4px',
-          zIndex: 2,
-        }}
-      />
+        <div className="boot-sequence__status">
+          <div className="boot-sequence__eyebrow">COGNITIVE CORE STARTUP</div>
+          <h1>AETERNUS NEXUS</h1>
+          <p>{launchMessage}</p>
+          <div className="boot-sequence__progress" aria-label="Boot progress">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+          <div className="boot-sequence__meta">
+            <span>{progress}%</span>
+            <span>{agentCount === null ? 'agents syncing' : `${agentCount} agents indexed`}</span>
+          </div>
+        </div>
 
-      {/* Hexgrid background */}
-      <motion.div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'repeating-linear-gradient(60deg, transparent, transparent 35px, rgba(229,199,107,0.02) 35px, rgba(229,199,107,0.02) 70px)',
-          zIndex: 2,
-        }}
-      />
+        <div className="boot-sequence__steps">
+          {BOOT_STEPS.map((step, index) => {
+            const status = statusForStep(step, checks)
+            return (
+              <div key={step.id} className={`boot-step boot-step--${status} ${index === activeIndex ? 'boot-step--active' : ''}`}>
+                <span className="boot-step__dot" />
+                <div>
+                  <b>{step.label}</b>
+                  <small>{step.detail}</small>
+                </div>
+              </div>
+            )
+          })}
+        </div>
 
-      {/* Enhanced radial glow */}
-      <motion.div
-        className="absolute inset-0 pointer-events-none"
-        animate={{ opacity: [0.10, 0.22, 0.10] }}
-        transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-        style={{
-          background: 'radial-gradient(ellipse at 50% 50%, rgba(212,175,55,1) 0%, transparent 65%)',
-          zIndex: 2,
-        }}
-      />
-
-      <div className="relative w-full px-[15%] z-10">
-        {/* Terminal lines */}
-        <div className="mb-6 min-h-[200px]">
-          {visibleLines.map((line, idx) => (
+        <div className="boot-sequence__terminal">
+          {lines.map((line, index) => (
             <motion.div
-              key={idx}
-              initial={{ opacity: 0, x: -12 }}
+              key={`${line}-${index}`}
+              initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.15 }}
-              className="font-mono text-xs mb-1"
-              style={{
-                color: line.includes('COMPLETE') || line.includes('OK') || line.includes('CLEAR')
-                  ? '#D4AF37'
-                  : '#888',
-              }}
+              transition={{ duration: 0.18 }}
             >
               {line}
             </motion.div>
           ))}
         </div>
 
-        {/* Progress bar */}
-        <div
-          className="w-full mb-8"
-          style={{
-            height: '2px',
-            background: 'rgba(212,175,55,0.1)',
-            borderRadius: '1px',
-          }}
-        >
-          <motion.div
-            initial={{ width: '0%' }}
-            style={{
-              height: '100%',
-              background: 'linear-gradient(90deg, rgba(212,175,55,0.4), #D4AF37)',
-              borderRadius: '1px',
-              boxShadow: '0 0 8px rgba(212,175,55,0.6)',
-            }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-          />
-        </div>
-
-        {/* Logo reveal */}
-        <AnimatePresence>
-          {showLogo && (
-            <motion.div
-              initial={{ opacity: 0, scaleX: 0 }}
-              animate={{ opacity: 1, scaleX: 1 }}
-              transition={{ duration: 0.4, ease: 'easeOut' }}
-              className="flex items-center justify-center relative"
-              style={{
-                border: '2px solid rgba(212,175,55,0.4)',
-                padding: '24px 80px',
-                borderRadius: '6px',
-                background: 'rgba(212,175,55,0.04)',
-                transition: 'box-shadow 0.4s ease',
-              }}
+        {/* Cinematic flash line overlay */}
+        <div className="boot-sequence__cinematic" aria-hidden="true">
+          {CINEMATIC_LINES.slice(0, cinematicIdx).map((line, i) => (
+            <div
+              key={line}
+              className="boot-sequence__cinematic-line"
+              style={{ animationDelay: `${i * 0.12}s` }}
             >
-              {logoReady && (
-                <motion.div
-                  className="absolute inset-0 rounded-[6px]"
-                  animate={{ boxShadow: ['0 0 20px rgba(212,175,55,0.1)', '0 0 60px rgba(212,175,55,0.3)', '0 0 20px rgba(212,175,55,0.1)'] }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                  style={{ pointerEvents: 'none' }}
-                />
-              )}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.25, duration: 0.4 }}
-                className="font-mono text-4xl font-bold tracking-[0.4em]"
-                style={{ color: '#D4AF37', position: 'relative', zIndex: 1 }}
-              >
-                <GlitchText>ULTRON</GlitchText>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              {line}
+            </div>
+          ))}
+        </div>
       </div>
-
-      {/* Corner grid marks */}
-      {[
-        { top: 24, left: 24 },
-        { top: 24, right: 24 },
-        { bottom: 24, left: 24 },
-        { bottom: 24, right: 24 },
-      ].map((pos, i) => (
-        <div
-          key={i}
-          className="absolute"
-          style={{
-            ...pos,
-            width: 12,
-            height: 12,
-            borderTop: pos.top !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
-            borderBottom: pos.bottom !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
-            borderLeft: pos.left !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
-            borderRight: pos.right !== undefined ? '1px solid rgba(212,175,55,0.3)' : 'none',
-          }}
-        />
-      ))}
     </motion.div>
   )
 }

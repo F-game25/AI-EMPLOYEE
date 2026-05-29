@@ -41,6 +41,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from typing import Any
 
 logger = logging.getLogger("core.forge_controller")
@@ -97,26 +98,44 @@ class ForgeController:
         self,
         *,
         module: str,
-        code: str,
+        code: str | None = None,
+        goal: str | None = None,
         description: str = "",
         tag: str = "",
         author: str = "forge",
         auto_deploy: bool = False,
+        priority: int | str | None = None,
     ) -> dict[str, Any]:
         """Submit a code change for validation and (optional) deployment.
 
         Args:
             module:      Repo-relative module path, e.g. ``"agents/my_agent.py"``.
-            code:        New Python source code.
+            code:        New Python source code.  When omitted with ``goal``,
+                         the request is staged as a goal-only compatibility
+                         item and cannot be deployed by approval.
+            goal:        Natural-language Forge goal from legacy/Neural Brain
+                         callers.  Goal-only submissions are review queue
+                         items, not executable code changes.
             description: Human-readable description of the change.
             tag:         Optional version tag (e.g. ``"v1.3"``).
             author:      Submitter name / system component.
             auto_deploy: When True and module is not in the auto-deploy blocklist,
                          the change is applied immediately after validation.
+            priority:    Optional goal priority from compatibility callers.
 
         Returns:
             A dict with ``status``, ``snapshot_id``, ``validation``, and ``ts``.
         """
+        if code is None:
+            return self._submit_goal(
+                module=module,
+                goal=goal or description,
+                description=description,
+                tag=tag,
+                author=author,
+                priority=priority,
+            )
+
         # 0. Write-protection
         if module in _WRITE_PROTECTED:
             return {
@@ -161,6 +180,8 @@ class ForgeController:
         if not effective_auto:
             with _LOCK:
                 self._pending[snapshot_id] = {
+                    "kind": "code",
+                    "status": "awaiting_approval",
                     "module": module,
                     "code": code,
                     "snapshot_id": snapshot_id,
@@ -205,6 +226,21 @@ class ForgeController:
                 "error": f"No pending submission with ID '{snapshot_id}'",
                 "ts": _ts(),
             }
+        if pending.get("kind") == "goal":
+            return {
+                "status": "approved",
+                "deployed": False,
+                "snapshot_id": snapshot_id,
+                "request_id": snapshot_id,
+                "goal": pending.get("goal", ""),
+                "module": pending.get("module", ""),
+                "risk_level": pending.get("risk_level", "UNKNOWN"),
+                "reason": (
+                    "Goal approved for supervised planning. Submit generated code "
+                    "through ForgeController before deployment."
+                ),
+                "ts": _ts(),
+            }
         return self._deploy(
             snapshot_id,
             pending["module"],
@@ -218,7 +254,8 @@ class ForgeController:
             pending = self._pending.pop(snapshot_id, None)
         if pending is None:
             return {"status": "error", "error": f"No pending submission '{snapshot_id}'"}
-        self._get_vc().set_status(snapshot_id, "rolled_back")
+        if pending.get("kind") != "goal":
+            self._get_vc().set_status(snapshot_id, "rolled_back")
         logger.info("Forge submission %s rejected: %s", snapshot_id, reason or "no reason given")
         return {"status": "rejected", "snapshot_id": snapshot_id, "reason": reason, "ts": _ts()}
 
@@ -271,6 +308,110 @@ class ForgeController:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _submit_goal(
+        self,
+        *,
+        module: str,
+        goal: str | None,
+        description: str = "",
+        tag: str = "",
+        author: str = "forge",
+        priority: int | str | None = None,
+    ) -> dict[str, Any]:
+        """Stage a natural-language Forge goal without creating deployable code."""
+        clean_goal = str(goal or "").strip()
+        if not clean_goal:
+            return {
+                "status": "rejected",
+                "reason": "Forge goal submissions require a non-empty goal or code payload.",
+                "snapshot_id": None,
+                "ts": _ts(),
+            }
+
+        risk_score, risk_level = self._score_goal(clean_goal)
+        if risk_level == "HIGH":
+            return {
+                "status": "rejected",
+                "reason": "High-risk Forge goals require a concrete code proposal and manual review.",
+                "snapshot_id": None,
+                "request_id": None,
+                "goal": clean_goal,
+                "module": module,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "auto_deploy": False,
+                "requires_approval": True,
+                "ts": _ts(),
+            }
+
+        request_id = f"fg-{uuid.uuid4().hex[:10]}"
+        validation = {
+            "safe": True,
+            "mode": "goal_review_only",
+            "errors": [],
+            "warnings": [
+                "No code payload was supplied; this request cannot deploy until generated code is submitted."
+            ],
+        }
+        record = {
+            "kind": "goal",
+            "status": "pending_approval",
+            "module": module,
+            "goal": clean_goal,
+            "snapshot_id": request_id,
+            "request_id": request_id,
+            "description": description or clean_goal,
+            "tag": tag,
+            "author": author,
+            "priority": priority if priority is not None else "normal",
+            "submitted_at": _ts(),
+            "validation": validation,
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "auto_deploy": False,
+            "requires_approval": True,
+        }
+        with _LOCK:
+            self._pending[request_id] = record
+
+        logger.info(
+            "Forge goal staged: %s module=%s risk=%s priority=%s",
+            request_id,
+            module,
+            risk_level,
+            record["priority"],
+        )
+        return {
+            "status": "pending_approval",
+            "reason": "Goal staged for supervised Forge planning; no code will deploy from this request.",
+            "snapshot_id": request_id,
+            "request_id": request_id,
+            "goal": clean_goal,
+            "module": module,
+            "priority": record["priority"],
+            "validation": validation,
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "auto_deploy": False,
+            "requires_approval": True,
+            "ts": _ts(),
+        }
+
+    @staticmethod
+    def _score_goal(goal: str) -> tuple[float, str]:
+        """Return risk score/label for compatibility goal submissions."""
+        try:
+            from core.ascend_forge import _risk_label, _score_goal
+            score = float(_score_goal(goal))
+            return score, _risk_label(score)
+        except Exception:  # noqa: BLE001
+            text = goal.lower()
+            high = ("deploy", "production", "delete", "drop", "rm ", "overwrite", "replace all", "wipe")
+            medium = ("refactor", "update", "migrate", "change", "modify", "patch", "rewrite")
+            score = 0.80 if any(term in text for term in high) else 0.45 if any(term in text for term in medium) else 0.15
+            label = "HIGH" if score >= 0.7 else "MEDIUM" if score >= 0.3 else "LOW"
+            return score, label
 
     def _deploy(
         self,

@@ -1,0 +1,415 @@
+================================================================================
+                 PHASE 2 TESTING & VERIFICATION FRAMEWORK
+                          AI-EMPLOYEE SYSTEM
+                            2026-05-13
+================================================================================
+
+PROJECT: AI-EMPLOYEE (wavefield-routing branch)
+STATUS: TESTING INFRASTRUCTURE COMPLETE - READY FOR EXECUTION
+DURATION: 6-7 hours (flexible, can be 30 min to 7+ hours)
+
+================================================================================
+                          QUICK REFERENCE
+================================================================================
+
+To Start Testing:
+  1. bash tests/phase2-verify.sh              (automated checks - 5 min)
+  2. npm start                                 (start system)
+  3. Follow tests/FEATURE_TESTING_CHECKLIST.md (manual testing - 2-3 hrs)
+  4. Review all logs and document results
+
+Success Criteria:
+  ✓ 0 P0 errors
+  ✓ All syntax checks pass
+  ✓ Page loads < 5 seconds
+  ✓ Avatar animates smoothly (30+ FPS)
+  ✓ No console errors
+  ✓ All features working
+  ✓ Security baseline met
+  ✓ Regression tests passing
+
+Go/No-Go:
+  GO → Proceed to Phase 3
+  NO-GO → Fix P0 errors, re-test, get sign-off
+  CONDITIONAL GO → Document issues, create tickets, proceed with follow-ups
+
+================================================================================
+                        ARTIFACT OVERVIEW
+================================================================================
+
+LOCATION: /home/lf/AI-EMPLOYEE/tests/
+
+FILE                                  | PURPOSE
+────────────────────────────────────────────────────────────────────────────
+phase2-verify.sh                      | Automated verification script
+                                      | (syntax, build, imports, readiness)
+                                      | Time: ~5 minutes
+                                      |
+PHASE2_TESTING_GUIDE.md               | Detailed testing procedures
+                                      | 10 sections, step-by-step instructions
+                                      | Time: 30 min read
+                                      |
+FEATURE_TESTING_CHECKLIST.md          | Manual testing checklist
+                                      | 100+ test items, pass/fail tracking
+                                      | Time: 2-3 hours testing
+                                      |
+DEPLOYMENT_READINESS_REPORT.md        | Strategic deployment assessment
+                                      | Go/no-go criteria, timelines, handoff
+                                      | Time: 20 min read
+                                      |
+ERROR_TRACKING_TEMPLATE.md            | Error procedures and resolutions
+                                      | P0-P3 severity levels, templates
+                                      | Reference: During testing
+                                      |
+QUICK_START_TESTING.md                | Fast-track testing guide
+                                      | 5-min, 30-min, 2-hour options
+                                      | Time: 30 min to 2 hours
+                                      |
+README_PHASE2_TESTING.md              | Framework overview
+                                      | Workflow, timelines, commands
+                                      | Time: 15 min read
+
+================================================================================
+                         TESTING CHECKLIST
+================================================================================
+
+PHASE 2A: AUTOMATED VERIFICATION (15 minutes)
+  [ ] Run: bash tests/phase2-verify.sh
+  [ ] Check: verification_results.log
+  [ ] Check: verification_errors.log
+  [ ] Fix: Any P0 errors found
+  [ ] Decision: Readiness score ≥ 6/8?
+
+PHASE 2B: MANUAL FEATURE TESTING (2-3 hours)
+  [ ] Start system: npm start
+  [ ] Open browser: http://localhost:8787
+  [ ] Open DevTools: F12
+  [ ] Follow: FEATURE_TESTING_CHECKLIST.md
+  [ ] Test: Backend startup, frontend load, avatar, CommandDock, EventFeed
+  [ ] Test: Navigation, WebSocket routing, performance
+  [ ] Check: No console errors
+  [ ] Document: All results
+
+PHASE 2C: PERFORMANCE VALIDATION (1 hour)
+  [ ] Run Lighthouse audit (Chrome DevTools)
+  [ ] Check: FCP < 2s, LCP < 3s, TTI < 5s
+  [ ] Check: Bundle size (gzipped) < 500 KB
+  [ ] Check: FPS > 30 on laptop, > 50 on desktop
+  [ ] Document: Performance metrics
+
+PHASE 2D: SECURITY VERIFICATION (1 hour)
+  [ ] Test: JWT token rotation
+  [ ] Test: Rate limiting (auth endpoints)
+  [ ] Check: CSP headers present
+  [ ] Check: No secrets in logs
+  [ ] Test: Tenant data isolation
+  [ ] Document: Security validation
+
+PHASE 2E: REGRESSION TESTING (1 hour)
+  [ ] Test: API endpoints (/api/*, /auth/*)
+  [ ] Test: Chat forwarding to Python backend
+  [ ] Test: Old components still render
+  [ ] Test: State management still works
+  [ ] Document: Regression results
+
+PHASE 2F: DOCUMENTATION & SIGN-OFF (30 minutes)
+  [ ] Create: Test results summary
+  [ ] Review: All error logs
+  [ ] Make: Go/no-go decision
+  [ ] Document: Any issues found (P0-P3)
+  [ ] Sign-off: Ready for Phase 3
+
+================================================================================
+                           TESTING MATRIX
+================================================================================
+
+COMPONENT                  | TEST TYPE         | PASS/FAIL | NOTES
+────────────────────────────────────────────────────────────────────────────
+Python Runtime            | Syntax check      | [ ]       | phase2-verify.sh
+Node.js Backend          | Syntax check      | [ ]       | phase2-verify.sh
+Frontend Bundle          | Build verify      | [ ]       | phase2-verify.sh
+                        | Size check        | [ ]       | < 500 KB gzipped
+                        | Load time         | [ ]       | < 5 seconds
+                        | Console errors    | [ ]       | Zero errors
+                        |                   |           |
+Avatar Component         | Rendering         | [ ]       | Visible
+                        | Animation         | [ ]       | Smooth (30+ FPS)
+                        | State transitions | [ ]       | 9-state machine
+                        | CPU/RAM reaction  | [ ]       | Responsive
+                        |                   |           |
+CommandDock             | Visibility        | [ ]       | Always at bottom
+                        | Stats display     | [ ]       | CPU/GPU/RAM/Disk
+                        | Updates          | [ ]       | Every 2-3 seconds
+                        | Color coding     | [ ]       | Green/gold/orange/red
+                        | TALK button      | [ ]       | Functional
+                        |                   |           |
+EventFeed              | Display           | [ ]       | Shows 8 categories
+                        | Auto-scroll       | [ ]       | To newest events
+                        | Filters          | [ ]       | All work correctly
+                        | Max items        | [ ]       | 200 events limit
+                        |                   |           |
+Navigation             | Sidebar items    | [ ]       | 20+ visible
+                        | Page loading     | [ ]       | All pages load
+                        | Links            | [ ]       | All functional
+                        |                   |           |
+WebSocket              | Connection       | [ ]       | Connects to Python
+                        | Event routing    | [ ]       | 8 categories route
+                        | Message rate     | [ ]       | 50ms stagger
+                        | No backpressure  | [ ]       | Smooth delivery
+                        |                   |           |
+API Endpoints          | /api/status      | [ ]       | Returns 200
+                        | /api/agents      | [ ]       | Returns data
+                        | /api/chat        | [ ]       | Forwards to backend
+                        | /auth/login      | [ ]       | Returns token
+                        | /auth/refresh    | [ ]       | Rotates token
+                        |                   |           |
+Security               | JWT rotation     | [ ]       | Refresh works
+                        | Auth required    | [ ]       | Protected routes
+                        | Rate limiting    | [ ]       | Blocks excess req
+                        | CSP headers      | [ ]       | Headers present
+                        | Secrets logged   | [ ]       | None found
+                        | Tenant isolation | [ ]       | Data isolated
+                        |                   |           |
+Regression             | Old components   | [ ]       | Still render
+                        | Legacy routes    | [ ]       | Still functional
+                        | State compat     | [ ]       | Still accessible
+                        |                   |           |
+
+================================================================================
+                      TESTING TIMELINE & ESTIMATES
+================================================================================
+
+PHASE                                    | TIME      | CUMULATIVE
+────────────────────────────────────────────────────────────────────────────
+Phase 2A: Automated Verification        | 15 min    | 15 min
+Phase 2B: Manual Feature Testing        | 2-3 hrs   | 2.25-3.25 hrs
+Phase 2C: Performance Validation        | 1 hr      | 3.25-4.25 hrs
+Phase 2D: Security Verification         | 1 hr      | 4.25-5.25 hrs
+Phase 2E: Regression Testing            | 1 hr      | 5.25-6.25 hrs
+Phase 2F: Documentation & Sign-off      | 30 min    | 6-6.5 hrs
+────────────────────────────────────────────────────────────────────────────
+TOTAL (Full Testing)                    | 6-7 hrs   | 6-7 hrs
+QUICK VALIDATION (2A + 2B only)         | 2-3 hrs   | 2-3 hrs
+SMOKE TEST (2A only)                    | 15 min    | 15 min
+
+================================================================================
+                           ERROR SEVERITY
+================================================================================
+
+P0 — BLOCKING (Prevents Deployment)
+  • Syntax errors that prevent execution
+  • Missing critical dependencies
+  • Authentication system broken
+  • Core functionality completely broken
+  • Merge conflicts present
+
+  Action: STOP. Fix immediately. Re-test. Only continue when resolved.
+  Count Target: 0
+
+P1 — MAJOR (High Priority)
+  • Significant feature broken
+  • Performance 50%+ below baseline
+  • Security vulnerability (non-critical)
+  • Memory leak causing crashes
+
+  Action: Document. Create ticket. Can proceed with known issues.
+  Count Target: < 3
+
+P2 — MINOR (Medium Priority)
+  • Limited feature impact
+  • Performance 10-30% below baseline
+  • Workaround available
+  • Non-critical error
+
+  Action: Log for next sprint.
+  Count Target: < 5
+
+P3 — COSMETIC (Low Priority)
+  • Negligible impact
+  • Cosmetic UI issue
+  • Unused code/imports
+  • No workaround needed
+
+  Action: Log in backlog.
+  Count Target: < 10
+
+================================================================================
+                            GO/NO-GO CRITERIA
+================================================================================
+
+GO TO PHASE 3 (Automatic Approval)
+  ✓ Readiness score ≥ 6/8
+  ✓ 0 P0 errors found
+  ✓ All syntax checks pass
+  ✓ Frontend builds successfully
+  ✓ Page loads < 5 seconds
+  ✓ Avatar animates smoothly (30+ FPS)
+  ✓ CommandDock displays all stats
+  ✓ EventFeed shows events
+  ✓ No console errors
+  ✓ All major features working
+  ✓ Security baseline met
+  ✓ Regression tests passing
+  ✓ No merge conflicts
+
+NO-GO (Block Deployment)
+  ✗ P0 errors found
+  ✗ Syntax errors present
+  ✗ Frontend build fails
+  ✗ Page load > 5 seconds
+  ✗ Avatar not rendering
+  ✗ Core feature broken
+  ✗ Auth system broken
+  ✗ Critical console errors
+  ✗ WebSocket not connecting
+  ✗ Merge conflicts present
+
+CONDITIONAL GO (Proceed with Follow-ups)
+  ~ P1 errors found (document & schedule)
+  ~ Performance 10-30% slow (monitor)
+  ~ Non-critical features partially working
+
+  Action: Create tickets. Document issues. Get approval. Proceed.
+
+================================================================================
+                         COMMAND REFERENCE
+================================================================================
+
+Run All Tests:
+  bash tests/phase2-verify.sh
+
+Start System:
+  npm start
+
+View Results:
+  cat tests/verification_results.log
+  cat tests/verification_errors.log
+
+Test API:
+  curl http://localhost:8787/api/status
+  curl -X POST http://localhost:8787/auth/login
+
+Check Logs:
+  tail -f state/python-backend.log
+
+Performance Audit:
+  Chrome DevTools → Lighthouse → Analyze page load
+
+Check Memory:
+  Chrome DevTools → Memory → Record heap snapshot
+
+Stop Services:
+  npm stop  # or  bash stop.sh
+
+Kill Background Processes:
+  pkill -f "node\|python3\|uvicorn"
+
+================================================================================
+                            NEXT STEPS
+================================================================================
+
+BEFORE TESTING:
+  1. Ensure Node 18+: node --version
+  2. Ensure Python 3.9+: python3 --version
+  3. Install dependencies: npm install
+  4. Frontend dependencies: cd frontend && npm install && cd ..
+  5. Read: tests/README_PHASE2_TESTING.md (15 min overview)
+
+DURING TESTING:
+  1. Start with tests/QUICK_START_TESTING.md (if short on time)
+  2. Use tests/FEATURE_TESTING_CHECKLIST.md (for comprehensive testing)
+  3. Reference tests/PHASE2_TESTING_GUIDE.md (for procedures)
+  4. Document findings in tests/verification_errors.log
+
+AFTER TESTING:
+  1. Review all error logs
+  2. Make go/no-go decision
+  3. Fix P0 errors if found
+  4. Document P1/P2/P3 issues
+  5. Proceed to Phase 3 if GO
+  6. Or iterate if NO-GO
+
+HANDOFF TO PHASE 3:
+  • All test artifacts ready
+  • Testing procedures documented
+  • Performance baseline established
+  • Security baseline validated
+  • Regression tests passing
+  • Ready for integration testing
+
+================================================================================
+                          KEY METRICS
+================================================================================
+
+BUILD METRICS
+  Python files with no syntax errors: [  /  ] (100%)
+  Node.js files with no syntax errors: [  /  ] (100%)
+  Frontend build success: [PASS/FAIL]
+  Bundle size (uncompressed): _____ MB (target: 1.5)
+  Bundle size (gzipped): _____ KB (target: 500)
+
+FEATURE METRICS
+  Frontend load time: _____ seconds (target: < 5)
+  Avatar FPS: _____ (target: 30+)
+  Console errors on load: _____ (target: 0)
+  Features working: [  /  ] (target: 100%)
+
+PERFORMANCE METRICS
+  First Contentful Paint: _____ ms (target: < 2000)
+  Largest Contentful Paint: _____ ms (target: < 3000)
+  Time to Interactive: _____ ms (target: < 5000)
+  Memory usage (peak): _____ MB (target: < 150)
+
+SECURITY METRICS
+  JWT token rotation: [WORKING/BROKEN]
+  Rate limiting: [WORKING/BROKEN]
+  CSP headers: [PRESENT/MISSING]
+  Secrets in logs: _____ (target: 0)
+  Tenant isolation: [WORKING/BROKEN]
+
+ERROR METRICS
+  P0 errors: _____ (target: 0)
+  P1 errors: _____ (target: 0-2)
+  P2 errors: _____ (target: < 5)
+  P3 errors: _____ (target: < 10)
+  Total errors: _____ (target: < 15)
+
+================================================================================
+                          SUPPORT & HELP
+================================================================================
+
+Testing Issues?
+  → Review: tests/QUICK_START_TESTING.md (Common Issues section)
+  → Reference: tests/ERROR_TRACKING_TEMPLATE.md
+  → Check logs: state/python-backend.log
+
+Stuck During Testing?
+  → Read: tests/PHASE2_TESTING_GUIDE.md (detailed procedures)
+  → Follow: tests/FEATURE_TESTING_CHECKLIST.md (step-by-step)
+  → Review: tests/DEPLOYMENT_READINESS_REPORT.md (context)
+
+Test Scripts?
+  → bash tests/phase2-verify.sh (automated checks)
+  → All outputs to: tests/*.log
+
+Browser Testing?
+  → http://localhost:8787 (main UI)
+  → F12 → Console (check errors)
+  → F12 → Network (check load times)
+  → F12 → Lighthouse (performance audit)
+
+================================================================================
+
+PHASE 2 TESTING INFRASTRUCTURE — READY FOR EXECUTION
+Created: 2026-05-13 | Branch: wavefield-routing | Version: 1.0.0
+
+Start testing with:
+  bash tests/phase2-verify.sh
+
+Then proceed with:
+  tests/FEATURE_TESTING_CHECKLIST.md (browser-based manual testing)
+
+Questions? See:
+  tests/README_PHASE2_TESTING.md
+
+================================================================================

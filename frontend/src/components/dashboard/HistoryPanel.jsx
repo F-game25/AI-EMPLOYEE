@@ -1,49 +1,44 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useEventFeedStore } from '../../store/eventFeedStore'
+import { Panel, HexButton, StatusPill, SectionLabel, KPITile } from '../nexus-ui'
+import './HistoryPanel.css'
+
+const STATUS_PILL_TONES = {
+  done: 'success',
+  failed: 'alert',
+  partial: 'warn',
+  running: 'cool',
+  queued: 'idle',
+}
 
 export default function HistoryPanel() {
-  const [tasks, setTasks] = useState([])
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [selectedTask, setSelectedTask] = useState(null)
-  const [filter, setFilter] = useState('all')
+  const events = useEventFeedStore(s => s.events)
+  const [selectedEvent, setSelectedEvent] = useState(null)
+  const [activeTab, setActiveTab] = useState('all')
+  const [searchTerm, setSearchTerm] = useState('')
 
-  useEffect(() => {
-    fetchHistory()
-    fetchStats()
-    // Refresh every 30 seconds
-    const interval = setInterval(() => {
-      fetchHistory()
-      fetchStats()
-    }, 30000)
-    return () => clearInterval(interval)
-  }, [filter])
-
-  const fetchHistory = async () => {
-    try {
-      const params = filter !== 'all' ? `?status=${filter}` : ''
-      const res = await fetch(`/api/history${params}`)
-      if (res.ok) {
-        const data = await res.json()
-        setTasks(data.tasks || [])
-      }
-    } catch (e) {
-      console.error('Failed to fetch history:', e)
+  const stats = useMemo(() => {
+    const total = events.length
+    const done = events.filter(e => e.kind === 'complete' || e.status === 'done').length
+    const failed = events.filter(e => e.kind === 'error' || e.status === 'failed').length
+    return {
+      total_tasks: total,
+      success_rate: total > 0 ? (done / total) * 100 : 0,
+      failed_count: failed,
     }
-    setLoading(false)
-  }
+  }, [events])
 
-  const fetchStats = async () => {
-    try {
-      const res = await fetch('/api/history/stats')
-      if (res.ok) {
-        const data = await res.json()
-        setStats(data)
-      }
-    } catch (e) {
-      console.error('Failed to fetch stats:', e)
+  const handleEventSelect = useCallback((event) => {
+    setSelectedEvent(selectedEvent?.task_id === event.task_id ? null : event)
+  }, [selectedEvent])
+
+  const handleCopyToClipboard = useCallback(() => {
+    if (selectedEvent) {
+      const json = JSON.stringify(selectedEvent, null, 2)
+      navigator.clipboard.writeText(json)
     }
-  }
+  }, [selectedEvent])
 
   const formatTime = (ms) => {
     if (ms < 1000) return `${ms}ms`
@@ -59,179 +54,223 @@ export default function HistoryPanel() {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
   }
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'done':
-        return '#22C55E'
-      case 'failed':
-        return '#FF3B3B'
-      case 'partial':
-        return '#FBBF24'
-      default:
-        return 'rgba(255,255,255,0.5)'
-    }
-  }
+  const getEventStatus = useCallback((event) => event.status || 'queued', [])
+
+  const filteredEvents = useMemo(() => {
+    const term = searchTerm.toLowerCase()
+    return events
+      .filter((e) => activeTab === 'all' || getEventStatus(e) === activeTab)
+      .filter((e) => {
+        if (!searchTerm) return true
+        return (
+          (e.input || '').toLowerCase().includes(term) ||
+          (e.agent_sequence?.some((a) => a.toLowerCase().includes(term))) ||
+          (e.task_id || '').toLowerCase().includes(term)
+        )
+      })
+      .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+  }, [events, activeTab, searchTerm, getEventStatus])
 
   return (
-    <div
-      className="flex flex-col h-full"
-      style={{
-        background: 'rgba(0,0,0,0.2)',
-        borderLeft: '1px solid var(--border-subtle)',
-      }}
-    >
-      {/* Header */}
-      <div
-        className="p-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border-subtle)' }}
+    <div className="hp-container">
+      {/* Main panel */}
+      <Panel
+        title="Execution History"
+        corners
+        flush
+        className="hp-panel"
+        bodyStyle={{ padding: 0, display: 'flex', flexDirection: 'column', height: '100%' }}
       >
-        <div className="font-mono text-xs tracking-widest mb-2" style={{ color: 'var(--gold)' }}>
-          HISTORY
-        </div>
-
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            <div style={{ background: 'rgba(255,255,255,0.04)', padding: '6px 8px', borderRadius: '4px' }}>
-              <div className="text-8px" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                Tasks
-              </div>
-              <div className="font-mono text-xs font-semibold">{stats.total_tasks}</div>
+        {/* Header section */}
+        <div className="hp-header">
+          {/* Stats row */}
+          {stats && (
+            <div className="hp-stats">
+              <KPITile label="Total" value={stats.total_tasks} size="sm" />
+              <KPITile
+                label="Success"
+                value={`${Math.round(stats.success_rate)}%`}
+                iconTone="success"
+                size="sm"
+              />
+              <KPITile
+                label="Failed"
+                value={stats.failed_count || 0}
+                iconTone="alert"
+                size="sm"
+              />
             </div>
-            <div style={{ background: 'rgba(255,255,255,0.04)', padding: '6px 8px', borderRadius: '4px' }}>
-              <div className="text-8px" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                Success
-              </div>
-              <div className="font-mono text-xs font-semibold">
-                {Math.round(stats.success_rate)}%
-              </div>
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Filter */}
-        <div className="flex gap-1">
-          {['all', 'done', 'failed'].map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className="font-mono text-8px px-2 py-1 flex-1"
-              style={{
-                background: filter === f ? 'rgba(212,175,55,0.2)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${filter === f ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                color: filter === f ? 'var(--gold)' : 'rgba(255,255,255,0.5)',
-                borderRadius: '3px',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-            >
-              {f.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Task List */}
-      <div className="flex-1 overflow-y-auto px-3 py-2">
-        {loading ? (
-          <div className="text-8px text-center py-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            Loading history...
-          </div>
-        ) : tasks.length === 0 ? (
-          <div className="text-8px text-center py-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            No tasks yet
-          </div>
-        ) : (
-          <AnimatePresence initial={false}>
-            {tasks.map((task, idx) => (
-              <motion.div
-                key={task.task_id}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -8 }}
-                transition={{ delay: idx * 0.02 }}
-                onClick={() => setSelectedTask(task)}
-                style={{
-                  background: selectedTask?.task_id === task.task_id ? 'rgba(212,175,55,0.1)' : 'transparent',
-                  border: `1px solid ${selectedTask?.task_id === task.task_id ? 'rgba(212,175,55,0.3)' : 'transparent'}`,
-                  padding: '8px',
-                  marginBottom: '4px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
+          {/* Tabs */}
+          <div className="hp-tabs">
+            {['all', 'done', 'failed', 'running'].map((tab) => (
+              <HexButton
+                key={tab}
+                variant={activeTab === tab ? 'primary' : 'outline'}
+                size="sm"
+                onClick={() => setActiveTab(tab)}
+                className={`hp-tab-btn ${activeTab === tab ? 'hp-tab-btn--active' : ''}`}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                  <span
-                    style={{
-                      width: '6px',
-                      height: '6px',
-                      borderRadius: '50%',
-                      background: getStatusColor(task.status),
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span className="font-mono text-8px flex-1 truncate" style={{ color: 'rgba(255,255,255,0.8)' }}>
-                    {task.input.substring(0, 30)}...
-                  </span>
-                  <span className="text-8px" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                    {formatDate(task.timestamp)}
-                  </span>
-                </div>
-                <div className="flex gap-2 items-center text-8px">
-                  <span style={{ color: 'rgba(255,255,255,0.4)' }}>
-                    {formatTime(task.duration_ms)}
-                  </span>
-                  {task.confidence > 0 && (
-                    <span style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      ${task.cost_estimate_usd.toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              </motion.div>
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </HexButton>
             ))}
-          </AnimatePresence>
-        )}
-      </div>
-
-      {/* Detail View */}
-      {selectedTask && (
-        <div
-          className="p-3 flex-shrink-0"
-          style={{
-            background: 'rgba(0,0,0,0.4)',
-            borderTop: '1px solid var(--border-subtle)',
-            maxHeight: '200px',
-            overflow: 'y-auto',
-          }}
-        >
-          <div className="font-mono text-8px mb-2" style={{ color: 'var(--gold)' }}>
-            DETAILS
           </div>
-          <div className="space-y-1 text-8px">
-            <div>
-              <span style={{ color: 'rgba(255,255,255,0.5)' }}>ID: </span>
-              <span style={{ fontFamily: 'monospace', fontSize: '7px' }}>
-                {selectedTask.task_id}
-              </span>
-            </div>
-            <div>
-              <span style={{ color: 'rgba(255,255,255,0.5)' }}>Agents: </span>
-              <span>{selectedTask.agent_sequence.join(', ')}</span>
-            </div>
-            <div>
-              <span style={{ color: 'rgba(255,255,255,0.5)' }}>Confidence: </span>
-              <span>{Math.round(selectedTask.confidence * 100)}%</span>
-            </div>
-            {selectedTask.error && (
-              <div>
-                <span style={{ color: 'rgba(255,255,255,0.5)' }}>Error: </span>
-                <span style={{ color: '#FF3B3B' }}>{selectedTask.error}</span>
-              </div>
+
+          {/* Search */}
+          <div className="hp-search-box">
+            <input
+              type="text"
+              placeholder="Filter by agent name or description..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="hp-search-input"
+            />
+          </div>
+        </div>
+
+        {/* Content area */}
+        <div className="hp-content">
+          {/* Event list */}
+          <div className="hp-list">
+            {filteredEvents.length === 0 ? (
+              <div className="hp-empty">No events yet</div>
+            ) : (
+              <AnimatePresence initial={false}>
+                {filteredEvents.map((event, idx) => (
+                  <motion.div
+                    key={event.task_id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8 }}
+                    transition={{ delay: idx * 0.02 }}
+                    className={`hp-event-row ${selectedEvent?.task_id === event.task_id ? 'hp-event-row--selected' : ''}`}
+                    onClick={() => handleEventSelect(event)}
+                  >
+                    <div className="hp-event-main">
+                      <div className="hp-event-header">
+                        <StatusPill
+                          label={getEventStatus(event).toUpperCase()}
+                          tone={STATUS_PILL_TONES[getEventStatus(event)] || 'cool'}
+                          size="sm"
+                          dot={false}
+                        />
+                        <span className="hp-event-desc">
+                          {(event.input || event.description || '').substring(0, 40)}
+                          {((event.input || event.description || '').length > 40 ? '...' : '')}
+                        </span>
+                        <span className="hp-event-time">{formatDate(event.timestamp)}</span>
+                      </div>
+                      <div className="hp-event-meta">
+                        {event.agent_sequence && event.agent_sequence.length > 0 && (
+                          <span className="hp-event-agent">
+                            {event.agent_sequence[0]}
+                          </span>
+                        )}
+                        <span className="hp-event-duration">{formatTime(event.duration_ms || 0)}</span>
+                        {event.cost_estimate_usd > 0 && (
+                          <span className="hp-event-cost">${event.cost_estimate_usd.toFixed(2)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             )}
           </div>
+
+          {/* Detail panel (slide-in from right) */}
+          <AnimatePresence>
+            {selectedEvent && (
+              <motion.div
+                className="hp-detail"
+                initial={{ x: '100%', opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: '100%', opacity: 0 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              >
+                <div className="hp-detail-header">
+                  <SectionLabel tone="gold">Event Details</SectionLabel>
+                  <HexButton
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopyToClipboard}
+                  >
+                    Copy JSON
+                  </HexButton>
+                </div>
+
+                <div className="hp-detail-content">
+                  <div className="hp-detail-row">
+                    <span className="hp-detail-label">Status</span>
+                    <StatusPill
+                      label={getEventStatus(selectedEvent).toUpperCase()}
+                      tone={STATUS_PILL_TONES[getEventStatus(selectedEvent)] || 'cool'}
+                      dot={false}
+                    />
+                  </div>
+
+                  <div className="hp-detail-row">
+                    <span className="hp-detail-label">Task ID</span>
+                    <code className="hp-detail-code">{selectedEvent.task_id}</code>
+                  </div>
+
+                  <div className="hp-detail-row">
+                    <span className="hp-detail-label">Input</span>
+                    <span className="hp-detail-text">{selectedEvent.input || selectedEvent.description}</span>
+                  </div>
+
+                  {selectedEvent.agent_sequence && selectedEvent.agent_sequence.length > 0 && (
+                    <div className="hp-detail-row">
+                      <span className="hp-detail-label">Agents</span>
+                      <span className="hp-detail-text">{selectedEvent.agent_sequence.join(', ')}</span>
+                    </div>
+                  )}
+
+                  <div className="hp-detail-row">
+                    <span className="hp-detail-label">Duration</span>
+                    <span className="hp-detail-text">{formatTime(selectedEvent.duration_ms || 0)}</span>
+                  </div>
+
+                  <div className="hp-detail-row">
+                    <span className="hp-detail-label">Cost</span>
+                    <span className="hp-detail-text">${(selectedEvent.cost_estimate_usd || 0).toFixed(2)}</span>
+                  </div>
+
+                  {selectedEvent.confidence != null && (
+                    <div className="hp-detail-row">
+                      <span className="hp-detail-label">Confidence</span>
+                      <span className="hp-detail-text">{Math.round(selectedEvent.confidence * 100)}%</span>
+                    </div>
+                  )}
+
+                  {selectedEvent.error && (
+                    <div className="hp-detail-row hp-detail-row--error">
+                      <span className="hp-detail-label">Error</span>
+                      <span className="hp-detail-error">{selectedEvent.error}</span>
+                    </div>
+                  )}
+
+                  <div className="hp-detail-row">
+                    <span className="hp-detail-label">Timestamp</span>
+                    <span className="hp-detail-text hp-detail-mono">
+                      {new Date(selectedEvent.timestamp).toISOString()}
+                    </span>
+                  </div>
+
+                  {/* Full JSON dump */}
+                  <div className="hp-detail-json">
+                    <SectionLabel tone="muted" size="sm">Raw JSON</SectionLabel>
+                    <pre className="hp-detail-pre">
+                      {JSON.stringify(selectedEvent, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      )}
+      </Panel>
     </div>
   )
 }

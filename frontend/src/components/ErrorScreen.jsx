@@ -2,7 +2,8 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../store/appStore'
 
 export default function ErrorScreen() {
-  const { errorMessage, setAppState } = useAppStore()
+  const errorMessage = useAppStore(s => s.errorMessage)
+  const setAppState = useAppStore(s => s.setAppState)
 
   return (
     <motion.div

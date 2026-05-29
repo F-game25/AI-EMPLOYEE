@@ -1,0 +1,279 @@
+/* ────────────────────────────────────────────────────────── */
+/* SYSTEM BAR — Fixed Top Status Bar with System Indicators */
+/* ────────────────────────────────────────────────────────── */
+
+.system-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: var(--mc-dark, #0f1629);
+  border-bottom: 1px solid rgba(0, 217, 255, 0.3);
+  box-shadow: 0 0 16px rgba(0, 217, 255, 0.1);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  z-index: 60;
+}
+
+/* Grid overlay */
+.system-bar-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(90deg, rgba(0, 217, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(rgba(0, 217, 255, 0.02) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Content wrapper */
+.system-bar-content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+/* Individual item */
+.system-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* System bar label text */
+.system-bar-label {
+  color: var(--mc-text-primary, #e0e0e0);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Clock — big cyan monospace */
+.clock {
+  gap: 4px;
+}
+
+.system-bar-icon {
+  font-size: 12px;
+  color: var(--mc-cyan, #00d9ff);
+  text-shadow: 0 0 8px rgba(0, 217, 255, 0.4);
+}
+
+.clock .system-bar-label {
+  color: var(--mc-cyan, #00d9ff);
+  text-shadow: 0 0 8px rgba(0, 217, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mode chip — gold background */
+.mode-chip {
+  background: linear-gradient(135deg, rgba(255, 165, 0, 0.15) 0%, rgba(255, 165, 0, 0.05) 100%);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  padding: 4px 10px;
+  border-radius: 4px;
+  gap: 4px;
+}
+
+.mode-value {
+  color: var(--mc-gold, #ffa500);
+  text-shadow: 0 0 8px rgba(255, 165, 0, 0.4);
+}
+
+/* Uptime */
+.uptime {
+  gap: 4px;
+}
+
+.uptime .system-bar-label {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Threat level */
+.threat {
+  gap: 4px;
+  align-items: center;
+}
+
+.threat-dot {
+  display: inline-flex;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--threat-color, #00ff88);
+  box-shadow: 0 0 8px var(--threat-color, #00ff88);
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+.threat-level {
+  font-size: 10px;
+}
+
+/* Revenue display — gold text, large */
+.revenue {
+  margin-left: 8px;
+}
+
+.revenue .system-bar-label {
+  color: var(--mc-gold, #ffa500);
+  font-size: 12px;
+  text-shadow: 0 0 8px rgba(255, 165, 0, 0.4);
+}
+
+/* Status indicators */
+.status-indicator {
+  gap: 4px;
+  align-items: center;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.status-dot.connected {
+  background: var(--mc-cyan, #00d9ff);
+  color: var(--mc-cyan, #00d9ff);
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+.status-dot.disconnected {
+  background: #606080;
+  color: #606080;
+  box-shadow: none;
+}
+
+/* Spacer — flexible space */
+.system-bar-spacer {
+  flex: 1 1 auto;
+}
+
+/* Emergency stop button — red glowing */
+.emergency-stop-btn {
+  background: linear-gradient(135deg, #ff3333 0%, #cc2626 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 51, 51, 0.5);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+  box-shadow: 0 0 12px rgba(255, 51, 51, 0.4);
+  margin-left: 8px;
+}
+
+.emergency-stop-btn:hover {
+  background: linear-gradient(135deg, #cc2626 0%, #992020 100%);
+  box-shadow: 0 0 20px rgba(255, 51, 51, 0.6);
+  transform: translateY(-1px);
+}
+
+.emergency-stop-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 0 12px rgba(255, 51, 51, 0.4);
+}
+
+.emergency-stop-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Glow pulse animation for status indicators */
+@keyframes glow-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px currentColor);
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 8px currentColor);
+    opacity: 0.8;
+  }
+}
+
+/* Responsive — hide labels on mobile, keep icons */
+@media (max-width: 1024px) {
+  .system-bar {
+    padding: 0 12px;
+    gap: 10px;
+  }
+
+  .system-bar-item {
+    font-size: 10px;
+  }
+
+  .system-bar-label {
+    font-size: 10px;
+  }
+
+  .emergency-stop-btn {
+    padding: 5px 10px;
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 768px) {
+  .system-bar {
+    height: 36px;
+    padding: 0 8px;
+  }
+
+  .system-bar-item {
+    font-size: 9px;
+    gap: 3px;
+  }
+
+  .system-bar-label {
+    font-size: 9px;
+    display: none;
+  }
+
+  .system-bar-icon {
+    display: inline;
+  }
+
+  .mode-chip {
+    padding: 3px 8px;
+  }
+
+  .mode-value {
+    display: inline;
+  }
+
+  .threat-level {
+    display: none;
+  }
+
+  .emergency-stop-btn {
+    padding: 4px 8px;
+    font-size: 8px;
+  }
+
+  /* Show icons only on mobile */
+  .clock .system-bar-label,
+  .uptime .system-bar-label,
+  .status-indicator .system-bar-label {
+    display: none;
+  }
+}

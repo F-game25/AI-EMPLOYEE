@@ -1,5 +1,12 @@
 'use strict';
 
+// NOTE: SecretStore is a synchronous config/env accessor (plain process.env
+// reads used for app bootstrap config), not the runtime secrets/wallet/API-key
+// vault read path. The auditable vault read path lives in
+// backend/infra/secrets/broker.js, which is instrumented to emit vault:access /
+// vault:access_denied telemetry to the Python sentinel. Instrumenting these
+// env lookups would emit on every config read (noise, no attack signal), so it
+// is intentionally left uninstrumented.
 class SecretStore {
   constructor(env = process.env) {
     this._env = env;

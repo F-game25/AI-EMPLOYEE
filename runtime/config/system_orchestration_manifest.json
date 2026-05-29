@@ -1,0 +1,255 @@
+{
+  "version": "2026.05.16",
+  "purpose": "Canonical operating contract for AETERNUS NEXUS agents, memory, model routing, and high-risk approvals.",
+  "defaults": {
+    "execution_mode": "offline_first",
+    "network_policy": "local_only_until_admin_enabled",
+    "human_approval_required_for": [
+      "publishing_content",
+      "sending_client_work",
+      "spending_money",
+      "accepting_paid_tasks",
+      "wallet_or_payment_use",
+      "external_account_changes",
+      "destructive_file_changes",
+      "security_policy_changes"
+    ],
+    "model_strategy": "local_small_first_remote_only_when_approved"
+  },
+  "memory_fabric": {
+    "layers": [
+      {
+        "id": "working",
+        "owner": "frontend+cognitive-store",
+        "purpose": "Live session context and WebSocket memory write events.",
+        "ui": "/memory"
+      },
+      {
+        "id": "episodic",
+        "owner": "python-memory-api",
+        "purpose": "Recent interactions, conversations, and task history.",
+        "api": "/api/memory/interactions"
+      },
+      {
+        "id": "semantic",
+        "owner": "python-memory-api+runtime/memory/vector_store.py",
+        "purpose": "Clients, facts, embeddings, and retrieval-ready knowledge.",
+        "api": "/api/memory"
+      },
+      {
+        "id": "graph",
+        "owner": "neo4j-or-local-graph",
+        "purpose": "Entity relationships and associative reasoning.",
+        "api": "/api/memory/tree"
+      }
+    ],
+    "rules": [
+      "Every agent must write important observations through the memory API or event bus.",
+      "Every expensive model call should receive compacted memory, not raw history.",
+      "Memory shown in the UI must be marked live, fallback, or mock."
+    ]
+  },
+  "model_stack": {
+    "LLM": {
+      "role": "central reasoning, planning, code, orchestration",
+      "preferred_order": ["local_slm", "local_llm", "external_llm"],
+      "token_policy": "summarize_first_then_route"
+    },
+    "SLM": {
+      "role": "fast local intent classification, summaries, background tasks",
+      "preferred_order": ["local_phi", "local_gemma", "local_mistral_7b"],
+      "token_policy": "default_for_short_tasks"
+    },
+    "MLM": {
+      "role": "embeddings, semantic search, RAG context linking",
+      "preferred_order": ["local_minilm", "local_e5", "external_embeddings"],
+      "token_policy": "cache_embeddings_by_content_hash"
+    },
+    "MoE": {
+      "role": "route work across specialized local and external models",
+      "preferred_order": ["policy_router", "performance_tracker", "cost_router"],
+      "token_policy": "choose_cheapest_model_that_meets_quality"
+    },
+    "LAM": {
+      "role": "execute tool, browser, file, API, and workflow actions",
+      "preferred_order": ["sandboxed_local_tools", "browser_agent", "external_action_model"],
+      "token_policy": "plan_once_execute_structured_steps"
+    },
+    "VLM": {
+      "role": "screen, image, OCR, UI, and diagram understanding",
+      "preferred_order": ["local_vlm", "external_vision"],
+      "token_policy": "crop_and_compress_before_remote"
+    },
+    "SAM": {
+      "role": "screen segmentation and visual targeting",
+      "preferred_order": ["local_sam"],
+      "token_policy": "no_remote_required"
+    },
+    "LCM": {
+      "role": "fast image/video generation, avatar visuals, visual memory synthesis",
+      "preferred_order": ["local_lcm", "external_image_generation"],
+      "token_policy": "explicit_user_or_workflow_request_only"
+    }
+  },
+  "token_orchestrator": {
+    "goal": "Keep external API usage low by planning locally, compressing context, routing small tasks to local models, and escalating only when quality or capability requires it.",
+    "steps": [
+      "Classify intent locally with SLM/rules.",
+      "Retrieve only top relevant memory chunks.",
+      "Summarize long context locally before remote calls.",
+      "Split tasks into local executable steps and remote reasoning steps.",
+      "Cache model outputs, embeddings, plans, and tool observations.",
+      "Track token cost per agent, page, workflow, and outcome."
+    ],
+    "remote_call_requirements": [
+      "policy_allows_external_api",
+      "task_cannot_be_completed_locally_at_required_quality",
+      "context_is_compacted",
+      "estimated_cost_is_recorded"
+    ]
+  },
+  "agents": {
+    "ascend-forge": {
+      "title": "System Overseer, Vibecoding Engineer, Security Specialist",
+      "job_description": "Build and improve internal or external projects, create agents, skills, tools, and workflows, review system health, enforce security gates, and prepare patches for human approval.",
+      "workflows": [
+        "project_scaffold",
+        "code_change_plan",
+        "sandboxed_patch",
+        "security_review",
+        "agent_skill_generation",
+        "workflow_generation",
+        "rollback_preparation"
+      ],
+      "hooks": [
+        "before_patch:create_snapshot",
+        "before_external_write:require_approval",
+        "after_patch:run_tests",
+        "after_failure:create_diagnostics",
+        "security_scan:on_submit"
+      ],
+      "allowed_models": ["SLM", "LLM", "LAM", "VLM", "MLM"],
+      "approval_level": "required_for_code_apply_or_external_delivery"
+    },
+    "task-orchestrator": {
+      "title": "Planner and Multi-Agent Coordinator",
+      "job_description": "Decompose jobs, choose agents, allocate model budget, track progress, merge outputs, and write durable task memory.",
+      "workflows": ["task_decomposition", "agent_dispatch", "result_synthesis", "peer_review"],
+      "hooks": ["before_dispatch:budget_check", "after_subtask:memory_write", "on_failure:retry_or_escalate"],
+      "allowed_models": ["SLM", "LLM", "MoE", "MLM"]
+    },
+    "memory": {
+      "title": "Persistent Memory Service",
+      "job_description": "Store client, episodic, semantic, and workflow memory for local and external AI agents.",
+      "workflows": ["record_interaction", "semantic_recall", "conversation_summary", "memory_compaction"],
+      "hooks": ["after_chat:record_interaction", "before_model_call:retrieve_context", "after_task:write_summary"],
+      "allowed_models": ["MLM", "SLM"]
+    },
+    "blacklight-security": {
+      "title": "Security and Governance Sentinel",
+      "job_description": "Detect unsafe actions, secrets exposure, policy violations, and high-risk agent behavior before execution.",
+      "workflows": ["risk_scan", "secret_scan", "approval_gate", "audit_digest"],
+      "hooks": ["before_tool_call:risk_score", "before_publish:approval_gate", "after_incident:audit_event"],
+      "allowed_models": ["SLM", "LLM", "LAM"]
+    }
+  },
+  "enterprise_upgrade_mission": {
+    "id": "enterprise-grade-desktop-offline-mission",
+    "owner_agent": "ascend-forge",
+    "coordinators": ["task-orchestrator", "blacklight-security", "memory"],
+    "status": "active",
+    "created_at": "2026-05-17",
+    "goal": "Make AETERNUS NEXUS installable, offline-first, secure, locally buildable on first boot, and stable enough that the operator can shut down and resume work without losing mission state.",
+    "operating_rules": [
+      "Keep the launcher as the single lifecycle owner for Node, Python, frontend build, readiness, diagnostics, update, rebuild, and stop.",
+      "Store every enterprise upgrade task as durable repo/config state before execution.",
+      "Prefer local model/tool execution; require explicit policy approval before external APIs, downloads, payments, publishing, or account changes.",
+      "Never apply code, security, data, payment, or external-account changes without risk classification and rollback notes.",
+      "Every completed step must update docs, tests, and verification commands."
+    ],
+    "phases": [
+      {
+        "id": "startup-readiness-stability",
+        "priority": "critical",
+        "agents": ["ascend-forge", "engineering-assistant", "qa-tester"],
+        "definition_of_done": [
+          "/api/health only means Node is alive",
+          "/api/readiness exposes Python, neural brain, graph, degraded reasons",
+          "Launcher treats late subsystem/page failures as degraded instead of fatal",
+          "Fragile dashboard pages are gated until backing services are ready"
+        ],
+        "verification": [
+          "npm --prefix frontend test -- DashboardRoutes.smoke.test.jsx ErrorBoundary.test.jsx NeuralNetworkPage.readiness.test.jsx",
+          "npm --prefix frontend run build",
+          "npm --prefix launcher run verify"
+        ]
+      },
+      {
+        "id": "offline-first-local-build",
+        "priority": "critical",
+        "agents": ["ascend-forge", "engineering-assistant", "blacklight-security"],
+        "definition_of_done": [
+          "Packaged app contains all critical runtime resources, not external extensions",
+          "First boot can build local frontend/backend/runtime assets when policy allows",
+          "Offline mode blocks network installs/model downloads by default with clear UI",
+          "Windows, Linux, and macOS packaging paths are documented and verified"
+        ],
+        "verification": [
+          "python3 scripts/verify_core_dependencies.py",
+          "npm run package:enterprise:linux"
+        ]
+      },
+      {
+        "id": "agent-workflows-memory",
+        "priority": "high",
+        "agents": ["task-orchestrator", "memory", "ascend-forge"],
+        "definition_of_done": [
+          "All production agents have job descriptions, workflows, hooks, model needs, and approval gates",
+          "Memory pages show live working, episodic, semantic, and graph memory status",
+          "Local and external AI routes use the same memory retrieval and token-budget policy"
+        ],
+        "verification": [
+          "python3 scripts/verify_agent_contracts.py",
+          "python3 -m pytest tests/test_memory.py tests/test_agents.py"
+        ]
+      },
+      {
+        "id": "enterprise-security-observability",
+        "priority": "high",
+        "agents": ["blacklight-security", "qa-tester", "ascend-forge"],
+        "definition_of_done": [
+          "Auth, RBAC, audit logs, HITL gates, local bind policy, and secret handling are tested",
+          "Launcher diagnostics include actionable log paths and subsystem readiness",
+          "Security checks reject unsafe opensource dependency copies unless renamed, licensed, and sandboxed"
+        ],
+        "verification": [
+          "python3 -m pytest tests/test_security.py tests/test_enterprise_hardening.py",
+          "npm run lint"
+        ]
+      }
+    ]
+  },
+  "page_contracts": {
+    "memory": {
+      "must_show": ["live status", "persisted entries", "recent interactions", "write interaction action"],
+      "api": ["/api/memory", "/api/memory/conversations", "/api/memory/interactions"]
+    },
+    "ascend_forge": {
+      "must_show": ["project goal input", "risk gate", "sandbox output", "approval queue", "security scan"],
+      "api": ["/api/forge/submit", "/api/forge/queue", "/api/forge/sandbox", "/api/forge/security"]
+    },
+    "agents": {
+      "must_show": ["job description", "workflows", "hooks", "model needs", "task assignment"],
+      "api": ["/api/agents", "/api/system/manifest"]
+    },
+    "operations": {
+      "must_show": ["queue", "running tasks", "completed tasks", "approval gates", "agent ownership"],
+      "api": ["/api/tasks/run", "/api/tasks/queue"]
+    },
+    "blacklight": {
+      "must_show": ["tool catalog", "AI search", "safe local analyzers", "policy gates", "blocked high-risk tools", "audit trail"],
+      "api": ["/api/blacklight/tools", "/api/blacklight/tools/search", "/api/blacklight/tools/run", "/api/blacklight/alerts"],
+      "blocked_capabilities": ["botnet", "ddos", "credential_harvester", "reverse_shell_generator", "active_exploitation_without_approval"]
+    }
+  }
+}

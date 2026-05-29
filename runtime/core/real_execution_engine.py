@@ -137,6 +137,7 @@ class RealExecutionEngine:
             "steps": state.snapshot(),
             "results": results,
         }
+        summary["proof"] = self.extract_proof(summary)
 
         if success:
             store.complete(goal_id, {"completed": completed, "total": len(task_plan)})
@@ -145,6 +146,83 @@ class RealExecutionEngine:
 
         logger.info("[ENGINE] Done: goal_id=%s %d/%d steps success=%s", goal_id, completed, len(task_plan), success)
         return summary
+
+    def extract_proof(self, execution_result: dict) -> list[dict]:
+        """Return user-facing proof records from real tool outputs.
+
+        Proof is deliberately factual: saved paths, provider IDs, counts,
+        explicit not_configured failures, and source URLs. It never claims an
+        action happened unless a tool returned that evidence.
+        """
+        proof: list[dict] = []
+        for step in execution_result.get("results", []):
+            if not isinstance(step, dict):
+                continue
+            action = step.get("action", "")
+            status = step.get("status", "")
+            output = step.get("output") or {}
+            error = step.get("error") or ""
+            if not isinstance(output, dict):
+                output = {"value": output}
+
+            if output.get("path"):
+                proof.append({
+                    "type": "file",
+                    "label": output.get("filename") or Path(str(output["path"])).name,
+                    "path": output["path"],
+                    "status": status,
+                    "action": action,
+                })
+            if output.get("post_id"):
+                proof.append({
+                    "type": "provider_response",
+                    "label": f"External post id {output['post_id']}",
+                    "provider": output.get("provider"),
+                    "provider_id": output["post_id"],
+                    "status": status,
+                    "action": action,
+                })
+            if output.get("results") and isinstance(output["results"], list):
+                proof.append({
+                    "type": "source_results",
+                    "label": f"{len(output['results'])} source result(s)",
+                    "sources": [
+                        {"title": r.get("title"), "url": r.get("url"), "source": r.get("source")}
+                        for r in output["results"][:8]
+                        if isinstance(r, dict)
+                    ],
+                    "status": status,
+                    "action": action,
+                })
+            if output.get("saved") is not None:
+                proof.append({
+                    "type": "database_write",
+                    "label": f"{output['saved']} record(s) saved",
+                    "store": output.get("store"),
+                    "status": status,
+                    "action": action,
+                })
+            if output.get("required") or output.get("required_env_vars"):
+                proof.append({
+                    "type": "blocked_configuration",
+                    "label": output.get("required") or f"Missing {', '.join(output.get('required_env_vars') or [])}",
+                    "status": "not_configured",
+                    "action": action,
+                })
+            if status == "error" and error:
+                proof.append({
+                    "type": "tool_error",
+                    "label": error,
+                    "status": "failed",
+                    "action": action,
+                })
+        if not proof:
+            proof.append({
+                "type": "execution_trace",
+                "label": f"{execution_result.get('completed', 0)}/{execution_result.get('total_steps', 0)} steps completed",
+                "status": "completed" if execution_result.get("success") else "failed",
+            })
+        return proof
 
     def extract_attachments(self, execution_result: dict) -> list[dict]:
         """Return list of {type, filename, content[, language]} from step outputs."""

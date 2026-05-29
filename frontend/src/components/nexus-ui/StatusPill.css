@@ -1,0 +1,132 @@
+/* ════════════════════════════════════════════════════════════════════
+   <StatusPill> — Compact chamfered status indicator
+   Anatomy:
+     ┌─◆─ dot/icon ─ LABEL ─ value ─◆─┐   (chamfered ends)
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  height: 22px;
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border);
+  border-radius: 999px;
+  font-family: var(--nx-font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: var(--nx-text-muted);
+  white-space: nowrap;
+  line-height: 1;
+  transition: background var(--nx-dur) var(--nx-ease),
+              border-color var(--nx-dur) var(--nx-ease),
+              color var(--nx-dur) var(--nx-ease);
+  user-select: none;
+}
+
+.nx-pill--sm {
+  height: 18px;
+  padding: 2px 8px;
+  font-size: 9px;
+  gap: 4px;
+}
+
+.nx-pill--clickable {
+  cursor: pointer;
+}
+.nx-pill--clickable:hover {
+  background: var(--nx-surface-3);
+  border-color: var(--nx-border-strong);
+}
+.nx-pill--clickable:focus-visible {
+  outline: 1px solid var(--nx-gold);
+  outline-offset: 2px;
+}
+
+/* ── Dot ──────────────────────────────────────────────────────────── */
+.nx-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+.nx-pill--sm .nx-pill__dot {
+  width: 5px;
+  height: 5px;
+}
+
+@keyframes nx-pill-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+.nx-pill__dot--pulse {
+  animation: nx-pill-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nx-pill__dot--pulse { animation: none; }
+}
+
+.nx-pill__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.nx-pill__label {
+  display: inline-block;
+}
+
+.nx-pill__value {
+  font-family: var(--nx-font-mono);
+  font-weight: 500;
+  color: var(--nx-text);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  margin-left: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Tones ────────────────────────────────────────────────────────── */
+.nx-pill--gold {
+  color: var(--nx-gold);
+  border-color: rgba(229,199,107,0.30);
+  background: rgba(229,199,107,0.06);
+}
+.nx-pill--cool {
+  color: var(--nx-info);
+  border-color: rgba(96,165,250,0.28);
+  background: rgba(96,165,250,0.06);
+}
+.nx-pill--success {
+  color: var(--nx-success);
+  border-color: rgba(34,197,94,0.28);
+  background: rgba(34,197,94,0.06);
+}
+.nx-pill--warn {
+  color: var(--nx-warning);
+  border-color: rgba(245,158,11,0.30);
+  background: rgba(245,158,11,0.06);
+}
+.nx-pill--alert {
+  color: var(--nx-danger);
+  border-color: rgba(239,68,68,0.32);
+  background: rgba(239,68,68,0.07);
+}
+.nx-pill--idle {
+  color: var(--nx-text-dim);
+  border-color: var(--nx-border);
+  background: rgba(255,255,255,0.02);
+}
+.nx-pill--purple {
+  color: #c084fc;
+  border-color: rgba(168,85,247,0.30);
+  background: rgba(168,85,247,0.06);
+}

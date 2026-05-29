@@ -49,9 +49,15 @@ _MAX_ENTRIES = int(os.environ.get("AI_EMPLOYEE_VECTOR_STORE_MAX", "10000"))
 
 
 def _default_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    path = base / "state" / "vector_store.json"
+    # Honor STATE_DIR first (canonical, set by start.sh), then AI_EMPLOYEE_HOME/AI_HOME,
+    # then the repo — so every subsystem agrees on one state dir.
+    state = os.getenv("STATE_DIR")
+    if state:
+        path = Path(state) / "vector_store.json"
+    else:
+        home = os.getenv("AI_EMPLOYEE_HOME") or os.getenv("AI_HOME")
+        base = Path(home) if home else Path(__file__).resolve().parents[2]
+        path = base / "state" / "vector_store.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -1,0 +1,76 @@
+{
+  "id": "run-fixture-created",
+  "run_id": "run-fixture-created",
+  "project_id": "project-test",
+  "goal": "Add input validation to the signup form",
+  "status": "awaiting_approval",
+  "mode": "supervised",
+  "provider": "anthropic",
+  "max_iterations": 3,
+  "context_pack": {
+    "goal": "Add input validation to the signup form",
+    "project": { "id": "project-test", "name": "Test Project", "target_type": "internal_repo", "write_access": true },
+    "repo_summary": { "ok": false, "error": "not indexed yet" },
+    "relevant_files": [],
+    "tree_paths": ["src/app.js", "src/components/SignupForm.jsx", "package.json"],
+    "recent_sessions": [],
+    "constraints": {
+      "approval_required_for_writes": true,
+      "staged_apply_required": true,
+      "blocked_by_default": ["secrets", "wallets", "payments", "force_push", "destructive_delete", "arbitrary_shell"]
+    }
+  },
+  "plan": {
+    "id": "plan-fixture-created",
+    "goal": "Add input validation to the signup form",
+    "provider": "anthropic",
+    "steps": [
+      "Analyse current SignupForm component",
+      "Add email and password validation with inline error messages",
+      "Write unit test for validation logic"
+    ],
+    "verification_commands": ["node --check src/app.js"],
+    "approval_policy": { "write_actions": "approval_required", "shell_command": "owner_approval_required" }
+  },
+  "actions": [
+    {
+      "id": "action-fixture-created-1",
+      "type": "write_file",
+      "label": "Write src/utils/validate.js",
+      "file_path": "src/utils/validate.js",
+      "status": "pending_approval",
+      "approval_required": true,
+      "risk": "low",
+      "risk_level": "low",
+      "run_id": "run-fixture-created",
+      "proposed_content": "export function validateEmail(v) {\n  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(v);\n}\nexport function validatePassword(v) {\n  return v && v.length >= 8;\n}\n",
+      "content": "export function validateEmail(v) {\n  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(v);\n}\nexport function validatePassword(v) {\n  return v && v.length >= 8;\n}\n",
+      "expected_result": "File is staged in the run workspace, verified, then applied after owner approval.",
+      "rollback_plan": "Restore from per-file .forge_snapshots copy if apply must be reverted.",
+      "policy_decision": { "allowed": true, "risk_level": "low", "violations": [], "files": ["src/utils/validate.js"] },
+      "created_at": "2026-05-27T12:00:00.000Z",
+      "updated_at": "2026-05-27T12:00:00.000Z"
+    }
+  ],
+  "patches": [
+    {
+      "action_id": "action-fixture-created-1",
+      "files": ["src/utils/validate.js"],
+      "diff": "--- src/utils/validate.js\n+++ src/utils/validate.js\n+export function validateEmail(v) {\n+  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(v);\n+}\n+export function validatePassword(v) {\n+  return v && v.length >= 8;\n+}\n",
+      "policy": { "allowed": true, "risk_level": "low", "violations": [] },
+      "status": "pending_approval"
+    }
+  ],
+  "approvals": [],
+  "test_results": [],
+  "review": {
+    "status": "policy_checked",
+    "summary": "1 patch action(s) generated and policy checked.",
+    "blocked": 0
+  },
+  "final_report": null,
+  "audit_ids": [],
+  "workspace_path": "/tmp/forge/runs/run-fixture-created/workspace",
+  "created_at": "2026-05-27T12:00:00.000Z",
+  "updated_at": "2026-05-27T12:00:00.000Z"
+}

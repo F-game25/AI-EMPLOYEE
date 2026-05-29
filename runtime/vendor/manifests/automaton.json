@@ -1,0 +1,14 @@
+{
+  "id": "automaton",
+  "source_url": "https://github.com/Conway-Research/automaton",
+  "fork_url": "https://github.com/F-game25/automaton.",
+  "upstream_commit": "22096f78f20bef63660e24a433f290769af6290f",
+  "license": "MIT",
+  "checksum_sha256": "66ce0da46c51b3ceef0aaca5ca1c6f90ad75b004b20759928586574168211ea2",
+  "local_namespace": "aeternus_autonomy_policy",
+  "risk_class": "high",
+  "runtime_code_imported": false,
+  "imported_paths": ["runtime/config/fork_integration_manifest.json#autonomy_policy"],
+  "approval_policy": "risk_engine_only_forbidden_capabilities_blocked",
+  "patch_notes": "Mapped ReAct, policy risk levels, heartbeat, loop detection, and audit concepts into AETERNUS governance. Wallets, replication, domain purchase, and external compute purchase are blocked."
+}

@@ -1,13 +1,13 @@
 """Unified AI Pipeline — single controlled execution path.
 
 All user input MUST flow through ``process_user_input()``.  This module
-connects every subsystem in one enforced sequence:
+connects every subsystem in one enforced sequence with real-time phase tracking:
 
-Phase 2  → retrieve_relevant_nodes   [KnowledgeStore + MemoryIndex + neighbor expansion]
-Phase 2b → build_context             [structured context for the LLM]
+Phase 1  → retrieve_relevant_nodes   [KnowledgeStore + MemoryIndex + neighbor expansion]
+Phase 2  → build_context             [structured context for the LLM]
 Phase 3  → classify_decision         [TaskOrchestrator intent + DecisionEngine ranking]
 Phase 4  → call_llm                  [injected callable, circuit-broken, full context]
-Phase 5  → decompose_to_tasks        [structured task list + schema validation]
+Phase 5  → validate_tasks            [schema validation]
 Phase 6  → execute_tasks             [AgentController.run_goal() + real-execution check]
 Phase 7  → format_response           [OutputValidationMiddleware + trace annotation]
 Phase 8  → update_graph              [KnowledgeStore + MemoryIndex + edge creation]
@@ -44,9 +44,20 @@ import collections
 import logging
 import os
 import time
+import uuid
 from typing import Any, Callable
 
+from core.phase_reporter import PhaseReporter
+
 logger = logging.getLogger("unified_pipeline")
+
+# ── Native graph store initialisation (once at import time) ──────────────────
+try:
+    from neural_brain.graph.native_graph_store import NativeGraphStore as _NativeGraphStore  # noqa: PLC0415
+    _NativeGraphStore()  # triggers _ensure_schema() → creates DB + tables if absent
+    logger.debug("native_memory_graph.db initialised")
+except Exception as _e:  # pragma: no cover
+    logger.debug("NativeGraphStore init skipped (non-fatal): %s", _e)
 
 # ── Runtime mode ──────────────────────────────────────────────────────────────
 
@@ -231,6 +242,26 @@ def retrieve_relevant_nodes(input_text: str) -> dict[str, Any]:
     except Exception as exc:
         logger.debug("MemoryIndex retrieval failed (non-fatal): %s", exc)
 
+    # MemoryRouter: additional hybrid memory retrieval (5-lane)
+    try:
+        from memory.memory_router import get_memory_router  # noqa: PLC0415
+        router = get_memory_router()
+        router_results = router.retrieve(input_text, top_k=5)
+        if router_results:
+            extra_concepts = [
+                r.get("text", "")
+                for r in router_results
+                if r.get("text", "").strip()
+            ]
+            # Merge without duplicates
+            seen_concepts = set(concepts)
+            for c in extra_concepts:
+                if c not in seen_concepts:
+                    concepts.append(c)
+                    seen_concepts.add(c)
+    except Exception as exc:
+        logger.debug("MemoryRouter retrieval failed (non-fatal): %s", exc)
+
     return {
         "nodes": nodes,
         "concepts": concepts,
@@ -263,6 +294,56 @@ def build_context(input_text: str, graph_data: dict[str, Any]) -> str:
         parts.append("Past Decisions & Memory:\n" + "\n".join(f"- {s}" for s in snippets))
 
     return "\n\n".join(parts)
+
+
+# ── Phase 2.5 — Context sufficiency + optional research ─────────────────────
+
+
+def rate_context_sufficiency(input_text: str, graph_data: dict[str, Any]) -> dict[str, Any]:
+    """Score how well existing memory covers ``input_text``.
+
+    Returns ``{score, sufficient, gaps, memory_hits, graph_hits}``. If
+    ``AUTO_RESEARCH_MODE=auto`` and ``sufficient`` is False, kicks off a single
+    inline research hop and re-evaluates. Caller decides whether to loop.
+    """
+    import os
+    try:
+        from core.context_evaluator import get_context_evaluator  # noqa: PLC0415
+        evaluator = get_context_evaluator()
+        result = evaluator.evaluate(input_text)
+    except Exception as exc:
+        logger.debug("rate_context_sufficiency unavailable (non-fatal): %s", exc)
+        return {"score": 1.0, "sufficient": True, "gaps": [], "memory_hits": 0, "graph_hits": 0, "researched": False}
+
+    if result.get("sufficient"):
+        result["researched"] = False
+        return result
+
+    mode = (os.getenv("AUTO_RESEARCH_MODE") or "ask").lower()
+    if mode != "auto":
+        result["researched"] = False
+        return result
+
+    # Inline single-hop research (auto mode only — the "ask" path runs via AgentController)
+    try:
+        import asyncio  # noqa: PLC0415
+        from core.auto_research_agent import get_auto_researcher  # noqa: PLC0415
+        researcher = get_auto_researcher()
+        asyncio.run(researcher.research(gaps=result.get("gaps", []), goal=input_text, hop=0))
+        # Re-evaluate after research
+        try:
+            re_eval = evaluator.evaluate(input_text)
+            re_eval["researched"] = True
+            return re_eval
+        except Exception:
+            result["researched"] = True
+            return result
+    except Exception as exc:
+        if os.getenv("STRICT_PIPELINE") == "1":
+            raise
+        logger.debug("inline research failed (non-fatal): %s", exc)
+        result["researched"] = False
+        return result
 
 
 # ── Phase 3 — Neural decision layer ──────────────────────────────────────────
@@ -785,6 +866,8 @@ def process_user_input(
     model_route: str = "",
     generate_llm_response_fn: Callable[..., str] | None = None,
     route_to_agent_fn: Callable[[str], str] | None = None,
+    task_id: str = "",
+    tenant_id: str = "default",
 ) -> str:
     """Single controlled entry point for all user input.
 
@@ -808,6 +891,10 @@ def process_user_input(
             Optional ``(message) → agent_id`` callable.  When provided, its
             result is used as the routed_agent in the LLM call instead of the
             DecisionEngine selection (preserves server.py keyword routing).
+        task_id:
+            Optional unique task identifier (auto-generated if not provided).
+        tenant_id:
+            Tenant identifier for multi-tenancy (default: "default").
 
     Returns:
         The final user-facing response string.
@@ -815,31 +902,75 @@ def process_user_input(
     Raises:
         Any phase exception when ``STRICT_PIPELINE=1``.
     """
+    # Generate task ID if not provided
+    if not task_id:
+        task_id = f"task-{uuid.uuid4().hex[:12]}"
+
+    # Initialize phase reporter for real-time tracking
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8787")
+    reporter = PhaseReporter(
+        backend_url=backend_url,
+        task_id=task_id,
+        tenant_id=tenant_id,
+    )
+
     run = _PipelineRun(input_text, user_id, mode, model_route)
     # Track previous intent for edge creation (see Phase 8)
     _prev_intent: str = ""
 
-    def _phase(name: str, fn: Callable[[], Any], fallback: Callable[[], Any], *, critical: bool = True) -> Any:
+    def _phase(
+        phase_num: int,
+        phase_name: str,
+        name: str,
+        fn: Callable[[], Any],
+        fallback: Callable[[], Any],
+        *,
+        critical: bool = True,
+    ) -> Any:
         """Run *fn()*, fall back to *fallback()* unless STRICT_PIPELINE.
+
+        Reports phase transitions to backend via PhaseReporter.
 
         When ``critical=True`` (default), a failure marks the run as degraded.
         Set ``critical=False`` for monitoring/write-back phases (8, 9) whose
         failure does not degrade response quality.
         """
+        phase_start = time.time()
+        reporter.report_phase(phase_num, phase_name, "running", input={"step": name})
+
         try:
-            return fn()
+            result = fn()
+            duration_ms = (time.time() - phase_start) * 1000
+            reporter.report_phase(
+                phase_num,
+                phase_name,
+                "done",
+                duration_ms=duration_ms,
+                output={"status": "completed"},
+            )
+            return result
         except Exception as exc:
+            duration_ms = (time.time() - phase_start) * 1000
+            reporter.report_phase(
+                phase_num,
+                phase_name,
+                "failed",
+                duration_ms=duration_ms,
+                error=str(exc),
+            )
             if STRICT_PIPELINE:
-                logger.error("Phase %s failed in STRICT_PIPELINE mode: %s", name, exc)
+                logger.error("Phase %d (%s) failed in STRICT_PIPELINE mode: %s", phase_num, name, exc)
                 raise
-            logger.warning("Phase %s failed (degraded): %s", name, exc)
+            logger.warning("Phase %d (%s) failed (degraded): %s", phase_num, name, exc)
             if critical:
                 run.degraded = True
             return fallback()
 
-    # ── Phase 2: Graph retrieval ──────────────────────────────────────────────
+    # ── Phase 1: Graph retrieval ──────────────────────────────────────────────
     run.graph_data = _phase(
-        "2 (graph retrieval)",
+        1,
+        "retrieve_relevant_nodes",
+        "1 (graph retrieval)",
         lambda: retrieve_relevant_nodes(input_text),
         lambda: {"nodes": "", "concepts": [], "past_decisions": [], "expanded": []},
     )
@@ -850,15 +981,42 @@ def process_user_input(
         "expanded": len(run.graph_data.get("expanded") or []),
     }
 
-    # ── Phase 2b: Context building ────────────────────────────────────────────
+    # ── Phase 2: Context building ────────────────────────────────────────────
     run.context = _phase(
-        "2b (build context)",
+        2,
+        "build_context",
+        "2 (build context)",
         lambda: build_context(input_text, run.graph_data),
         lambda: "",
     )
 
+    # ── Phase 2.5: Context sufficiency + optional auto-research ─────────────
+    context_check = _phase(
+        25,
+        "rate_context_sufficiency",
+        "2.5 (rate context sufficiency)",
+        lambda: rate_context_sufficiency(input_text, run.graph_data),
+        lambda: {"score": 1.0, "sufficient": True, "gaps": [], "researched": False},
+        critical=False,
+    )
+    run.trace["context_check"] = {
+        "score": context_check.get("score", 1.0),
+        "sufficient": context_check.get("sufficient", True),
+        "gaps": context_check.get("gaps", []),
+        "researched": context_check.get("researched", False),
+    }
+    # If research happened inline, re-retrieve to pick up new memory
+    if context_check.get("researched"):
+        try:
+            run.graph_data = retrieve_relevant_nodes(input_text) or run.graph_data
+            run.context = build_context(input_text, run.graph_data)
+        except Exception as exc:
+            logger.debug("post-research re-retrieval failed (non-fatal): %s", exc)
+
     # ── Phase 3: Intent classification + agent selection ─────────────────────
     decision = _phase(
+        3,
+        "classify_decision",
         "3 (decision)",
         lambda: classify_decision(input_text, run.graph_data),
         lambda: {
@@ -897,6 +1055,8 @@ def process_user_input(
         )
 
     run.llm_output = _phase(
+        4,
+        "call_llm",
         "4 (LLM call)",
         _call_llm,
         lambda: f"{_FALLBACK_PREFIX} LLM call failed",
@@ -905,22 +1065,21 @@ def process_user_input(
 
     # ── Phase 5: Task decomposition + schema validation ───────────────────────
     raw_tasks = _phase(
-        "5 (decompose tasks)",
-        lambda: decompose_to_tasks(run.llm_output, run.intent, run.selected_agents),
+        5,
+        "validate_tasks",
+        "5 (decompose and validate tasks)",
+        lambda: validate_tasks(decompose_to_tasks(run.llm_output, run.intent, run.selected_agents)),
         lambda: [],
     )
-    # Fix 3 — validate task schema (separate from decompose so it always runs)
-    run.tasks = _phase(
-        "5v (validate tasks)",
-        lambda: validate_tasks(raw_tasks),
-        lambda: [],
-    )
+    run.tasks = raw_tasks
     run.trace["validated_tasks"] = [
         {"agent": t.get("agent"), "intent": t.get("intent")} for t in run.tasks
     ]
 
     # ── Phase 6: Agent execution ──────────────────────────────────────────────
     run.agent_results = _phase(
+        6,
+        "execute_tasks",
         "6 (execute tasks)",
         lambda: execute_tasks(run.tasks, input_text),
         lambda: [],
@@ -937,6 +1096,8 @@ def process_user_input(
 
     # ── Phase 7: Result aggregation ───────────────────────────────────────────
     run.final_response = _phase(
+        7,
+        "format_response",
         "7 (format response)",
         lambda: format_response(
             run.llm_output,
@@ -952,6 +1113,8 @@ def process_user_input(
 
     # ── Phase 8: Graph update (non-blocking, non-critical) ────────────────────
     _phase(
+        8,
+        "update_graph",
         "8 (graph update)",
         lambda: update_graph(
             input_text,
@@ -964,8 +1127,41 @@ def process_user_input(
         critical=False,
     )
 
+    # ── Phase 8b: MemoryRouter write-back (non-blocking, non-critical) ──────────
+    def _memory_writeback() -> None:
+        from memory.memory_router import get_memory_router  # noqa: PLC0415
+        import datetime  # noqa: PLC0415
+        router = get_memory_router()
+        goal = input_text
+        response_text = run.final_response
+        if goal and response_text:
+            router.store(
+                key=f"ep:{abs(hash(goal)) % 1_000_000}:{int(time.time())}",
+                text=f"Goal: {goal}\nResult: {response_text[:500]}",
+                memory_type="episodic",
+                source="unified_pipeline",
+                importance=0.6,
+                extra={
+                    "timestamp": datetime.datetime.utcnow().isoformat(),
+                    "goal": goal[:200],
+                    "intent": run.intent,
+                    "success": not run.degraded,
+                },
+            )
+
+    _phase(
+        8,
+        "memory_writeback",
+        "8b (memory write-back)",
+        _memory_writeback,
+        lambda: None,
+        critical=False,
+    )
+
     # ── Phase 9: AscendForge monitoring (non-blocking, non-critical) ──────────
     _phase(
+        9,
+        "monitor_and_improve",
         "9 (ascend forge)",
         lambda: monitor_and_improve(run),
         lambda: None,
@@ -975,9 +1171,28 @@ def process_user_input(
     # ── Phase 10: Integrity validation ────────────────────────────────────────
     # When violations are found, run.degraded=True and DEGRADED marker is added
     # to the response so the UI debug panel can surface it.
+    phase_10_start = time.time()
+    reporter.report_phase(10, "validate_pipeline_integrity", "running")
+
     try:
         validate_pipeline_integrity(run)
+        duration_ms = (time.time() - phase_10_start) * 1000
+        reporter.report_phase(
+            10,
+            "validate_pipeline_integrity",
+            "done",
+            duration_ms=duration_ms,
+            output={"validated": True},
+        )
     except PipelineViolationError as exc:
+        duration_ms = (time.time() - phase_10_start) * 1000
+        reporter.report_phase(
+            10,
+            "validate_pipeline_integrity",
+            "failed",
+            duration_ms=duration_ms,
+            error=str(exc),
+        )
         logger.warning("Phase 10 (integrity check) violations: %s", exc)
         # Fix 7 — append DEGRADED marker if not already present
         if _DEGRADED_MARKER not in run.final_response:

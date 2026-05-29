@@ -64,7 +64,7 @@ class WorkflowFormatter:
             self._plan(tasks, intent),
             self._step_breakdown(tasks),
             self._execution_updates(agent_results),
-            self._results(llm_output),
+            self._results(llm_output, agent_results),
             self._conclusion(agent, agent_results),
             self._improvements(intent),
             self._artifacts_section(artifacts),
@@ -130,10 +130,27 @@ class WorkflowFormatter:
 
     # ── Phase 5 ──────────────────────────────────────────────────────────────
 
-    def _results(self, llm_output: str) -> str:
+    def _results(self, llm_output: str, agent_results: list[dict]) -> str:
         # Strip old 3-section template headers to avoid duplication
         clean = _OLD_HEADERS.sub("", llm_output).strip()
         content = clean or llm_output.strip()
+        snippets: list[str] = []
+        lowered = content.lower()
+        for r in agent_results[:5]:
+            if not r.get("success"):
+                continue
+            out = r.get("output")
+            if isinstance(out, dict):
+                snippet = str(out.get("text") or out.get("output") or "").strip()
+            else:
+                snippet = str(out or "").strip()
+            if not snippet:
+                continue
+            if snippet.lower() in lowered:
+                continue
+            snippets.append(f"- {snippet}")
+        if snippets:
+            content = f"{content}\n\n### Task Outputs\n" + "\n".join(snippets)
         return f"## 📊 RESULTS\n\n{content}"
 
     # ── Phase 6 ──────────────────────────────────────────────────────────────

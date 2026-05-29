@@ -1,129 +1,536 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Panel, Badge, StatCard } from '../ui/primitives'
-import { API_URL } from '../../config/api'
+import { useEffect, useRef, useState } from 'react'
+import Panel from '../nexus-ui/Panel'
+import KPITile from '../nexus-ui/KPITile'
+import StatusPill from '../nexus-ui/StatusPill'
+import { SectionLabel } from '../nexus-ui/SectionLabel'
+import { EmptyState, ErrorState, NxButton } from '../nexus-ui'
+import { useAppStore } from '../../store/appStore'
+import api from '../../api/client'
+import TaskComposer, { MONEY_PRESETS } from '../core/TaskComposer'
+import { fmtCurrency, fmtNumber, fmtDate } from '../../utils/format'
+import './MoneyModePage.css'
 
-const BASE = API_URL
+const fmt$ = (v) => fmtCurrency(v, { compact: false })
+const fmtNum = (v) => fmtNumber(v, { compact: false })
 
-const PIPELINES = [
-  {
-    id: 'content',
-    label: 'Content Pipeline',
-    icon: '✍️',
-    desc: 'Generate, publish, and distribute content across channels.',
-    endpoint: '/api/money/content-pipeline',
-    color: '#20D6C7',
-  },
-  {
-    id: 'lead',
-    label: 'Lead Pipeline',
-    icon: '🎯',
-    desc: 'Identify, qualify, and enrich B2B leads via Apollo + scraping.',
-    endpoint: '/api/money/lead-pipeline',
-    color: '#E5C76B',
-  },
-  {
-    id: 'opportunity',
-    label: 'Opportunity Pipeline',
-    icon: '💰',
-    desc: 'Run outreach sequences and convert opportunities to revenue.',
-    endpoint: '/api/money/opportunity-pipeline',
-    color: '#22C55E',
-  },
-]
+async function fetchJson(path) {
+  return api.get(path)
+}
 
-function PipelineCard({ pipeline, onRun, running, lastRun }) {
+function useEconomyData() {
+  const [state, setState] = useState({ loading: true, error: null, data: null })
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const [summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks, contentLog, outreachLog] = await Promise.all([
+          fetchJson('/api/economy/summary').catch((e) => ({ state: 'degraded', error: e.message })),
+          fetchJson('/api/economy/ledger').catch(() => ({ items: [] })),
+          fetchJson('/api/economy/costs').catch(() => ({ items: [] })),
+          fetchJson('/api/economy/pipelines').catch(() => ({ pipelines: [] })),
+          fetchJson('/api/economy/opportunities').catch(() => ({ opportunities: [] })),
+          fetchJson('/api/economy/wallet').catch(() => ({ wallet: { configured: false, state: 'degraded' } })),
+          fetchJson('/api/money/tasks').catch(() => ({ tasks: [], policy: null })),
+          fetchJson('/api/money/content-log').catch(() => ({ entries: [] })),
+          fetchJson('/api/money/outreach-log').catch(() => ({ entries: [] })),
+        ])
+        if (alive) setState({ loading: false, error: summary.error || null, data: { summary, ledger, costs, pipelines, opportunities, wallet, moneyTasks, contentLog, outreachLog } })
+      } catch (err) {
+        if (alive) setState({ loading: false, error: err.message, data: null })
+      }
+    }
+    load()
+    const id = setInterval(load, 30000)
+    const onEconomyUpdate = () => load()
+    window.addEventListener('economy:update', onEconomyUpdate)
+    window.addEventListener('ws:event', (e) => { if (e.detail?.type?.startsWith('economy:') || e.detail?.type?.startsWith('money:')) onEconomyUpdate() })
+    return () => { alive = false; clearInterval(id); window.removeEventListener('economy:update', onEconomyUpdate) }
+  }, [])
+  return state
+}
+
+function SimpleTable({ rows, columns, emptyTitle }) {
+  if (!rows.length) return <EmptyState icon="[]" title={emptyTitle} sub="No persisted records exist yet." />
   return (
-    <div style={{ padding: '16px 18px', borderRadius: 10, border: `1px solid ${pipeline.color}22`, background: `${pipeline.color}08`, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 22 }}>{pipeline.icon}</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary, #F0E9D2)' }}>{pipeline.label}</div>
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{pipeline.desc}</div>
-        </div>
-        {lastRun && (
-          <Badge color={pipeline.color} label={`$${lastRun.estimated_roi} ROI`} />
-        )}
+    <table className="ecc-token-table">
+      <thead>
+        <tr>{columns.map((col) => <th key={col.key} className="ecc-token-table__th">{col.label}</th>)}</tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={row.id || index} className="ecc-token-table__row">
+            {columns.map((col) => <td key={col.key} className="ecc-token-table__op">{col.render ? col.render(row) : row[col.key] || '-'}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function PipelineCard({ pipeline }) {
+  return (
+    <div className="ecc-pipeline-card">
+      <div className="ecc-pipeline-card__head">
+        <span className="ecc-pipeline-card__name">{pipeline.name || pipeline.id}</span>
+        <StatusPill label={(pipeline.status || 'idle').toUpperCase()} tone={pipeline.status === 'active' ? 'success' : 'idle'} size="sm" />
       </div>
-      {lastRun && (
-        <div style={{ display: 'flex', gap: 12, fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)' }}>
-          <span>Last: {new Date(lastRun.executed_at).toLocaleTimeString()}</span>
-          <span style={{ color: '#22C55E' }}>● {lastRun.status}</span>
+      <div className="ecc-pipeline-card__metrics">
+        <div className="ecc-pipeline-card__metric">
+          <span className="ecc-pipeline-card__metric-label">Runs</span>
+          <span className="ecc-pipeline-card__metric-val">{fmtNum(pipeline.runs || 0)}</span>
         </div>
-      )}
-      <button
-        onClick={() => onRun(pipeline)}
-        disabled={running === pipeline.id}
-        style={{ alignSelf: 'flex-start', padding: '7px 18px', borderRadius: 7, border: `1px solid ${pipeline.color}55`, background: running === pipeline.id ? 'rgba(255,255,255,0.04)' : `${pipeline.color}18`, color: running === pipeline.id ? 'rgba(255,255,255,0.3)' : pipeline.color, fontSize: 12, cursor: running === pipeline.id ? 'not-allowed' : 'pointer', fontWeight: 600 }}
-      >
-        {running === pipeline.id ? '⏳ Running…' : '▶ Run Pipeline'}
-      </button>
+        <div className="ecc-pipeline-card__metric">
+          <span className="ecc-pipeline-card__metric-label">Value</span>
+          <span className="ecc-pipeline-card__metric-val">{fmt$(pipeline.value || 0)}</span>
+        </div>
+        <div className="ecc-pipeline-card__metric">
+          <span className="ecc-pipeline-card__metric-label">Last Run</span>
+          <span className="ecc-pipeline-card__metric-val ecc-pipeline-card__metric-val--muted">{pipeline.last_run_at ? fmtDate(pipeline.last_run_at, { time: true }) : 'never'}</span>
+        </div>
+      </div>
     </div>
   )
 }
 
-export default function MoneyModePage() {
-  const [running, setRunning]     = useState(null)
-  const [history, setHistory]     = useState([])
-  const [totals, setTotals]       = useState({ roi: 0, runs: 0 })
-  const [lastRuns, setLastRuns]   = useState({})
-  const [error, setError]         = useState(null)
+function WalletPanel({ wallet }) {
+  const w = wallet?.wallet || wallet || {}
+  return (
+    <Panel
+      title="OWNER WALLET VAULT"
+      icon="$"
+      tone="gold"
+      size="compact"
+      actions={<StatusPill label={w.configured ? 'CONFIGURED' : 'OWNER SETUP'} tone={w.configured ? 'success' : 'warn'} size="sm" />}
+    >
+      <div className="ecc-wallet-vault">
+        <div className="ecc-wallet-vault__balance">{fmt$(w.balance?.available || w.available || 0)}</div>
+        <div className="ecc-wallet-vault__meta">
+          <span>{w.address || 'Encrypted local owner vault is not configured.'}</span>
+          <span>Claim, spend, wallet and external compute actions require owner approval.</span>
+          <span>Autonomous spending is blocked.</span>
+        </div>
+      </div>
+    </Panel>
+  )
+}
 
-  const runPipeline = useCallback(async (pipeline) => {
-    setRunning(pipeline.id)
-    setError(null)
-    try {
-      const token = localStorage.getItem('auth_token') || ''
-      const r = await fetch(`${BASE}${pipeline.endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      })
-      const data = await r.json()
-      setHistory(h => [{ ...data, pipeline: pipeline.id, label: pipeline.label, color: pipeline.color, ts: Date.now() }, ...h].slice(0, 50))
-      setLastRuns(lr => ({ ...lr, [pipeline.id]: { ...data, executed_at: new Date().toISOString() } }))
-      setTotals(t => ({ roi: t.roi + (data.estimated_roi || 0), runs: t.runs + 1 }))
-    } catch (e) {
-      setError(`${pipeline.label} failed: ${e.message}`)
-    } finally {
-      setRunning(null)
-    }
-  }, [])
+const STATUS_TONE = {
+  draft: 'warn',
+  published: 'success',
+  template: 'idle',
+  sent: 'success',
+  pending_approval: 'warn',
+}
+
+function ContentCalendarPanel({ entries = [] }) {
+  return (
+    <Panel title="CONTENT CALENDAR" icon="[]" tone="gold" size="compact" actions={<StatusPill label={entries.length ? `${entries.length} ENTRIES` : 'EMPTY'} tone={entries.length ? 'success' : 'idle'} size="sm" />}>
+      <div className="ecc-native-list">
+        {entries.length ? entries.slice(0, 8).map((e, i) => (
+          <div key={e.id || i} className="ecc-native-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="ecc-native-row__title">{e.topic || e.title || 'Untitled'}</span>
+              <span className="ecc-native-row__sub">
+                {e.type && <span style={{ marginRight: 6 }}>{e.type}</span>}
+                {e.format && <span style={{ marginRight: 6 }}>{e.format}</span>}
+                {e.word_count ? `${e.word_count} words · ` : ''}{fmtDate(e.timestamp || e.created_at, { time: true })}
+              </span>
+            </div>
+            <StatusPill label={(e.status || 'draft').toUpperCase()} tone={STATUS_TONE[e.status] || 'idle'} size="sm" />
+          </div>
+        )) : (
+          <div className="ecc-native-empty">No content published yet</div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+function ROITrackingPanel({ summary = {}, pipelines = [] }) {
+  const revenue = Number(summary.revenue || summary.total_revenue || 0)
+  const cost = Number(summary.cost || summary.total_cost || 0)
+  const profit = summary.profit != null ? Number(summary.profit) : revenue - cost
+  const roi = cost > 0 ? (profit / cost) * 100 : 0
+  const profitColor = profit >= 0 ? 'var(--nx-success)' : 'var(--nx-danger)'
+  return (
+    <Panel title="ROI TRACKING" icon="%" tone="gold" size="compact">
+      {!revenue && !cost && !pipelines.length ? (
+        <div className="ecc-native-empty">No economy data</div>
+      ) : (
+        <>
+          <div className="ecc-roi-grid">
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">REVENUE</span>
+              <span className="ecc-roi-stat__val">{fmt$(revenue)}</span>
+            </div>
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">COSTS</span>
+              <span className="ecc-roi-stat__val">{fmt$(cost)}</span>
+            </div>
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">PROFIT</span>
+              <span className="ecc-roi-stat__val" style={{ color: profitColor }}>{fmt$(profit)}</span>
+            </div>
+            <div className="ecc-roi-stat">
+              <span className="ecc-roi-stat__label">ROI</span>
+              <span className="ecc-roi-stat__val" style={{ color: profitColor }}>{roi.toFixed(1)}%</span>
+            </div>
+          </div>
+          {pipelines.length > 0 && (
+            <table className="ecc-token-table" style={{ marginTop: 'var(--nx-s-3)' }}>
+              <thead>
+                <tr>
+                  <th className="ecc-token-table__th">Pipeline</th>
+                  <th className="ecc-token-table__th">Revenue</th>
+                  <th className="ecc-token-table__th">Cost</th>
+                  <th className="ecc-token-table__th">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pipelines.map((p, i) => (
+                  <tr key={p.id || p.name || i} className="ecc-token-table__row">
+                    <td className="ecc-token-table__op">{p.name || p.id || '-'}</td>
+                    <td className="ecc-token-table__op">{fmt$(p.revenue || p.value || 0)}</td>
+                    <td className="ecc-token-table__op">{fmt$(p.cost || 0)}</td>
+                    <td className="ecc-token-table__op">{p.status || 'idle'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </Panel>
+  )
+}
+
+function OutreachStatusPanel({ entries = [] }) {
+  return (
+    <Panel title="OUTREACH STATUS" icon="@" tone="gold" size="compact" actions={<StatusPill label={entries.length ? `${entries.length} RECORDS` : 'EMPTY'} tone={entries.length ? 'success' : 'idle'} size="sm" />}>
+      <div className="ecc-native-list">
+        {entries.length ? entries.slice(0, 8).map((e, i) => (
+          <div key={e.id || i} className="ecc-native-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="ecc-native-row__title">{e.recipient_name || e.recipient || e.email || 'Unknown'}</span>
+              <span className="ecc-native-row__sub">{fmtDate(e.timestamp || e.sent_at || e.created_at, { time: true })}</span>
+            </div>
+            <StatusPill label={(e.status || 'draft').toUpperCase()} tone={STATUS_TONE[e.status] || 'idle'} size="sm" />
+          </div>
+        )) : (
+          <div className="ecc-native-empty">No outreach drafted yet</div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+// ── Pipeline Builder — end-to-end money workflow ──────────────────────────────
+const PIPELINE_STEPS = [
+  { id: 'niche',    label: 'Niche Research',  api: '/api/money/niche-research',  icon: '🔍', desc: 'Discover profitable niches and validate demand' },
+  { id: 'offer',    label: 'Offer Creation',  api: '/api/money/offer-creation',  icon: '📦', desc: 'Design a sellable offer from niche insights' },
+  { id: 'calendar', label: 'Content Plan',    api: '/api/money/content-calendar', icon: '📅', desc: 'Build a content calendar to attract clients' },
+  { id: 'leads',    label: 'Lead Research',   api: '/api/money/lead-research',   icon: '👤', desc: 'Find potential clients (approval required before outreach)' },
+  { id: 'proposal', label: 'Proposal Draft',  api: '/api/money/proposal',        icon: '📝', desc: 'Generate a proposal — human must approve before sending' },
+]
+
+const STEP_STATUS = { idle: 'idle', running: 'running', done: 'done', error: 'error', blocked: 'blocked' }
+
+function StepCard({ step, status, result, error, onRun, disabled, isActive }) {
+  const [open, setOpen] = useState(false)
+  const statusColors = { idle: '#9a927e', running: '#e89a4f', done: '#22c55e', error: '#ef4444', blocked: '#f59e0b' }
+  const statusIcons  = { idle: '○', running: '●', done: '✓', error: '✗', blocked: '!' }
+  const c = statusColors[status] || '#9a927e'
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%', overflowY: 'auto' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, flexShrink: 0 }}>
-        <StatCard label="Total ROI" value={`$${totals.roi.toFixed(2)}`} color="#22C55E" sub="this session" />
-        <StatCard label="Runs" value={totals.runs} color="#20D6C7" sub="pipelines triggered" />
-        <StatCard label="Pipelines" value={PIPELINES.length} color="#E5C76B" sub="available" />
+    <div style={{ border: `1px solid ${c}33`, borderLeft: `3px solid ${c}`, borderRadius: 6, marginBottom: 8, background: isActive ? 'rgba(229,199,107,0.04)' : 'rgba(0,0,0,0.2)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
+        <span style={{ fontSize: 16 }}>{step.icon}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#ecead8', fontFamily: 'Inter, sans-serif' }}>{step.label}</div>
+          <div style={{ fontSize: 11, color: '#9a927e', fontFamily: 'monospace' }}>{step.desc}</div>
+        </div>
+        <span style={{ color: c, fontSize: 12, fontFamily: 'monospace', marginRight: 8 }}>
+          {statusIcons[status]} {status.toUpperCase()}
+        </span>
+        {result && <NxButton variant="ghost" size="sm" onClick={() => setOpen(o => !o)}>{open ? 'HIDE' : 'VIEW'}</NxButton>}
+        <NxButton
+          variant="primary"
+          size="sm"
+          onClick={onRun}
+          loading={status === 'running'}
+          disabled={disabled || status === 'running'}
+        >{status === 'done' ? '↺ RE-RUN' : '▶ RUN'}</NxButton>
       </div>
+      {error && <div style={{ padding: '0 14px 8px', fontSize: 11, color: '#ef4444', fontFamily: 'monospace' }}>{error}</div>}
+      {open && result && (
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '10px 14px', maxHeight: 200, overflowY: 'auto' }}>
+          <pre style={{ fontSize: 10, color: '#9a927e', fontFamily: 'monospace', whiteSpace: 'pre-wrap', margin: 0 }}>
+            {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
 
-      {error && (
-        <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: '#EF4444', fontSize: 12 }}>{error}</div>
+function PipelineBuilder() {
+  const [context, setContext]   = useState('')
+  const [statuses, setStatuses] = useState({})  // stepId → STEP_STATUS
+  const [results, setResults]   = useState({})
+  const [errors, setErrors]     = useState({})
+  const [activeStep, setActiveStep] = useState(null)
+  const token = () => sessionStorage.getItem('ai_jwt') || ''
+
+  const runStep = async (step, ctxOverride) => {
+    const ctx = ctxOverride ?? context
+    if (!ctx.trim()) return
+    setStatuses(s => ({ ...s, [step.id]: 'running' }))
+    setErrors(e => ({ ...e, [step.id]: null }))
+    setActiveStep(step.id)
+    try {
+      const prevResults = Object.fromEntries(
+        PIPELINE_STEPS.filter(s => results[s.id]).map(s => [s.id, results[s.id]])
+      )
+      const res = await fetch(step.api, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ context: ctx, previous_results: prevResults }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
+      setResults(r => ({ ...r, [step.id]: data }))
+      setStatuses(s => ({ ...s, [step.id]: data.requires_approval ? 'blocked' : 'done' }))
+    } catch (e) {
+      setErrors(err => ({ ...err, [step.id]: e.message }))
+      setStatuses(s => ({ ...s, [step.id]: 'error' }))
+    } finally {
+      setActiveStep(null)
+    }
+  }
+
+  const runAll = async () => {
+    if (!context.trim()) return
+    for (const step of PIPELINE_STEPS) {
+      await runStep(step)
+    }
+  }
+
+  const doneCount = PIPELINE_STEPS.filter(s => statuses[s.id] === 'done').length
+
+  return (
+    <Panel title="PIPELINE BUILDER" icon="▶" tone="gold" size="compact"
+      actions={
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {doneCount > 0 && <StatusPill label={`${doneCount}/${PIPELINE_STEPS.length} DONE`} tone="success" size="sm" />}
+          <NxButton
+            variant="primary"
+            size="sm"
+            onClick={runAll}
+            loading={!!activeStep}
+            disabled={!context.trim() || !!activeStep}
+          >▶▶ RUN ALL</NxButton>
+        </div>
+      }
+    >
+      <div style={{ padding: '12px 14px' }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.12em', color: '#e5c76b', fontFamily: 'monospace', textTransform: 'uppercase', marginBottom: 6 }}>Your context / skills / goal</div>
+          <textarea
+            value={context}
+            onChange={e => setContext(e.target.value)}
+            placeholder="Describe yourself, your skills, your target market, or your income goal. The pipeline will use this throughout."
+            rows={3}
+            style={{ width: '100%', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(229,199,107,0.18)', borderRadius: 4, color: '#ecead8', fontSize: 12, fontFamily: 'monospace', padding: '8px 10px', resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
+          />
+        </div>
+        <div style={{ fontSize: 10, color: '#9a927e', fontFamily: 'monospace', marginBottom: 10 }}>
+          Run steps individually or use RUN ALL. Steps build on each other — earlier results are passed as context. Outreach and proposals require human approval before sending.
+        </div>
+        {PIPELINE_STEPS.map((step, i) => {
+          const prevDone = i === 0 || statuses[PIPELINE_STEPS[i - 1].id] === 'done'
+          return (
+            <StepCard
+              key={step.id}
+              step={step}
+              status={statuses[step.id] || 'idle'}
+              result={results[step.id]}
+              error={errors[step.id]}
+              isActive={activeStep === step.id}
+              disabled={!context.trim() || !!activeStep}
+              onRun={() => runStep(step)}
+            />
+          )
+        })}
+      </div>
+    </Panel>
+  )
+}
+
+export default function MoneyModePage() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
+  const { loading, error, data } = useEconomyData()
+  const summary = data?.summary || {}
+  const ledger = data?.ledger?.items || data?.ledger?.ledger || []
+  const costs = data?.costs?.items || data?.costs?.costs || []
+  const pipelines = data?.pipelines?.pipelines || []
+  const opportunities = data?.opportunities?.opportunities || []
+  const tasks = data?.moneyTasks?.tasks || []
+  const policy = data?.moneyTasks?.policy || {}
+  const contentEntries = data?.contentLog?.entries || []
+  const outreachEntries = data?.outreachLog?.entries || []
+
+  const revenue = summary.revenue || summary.total_revenue || 0
+  const cost = summary.cost || summary.total_cost || 0
+  const profit = summary.profit ?? (revenue - cost)
+  const tokenCost = summary.token_cost || costs.reduce((acc, item) => acc + (Number(item.cost) || 0), 0)
+  const roi = cost > 0 ? (profit / cost) * 100 : 0
+  const needsFirstRunSetup = !loading && !tasks.length && !pipelines.length && !opportunities.length && !ledger.length
+
+  return (
+    <div className="ecc-page" role="main" aria-label="Economy Command Center">
+      <header className="ecc-titlebar">
+        <div className="ecc-titlebar__left">
+          <span className="ecc-titlebar__icon" aria-hidden="true">$</span>
+          <h1 className="ecc-titlebar__title">ECONOMY COMMAND CENTER</h1>
+          <div className="ecc-titlebar__divider" aria-hidden="true" />
+          <span className="ecc-titlebar__sub">Real ledger, wallet, task value and approval gates</span>
+        </div>
+        <div className="ecc-titlebar__right">
+          <StatusPill label={(summary.state || (error ? 'degraded' : 'live')).toUpperCase()} tone={error ? 'alert' : 'gold'} dot={!error} />
+          <span className="ecc-titlebar__ts">{new Date().toLocaleTimeString()}</span>
+        </div>
+      </header>
+
+      {loading && <EmptyState icon="..." title="Loading economy state" />}
+      {error && <ErrorState title="Economy degraded" message={error} />}
+      {needsFirstRunSetup && (
+        <Panel
+          title="MONEY MODE SETUP REQUIRED"
+          icon="!"
+          tone="gold"
+          size="compact"
+          actions={<StatusPill label="NO LIVE SOURCES" tone="warn" size="sm" />}
+        >
+          <div className="ecc-guided-setup">
+            <div>
+              <strong>Money Mode has no active task sources, pipelines, opportunities, or ledger proof yet.</strong>
+              <span>Configure providers first, then run a safe draft task. Publishing, outreach, wallet use, spending, and paid-task acceptance stay approval-gated.</span>
+            </div>
+            <div className="ecc-guided-setup__actions" aria-label="Money Mode setup actions">
+              <NxButton variant="primary" onClick={() => setActiveSection('setup')}>Open Setup</NxButton>
+              <NxButton variant="ghost" onClick={() => setActiveSection('integrations')}>Check Integrations</NxButton>
+              <NxButton variant="ghost" onClick={() => setActiveSection('approvals')}>Approval Inbox</NxButton>
+              <NxButton variant="ghost" onClick={() => setActiveSection('proof')}>Proof Center</NxButton>
+            </div>
+          </div>
+        </Panel>
       )}
 
-      <Panel title="Money Pipelines">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {PIPELINES.map(p => (
-            <PipelineCard key={p.id} pipeline={p} onRun={runPipeline} running={running} lastRun={lastRuns[p.id]} />
-          ))}
-        </div>
-      </Panel>
+      <section className="ecc-kpi-strip" aria-label="Key performance indicators">
+        <KPITile label="TRACKED VALUE" value={<span className="ecc-tabular">{fmt$(revenue)}</span>} icon="$" iconTone="gold" accent hover sub="persisted ledger" />
+        <KPITile label="COST" value={<span className="ecc-tabular">{fmt$(cost)}</span>} icon="-" iconTone="warn" hover sub="tracked spend" />
+        <KPITile label="PROFIT" value={<span className="ecc-tabular">{fmt$(profit)}</span>} icon="+" iconTone={profit >= 0 ? 'success' : 'warn'} hover sub="value minus cost" />
+        <KPITile label="ROI" value={<span className="ecc-tabular">{roi.toFixed(1)}%</span>} icon="%" iconTone={roi >= 0 ? 'success' : 'warn'} hover sub="real data only" />
+        <KPITile label="TOKEN COST" value={<span className="ecc-tabular">{fmt$(tokenCost)}</span>} icon="T" iconTone="warn" hover sub="from call logs" />
+      </section>
 
-      <Panel title="Run History">
-        {history.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>No pipelines run yet this session.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {history.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', fontSize: 12 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
-                <span style={{ flex: 1, color: 'var(--text-primary, #F0E9D2)' }}>{r.label}</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#22C55E' }}>${r.estimated_roi} ROI</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{new Date(r.ts).toLocaleTimeString()}</span>
+      <div className="ecc-enhance-grid">
+        <TaskComposer
+          title="START MONEY TASK"
+          subtitle="Draft, evaluate, and prepare work. Risky execution pauses for approval."
+          presets={MONEY_PRESETS}
+          placeholder="Example: find 3 service offers I can sell this week using my existing skills."
+          source="money-mode-composer"
+        />
+        <Panel title="MONEY MODE TASK INBOX" icon="[]" tone="gold" size="compact" actions={<StatusPill label={tasks.length ? `${tasks.length} TASKS` : 'EMPTY'} tone={tasks.length ? 'success' : 'idle'} size="sm" />}>
+          <div className="ecc-native-list">
+            {tasks.slice(0, 5).map((task) => (
+              <div key={task.id} className="ecc-native-row">
+                <div>
+                  <span className="ecc-native-row__title">{task.title || task.id}</span>
+                  <span className="ecc-native-row__sub">{task.source || 'internal'} - {task.estimated_hours || 0}h - {task.risk || 'standard'}</span>
+                </div>
+                <StatusPill label={(task.state || 'draft').toUpperCase()} tone={task.risk === 'dangerous' ? 'warn' : 'idle'} size="sm" />
               </div>
             ))}
+            {!tasks.length && (
+              <div className="ecc-native-empty ecc-native-empty--guided">
+                <span>No task sources are active. Discovery is disabled until configured by the owner.</span>
+                <NxButton variant="ghost" size="sm" onClick={() => setActiveSection('integrations')}>Configure Sources</NxButton>
+              </div>
+            )}
           </div>
-        )}
+        </Panel>
+        <WalletPanel wallet={data?.wallet} />
+        <Panel title="APPROVAL GATES" icon="!" tone="gold" size="compact" actions={<StatusPill label={policy.state?.toUpperCase?.() || 'POLICY'} tone="success" size="sm" />}>
+          <div className="ecc-approval-gates">
+            {(policy.approval_gates || ['accept_paid_task', 'deliver_client_work', 'claim_funds', 'spend_money', 'buy_external_compute']).map((gate) => (
+              <span key={gate} className="ecc-approval-gate">{gate.replace(/_/g, ' ')}</span>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      <PipelineBuilder />
+
+      <div className="ecc-mid-row">
+        <Panel title="PIPELINES" icon="[]" tone="gold" size="compact" className="ecc-pipeline-panel">
+          <div className="ecc-pipeline-list">
+            {pipelines.map((pipeline) => <PipelineCard key={pipeline.id || pipeline.name} pipeline={pipeline} />)}
+            {!pipelines.length && <EmptyState icon="[]" title="No active pipelines" sub="Content, data and outreach pipelines will appear after first real run." />}
+          </div>
+        </Panel>
+        <Panel title="OPPORTUNITIES" icon="+" tone="gold" size="compact" className="ecc-chart-panel">
+          <SimpleTable
+            rows={opportunities}
+            emptyTitle="No opportunities"
+            columns={[
+              { key: 'title', label: 'Opportunity' },
+              { key: 'source', label: 'Source' },
+              { key: 'estimated_value', label: 'Value', render: (r) => fmt$(r.estimated_value || r.value) },
+              { key: 'state', label: 'State' },
+            ]}
+          />
+        </Panel>
+      </div>
+
+      <Panel title="TOKEN/API COSTS" icon="T" tone="gold" size="compact" className="ecc-token-panel">
+        <SimpleTable
+          rows={costs}
+          emptyTitle="No cost history"
+          columns={[
+            { key: 'operation', label: 'Operation' },
+            { key: 'tokens', label: 'Tokens', render: (r) => fmtNum(r.tokens) },
+            { key: 'cost', label: 'Cost', render: (r) => fmt$(r.cost) },
+            { key: 'provider', label: 'Provider' },
+          ]}
+        />
       </Panel>
+
+      <section aria-label="Ledger">
+        <SectionLabel icon="$" tone="gold" rule>LEDGER</SectionLabel>
+        <Panel title="REAL ECONOMY LEDGER" icon="$" tone="gold" size="compact">
+          <SimpleTable
+            rows={ledger}
+            emptyTitle="No ledger records"
+            columns={[
+              { key: 'type', label: 'Type' },
+              { key: 'amount', label: 'Amount', render: (r) => fmt$(r.amount || r.value) },
+              { key: 'status', label: 'Status' },
+              { key: 'created_at', label: 'Created', render: (r) => fmtDate(r.created_at, { time: true }) },
+            ]}
+          />
+        </Panel>
+      </section>
+
+      <section aria-label="Money Mode Tracking Panels">
+        <SectionLabel icon="[]" tone="gold" rule>MONEY MODE TRACKING</SectionLabel>
+        <div className="ecc-tracking-grid">
+          <ContentCalendarPanel entries={contentEntries} />
+          <ROITrackingPanel summary={summary} pipelines={pipelines} />
+          <OutreachStatusPanel entries={outreachEntries} />
+        </div>
+      </section>
     </div>
   )
 }

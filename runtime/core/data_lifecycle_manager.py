@@ -69,6 +69,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re as _re
 import sqlite3
 import threading
 import time
@@ -179,7 +180,13 @@ class _SqliteHandler:
     Expects a ``ts`` column containing ISO-8601 timestamps (``%Y-%m-%dT%H:%M:%SZ``).
     """
 
+    _IDENT_RE = _re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
     def __init__(self, db_path: Path, table: str, ts_column: str = "ts") -> None:
+        if not self._IDENT_RE.fullmatch(table):
+            raise ValueError(f"Invalid SQL table name: {table!r}")
+        if not self._IDENT_RE.fullmatch(ts_column):
+            raise ValueError(f"Invalid SQL column name: {ts_column!r}")
         self._db_path   = db_path
         self._table     = table
         self._ts_col    = ts_column

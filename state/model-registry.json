@@ -1,0 +1,67 @@
+{
+  "providers": {
+    "ollama": {
+      "label": "Ollama (Local)",
+      "description": "Runs locally on your hardware. Free, private, no API key needed.",
+      "requires_api_key": false,
+      "models": [
+        { "id": "llama3.2:3b",              "name": "Llama 3.2 3B",             "size_gb": 2.0,  "min_vram_gb": 0,  "tasks": ["general","bulk"],              "tier": "cpu",  "speed": "fast"   },
+        { "id": "llama3.2",                  "name": "Llama 3.2 8B",             "size_gb": 4.7,  "min_vram_gb": 4,  "tasks": ["general","creative"],          "tier": "low",  "speed": "medium" },
+        { "id": "llama3.3:70b",              "name": "Llama 3.3 70B",            "size_gb": 40,   "min_vram_gb": 24, "tasks": ["reasoning","analytics"],       "tier": "high", "speed": "slow"   },
+        { "id": "llama3.3:70b-q4_K_M",       "name": "Llama 3.3 70B Q4",        "size_gb": 22,   "min_vram_gb": 12, "tasks": ["reasoning","analytics"],       "tier": "mid",  "speed": "medium" },
+        { "id": "qwen2.5-coder:7b",          "name": "Qwen 2.5 Coder 7B",        "size_gb": 4.5,  "min_vram_gb": 6,  "tasks": ["coding"],                      "tier": "low",  "speed": "fast"   },
+        { "id": "qwen2.5-coder:32b-q4_K_M",  "name": "Qwen 2.5 Coder 32B Q4",   "size_gb": 19,   "min_vram_gb": 10, "tasks": ["coding"],                      "tier": "mid",  "speed": "medium" },
+        { "id": "qwen2.5-coder:32b",         "name": "Qwen 2.5 Coder 32B",       "size_gb": 32,   "min_vram_gb": 24, "tasks": ["coding"],                      "tier": "high", "speed": "medium" },
+        { "id": "deepseek-r1:7b",            "name": "DeepSeek R1 7B",           "size_gb": 4.7,  "min_vram_gb": 6,  "tasks": ["reasoning","coding"],          "tier": "low",  "speed": "medium" },
+        { "id": "deepseek-r1:32b",           "name": "DeepSeek R1 32B",          "size_gb": 20,   "min_vram_gb": 12, "tasks": ["reasoning","coding"],          "tier": "mid",  "speed": "slow"   },
+        { "id": "gemma4",                    "name": "Gemma 4",                  "size_gb": 8,    "min_vram_gb": 6,  "tasks": ["creative","general"],          "tier": "low",  "speed": "fast"   },
+        { "id": "phi3:mini",                 "name": "Phi-3 Mini 3.8B",          "size_gb": 2.3,  "min_vram_gb": 0,  "tasks": ["general","bulk"],              "tier": "cpu",  "speed": "fast"   },
+        { "id": "mistral:7b",               "name": "Mistral 7B",               "size_gb": 4.1,  "min_vram_gb": 4,  "tasks": ["general","coding"],            "tier": "low",  "speed": "fast"   }
+      ]
+    },
+    "anthropic": {
+      "label": "Anthropic Claude",
+      "description": "Best-in-class reasoning and analysis. Requires API key.",
+      "requires_api_key": true,
+      "env_key": "ANTHROPIC_API_KEY",
+      "models": [
+        { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5",  "cost_per_1k_in": 0.0008, "cost_per_1k_out": 0.0024, "tasks": ["bulk","general"],              "tier": "cloud", "speed": "fast"   },
+        { "id": "claude-sonnet-4-6",         "name": "Claude Sonnet 4.6", "cost_per_1k_in": 0.003,  "cost_per_1k_out": 0.015,  "tasks": ["general","coding","analytics"], "tier": "cloud", "speed": "medium" },
+        { "id": "claude-opus-4-7",           "name": "Claude Opus 4.7",   "cost_per_1k_in": 0.015,  "cost_per_1k_out": 0.075,  "tasks": ["reasoning","research"],        "tier": "cloud", "speed": "slow"   }
+      ]
+    },
+    "nvidia_nim": {
+      "label": "NVIDIA NIM (Free Tier)",
+      "description": "High-quality cloud models with a free tier. Requires NVIDIA API key.",
+      "requires_api_key": true,
+      "env_key": "NVIDIA_API_KEY",
+      "models": [
+        { "id": "qwen/qwen2.5-coder-32b-instruct",        "name": "Qwen 2.5 Coder 32B",    "tasks": ["coding"],                "tier": "cloud", "speed": "medium" },
+        { "id": "nvidia/llama-3.3-nemotron-super-49b-v1", "name": "Nemotron Super 49B",     "tasks": ["reasoning","analytics"], "tier": "cloud", "speed": "medium" },
+        { "id": "meta/llama-3.1-8b-instruct",             "name": "Llama 3.1 8B (NIM)",    "tasks": ["bulk","general"],        "tier": "cloud", "speed": "fast"   },
+        { "id": "meta/llama-3.3-70b-instruct",            "name": "Llama 3.3 70B (NIM)",   "tasks": ["general","analytics"],   "tier": "cloud", "speed": "medium" }
+      ]
+    },
+    "openai": {
+      "label": "OpenAI",
+      "description": "GPT models. Requires OpenAI API key.",
+      "requires_api_key": true,
+      "env_key": "OPENAI_API_KEY",
+      "models": [
+        { "id": "gpt-4o-mini", "name": "GPT-4o Mini", "cost_per_1k_in": 0.00015, "cost_per_1k_out": 0.0006, "tasks": ["bulk","general"],    "tier": "cloud", "speed": "fast"   },
+        { "id": "gpt-4o",      "name": "GPT-4o",      "cost_per_1k_in": 0.0025,  "cost_per_1k_out": 0.010,  "tasks": ["creative","coding"], "tier": "cloud", "speed": "medium" }
+      ]
+    },
+    "openrouter": {
+      "label": "OpenRouter",
+      "description": "200+ models via one API key. Pay-per-use.",
+      "requires_api_key": true,
+      "env_key": "OPENROUTER_API_KEY",
+      "models": [
+        { "id": "deepseek/deepseek-coder-v2",      "name": "DeepSeek Coder V2",  "tasks": ["coding"],    "tier": "cloud", "speed": "fast"   },
+        { "id": "mistralai/mixtral-8x22b",          "name": "Mixtral 8x22B",      "tasks": ["general"],   "tier": "cloud", "speed": "medium" },
+        { "id": "meta-llama/llama-3.3-70b-instruct","name": "Llama 3.3 70B",      "tasks": ["general"],   "tier": "cloud", "speed": "medium" }
+      ]
+    }
+  }
+}

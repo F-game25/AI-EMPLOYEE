@@ -1,236 +1,186 @@
-import { useState, useEffect, useRef } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 
-export default function TaskProgressBlock({ taskId, title = 'Task' }) {
-  const [task, setTask] = useState(null)
-  const [steps, setSteps] = useState([])
-  const [loading, setLoading] = useState(true)
-  const wsRef = useRef(null)
+const STATUS_ICON  = { pending: '○', active: '●', done: '✓', error: '✗' }
+const STATUS_COLOR = {
+  pending: 'rgba(255,255,255,0.25)',
+  active:  '#20D6C7',
+  done:    '#22C55E',
+  error:   '#EF4444',
+}
+
+function MiniGraph({ data = [] }) {
+  const canvasRef = useRef(null)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || data.length < 2) return
+    const ctx = canvas.getContext('2d')
+    const { width: w, height: h } = canvas
+    ctx.clearRect(0, 0, w, h)
+    const pts = data.slice(-12)
+    const max = Math.max(...pts, 1)
+    const step = w / Math.max(pts.length - 1, 1)
+    ctx.beginPath()
+    pts.forEach((v, i) => {
+      const x = i * step
+      const y = h - (v / max) * (h - 4) - 2
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+    })
+    ctx.strokeStyle = 'rgba(32,214,199,0.7)'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+    ctx.lineTo((pts.length - 1) * step, h)
+    ctx.lineTo(0, h)
+    ctx.closePath()
+    ctx.fillStyle = 'rgba(32,214,199,0.08)'
+    ctx.fill()
+  }, [data])
+  if (data.length < 2) return null
+  return <canvas ref={canvasRef} width={200} height={36} style={{ width: '100%', height: 36, marginTop: 8 }} />
+}
+
+export default function TaskProgressBlock({ taskId, title, steps: propSteps = [], graph: propGraph = [] }) {
+  // SSE-driven state — active when taskId is provided and not externally controlled
+  const [liveSteps, setLiveSteps] = useState(null)  // null = use props
+  const [liveGraph, setLiveGraph] = useState(null)
+  const [done, setDone] = useState(false)
 
   useEffect(() => {
-    const fetchTask = async () => {
+    if (!taskId) return
+    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ai_jwt') : null
+    // EventSource doesn't support custom headers; pass token as query param for SSE auth
+    const url = `/api/tasks/${taskId}/progress${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    const es = new EventSource(url)
+    es.onmessage = (e) => {
       try {
-        const res = await fetch(`/api/tasks/${taskId}`)
-        if (!res.ok) {
-          setLoading(false)
-          return
-        }
-        const data = await res.json()
-        setTask(data.task)
-        setSteps(data.steps || [])
-      } catch (e) {
-        console.error('Failed to fetch task:', e)
-      }
-      setLoading(false)
-    }
-
-    fetchTask()
-
-    // WebSocket subscription
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    wsRef.current = new WebSocket(
-      `${protocol}//${window.location.host}/api/tasks/${taskId}/ws`
-    )
-
-    wsRef.current.onmessage = (event) => {
-      try {
-        const update = JSON.parse(event.data)
-
-        if (update.type === 'step_update') {
-          setSteps((prev) => {
-            const idx = prev.findIndex((s) => s.id === update.step_id)
-            if (idx >= 0) {
-              const newSteps = [...prev]
-              newSteps[idx] = { ...newSteps[idx], ...update.data }
-              return newSteps
-            }
-            return prev
+        const data = JSON.parse(e.data)
+        if (data.type === 'heartbeat' || data.type === 'connected') return
+        if (data.type === 'snapshot' && Array.isArray(data.steps)) {
+          setLiveSteps(data.steps.map(s => ({
+            id: s.id ?? s.step_id,
+            label: s.label ?? s.name ?? String(s.id),
+            status: s.status ?? 'pending',
+            elapsed: s.elapsed_ms ?? s.elapsed ?? null,
+          })))
+        } else if (data.type === 'task_progress' && Array.isArray(data.steps)) {
+          setLiveSteps(data.steps.map(s => ({
+            id: s.id ?? s.step_id,
+            label: s.label ?? s.name ?? String(s.id),
+            status: s.status ?? 'pending',
+            elapsed: s.elapsed_ms ?? s.elapsed ?? null,
+          })))
+          if (typeof data.percent === 'number') {
+            setLiveGraph(prev => [...(prev || []), data.percent])
+          }
+        } else if (data.type === 'workflow_update') {
+          const status = data.status === 'complete' ? 'done'
+            : data.status === 'running' ? 'active'
+            : data.status === 'failed' ? 'error' : 'pending'
+          setLiveSteps(prev => {
+            const next = (prev || propSteps).map(s =>
+              (s.id === data.task_id || s.id === data.taskId) ? { ...s, status } : s
+            )
+            return next
           })
         }
-
-        if (update.type === 'task_update') {
-          setTask((prev) => (prev ? { ...prev, ...update.data } : null))
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'done' || data.status === 'error') {
+          setDone(true)
+          es.close()
         }
-      } catch (e) {
-        console.error('WS parse error:', e)
-      }
+      } catch (_) {}
     }
+    es.onerror = () => { es.close() }
+    return () => { es.close() }
+  }, [taskId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    wsRef.current.onerror = () => {
-      console.warn('Task progress WS connection failed')
-    }
+  const steps = (liveSteps !== null ? liveSteps : propSteps)
+  const graph  = (liveGraph !== null ? liveGraph : propGraph)
 
-    return () => {
-      if (wsRef.current) wsRef.current.close()
-    }
-  }, [taskId])
-
-  if (loading) return <div style={{ fontSize: 12, color: '#999' }}>Loading task...</div>
-  if (!task) return <div style={{ fontSize: 12, color: '#999' }}>Task not found</div>
-
-  const elapsed = Math.round((Date.now() - new Date(task.started_at).getTime()) / 1000)
-  const completedSteps = steps.filter((s) => s.status === 'done').length
-  const totalSteps = steps.length
-  const progressPercent = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0
-
-  const icons = {
-    pending: '○',
-    active: '●',
-    done: '✓',
-    error: '✗',
-  }
-
-  const colors = {
-    pending: 'rgba(255,255,255,0.3)',
-    active: '#20D6C7',
-    done: '#22C55E',
-    error: '#FF3B3B',
-  }
+  const isActive  = !done && steps.some(s => s.status === 'active')
+  const doneCount = steps.filter(s => s.status === 'done').length
+  const errCount  = steps.filter(s => s.status === 'error').length
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      style={{
-        background: 'rgba(0,0,0,0.3)',
-        border: '2px solid rgba(229,199,107,0.3)',
-        borderRadius: 6,
-        padding: 12,
-        marginBottom: 12,
-        fontFamily: 'monospace',
-        fontSize: 11,
-      }}
-    >
+    <div style={{
+      background: 'rgba(0,0,0,0.3)',
+      border: '1px solid rgba(229,199,107,0.15)',
+      borderLeft: '3px solid rgba(229,199,107,0.4)',
+      borderRadius: 6,
+      padding: '10px 12px',
+      fontFamily: 'var(--nx-font-mono, monospace)',
+      fontSize: 11,
+      maxWidth: 480,
+    }}>
       {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 10,
-        }}
-      >
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(229,199,107,1)' }}>
-          {title || 'Task'}
-          {task.status === 'running' && (
-            <span
-              style={{
-                marginLeft: 8,
-                display: 'inline-block',
-                animation: 'pulse 1.5s infinite',
-              }}
-            >
-              ●
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
-          {elapsed}s elapsed
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        {isActive && (
+          <motion.span
+            animate={{ opacity: [1, 0.2, 1] }}
+            transition={{ repeat: Infinity, duration: 1.2 }}
+            style={{ width: 6, height: 6, borderRadius: '50%', background: '#20D6C7', display: 'inline-block', flexShrink: 0 }}
+          />
+        )}
+        <span style={{ flex: 1, color: '#E5C76B', fontWeight: 700, letterSpacing: '0.06em' }}>
+          {title || `Task ${taskId}`}
+        </span>
+        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>
+          {doneCount}/{steps.length} done{errCount > 0 ? ` · ${errCount} err` : ''}
+        </span>
       </div>
 
-      {/* Progress bar */}
-      <div
-        style={{
-          height: 4,
-          background: 'rgba(139,81,32,0.2)',
-          borderRadius: 2,
-          marginBottom: 10,
-          overflow: 'hidden',
-        }}
-      >
-        <motion.div
-          style={{
-            height: '100%',
-            background: 'linear-gradient(90deg, #E5C76B, #FFD97A)',
-            width: `${progressPercent}%`,
-          }}
-          transition={{ duration: 0.4 }}
-        />
-      </div>
-
-      {/* Steps list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-        {steps.map((step, idx) => (
+      {/* Steps */}
+      <AnimatePresence initial={false}>
+        {steps.map((step, i) => (
           <motion.div
-            key={step.id}
-            initial={{ opacity: 0, x: -6 }}
+            key={step.id ?? i}
+            initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: idx * 0.05 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              fontSize: 10,
-              color: colors[step.status] || colors.pending,
+              padding: '3px 0',
+              borderBottom: i < steps.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
             }}
           >
-            <span style={{ minWidth: 12 }}>{icons[step.status] || '?'}</span>
-            <span style={{ flex: 1 }}>
+            <span style={{ color: STATUS_COLOR[step.status] ?? STATUS_COLOR.pending, flexShrink: 0 }}>
+              {STATUS_ICON[step.status] ?? '○'}
+            </span>
+            <span style={{
+              flex: 1,
+              color: step.status === 'done'   ? 'rgba(255,255,255,0.4)' :
+                     step.status === 'active' ? '#20D6C7' :
+                     step.status === 'error'  ? '#EF4444' : 'rgba(255,255,255,0.25)',
+            }}>
               {step.label}
               {step.status === 'active' && (
-                <span
-                  style={{
-                    marginLeft: 4,
-                    animation: 'blink 0.7s infinite',
-                    display: 'inline-block',
-                  }}
-                >
-                  ▌
-                </span>
+                <motion.span
+                  animate={{ opacity: [1, 0] }}
+                  transition={{ repeat: Infinity, duration: 0.6, ease: 'steps(1)' }}
+                >▌</motion.span>
               )}
             </span>
-            {step.elapsed_ms && (
-              <span style={{ fontSize: 9, opacity: 0.6 }}>
-                {Math.round(step.elapsed_ms / 1000)}s
+            {step.elapsed != null && (
+              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)' }}>{step.elapsed}ms</span>
+            )}
+            {step.status !== 'pending' && (
+              <span style={{
+                fontSize: 8, padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+                background: `${STATUS_COLOR[step.status]}18`,
+                border: `1px solid ${STATUS_COLOR[step.status]}44`,
+                color: STATUS_COLOR[step.status],
+                letterSpacing: '0.08em',
+              }}>
+                {step.status.toUpperCase()}
               </span>
             )}
           </motion.div>
         ))}
-      </div>
+      </AnimatePresence>
 
-      {/* Summary */}
-      {task.status === 'done' && (
-        <div
-          style={{
-            padding: 8,
-            background: 'rgba(34,197,94,0.1)',
-            borderRadius: 4,
-            fontSize: 9,
-            color: '#22C55E',
-            borderLeft: '2px solid #22C55E',
-          }}
-        >
-          ✓ Complete: {completedSteps}/{totalSteps} steps • {elapsed}s total
-        </div>
-      )}
-
-      {task.status === 'failed' && (
-        <div
-          style={{
-            padding: 8,
-            background: 'rgba(255,59,59,0.1)',
-            borderRadius: 4,
-            fontSize: 9,
-            color: '#FF3B3B',
-            borderLeft: '2px solid #FF3B3B',
-          }}
-        >
-          ✗ Failed at step {steps.findIndex((s) => s.status === 'error') + 1}
-        </div>
-      )}
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
-      `}</style>
-    </motion.div>
+      <MiniGraph data={graph} />
+    </div>
   )
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
@@ -167,6 +168,7 @@ class EvolutionController:
         return self._deployer.rollback(backup_id)
 
     def _loop(self) -> None:
+        cycle = 0
         while True:
             with self._lock:
                 if not self._running:
@@ -175,6 +177,12 @@ class EvolutionController:
                 # Poll anomaly detector; wake immediately on high/critical issues.
                 self._check_anomalies()
                 self.run_once(manual_approved=False)
+                # Passive knowledge acquisition (every K cycles)
+                cycle += 1
+                interval_s = int(os.getenv("KNOWLEDGE_ACQUISITION_INTERVAL_S", "3600"))
+                if interval_s > 0 and (cycle * max(int(self._cycle_interval_s), 1)) >= interval_s:
+                    self._run_passive_research()
+                    cycle = 0
             except Exception as exc:
                 self._last_result = {
                     "status": "error",
@@ -185,6 +193,27 @@ class EvolutionController:
             # Wait for the scheduled interval, but allow early wake-up.
             self._wake_event.wait(timeout=self._cycle_interval_s)
             self._wake_event.clear()
+
+    def _run_passive_research(self) -> None:
+        """Background hourly knowledge top-up: research recent low-confidence topics."""
+        try:
+            from memory.strategy_store import get_strategy_store
+            ss = get_strategy_store()
+            weak_topics = [
+                t for t in (ss.list_weak_topics(limit=3) if hasattr(ss, "list_weak_topics") else [])
+                if t
+            ]
+        except Exception:
+            weak_topics = []
+        if not weak_topics:
+            return
+        try:
+            import asyncio as _asyncio
+            from core.auto_research_agent import get_auto_researcher
+            researcher = get_auto_researcher()
+            _asyncio.run(researcher.research(gaps=weak_topics, goal="passive learning", hop=0))
+        except Exception:
+            return
 
     def _check_anomalies(self) -> None:
         """Poll the anomaly detector and record any new findings."""

@@ -5,11 +5,13 @@ import os
 from pathlib import Path
 from typing import Any
 
+from core.state_paths import canonical_state_dir
+
 
 class SkillsManager:
     def __init__(self, definitions_dir: Path | None = None, state_dir: Path | None = None) -> None:
         self.definitions_dir = definitions_dir or Path("runtime/skills/definitions")
-        self.state_dir = state_dir or Path(os.environ.get("AI_EMPLOYEE_STATE_DIR", "state"))
+        self.state_dir = state_dir or canonical_state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.custom_path = self.state_dir / "custom_agents.json"
         self._skills = self._load()

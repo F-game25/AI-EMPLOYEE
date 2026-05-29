@@ -1,0 +1,273 @@
+/* ════════════════════════════════════════════════════════════════════
+   <Panel> — Chamfered framed panel.
+   Anatomy:
+     ┌─ corner ticks (gold) ──────── corner ticks ─┐
+     │  hairline gradient (top)                    │
+     │  ┌── header ──────────────────── badge ──┐  │
+     │  │  small-caps title                     │  │
+     │  └───────────────────────────────────────┘  │
+     │  body                                       │
+     │  ┌── footer (optional) ─────────────────┐   │
+     └─ corner ticks ────────────── corner ticks ─┘
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--nx-panel-bg);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-r-lg);
+  box-shadow: var(--nx-shadow-panel);
+  transition: box-shadow var(--nx-dur) var(--nx-ease),
+              border-color var(--nx-dur) var(--nx-ease),
+              background var(--nx-dur) var(--nx-ease);
+  /* chamfered corners via clip-path; subtle so radius still shows */
+  clip-path: polygon(
+    var(--nx-chamfer) 0%, calc(100% - var(--nx-chamfer)) 0%,
+    100% var(--nx-chamfer), 100% calc(100% - var(--nx-chamfer)),
+    calc(100% - var(--nx-chamfer)) 100%, var(--nx-chamfer) 100%,
+    0% calc(100% - var(--nx-chamfer)), 0% var(--nx-chamfer)
+  );
+}
+
+/* Top hairline (gold gradient sweep) */
+.nx-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--nx-chamfer);
+  right: var(--nx-chamfer);
+  height: 1px;
+  background: var(--nx-hairline);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Bottom hairline (dimmer) */
+.nx-panel::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: var(--nx-chamfer);
+  right: var(--nx-chamfer);
+  height: 1px;
+  background: var(--nx-hairline-dim);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.nx-panel--hover:hover {
+  background: var(--nx-panel-bg-hover);
+  border-color: var(--nx-border-strong);
+  box-shadow: var(--nx-shadow-panel-hover);
+}
+
+/* Tone variants */
+.nx-panel--cool {
+  border-color: var(--nx-border-cool);
+}
+.nx-panel--cool::before,
+.nx-panel--cool::after {
+  background: linear-gradient(90deg, transparent, rgba(180,200,255,0.35) 50%, transparent);
+}
+
+.nx-panel--alert {
+  border-color: rgba(239,68,68,0.30);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 0 0 1px rgba(239,68,68,0.18) inset,
+    0 18px 48px rgba(0,0,0,0.55),
+    0 0 24px rgba(239,68,68,0.18);
+}
+.nx-panel--alert::before,
+.nx-panel--alert::after {
+  background: linear-gradient(90deg, transparent, rgba(239,68,68,0.55) 50%, transparent);
+}
+
+/* ── Corner ticks ──────────────────────────────────────────────────── */
+.nx-panel__corner {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.85;
+}
+.nx-panel__corner::before,
+.nx-panel__corner::after {
+  content: '';
+  position: absolute;
+  background: var(--nx-gold);
+  box-shadow: 0 0 6px rgba(229,199,107,0.55);
+}
+.nx-panel__corner--tl { top: 4px; left: 4px; }
+.nx-panel__corner--tl::before { top: 0; left: 0; width: 8px; height: 1px; }
+.nx-panel__corner--tl::after  { top: 0; left: 0; width: 1px; height: 8px; }
+
+.nx-panel__corner--tr { top: 4px; right: 4px; }
+.nx-panel__corner--tr::before { top: 0; right: 0; width: 8px; height: 1px; }
+.nx-panel__corner--tr::after  { top: 0; right: 0; width: 1px; height: 8px; }
+
+.nx-panel__corner--bl { bottom: 4px; left: 4px; }
+.nx-panel__corner--bl::before { bottom: 0; left: 0; width: 8px; height: 1px; }
+.nx-panel__corner--bl::after  { bottom: 0; left: 0; width: 1px; height: 8px; }
+
+.nx-panel__corner--br { bottom: 4px; right: 4px; }
+.nx-panel__corner--br::before { bottom: 0; right: 0; width: 8px; height: 1px; }
+.nx-panel__corner--br::after  { bottom: 0; right: 0; width: 1px; height: 8px; }
+
+/* ── Header ────────────────────────────────────────────────────────── */
+.nx-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-s-3);
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--nx-divider);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.nx-panel__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2);
+  min-width: 0;
+}
+
+.nx-panel__title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--nx-gold);
+  filter: drop-shadow(0 0 4px rgba(229,199,107,0.5));
+  flex-shrink: 0;
+}
+
+.nx-panel__title {
+  font-family: var(--nx-font-display);
+  font-size: var(--nx-text-sm);
+  font-weight: 600;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: var(--nx-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--nx-gold-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.nx-panel__sub {
+  font-family: var(--nx-font-mono);
+  font-size: var(--nx-text-xs);
+  letter-spacing: var(--nx-tracking-mid);
+  color: var(--nx-text-dim);
+  margin-left: var(--nx-s-2);
+  flex-shrink: 0;
+}
+
+.nx-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2);
+  flex-shrink: 0;
+}
+
+.nx-panel__freshness-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.4s, box-shadow 0.4s;
+}
+
+/* ── Body ──────────────────────────────────────────────────────────── */
+.nx-panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.nx-panel__body--flush {
+  padding: 0;
+}
+
+.nx-panel__body--tight {
+  padding: 10px 12px;
+}
+
+/* ── Footer ────────────────────────────────────────────────────────── */
+.nx-panel__footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--nx-divider);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-s-3);
+  font-family: var(--nx-font-mono);
+  font-size: var(--nx-text-xs);
+  letter-spacing: var(--nx-tracking-mid);
+  color: var(--nx-text-dim);
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Parallax depth ────────────────────────────────────────────────── */
+.nx-panel {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.nx-panel[data-depth="0"] { --shadow-spread: 0px; }
+.nx-panel[data-depth="1"] {
+  --shadow-spread: 8px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 0 0 1px rgba(229,199,107,0.10) inset,
+    0 4px 24px rgba(229,199,107,0.06),
+    0 18px 48px rgba(0,0,0,0.55);
+}
+.nx-panel[data-depth="2"] {
+  --shadow-spread: 16px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.06) inset,
+    0 0 0 1px rgba(229,199,107,0.16) inset,
+    0 8px 40px rgba(229,199,107,0.10),
+    0 24px 64px rgba(0,0,0,0.62);
+}
+
+.nx-panel--parallax {
+  transition: transform 80ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-panel,
+  .nx-panel--parallax {
+    transition: box-shadow var(--nx-dur) var(--nx-ease),
+                border-color var(--nx-dur) var(--nx-ease),
+                background var(--nx-dur) var(--nx-ease) !important;
+    transform: none !important;
+  }
+}
+
+/* ── Sizes ─────────────────────────────────────────────────────────── */
+.nx-panel--compact .nx-panel__header { padding: 8px 12px 6px; }
+.nx-panel--compact .nx-panel__body   { padding: 10px 12px; }
+.nx-panel--compact .nx-panel__footer { padding: 6px 12px; }
+
+.nx-panel--airy .nx-panel__header { padding: 16px 22px 14px; }
+.nx-panel--airy .nx-panel__body   { padding: 20px 22px; }
+.nx-panel--airy .nx-panel__footer { padding: 14px 22px; }

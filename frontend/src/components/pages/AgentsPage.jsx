@@ -1,140 +1,517 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
+import { useAgentStore } from '../../store/agentStore'
 import { useAppStore } from '../../store/appStore'
-import { Panel, Badge, StatusDot, MiniBar } from '../ui/primitives'
+import { KPITile, StatusPill } from '../nexus-ui'
+import LoadingSkeleton from '../nexus-ui/LoadingSkeleton'
+import api from '../../api/client'
+import './AgentsPage.css'
 
-const REVIEWS = [
-  { from: 'Risk Auditor',     to: 'Code Synthesizer',   verdict: 'APPROVED', msg: 'Integration layer passes security audit. Token efficiency +14%.', score: 94 },
-  { from: 'Fairness Monitor', to: 'Data Harvester',     verdict: 'FLAGGED',  msg: 'Dataset skew detected in 3 sources. Suggest rebalancing vendor weights.', score: 62 },
-  { from: 'Strategy Engine',  to: 'Orchestrator Prime', verdict: 'APPROVED', msg: 'Revenue pathway rank matches market signals. Execute.', score: 91 },
-  { from: 'Memory Indexer',   to: 'Learning Loop',      verdict: 'REVISE',   msg: 'Pattern 0xA4F duplicates 2 existing clusters. Merge recommended.', score: 71 },
-  { from: 'Prompt Inspector', to: 'Voice Gateway',      verdict: 'APPROVED', msg: 'Response tone matches user preference vector.', score: 88 },
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const ROLE_COLORS = {
+  coordinator: '#00FFB4',
+  researcher:  '#00D4FF',
+  analyst:     '#FF6B6B',
+  optimizer:   '#FFB800',
+  deployer:    '#B565F5',
+  validator:   '#FF8FA3',
+}
+
+const ROLE_GLOWS = {
+  coordinator: 'rgba(0,255,180,0.22)',
+  researcher:  'rgba(0,212,255,0.22)',
+  analyst:     'rgba(255,107,107,0.22)',
+  optimizer:   'rgba(255,184,0,0.22)',
+  deployer:    'rgba(181,101,245,0.22)',
+  validator:   'rgba(255,143,163,0.22)',
+}
+
+const STATUS_TONE = {
+  running: 'success', active: 'success',
+  idle: 'idle', stopped: 'idle',
+  error: 'alert', critical: 'alert',
+}
+
+const ALL_FILTER_TABS = [
+  { id: 'ALL',         label: 'ALL' },
+  { id: 'ACTIVE',      label: 'ACTIVE' },
+  { id: 'IDLE',        label: 'IDLE' },
+  { id: 'ERROR',       label: 'ERROR' },
+  { id: 'coordinator', label: 'COORDINATOR' },
+  { id: 'researcher',  label: 'RESEARCHER' },
+  { id: 'analyst',     label: 'ANALYST' },
+  { id: 'optimizer',   label: 'OPTIMIZER' },
+  { id: 'deployer',    label: 'DEPLOYER' },
+  { id: 'validator',   label: 'VALIDATOR' },
 ]
-const VC = { APPROVED: '#22C55E', FLAGGED: '#F59E0B', REVISE: 'var(--bronze, #CD7F32)' }
 
-function DR({ label, value, color = 'var(--text-primary, #F0E9D2)' }) {
+const PAGE_SIZE = 24
+
+function authHeaders(extra = {}) {
+  const token = sessionStorage.getItem('ai_jwt')
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const roleColor = (role) => ROLE_COLORS[role?.toLowerCase()] ?? '#e5c76b'
+const roleGlow  = (role) => ROLE_GLOWS[role?.toLowerCase()]  ?? 'rgba(229,199,107,0.22)'
+const initials  = (name) => name ? String(name).slice(0, 2).toUpperCase() : '??'
+const healthColor = (h) => h >= 75 ? '#22c55e' : h >= 40 ? '#f59e0b' : '#ef4444'
+
+function normalizeAgent(raw, index = 0) {
+  const id = String(raw.id ?? raw.agent_id ?? raw.name ?? `agent-${index}`)
+  const role = raw.role ?? raw.target_type ?? raw.type ?? 'agent'
+  const skills = raw.skills || raw.selected_skill_ids || raw.capabilities || []
+  return {
+    id,
+    name: raw.name ?? raw.title ?? id,
+    role,
+    status: raw.status ?? raw.state ?? 'idle',
+    health: Number.isFinite(Number(raw.health)) ? Number(raw.health) : 0,
+    success_pct: Number.isFinite(Number(raw.success_pct)) ? Number(raw.success_pct) : null,
+    tasks_completed: raw.tasks_completed ?? raw.tasksCompleted ?? 0,
+    last_active: raw.last_active ?? raw.updated_at ?? raw.registered_at ?? null,
+    recent_events: Array.isArray(raw.recent_events) ? raw.recent_events : [],
+    contract_key: raw.contract_key ?? id,
+    created_by: raw.created_by,
+    contract: raw.contract,
+    skills,
+    hooks: raw.hooks || raw.contract?.hooks || [],
+    authority_profile: raw.authority_profile || raw.contract?.authority_profile,
+  }
+}
+
+function mergeAgents(...groups) {
+  const map = new Map()
+  groups.flat().filter(Boolean).forEach((agent, index) => {
+    const normalized = normalizeAgent(agent, index)
+    map.set(normalized.id, { ...(map.get(normalized.id) || {}), ...normalized })
+  })
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function filterAgents(agents, tab) {
+  if (tab === 'ALL')    return agents
+  if (tab === 'ACTIVE') return agents.filter(a => a.status === 'active' || a.status === 'running')
+  if (tab === 'IDLE')   return agents.filter(a => a.status === 'idle' || a.status === 'stopped')
+  if (tab === 'ERROR')  return agents.filter(a => a.status === 'error' || a.status === 'critical')
+  return agents.filter(a => a.role?.toLowerCase() === tab.toLowerCase())
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+const AgentTile = memo(({ agent, selected, onClick }) => {
+  const rc = roleColor(agent.role)
+  const rg = roleGlow(agent.role)
+  const h  = agent.health ?? 0
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,.04)' }}>
-      <span style={{ fontSize: 12, color: 'var(--text-secondary, #9A927E)' }}>{label}</span>
-      <span style={{ fontFamily: 'monospace', fontSize: 12, color, fontWeight: 500 }}>{value}</span>
+    <button
+      type="button"
+      className={`swarm-tile${selected ? ' swarm-tile--active' : ''}`}
+      onClick={() => onClick(agent)}
+      style={{ '--role-color': rc, '--role-glow': rg }}
+      aria-label={`${agent.name} — ${agent.role ?? 'agent'}`}
+    >
+      <div className="swarm-tile__avatar-wrap">
+        <div className="swarm-tile__avatar" style={{ color: rc, borderColor: rc }}>
+          {initials(agent.name)}
+        </div>
+        <span className={`swarm-tile__status-dot swarm-tile__status-dot--${agent.status === 'active' || agent.status === 'running' ? 'active' : agent.status === 'error' || agent.status === 'critical' ? 'error' : 'idle'}`} />
+      </div>
+      <div className="swarm-tile__id">{agent.id}</div>
+      <div className="swarm-tile__role">{agent.role ?? 'AGENT'}</div>
+      {typeof agent.success_pct === 'number' && (
+        <div className="swarm-tile__badge" style={{ color: rc }}>{agent.success_pct}%</div>
+      )}
+      {agent.created_by === 'ascend-forge' && (
+        <div className="swarm-tile__badge" style={{ color: '#e5c76b' }}>FORGE</div>
+      )}
+      <div className="swarm-tile__health-bar">
+        <div
+          className="swarm-tile__health-fill"
+          style={{ width: `${h}%`, background: healthColor(h) }}
+        />
+      </div>
+    </button>
+  )
+})
+
+AgentTile.displayName = 'AgentTile'
+
+function StatRow({ label, value }) {
+  return (
+    <div className="drawer-stat">
+      <span className="drawer-stat__label">{label}</span>
+      <span className="drawer-stat__value">{value}</span>
     </div>
   )
 }
 
-const FALLBACK_AGENTS = [
-  { id: 'a1', name: 'Orchestrator Prime', status: 'running', task: 'Coordinating agent fleet dispatch', health: 98 },
-  { id: 'a2', name: 'Data Harvester',     status: 'running', task: 'Scraping market intelligence feeds', health: 87 },
-  { id: 'a3', name: 'Code Synthesizer',   status: 'running', task: 'Generating API integration layer',  health: 91 },
-  { id: 'a4', name: 'Memory Indexer',     status: 'busy',    task: 'Compressing knowledge store',       health: 74 },
-  { id: 'a5', name: 'Hermes Relay',       status: 'running', task: 'Processing inbound requests',       health: 96 },
-  { id: 'a6', name: 'Strategy Engine',    status: 'running', task: 'Analyzing revenue pathways',        health: 83 },
-  { id: 'a7', name: 'Risk Auditor',       status: 'idle',    task: 'Standing by',                       health: 62 },
-  { id: 'a8', name: 'Learning Loop',      status: 'running', task: 'Training on session data delta',    health: 89 },
-]
+function DetailDrawer({ agent, onClose, contract }) {
+  const rc = roleColor(agent.role)
+  const events = agent.recent_events || []
+  const [grade,  setGrade]  = useState(null)
+  const [busy,   setBusy]   = useState(null)
+  const workflows = contract?.workflows || []
+  const hooks = contract?.hooks || []
+  const allowedModels = contract?.allowed_models || []
 
-export default function AgentsPage() {
-  const storeAgents = useAppStore(s => s.agents)
-  const setAgents   = useAppStore(s => s.setAgents)
-  const agents = storeAgents.length ? storeAgents : FALLBACK_AGENTS
-
-  const [sel, setSel]           = useState(null)
-  const [botState, setBotState] = useState('AUTO')
-
-  const selAgent = sel ?? agents[0]
-
-  const applyFleet = (state) => {
-    setBotState(state)
-    setAgents(agents.map(a => ({ ...a, status: state === 'SLEEP' ? 'idle' : state === 'AWAKE' ? 'running' : a.status })))
-  }
+  const callAction = useCallback(async (action) => {
+    setBusy(action)
+    try {
+      if (action === 'grade') {
+        const d = await api.get(`/api/agents/${agent.id}/grade`)
+        if (d) setGrade(d.grade ?? d.score ?? '—')
+      } else if (action === 'reinforce') {
+        await api.post(`/api/agents/${agent.id}/reinforce`)
+      } else if (action === 'ladder') {
+        await api.post(`/api/agents/${agent.id}/ladder/advance`)
+      }
+    } catch {/* swallow — UI doesn't block on agent endpoints */}
+    finally { setBusy(null) }
+  }, [agent.id])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
-      {/* Fleet Control bar */}
-      <div style={{ padding: '10px 12px', borderRadius: 10, background: 'linear-gradient(180deg, rgba(229,199,107,0.06), transparent)', border: '1px solid rgba(229,199,107,0.2)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', letterSpacing: '0.12em', textTransform: 'uppercase' }}>FLEET CONTROL</div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {[['AWAKE', 'Start All', 'var(--gold-bright,#FFD97A)', '#1a1000'], ['AUTO', 'Auto', 'var(--teal,#20D6C7)', '#001a18'], ['SLEEP', 'Sleep Bots', '#8B8B9E', '#fff']].map(([k, l, bg, fg]) => (
-            <button key={k} onClick={() => applyFleet(k)} style={{ padding: '7px 15px', borderRadius: 7, border: botState === k ? `1px solid ${bg}` : '1px solid transparent', background: botState === k ? bg : 'rgba(255,255,255,0.04)', color: botState === k ? fg : 'var(--text-secondary,#9A927E)', cursor: 'pointer', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600, boxShadow: botState === k ? `0 0 14px ${bg}55` : 'none' }}>{l}</button>
+    <>
+      <div className="drawer-backdrop" onClick={onClose} aria-hidden="true" />
+      <aside className="detail-drawer" role="complementary" aria-label="Agent detail">
+        <button type="button" className="drawer-close" onClick={onClose} aria-label="Close drawer">×</button>
+
+        <div className="drawer-hero">
+          <div className="drawer-avatar" style={{ color: rc, borderColor: rc }}>
+            {initials(agent.name)}
+          </div>
+          <div className="drawer-hero__text">
+            <div className="drawer-hero__name">{agent.name}</div>
+            <div className="drawer-hero__role" style={{ color: rc }}>{agent.role ?? 'AGENT'}</div>
+            <StatusPill
+              tone={STATUS_TONE[agent.status] || 'idle'}
+              label={(agent.status ?? 'idle').toUpperCase()}
+              size="sm"
+            />
+          </div>
+        </div>
+
+        <div className="drawer-divider" />
+
+        <div className="drawer-stats">
+          <StatRow label="Health"          value={`${agent.health ?? 0}%`} />
+          <StatRow label="Tasks Completed" value={agent.tasks_completed ?? agent.tasksCompleted ?? 0} />
+          <StatRow label="Success Rate"    value={typeof agent.success_pct === 'number' ? `${agent.success_pct}%` : '—'} />
+          <StatRow label="Last Active"     value={agent.last_active ?? '—'} />
+        </div>
+
+        <div className="drawer-divider" />
+
+        {contract && (
+          <>
+            <div className="drawer-events-label">JOB CONTRACT</div>
+            <div className="drawer-contract">
+              <div className="drawer-contract__title">{contract.title || agent.name}</div>
+              <p className="drawer-contract__desc">{contract.job_description || contract.description}</p>
+              {workflows.length > 0 && (
+                <div className="drawer-chip-group">
+                  {workflows.slice(0, 6).map(w => <span key={w} className="drawer-chip">{w}</span>)}
+                </div>
+              )}
+              {hooks.length > 0 && (
+                <div className="drawer-hook-list">
+                  {hooks.slice(0, 5).map(h => <div key={h} className="drawer-hook">{h}</div>)}
+                </div>
+              )}
+              {allowedModels.length > 0 && (
+                <div className="drawer-models">{allowedModels.join(' / ')}</div>
+              )}
+            </div>
+            <div className="drawer-divider" />
+          </>
+        )}
+
+        <div className="drawer-events-label">RECENT EVENTS</div>
+        <div className="drawer-events">
+          {events.length === 0 && (
+            <div className="drawer-event">
+              <span className="drawer-event__dot" style={{ background: rc }} />
+              <span className="drawer-event__text">No recent events recorded.</span>
+            </div>
+          )}
+          {events.map((ev, i) => (
+            <div key={i} className="drawer-event">
+              <span className="drawer-event__dot" style={{ background: rc }} />
+              <span className="drawer-event__text">
+                {typeof ev === 'string' ? ev : `${ev.time} — ${ev.msg}`}
+              </span>
+            </div>
           ))}
         </div>
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', gap: 14, fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', letterSpacing: '0.08em' }}>
-          <span>LIVE <span style={{ color: 'var(--teal,#20D6C7)' }}>{agents.filter(a => a.status === 'running').length}</span></span>
-          <span>BUSY <span style={{ color: 'var(--gold-bright,#FFD97A)' }}>{agents.filter(a => a.status === 'busy').length}</span></span>
-          <span>IDLE <span style={{ color: '#8B8B9E' }}>{agents.filter(a => a.status === 'idle').length}</span></span>
+
+        <div className="drawer-divider" />
+
+        <div className="drawer-events-label">TRAINING</div>
+        <div className="drawer-training">
+          <div className="drawer-training-row">
+            <span className="drawer-training-label">Grade</span>
+            <span className="drawer-training-val">{grade ?? '—'}</span>
+            <button
+              type="button"
+              className="drawer-train-btn"
+              disabled={busy !== null}
+              onClick={() => callAction('grade')}
+            >{busy === 'grade' ? '…' : 'CHECK'}</button>
+          </div>
+          <button
+            type="button"
+            className="drawer-train-btn drawer-train-btn--wide"
+            disabled={busy !== null}
+            onClick={() => callAction('reinforce')}
+          >{busy === 'reinforce' ? 'REINFORCING…' : '↻ REINFORCE'}</button>
+          <button
+            type="button"
+            className="drawer-train-btn drawer-train-btn--wide"
+            disabled={busy !== null}
+            onClick={() => callAction('ladder')}
+          >{busy === 'ladder' ? 'ADVANCING…' : '↑ ADVANCE LADDER'}</button>
         </div>
+
+        <div className="drawer-actions">
+          <button
+            type="button"
+            className="drawer-btn drawer-btn--danger"
+            onClick={() => console.info('Terminate agent:', agent.id)}
+          >
+            RETIRE WITH APPROVAL
+          </button>
+          <button
+            type="button"
+            className="drawer-btn drawer-btn--gold"
+            onClick={() => console.info('Assign task to:', agent.id)}
+          >
+            ASSIGN TASK
+          </button>
+        </div>
+      </aside>
+    </>
+  )
+}
+
+function AgentsEmpty({ filtered, onSpawn, onTasks, onSetup, onShowAll }) {
+  return (
+    <div className="swarm-empty swarm-empty--guided">
+      <div className="swarm-empty__title">{filtered ? 'NO AGENTS MATCH THIS FILTER' : 'NO AGENTS AVAILABLE'}</div>
+      <div className="swarm-empty__detail">
+        {filtered
+          ? 'Clear the filter or check setup if expected agents are missing.'
+          : 'Spawn an agent or run setup to verify the agent registry and Python backend.'}
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 1fr', gap: 10, flex: 1, minHeight: 0 }}>
-        {/* Fleet Roster */}
-        <Panel title="Fleet Roster" bodyStyle={{ padding: 8 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {agents.map(a => (
-              <div key={a.id} onClick={() => setSel(a)} style={{ padding: '7px 10px', borderRadius: 7, border: `1px solid ${selAgent?.id === a.id ? 'rgba(229,199,107,0.4)' : 'rgba(229,199,107,0.08)'}`, background: selAgent?.id === a.id ? 'rgba(229,199,107,0.07)' : 'var(--bg-elevated,#12141F)', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <StatusDot status={a.status} />
-                  <span style={{ fontSize: 11.5, color: 'var(--text-primary,#F0E9D2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: 10, color: (a.health ?? 80) > 80 ? 'var(--teal,#20D6C7)' : (a.health ?? 80) > 50 ? 'var(--gold-bright,#FFD97A)' : '#EF4444' }}>{a.health ?? 80}%</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Panel>
-
-        {/* Peer Review Feed */}
-        <Panel title="Peer Review Feed" badge={<Badge label="SCI-FI LIVE" variant="teal" />} bodyStyle={{ padding: 12 }}>
-          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', letterSpacing: '0.08em', marginBottom: 10, textTransform: 'uppercase' }}>Agents auditing each other in real time</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {REVIEWS.map((r, i) => (
-              <div key={i} style={{ padding: '10px 12px', borderRadius: 8, border: `1px solid ${VC[r.verdict]}33`, background: `linear-gradient(90deg, ${VC[r.verdict]}0A, transparent)`, position: 'relative', overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, background: VC[r.verdict], boxShadow: `0 0 10px ${VC[r.verdict]}` }} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, fontFamily: 'monospace', color: 'var(--text-secondary,#9A927E)', marginBottom: 5 }}>
-                  <span style={{ color: 'var(--gold-bright,#FFD97A)' }}>{r.from}</span>
-                  <svg width="12" height="6" viewBox="0 0 12 6" fill="none"><path d="M0 3 L11 3 M8 0 L11 3 L8 6" stroke={VC[r.verdict]} strokeWidth="1" /></svg>
-                  <span style={{ color: 'var(--teal,#20D6C7)' }}>{r.to}</span>
-                  <span style={{ flex: 1 }} />
-                  <span style={{ color: VC[r.verdict], fontWeight: 600, letterSpacing: '0.08em' }}>{r.verdict} · {r.score}</span>
-                </div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-primary,#F0E9D2)', lineHeight: 1.5 }}>{r.msg}</div>
-              </div>
-            ))}
-          </div>
-        </Panel>
-
-        {/* Detail + Collaboration Map */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-          {selAgent && (
-            <Panel title={selAgent.name} badge={<Badge label={selAgent.status} variant={selAgent.status === 'running' ? 'teal' : selAgent.status === 'busy' ? 'gold' : 'default'} />}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
-                <div><DR label="Health" value={`${selAgent.health ?? 80}%`} color={(selAgent.health ?? 80) > 80 ? '#22C55E' : '#F59E0B'} /><DR label="Tasks" value="847" /><DR label="Cost/task" value="$0.012" /></div>
-                <div><DR label="Success" value="98.9%" color="#22C55E" /><DR label="Latency" value="320ms" /><DR label="Errors" value="3" color="#EF4444" /></div>
-              </div>
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', letterSpacing: '0.08em', marginBottom: 5 }}>FAILURE DEBUGGER</div>
-              <div style={{ padding: 9, borderRadius: 7, background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.18)', fontSize: 11, color: 'var(--text-secondary,#9A927E)', lineHeight: 1.5 }}>
-                <div style={{ color: '#EF4444', fontWeight: 600, marginBottom: 3, fontSize: 10 }}>LAST FAILURE: prompt → logic → memory</div>
-                Prompt depth exceeded context window at step 4. Recommend prompt compression + reindex.
-              </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-                <button style={{ flex: 1, padding: 7, borderRadius: 6, border: '1px solid rgba(32,214,199,.3)', background: 'rgba(32,214,199,.07)', color: 'var(--teal,#20D6C7)', cursor: 'pointer', fontSize: 10 }}>RESTART</button>
-                <button style={{ flex: 1, padding: 7, borderRadius: 6, border: '1px solid rgba(229,199,107,.3)', background: 'rgba(229,199,107,.07)', color: 'var(--gold-bright,#FFD97A)', cursor: 'pointer', fontSize: 10 }}>TUNE</button>
-                <button style={{ flex: 1, padding: 7, borderRadius: 6, border: '1px solid rgba(239,68,68,.3)', background: 'rgba(239,68,68,.05)', color: '#EF4444', cursor: 'pointer', fontSize: 10 }}>HALT</button>
-              </div>
-            </Panel>
-          )}
-          <Panel title="Collaboration Map" style={{ flex: 1 }} bodyStyle={{ padding: 0, display: 'flex' }}>
-            <svg viewBox="0 0 280 200" style={{ width: '100%', height: '100%' }}>
-              <defs><radialGradient id="ngx"><stop offset="0%" stopColor="#FFD97A" /><stop offset="100%" stopColor="#CD7F32" /></radialGradient></defs>
-              {[[140,110,50,100,95,175],[140,110,230,60,210,180]].map((c,i)=><path key={i} d={`M${c[0]} ${c[1]} Q ${c[2]} ${c[3]} ${c[4]} ${c[5]}`} stroke="rgba(229,199,107,0.3)" strokeWidth="1" fill="none"/>)}
-              <line x1="140" y1="110" x2="50"  y2="100" stroke="rgba(32,214,199,0.3)" strokeWidth="1"/>
-              <line x1="140" y1="110" x2="230" y2="60"  stroke="rgba(32,214,199,0.3)" strokeWidth="1"/>
-              <line x1="140" y1="110" x2="95"  y2="175" stroke="rgba(32,214,199,0.3)" strokeWidth="1"/>
-              <line x1="140" y1="110" x2="210" y2="180" stroke="rgba(32,214,199,0.3)" strokeWidth="1"/>
-              {[[140,110,'Prime',14],[50,100,'Harvest',9],[230,60,'Strategy',9],[95,175,'Memory',9],[210,180,'Risk',9]].map((n,i)=>(
-                <g key={i}><circle cx={n[0]} cy={n[1]} r={n[3]} fill="url(#ngx)" opacity="0.9"/><circle cx={n[0]} cy={n[1]} r={n[3]+4} fill="none" stroke="rgba(229,199,107,0.3)" strokeWidth="1"/><text x={n[0]} y={n[1]+n[3]+14} textAnchor="middle" fontSize="10" fill="#9A927E" fontFamily="monospace">{n[2]}</text></g>
-              ))}
-            </svg>
-          </Panel>
-        </div>
+      <div className="swarm-empty__actions">
+        {filtered && <button type="button" onClick={onShowAll}>Show All</button>}
+        <button type="button" onClick={onSpawn}>Spawn Agent</button>
+        <button type="button" onClick={onTasks}>Run Task</button>
+        <button type="button" onClick={onSetup}>Open Setup</button>
       </div>
     </div>
   )
 }
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export const AgentsPage = () => {
+  const storeAgents = useAgentStore(s => s.agents)
+  const appAgents   = useAppStore(s => s.agents)
+  const setActiveSection = useAppStore(s => s.setActiveSection)
+
+  const [agents,        setAgents]        = useState([])
+  const [loading,       setLoading]       = useState(true)
+  const [activeTab,     setActiveTab]     = useState('ALL')
+  const [selectedAgent, setSelectedAgent] = useState(null)
+  const [page,          setPage]          = useState(0)
+  const [manifest,      setManifest]      = useState(null)
+  const [forgeAgents,   setForgeAgents]   = useState([])
+  const [liveActiveCount, setLiveActiveCount] = useState(null)
+  const [liveTotalCount,  setLiveTotalCount]  = useState(null)
+
+  useEffect(() => {
+    api.get('/api/agents/active')
+      .then(d => {
+        if (d && typeof d.count === 'number') setLiveActiveCount(d.count)
+        if (d && typeof d.total === 'number') setLiveTotalCount(d.total)
+        // Merge any live agent data into the agent list
+        if (Array.isArray(d?.agents) && d.agents.length > 0) {
+          setAgents(prev => mergeAgents(prev, d.agents))
+        }
+      })
+      .catch(() => {})
+    api.get('/api/system/manifest')
+      .then(data => data && setManifest(data))
+      .catch(() => {})
+    api.get('/api/forge/agents/blueprints')
+      .then(data => {
+        const list = Array.isArray(data?.blueprints) ? data.blueprints : []
+        setForgeAgents(list.filter(item => item.registration_status === 'registered').map((item, index) => normalizeAgent({
+          id: item.id,
+          name: item.name,
+          role: item.target_type || 'build_agent',
+          status: 'idle',
+          success_pct: null,
+          tasks_completed: 0,
+          last_active: item.registered_at || item.updated_at,
+          recent_events: [`Registered by AscendForge as a supervised code/build agent`, `${item.selected_skill_ids?.length || 0} skills attached`],
+          contract_key: item.id,
+          created_by: 'ascend-forge',
+          contract: item,
+          selected_skill_ids: item.selected_skill_ids,
+        }, index)))
+      })
+      .catch(() => {})
+  }, [])
+
+  // Hydrate from stores or API
+  useEffect(() => {
+    const source = storeAgents.length > 0 ? storeAgents : (appAgents || [])
+    if (source.length > 0) { setAgents(mergeAgents(forgeAgents, source)); setLoading(false); return }
+
+    api.get('/api/agents')
+      .then(data => {
+        const list = Array.isArray(data?.agents) ? data.agents : []
+        setAgents(mergeAgents(forgeAgents, list))
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [storeAgents, appAgents, forgeAgents])
+
+  const agentContracts = manifest?.agents || {}
+  const selectedContract = selectedAgent
+    ? agentContracts[selectedAgent.id] ||
+      agentContracts[selectedAgent.contract_key] ||
+      selectedAgent.contract ||
+      agentContracts[String(selectedAgent.name || '').toLowerCase().replace(/\s+/g, '-')]
+    : null
+
+  // KPI computations — prefer live endpoint counts when available
+  const totalAgents  = liveTotalCount ?? agents.length
+  const activeCount  = liveActiveCount ?? agents.filter(a => a.status === 'active' || a.status === 'running').length
+  const avgHealth    = Math.round(agents.reduce((s, a) => s + (a.health ?? 0), 0) / Math.max(1, agents.length))
+  const tasksDone    = agents.reduce((s, a) => s + (a.tasks_completed ?? a.tasksCompleted ?? 0), 0)
+
+  // Filter + paginate
+  const filtered  = filterAgents(agents, activeTab)
+  const pageCount = Math.ceil(filtered.length / PAGE_SIZE)
+  const visible   = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+  const handleTabChange = useCallback((id) => {
+    setActiveTab(id)
+    setPage(0)
+  }, [])
+
+  const handleTileClick = useCallback((agent) => {
+    setSelectedAgent(prev => prev?.id === agent.id ? null : agent)
+  }, [])
+
+  const handleDrawerClose = useCallback(() => setSelectedAgent(null), [])
+
+  const handleSpawn = () => window.dispatchEvent(new CustomEvent('nx:spawn-agent'))
+
+  return (
+    <div className="agents-page">
+
+      {/* TOP BAR */}
+      <header className="agents-header">
+        <div className="agents-kpi-row">
+          <KPITile icon="⚉" iconTone="gold"    label="Total Agents" value={totalAgents || '—'} sub="REGISTERED" />
+          <KPITile icon="◉" iconTone="success"  label="Active"       value={activeCount}        sub={`${totalAgents - activeCount} idle`} />
+          <KPITile icon="✦" iconTone="cool"     label="Avg Health"   value={`${avgHealth}%`}    sub="MEAN" accent />
+          <KPITile icon="◎" iconTone="gold"     label="Tasks Done"   value={tasksDone}           sub="COMPLETED" />
+        </div>
+
+        <div className="agents-toolbar">
+          <nav className="agents-filter-bar" aria-label="Filter agents">
+            {ALL_FILTER_TABS.map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`filter-tab${activeTab === tab.id ? ' filter-tab--active' : ''}`}
+                onClick={() => handleTabChange(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+          <button type="button" className="spawn-btn" onClick={handleSpawn} aria-label="Spawn agent">
+            <span className="spawn-btn__icon">⊕</span> SPAWN AGENT
+          </button>
+        </div>
+        <div className="agents-contract-strip">
+          <span className="agents-contract-strip__label">CONTRACT SOURCE</span>
+          <span className="agents-contract-strip__value">{manifest ? `${Object.keys(agentContracts).length} detailed roles loaded` : 'loading system manifest'}</span>
+        </div>
+      </header>
+
+      {/* SWARM GRID */}
+      <main className="agents-body">
+        <div className="swarm-grid" role="list" aria-label="Agent swarm">
+          {loading && <LoadingSkeleton variant="card-grid" rows={6} />}
+          {!loading && visible.map(agent => (
+            <AgentTile
+              key={agent.id}
+              agent={agent}
+              selected={selectedAgent?.id === agent.id}
+              onClick={handleTileClick}
+            />
+          ))}
+          {!loading && visible.length === 0 && (
+            <AgentsEmpty
+              filtered={agents.length > 0}
+              onSpawn={handleSpawn}
+              onTasks={() => setActiveSection('tasks')}
+              onSetup={() => setActiveSection('setup')}
+              onShowAll={() => handleTabChange('ALL')}
+            />
+          )}
+        </div>
+
+        {pageCount > 1 && (
+          <div className="swarm-pagination" role="navigation" aria-label="Page navigation">
+            <button
+              type="button"
+              className="page-btn"
+              disabled={page === 0}
+              onClick={() => setPage(p => p - 1)}
+              aria-label="Previous page"
+            >
+              ‹ PREV
+            </button>
+            {Array.from({ length: pageCount }, (_, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`page-btn${page === i ? ' page-btn--active' : ''}`}
+                onClick={() => setPage(i)}
+                aria-label={`Page ${i + 1}`}
+              >
+                {i + 1}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="page-btn"
+              disabled={page === pageCount - 1}
+              onClick={() => setPage(p => p + 1)}
+              aria-label="Next page"
+            >
+              NEXT ›
+            </button>
+          </div>
+        )}
+      </main>
+
+      {/* DETAIL DRAWER */}
+      {selectedAgent && (
+        <DetailDrawer agent={selectedAgent} contract={selectedContract} onClose={handleDrawerClose} />
+      )}
+    </div>
+  )
+}
+
+export default memo(AgentsPage)

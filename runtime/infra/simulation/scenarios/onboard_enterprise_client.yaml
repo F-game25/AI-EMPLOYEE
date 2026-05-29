@@ -1,0 +1,33 @@
+scenario_id: onboard_enterprise_client
+name: Enterprise Client Onboarding
+description: Test full onboarding flow including CRM, contract signing, and provisioning.
+risk_threshold: 0.20
+max_steps: 10
+timeout_s: 120
+
+synthetic_users:
+  - persona: procurement_manager
+    name: Alex Chen
+  - persona: compliance_officer
+    name: Dr. Sarah Park
+
+mock_systems:
+  - salesforce
+  - docusign
+  - jira
+
+inject_failures:
+  - at_step: 3
+    type: timeout
+    target: salesforce
+
+success_criteria:
+  - metric: task_completion_rate
+    threshold: 0.80
+    weight: 2.0
+  - metric: max_latency_ms
+    threshold: 5000
+    weight: 1.0
+  - metric: error_rate
+    threshold: 0.25
+    weight: 1.5

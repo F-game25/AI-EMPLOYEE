@@ -1,0 +1,139 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+image:
+  repository: aeternus/nexus
+  pullPolicy: IfNotPresent
+  tag: ""    # defaults to appVersion
+
+replicaCount:
+  node: 2
+  python: 2
+  worker: 0
+
+resources:
+  node:
+    requests: { cpu: "250m", memory: "256Mi" }
+    limits:   { cpu: "1000m", memory: "1Gi" }
+  python:
+    requests: { cpu: "500m", memory: "512Mi" }
+    limits:   { cpu: "2000m", memory: "2Gi" }
+  worker:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "1Gi" }
+
+autoscaling:
+  node:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+  python:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  worker:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 80
+
+service:
+  node:
+    type: ClusterIP
+    port: 8787
+  python:
+    type: ClusterIP
+    port: 18790
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  host: nexus.example.com
+  tls:
+    enabled: true
+    secretName: nexus-tls
+
+env:
+  NODE_ENV: production
+  LOG_LEVEL: INFO
+  EVOLUTION_MODE: SAFE
+  PYTHON_BACKEND_PORT: "18790"
+
+secrets:
+  useExternalSecrets: false
+  jwtSecretName: nexus-jwt
+  anthropicKeyName: nexus-anthropic
+
+persistence:
+  enabled: true
+  storageClass: "standard"
+  node:
+    size: 10Gi
+  python:
+    size: 20Gi
+  neo4j:
+    size: 50Gi
+  chroma:
+    size: 30Gi
+  postgres:
+    size: 100Gi
+  redis:
+    size: 10Gi
+
+postgresql:
+  enabled: true
+  auth:
+    database: nexus
+    existingSecret: nexus-postgres-creds
+  primary:
+    persistence:
+      enabled: true
+  readReplicas:
+    replicaCount: 2
+
+redis:
+  enabled: true
+  auth:
+    existingSecret: nexus-redis-creds
+  sentinel:
+    enabled: true
+
+neo4j:
+  enabled: true
+  edition: community
+
+chroma:
+  enabled: true
+
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    serviceMonitor: true
+  grafana:
+    enabled: true
+
+networkPolicy:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+securityContext:
+  enabled: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

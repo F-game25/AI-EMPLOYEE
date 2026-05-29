@@ -1,0 +1,17 @@
+{
+  "file_path": "simple.py",
+  "language": "python",
+  "summary": {
+    "purpose": "Analysis failed",
+    "complexity": "unknown",
+    "tech_stack": [],
+    "loc_count": 1
+  },
+  "bugs": [],
+  "style_issues": [],
+  "perf_concerns": [],
+  "refactoring": [],
+  "analysis_time_ms": 3000,
+  "cache_hit": false,
+  "truncated": false
+}

@@ -1,0 +1,65 @@
+.rap-panel { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+.rap-live {
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  background: rgba(96, 165, 250, 0.06);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+}
+.rap-live::before {
+  content: '';
+  position: absolute; left: -100%; top: 0; bottom: 0; width: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(96, 165, 250, 0.12) 50%, transparent 100%);
+  animation: rap-scan 1.6s linear infinite;
+}
+.rap-live-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.rap-live-status { color: #60a5fa; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+.rap-live-hop { color: #9a927e; font-size: 11px; }
+.rap-live-goal { color: #f4f4f6; font-size: 13px; margin-bottom: 6px; }
+.rap-live-gaps { color: #9a927e; font-size: 11px; }
+
+.rap-empty {
+  color: #9a927e;
+  font-size: 12px;
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed rgba(154, 146, 126, 0.18);
+}
+
+.rap-list { display: flex; flex-direction: column; gap: 8px; }
+.rap-row {
+  display: grid;
+  grid-template-columns: 22ch 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid rgba(229, 199, 107, 0.4);
+  font-size: 12px;
+}
+.rap-row__topic { color: #e5c76b; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rap-row__goal { color: #d6d6dc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rap-row__meta { color: #9a927e; font-size: 11px; white-space: nowrap; }
+.rap-row__sources {
+  display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;
+  grid-column: 1 / -1;
+}
+.rap-row__src {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  color: #60a5fa;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+}
+.rap-row__src:hover { background: rgba(96, 165, 250, 0.16); }
+
+@keyframes rap-scan {
+  to { left: 100%; }
+}
