@@ -40,7 +40,6 @@ _JS_SYMBOL = re.compile(r"^\s*(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|cla
 _PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.M)
 _JS_IMPORT = re.compile(r"""(?:import[^'"]*['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))""")
 _SAFE_PROJECT_ID = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
-_SAFE_PROJECT_DIR = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
 
 
 def _safe_project_id(project_id: str) -> str:
@@ -49,19 +48,9 @@ def _safe_project_id(project_id: str) -> str:
     return project_id
 
 
-def _safe_project_root(root: str) -> Path:
+def _safe_project_root() -> Path:
     allowed_root = os.path.realpath(os.environ.get("ASCENDFORGE_ALLOWED_ROOT", os.getcwd()))
-    if root in {"", "."}:
-        return Path(allowed_root)
-    project_dir = os.path.basename(root.rstrip(os.sep))
-    if not _SAFE_PROJECT_DIR.fullmatch(project_dir):
-        raise ValueError("invalid project directory")
-    if project_dir in {"", ".", ".."}:
-        raise ValueError("invalid project root")
-    candidate = os.path.normpath(os.path.join(allowed_root, project_dir))
-    if os.path.commonpath([allowed_root, candidate]) != allowed_root:
-        raise ValueError("project root is outside allowed workspace")
-    return Path(candidate)
+    return Path(allowed_root)
 
 
 def _state_dir() -> Path:
@@ -77,17 +66,30 @@ def _index_dir() -> Path:
 
 def _store_for(project_id: str):
     from memory.vector_store import VectorStore
-    safe_project = _safe_project_id(project_id)
-    return VectorStore(store_name=f"code_index/{safe_project}.json")
+    _safe_project_id(project_id)
+    return VectorStore(store_name="code_index.json")
 
 
-def _summary_path(project_id: str) -> Path:
-    safe_project = _safe_project_id(project_id)
+def _summary_path() -> Path:
     base = os.path.realpath(_index_dir())
-    fullpath = os.path.normpath(os.path.join(base, f"{safe_project}.summary.json"))
+    fullpath = os.path.realpath(os.path.join(base, "summaries.json"))
     if os.path.commonpath([base, fullpath]) != base:
         raise ValueError("summary path escapes index directory")
     return Path(fullpath)
+
+
+def _read_summaries() -> dict:
+    p = _summary_path()
+    if not p.exists():
+        return {}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
+def _write_summary(project_id: str, summary: dict) -> None:
+    summaries = _read_summaries()
+    summaries[project_id] = summary
+    _summary_path().write_text(json.dumps(summaries, indent=2), encoding="utf-8")
 
 
 def _chunk(text: str, lang: str) -> list[tuple[str, str]]:
@@ -141,7 +143,7 @@ def index_project(root: str, project_id: str, *, max_files: int = _MAX_FILES) ->
     """Index a project tree into its own vector store + write an architecture summary."""
     try:
         project_id = _safe_project_id(project_id)
-        root_p = _safe_project_root(root)
+        root_p = _safe_project_root()
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     if not root_p.is_dir():
@@ -202,7 +204,7 @@ def index_project(root: str, project_id: str, *, max_files: int = _MAX_FILES) ->
         "import_edges": import_edges,
         "duration_s": round(time.time() - t0, 2),
     }
-    _summary_path(project_id).write_text(json.dumps(summary, indent=2))
+    _write_summary(project_id, summary)
     logger.info("indexed %s: %d files, %d chunks in %.1fs", project_id, files, chunks, summary["duration_s"])
     return {"ok": True, **summary}
 
@@ -239,12 +241,9 @@ def get_summary(project_id: str) -> dict:
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "project_id": project_id}
     try:
-        p = _summary_path(project_id)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc), "project_id": project_id}
-    if not p.exists():
-        return {"ok": False, "error": "not indexed yet", "project_id": project_id}
-    try:
-        return {"ok": True, **json.loads(p.read_text())}
+        summary = _read_summaries().get(project_id)
+        if not isinstance(summary, dict):
+            return {"ok": False, "error": "not indexed yet", "project_id": project_id}
+        return {"ok": True, **summary}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}

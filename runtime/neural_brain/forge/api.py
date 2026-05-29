@@ -50,15 +50,39 @@ def _server_error(operation: str) -> HTTPException:
 _ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
 
 
-def _safe_payload(value):
+def _public_bool(value) -> bool:
+    return bool(value.get("ok", True)) if isinstance(value, dict) else bool(value)
+
+
+def _public_status(value, success: str, failure: str) -> dict:
+    ok = _public_bool(value)
+    return {"ok": ok, "status": success if ok else failure}
+
+
+def _public_queue(value) -> dict:
+    if not isinstance(value, dict):
+        return {"ok": False, "items": [], "count": 0}
+    raw_items = value.get("items") or value.get("queue") or value.get("results") or []
+    items = []
+    for item in raw_items[:100] if isinstance(raw_items, list) else []:
+        if isinstance(item, dict):
+            items.append({
+                key: item.get(key)
+                for key in ("id", "snapshot_id", "goal", "module", "status", "priority", "created_at", "updated_at")
+                if key in item and str(key).lower() not in _ERROR_KEYS
+            })
+    return {"ok": _public_bool(value), "items": items, "count": len(items)}
+
+
+def _public_snapshot(value, success: str, failure: str) -> dict:
+    payload = _public_status(value, success, failure)
     if isinstance(value, dict):
-        return {
-            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_safe_payload(item) for item in value]
-    return value
+        for key in ("id", "snapshot_id", "approval_id"):
+            if value.get(key):
+                payload[key] = value[key]
+        if "approval_required" in value:
+            payload["approval_required"] = bool(value.get("approval_required"))
+    return payload
 
 
 def _skill_recommendations(message: str) -> list[dict]:
@@ -124,7 +148,7 @@ async def _approve_action(action_id: str, req: ForgeActionApprovalRequest) -> di
 async def get_forge_queue(status: str | None = Query(None)):
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().forge_list(status=status))
+        return _public_queue(get_engine().forge_list(status=status))
     except Exception:
         raise _server_error("queue list")
 
@@ -133,7 +157,8 @@ async def get_forge_queue(status: str | None = Query(None)):
 async def submit_forge_goal(req: ForgeSubmitRequest):
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().forge_submit(goal=req.goal, module=req.module, priority=req.priority, code=req.code))
+        result = get_engine().forge_submit(goal=req.goal, module=req.module, priority=req.priority, code=req.code)
+        return _public_snapshot(result, "submitted", "submit_failed")
     except Exception:
         raise _server_error("goal submission")
 
@@ -142,7 +167,7 @@ async def submit_forge_goal(req: ForgeSubmitRequest):
 async def approve_forge_item(snapshot_id: str, req: ForgeApproveRequest = None):
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().forge_approve(snapshot_id))
+        return _public_snapshot(get_engine().forge_approve(snapshot_id), "approved", "approve_failed")
     except Exception:
         raise _server_error("approval")
 
@@ -151,7 +176,7 @@ async def approve_forge_item(snapshot_id: str, req: ForgeApproveRequest = None):
 async def reject_forge_item(snapshot_id: str):
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().forge_reject(snapshot_id))
+        return _public_snapshot(get_engine().forge_reject(snapshot_id), "rejected", "reject_failed")
     except Exception:
         raise _server_error("rejection")
 
@@ -162,7 +187,7 @@ async def reject_forge_item(snapshot_id: str):
 async def get_evolution_status():
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().evolution_status())
+        return _public_status(get_engine().evolution_status(), "available", "unavailable")
     except Exception:
         raise _server_error("evolution status")
 
@@ -171,7 +196,7 @@ async def get_evolution_status():
 async def set_evolution_mode(mode: str = Query(..., description="AUTO|SAFE|OFF")):
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().evolution_set_mode(mode))
+        return _public_status(get_engine().evolution_set_mode(mode), "mode_updated", "mode_update_failed")
     except Exception:
         raise _server_error("evolution mode")
 
@@ -182,11 +207,12 @@ async def set_evolution_mode(mode: str = Query(..., description="AUTO|SAFE|OFF")
 async def builder_generate(req: BuilderRequest):
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().forge_build(
+        result = get_engine().forge_build(
             spec=req.spec,
             project_name=req.project_name,
             target_type=req.target_type,
-        ))
+        )
+        return _public_snapshot(result, "generated", "generation_failed")
     except Exception:
         raise _server_error("builder generation")
 

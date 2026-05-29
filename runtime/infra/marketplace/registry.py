@@ -10,7 +10,7 @@ import sqlite3
 import time
 import uuid
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from .schema import (ApprovalRequest, ApprovalStatus, InstalledPlugin,
@@ -22,12 +22,23 @@ logger = logging.getLogger(__name__)
 _DB = Path(os.path.expanduser("~/.ai-employee/marketplace.db"))
 _PLUGINS_DIR = Path(os.path.expanduser("~/.ai-employee/plugins"))
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+_SAFE_ARCHIVE_PART = re.compile(r"^[A-Za-z0-9_. -]{1,128}$")
 
 
 def _safe_component(value: str, label: str) -> str:
     if not _SAFE_COMPONENT.fullmatch(value):
         raise ValueError(f"invalid {label}")
     return value
+
+
+def _safe_archive_parts(name: str) -> list[str]:
+    if name.startswith(("/", "\\")) or "\\" in name:
+        raise ValueError("invalid archive path")
+    path = PurePosixPath(name)
+    parts = [part for part in path.parts if part not in {"", "."}]
+    if not parts or any(part == ".." or not _SAFE_ARCHIVE_PART.fullmatch(part) for part in parts):
+        raise ValueError("invalid archive path")
+    return parts
 
 
 def _conn() -> sqlite3.Connection:
@@ -79,14 +90,14 @@ class PluginRegistry:
         """Install a .aiepkg (zip) from bytes. Returns install result."""
         try:
             zf = zipfile.ZipFile(io.BytesIO(package_bytes))
-        except Exception as e:
-            return {"ok": False, "error": f"Invalid package: {e}"}
+        except Exception:
+            return {"ok": False, "error": "Invalid package"}
 
         # Read manifest
         try:
             manifest_data = json.loads(zf.read("manifest.json"))
-        except Exception as e:
-            return {"ok": False, "error": f"Missing/invalid manifest.json: {e}"}
+        except Exception:
+            return {"ok": False, "error": "Missing/invalid manifest.json"}
 
         manifest = parse_manifest(manifest_data)
         if not manifest:
@@ -113,18 +124,21 @@ class PluginRegistry:
         if os.path.commonpath([plugins_root, plugin_dir]) != plugins_root:
             return {"ok": False, "error": "Plugin path escapes plugin root"}
         plugin_dir = Path(plugin_dir)
+        archive_plan = []
         for member in zf.infolist():
-            # Reject absolute paths and traversal sequences
-            if member.filename.startswith("/") or member.filename.startswith("\\"):
-                return {"ok": False, "error": f"Invalid archive path: {member.filename}"}
-            member_path = (plugin_dir / member.filename).resolve()
             try:
-                member_path.relative_to(plugin_dir)
+                archive_plan.append((member, _safe_archive_parts(member.filename)))
             except ValueError:
-                return {"ok": False, "error": f"Path traversal detected: {member.filename}"}
+                return {"ok": False, "error": "Invalid archive path"}
 
         plugin_dir.mkdir(parents=True, exist_ok=True)
-        zf.extractall(str(plugin_dir))
+        for member, parts in archive_plan:
+            target = plugin_dir.joinpath(*parts)
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(zf.read(member))
 
         now = time.time()
         status = PluginStatus.PENDING_APPROVAL if manifest.approval_required else PluginStatus.INSTALLED

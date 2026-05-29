@@ -7,7 +7,7 @@ Flow:
   engine.get_roadmap(roadmap_id)         -> Roadmap
   engine.list_roadmaps(tenant_id)        -> list[Roadmap]
 
-State persists to state/roadmaps/{roadmap_id}.json
+State persists to state/roadmaps/roadmaps.json
 """
 from __future__ import annotations
 
@@ -74,28 +74,45 @@ class RoadmapEngine:
             raise ValueError("invalid roadmap state directory")
         return Path(path)
 
-    def _path(self, roadmap_id: str) -> Path:
-        if not _SAFE_ID.fullmatch(roadmap_id):
-            raise ValueError("invalid roadmap id")
+    def _state_file(self) -> Path:
         base = os.path.realpath(self._state_dir())
-        fullpath = os.path.normpath(os.path.join(base, f"{roadmap_id}.json"))
+        fullpath = os.path.realpath(os.path.join(base, "roadmaps.json"))
         if os.path.commonpath([base, fullpath]) != base:
             raise ValueError("roadmap path escapes state directory")
         return Path(fullpath)
 
-    def _save(self, roadmap: Roadmap) -> None:
+    def _path(self, roadmap_id: str) -> Path:
+        if not _SAFE_ID.fullmatch(roadmap_id):
+            raise ValueError("invalid roadmap id")
+        return self._state_file()
+
+    def _load_all(self) -> dict:
+        path = self._state_file()
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+
+    def _write_all(self, roadmaps: dict) -> None:
         d = self._state_dir()
         d.mkdir(parents=True, exist_ok=True)
-        tmp = self._path(roadmap.id).with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(asdict(roadmap), indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.rename(self._path(roadmap.id))
+        tmp = self._state_file().with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(roadmaps, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.rename(self._state_file())
+
+    def _save(self, roadmap: Roadmap) -> None:
+        if not _SAFE_ID.fullmatch(roadmap.id):
+            raise ValueError("invalid roadmap id")
+        roadmaps = self._load_all()
+        roadmaps[roadmap.id] = asdict(roadmap)
+        self._write_all(roadmaps)
 
     def _load_raw(self, roadmap_id: str) -> dict | None:
-        p = self._path(roadmap_id)
-        if not p.exists():
-            return None
+        if not _SAFE_ID.fullmatch(roadmap_id):
+            raise ValueError("invalid roadmap id")
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            data = self._load_all().get(roadmap_id)
+            return data if isinstance(data, dict) else None
         except Exception as exc:
             logger.error("roadmap_engine: failed to load roadmap %s (%s)", roadmap_id, type(exc).__name__)
             return None
@@ -283,13 +300,13 @@ class RoadmapEngine:
         return self._dict_to_roadmap(raw) if raw else None
 
     def list_roadmaps(self, tenant_id: str) -> list[Roadmap]:
-        d = self._state_dir()
-        if not d.exists():
-            return []
         roadmaps: list[Roadmap] = []
-        for p in sorted(d.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+        try:
+            items = list(self._load_all().values())
+        except Exception:
+            return []
+        for data in sorted(items, key=lambda item: item.get("created_at", ""), reverse=True):
             try:
-                data = json.loads(p.read_text(encoding="utf-8"))
                 if data.get("tenant_id") == tenant_id:
                     roadmaps.append(self._dict_to_roadmap(data))
             except Exception:

@@ -160,7 +160,7 @@ class RequestGuard(BaseHTTPMiddleware):
                         if assessment.get("risk_score", 0) >= 85:
                             return JSONResponse({
                                 "detail": "Input rejected by security analysis",
-                                "threat_level": assessment.get("threat_level"),
+                                "threat_level": "high",
                             }, status_code=400)
                 except Exception:
                     pass  # non-JSON or other error — pass through

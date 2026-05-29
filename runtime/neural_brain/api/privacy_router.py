@@ -36,15 +36,13 @@ def _server_error(operation: str) -> HTTPException:
 _ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
 
 
-def _safe_payload(value):
-    if isinstance(value, dict):
-        return {
-            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_safe_payload(item) for item in value]
-    return value
+def _public_update_result(value, *, dry_run: bool) -> dict:
+    ok = bool(value.get("ok", False)) if isinstance(value, dict) else False
+    return {
+        "ok": ok,
+        "dry_run": dry_run,
+        "status": "validated" if dry_run and ok else ("applied" if ok else "apply_failed"),
+    }
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -239,7 +237,7 @@ async def apply_update(request: Request, dry_run: bool = False):
         packages = sorted(_PENDING_DIR.glob("*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not packages:
             return {"ok": False, "detail": "No downloaded package found — run /download first"}
-        result = _safe_payload(get_update_manager().apply(packages[0], dry_run=dry_run))
-        return {"ok": result.get("ok", False), **result}
+        result = get_update_manager().apply(packages[0], dry_run=dry_run)
+        return _public_update_result(result, dry_run=dry_run)
     except Exception:
         raise _server_error("update apply")

@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import threading
 import time
 from pathlib import Path
@@ -47,8 +46,7 @@ from core.memory_index import embed_text, cosine_similarity, clamp
 
 _LOCK = threading.RLock()
 _MAX_ENTRIES = int(os.environ.get("AI_EMPLOYEE_VECTOR_STORE_MAX", "10000"))
-_SAFE_ROOT_STORE = re.compile(r"^[A-Za-z0-9_.-]{1,96}\.json$")
-_SAFE_CODE_INDEX_STORE = re.compile(r"^code_index/[A-Za-z0-9_.-]{1,96}\.json$")
+_ALLOWED_STORE_NAMES = {"vector_store.json", "code_index.json"}
 
 
 def _default_path() -> Path:
@@ -67,15 +65,10 @@ def _default_path() -> Path:
 
 def _safe_store_path(store_name: str = "vector_store.json") -> Path:
     base = os.path.realpath(os.getenv("STATE_DIR") or Path.home() / ".ai-employee" / "state")
-    if _SAFE_CODE_INDEX_STORE.fullmatch(store_name):
-        subdir = "code_index"
-        filename = store_name.removeprefix("code_index/")
-    elif _SAFE_ROOT_STORE.fullmatch(store_name):
-        subdir = ""
-        filename = store_name
-    else:
-        raise ValueError("invalid vector store filename")
-    fullpath = os.path.normpath(os.path.join(base, subdir, filename))
+    if store_name not in _ALLOWED_STORE_NAMES:
+        raise ValueError("invalid vector store name")
+    filename = "code_index.json" if store_name == "code_index.json" else "vector_store.json"
+    fullpath = os.path.realpath(os.path.join(base, filename))
     if os.path.commonpath([base, fullpath]) != base:
         raise ValueError("vector store path is outside allowed state root")
     safe = Path(fullpath)

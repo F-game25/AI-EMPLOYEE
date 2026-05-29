@@ -14,15 +14,53 @@ router = APIRouter(prefix="/api/code-index", tags=["code-index"])
 _ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
 
 
-def _safe_payload(value):
-    if isinstance(value, dict):
-        return {
-            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_safe_payload(item) for item in value]
-    return value
+def _public_index(value: dict) -> dict:
+    if not isinstance(value, dict) or not value.get("ok"):
+        return {"ok": False, "error": "index_failed"}
+    return {
+        "ok": True,
+        "project_id": value.get("project_id", ""),
+        "indexed_at": value.get("indexed_at"),
+        "files": int(value.get("files", 0) or 0),
+        "chunks": int(value.get("chunks", 0) or 0),
+        "lines": int(value.get("lines", 0) or 0),
+        "languages": value.get("languages") if isinstance(value.get("languages"), dict) else {},
+        "entry_points": [str(p)[:256] for p in (value.get("entry_points") or [])[:10]],
+        "top_modules": [
+            {
+                "path": str(item.get("path", ""))[:256],
+                "symbol_count": int(item.get("symbol_count", 0) or 0),
+                "symbols": [str(s)[:128] for s in (item.get("symbols") or [])[:12]],
+            }
+            for item in (value.get("top_modules") or [])[:15]
+            if isinstance(item, dict)
+        ],
+        "import_edges": int(value.get("import_edges", 0) or 0),
+        "duration_s": value.get("duration_s", 0),
+    }
+
+
+def _public_context(value: dict) -> dict:
+    if not isinstance(value, dict) or not value.get("ok"):
+        return {"ok": False, "error": "context_failed", "results": []}
+    results = []
+    for item in (value.get("results") or [])[:20]:
+        if not isinstance(item, dict):
+            continue
+        results.append({
+            "path": str(item.get("path", ""))[:256],
+            "symbol": str(item.get("symbol", ""))[:128],
+            "lang": str(item.get("lang", ""))[:64],
+            "score": item.get("score", 0),
+            "snippet": str(item.get("snippet", ""))[:1200],
+        })
+    return {
+        "ok": True,
+        "query": str(value.get("query", ""))[:500],
+        "count": len(results),
+        "files": [str(p)[:256] for p in (value.get("files") or [])[:50]],
+        "results": results,
+    }
 
 
 class IndexReq(BaseModel):
@@ -41,7 +79,7 @@ class ContextReq(BaseModel):
 def index(req: IndexReq):
     try:
         from core.code_indexer import index_project
-        return _safe_payload(index_project(req.root, req.project_id, max_files=req.max_files))
+        return _public_index(index_project(req.root, req.project_id, max_files=req.max_files))
     except Exception:
         logger.warning("code-index index failed")
         raise HTTPException(status_code=500, detail="Code index failed")
@@ -51,7 +89,7 @@ def index(req: IndexReq):
 def context(req: ContextReq):
     try:
         from core.code_indexer import query_context
-        return _safe_payload(query_context(req.project_id, req.query, k=req.k))
+        return _public_context(query_context(req.project_id, req.query, k=req.k))
     except Exception:
         logger.warning("code-index context failed")
         raise HTTPException(status_code=500, detail="Code context failed")
@@ -61,7 +99,7 @@ def context(req: ContextReq):
 def summary(project_id: str):
     try:
         from core.code_indexer import get_summary
-        return _safe_payload(get_summary(project_id))
+        return _public_index(get_summary(project_id))
     except Exception:
         logger.warning("code-index summary failed")
         raise HTTPException(status_code=500, detail="Code summary failed")

@@ -35,10 +35,10 @@ def _user(req: Request) -> str:
 def _safe_install_result(result: dict) -> dict:
     return {
         "ok": bool(result.get("ok")),
-        "plugin_id": result.get("plugin_id", ""),
-        "status": result.get("status", "install_failed"),
+        "plugin_id": str(result.get("plugin_id", ""))[:128],
+        "status": str(result.get("status", "install_failed"))[:64],
         "approval_required": bool(result.get("approval_required", False)),
-        **({"approval_id": result["approval_id"]} if result.get("approval_id") else {}),
+        **({"approval_id": str(result["approval_id"])[:128]} if result.get("approval_id") else {}),
     }
 
 

@@ -59,6 +59,26 @@ def _safe_workspace_file(file_path: str) -> Path:
     return Path(candidate)
 
 
+def _workspace_file_bytes(path: Path) -> bytes:
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    root_fd = os.open(root, os.O_RDONLY)
+    try:
+        fd = os.open(path.name, os.O_RDONLY, dir_fd=root_fd)
+    finally:
+        os.close(root_fd)
+    with os.fdopen(fd, "rb") as f:
+        return f.read()
+
+
+def _workspace_file_size(path: Path) -> int:
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    root_fd = os.open(root, os.O_RDONLY)
+    try:
+        return os.stat(path.name, dir_fd=root_fd).st_size
+    finally:
+        os.close(root_fd)
+
+
 # ── Provider detection helpers ────────────────────────────────────────────────
 
 def _ollama_host() -> str:
@@ -201,7 +221,7 @@ def analyze_image(file_path: str, provider: Optional[str] = None) -> dict:
     media_type = _MEDIA_TYPES.get(ext, "image/jpeg")
 
     try:
-        image_data = base64.standard_b64encode(path.read_bytes()).decode("utf-8")
+        image_data = base64.standard_b64encode(_workspace_file_bytes(path)).decode("utf-8")
     except Exception as e:
         logger.warning("Could not read image (%s)", type(e).__name__)
         return {**base, "text": f"Image: {path.name}", "provider_used": "none",
@@ -242,7 +262,7 @@ def analyze_image(file_path: str, provider: Optional[str] = None) -> dict:
                 continue
 
             result["metadata"]["file_name"] = path.name
-            result["metadata"]["file_size"] = path.stat().st_size
+            result["metadata"]["file_size"] = _workspace_file_size(path)
             return {**base, **result}
 
         except Exception as e:

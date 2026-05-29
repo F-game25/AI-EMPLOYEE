@@ -114,15 +114,17 @@ def _server_error(operation: str) -> HTTPException:
 _ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
 
 
-def _safe_payload(value):
-    if isinstance(value, dict):
-        return {
-            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_safe_payload(item) for item in value]
-    return value
+def _public_stats(value) -> dict:
+    if not isinstance(value, dict):
+        return {"status": "completed"}
+    public = {"status": str(value.get("status") or "completed")[:64]}
+    for key in ("created", "updated", "deleted", "skipped", "failed", "count", "total"):
+        if key in value:
+            try:
+                public[key] = int(value.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                public[key] = 0
+    return public
 
 
 # ── RAG routes ────────────────────────────────────────────────────────────────
@@ -166,7 +168,7 @@ async def rag_sync(req: RAGSyncRequest, request: Request):
         from infra.rag.sync_daemon import get_sync_daemon
         st = SourceType(req.source_type)
         stats = await get_sync_daemon().trigger_sync(tenant_id, st, full=req.full)
-        return {"ok": True, "stats": _safe_payload(stats)}
+        return {"ok": True, "stats": _public_stats(stats)}
     except Exception:
         raise _server_error("rag sync")
 

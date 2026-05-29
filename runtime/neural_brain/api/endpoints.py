@@ -21,15 +21,61 @@ def _server_error(operation: str) -> HTTPException:
 _ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
 
 
-def _safe_payload(value):
+def _public_bool(value) -> bool:
+    return bool(value.get("ok", True)) if isinstance(value, dict) else bool(value)
+
+
+def _public_count(value) -> int:
     if isinstance(value, dict):
-        return {
-            key: "operation_failed" if str(key).lower() in _ERROR_KEYS else _safe_payload(item)
-            for key, item in value.items()
-        }
+        for key in ("count", "total", "size"):
+            try:
+                return int(value.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                continue
     if isinstance(value, list):
-        return [_safe_payload(item) for item in value]
-    return value
+        return len(value)
+    return 0
+
+
+def _public_items(value, *, limit: int = 50) -> list[dict]:
+    if isinstance(value, dict):
+        raw_items = value.get("results") or value.get("items") or value.get("memories") or value.get("nodes") or []
+    else:
+        raw_items = value if isinstance(value, list) else []
+    items = []
+    for item in raw_items[:limit] if isinstance(raw_items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        safe = {}
+        for key in ("id", "memory_id", "type", "memory_type", "title", "label", "path", "score", "created_at", "updated_at"):
+            if key in item and str(key).lower() not in _ERROR_KEYS:
+                safe[key] = item[key]
+        items.append(safe)
+    return items
+
+
+def _public_graph(value) -> dict:
+    if not isinstance(value, dict):
+        return {"ok": False, "nodes": [], "edges": []}
+    nodes = []
+    for node in (value.get("nodes") or [])[:500]:
+        if isinstance(node, dict):
+            nodes.append({k: node.get(k) for k in ("id", "label", "type", "weight") if k in node})
+    edges = []
+    for edge in (value.get("edges") or [])[:1000]:
+        if isinstance(edge, dict):
+            edges.append({k: edge.get(k) for k in ("source", "target", "type", "weight") if k in edge})
+    return {"ok": _public_bool(value), "nodes": nodes, "edges": edges}
+
+
+def _public_status(value) -> dict:
+    if not isinstance(value, dict):
+        return {"ok": False, "status": "unavailable"}
+    return {
+        "ok": _public_bool(value),
+        "status": str(value.get("status") or value.get("state") or "available")[:64],
+        "count": _public_count(value),
+    }
 
 # Mount forge sub-router (lazy import to avoid circular issues at module load)
 try:
@@ -87,7 +133,8 @@ async def recall(req: RecallRequest):
     """Retrieve from long-term memory."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().recall(req.query, user_id=req.user_id, k=req.k))
+        result = get_engine().recall(req.query, user_id=req.user_id, k=req.k)
+        return {"ok": _public_bool(result), "count": _public_count(result), "items": _public_items(result, limit=req.k)}
     except Exception:
         raise _server_error("recall")
 
@@ -97,7 +144,8 @@ async def remember(req: RememberRequest):
     """Store in long-term memory."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().remember(req.content, memory_type=req.type, user_id=req.user_id, metadata=req.metadata))
+        result = get_engine().remember(req.content, memory_type=req.type, user_id=req.user_id, metadata=req.metadata)
+        return {"ok": _public_bool(result), "status": "stored" if _public_bool(result) else "store_failed"}
     except Exception:
         raise _server_error("remember")
 
@@ -107,7 +155,8 @@ async def forget(memory_id: str):
     """Remove memory."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().forget(memory_id))
+        result = get_engine().forget(memory_id)
+        return {"ok": _public_bool(result), "status": "deleted" if _public_bool(result) else "delete_failed"}
     except Exception:
         raise _server_error("forget")
 
@@ -117,7 +166,7 @@ async def get_graph(depth: int = Query(2, ge=1, le=5), limit: int = Query(200, g
     """Fetch knowledge graph snapshot."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().get_graph_snapshot(limit=limit))
+        return _public_graph(get_engine().get_graph_snapshot(limit=limit))
     except Exception:
         raise _server_error("graph snapshot")
 
@@ -127,7 +176,7 @@ async def get_graph_snapshot(limit: int = Query(200, ge=10, le=1000)):
     """Alias for /graph — returns the full graph snapshot for dashboard use."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().get_graph_snapshot(limit=limit))
+        return _public_graph(get_engine().get_graph_snapshot(limit=limit))
     except Exception:
         raise _server_error("graph snapshot")
 
@@ -172,7 +221,8 @@ async def route_model(req: ModelRouteRequest):
     """Route request to specified architecture."""
     try:
         from neural_brain.core.consciousness_engine import get_engine
-        return _safe_payload(get_engine().route_model(req.arch, req.request))
+        result = get_engine().route_model(req.arch, req.request)
+        return {"ok": _public_bool(result), "status": "routed" if _public_bool(result) else "route_failed"}
     except Exception:
         raise _server_error("model route")
 
@@ -215,12 +265,9 @@ async def get_reasoning_trace(trace_id: str):
     try:
         if not _SAFE_TRACE_ID.fullmatch(trace_id):
             raise HTTPException(status_code=400, detail="Invalid trace id")
-        trace_root = os.path.realpath("state/neural_brain/traces")
-        trace_file = os.path.realpath(os.path.join(trace_root, f"{trace_id}.jsonl"))
-        if os.path.commonpath([trace_root, trace_file]) != trace_root:
-            raise HTTPException(status_code=400, detail="Invalid trace path")
-        trace_file = Path(trace_file)
-        if not trace_file.exists():
+        trace_root = Path("state/neural_brain/traces")
+        trace_file = next((p for p in trace_root.glob("*.jsonl") if p.stem == trace_id), None)
+        if trace_file is None or not trace_file.exists():
             raise HTTPException(status_code=404, detail="Trace not found")
         traces = []
         with open(trace_file) as f:

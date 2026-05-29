@@ -65,6 +65,36 @@ def _safe_document_path(file_path: str) -> Path:
     return Path(candidate)
 
 
+def _workspace_file_stat(path: Path):
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    root_fd = os.open(root, os.O_RDONLY)
+    try:
+        return os.stat(path.name, dir_fd=root_fd)
+    finally:
+        os.close(root_fd)
+
+
+def _workspace_read_text(path: Path) -> str:
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    root_fd = os.open(root, os.O_RDONLY)
+    try:
+        fd = os.open(path.name, os.O_RDONLY, dir_fd=root_fd)
+    finally:
+        os.close(root_fd)
+    with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def _workspace_open_text(path: Path, *, newline: str | None = None):
+    root = os.path.realpath(os.environ.get("AI_EMPLOYEE_WORKSPACE", os.getcwd()))
+    root_fd = os.open(root, os.O_RDONLY)
+    try:
+        fd = os.open(path.name, os.O_RDONLY, dir_fd=root_fd)
+    finally:
+        os.close(root_fd)
+    return os.fdopen(fd, "r", encoding="utf-8", errors="replace", newline=newline)
+
+
 def _strip_html(text: str) -> str:
     """Remove HTML tags and collapse whitespace."""
     text = re.sub(r"<[^>]+>", " ", text)
@@ -73,7 +103,7 @@ def _strip_html(text: str) -> str:
 
 def _extract_plain(path: Path, strip_html: bool = False) -> dict[str, Any]:
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = _workspace_read_text(path)
         if strip_html:
             text = _strip_html(text)
         return {"text": text, "pages": 1, "language": "text", "file_type": path.suffix.lstrip(".")}
@@ -84,7 +114,7 @@ def _extract_plain(path: Path, strip_html: bool = False) -> dict[str, Any]:
 def _extract_csv(path: Path) -> dict[str, Any]:
     try:
         lines = []
-        with path.open(encoding="utf-8", errors="replace", newline="") as f:
+        with _workspace_open_text(path, newline="") as f:
             reader = csv.reader(f)
             headers = next(reader, [])
             if headers:
@@ -210,7 +240,9 @@ def extract(file_path: str) -> dict[str, Any]:
         return {"error": str(exc)}
     ext = path.suffix.lower()
 
-    if not path.exists():
+    try:
+        file_stat = _workspace_file_stat(path)
+    except FileNotFoundError:
         return {"error": f"File not found: {file_path}"}
 
     # Images
@@ -243,7 +275,7 @@ def extract(file_path: str) -> dict[str, Any]:
     if "error" not in result:
         result.setdefault("metadata", {})
         result["metadata"].setdefault("file_name", path.name)
-        result["metadata"].setdefault("file_size", path.stat().st_size)
+        result["metadata"].setdefault("file_size", file_stat.st_size)
         result.setdefault("pages", 1)
         result.setdefault("language", "text")
         result.setdefault("file_type", ext.lstrip("."))

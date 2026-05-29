@@ -18422,7 +18422,8 @@ def get_wavefield_status():
 
   model = os.environ.get("WAVEFIELD_MODEL", "").strip()
   host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-  healthy, reason = wavefield_healthcheck(ollama_host=host, model=model or None)
+  healthy, _reason = wavefield_healthcheck(ollama_host=host, model=model or None)
+  health_reason = "healthy" if healthy else "unavailable"
   return JSONResponse({
     "enabled": os.environ.get("WAVEFIELD_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"},
     "rollout_mode": os.environ.get("WAVEFIELD_ROLLOUT_MODE", "default").strip().lower(),
@@ -18431,7 +18432,7 @@ def get_wavefield_status():
     "model": model,
     "ollama_host": host,
     "healthy": healthy,
-    "health_reason": reason,
+    "health_reason": health_reason,
     "allow_fallback": os.environ.get("WAVEFIELD_ALLOW_FALLBACK", "1").strip().lower() in {"1", "true", "yes", "on"},
     "metrics": get_wavefield_metrics(),
   })
@@ -20756,20 +20757,8 @@ def submit_task(payload: dict):
                 continue
             target = _resolve_agent_target(agent_id)
             if target and _agent_dir_exists(target) and _SAFE_AGENT_ID_PAT.match(target):
-                run_root = os.path.realpath(AI_HOME / "run")
-                pid_path = os.path.normpath(os.path.join(run_root, target + ".pid"))
-                if os.path.commonpath([run_root, pid_path]) != run_root:
-                    continue
-                pid_file = Path(pid_path)
-                already_running = False
-                if pid_file.exists():
-                    try:
-                        pid_text = pid_file.read_text().strip()
-                        pid = int(pid_text)
-                        os.kill(pid, 0)
-                        already_running = True
-                    except Exception:
-                        pass
+                pid = _read_pid_file(target)
+                already_running = bool(pid and _pid_alive(pid))
                 if not already_running:
                     try:
                         ai_employee("start", target)
@@ -21049,8 +21038,13 @@ async def roadmap_execute(roadmap_id: str, _auth: None = Depends(require_auth)):
     from core.roadmap_engine import get_roadmap_engine  # noqa: PLC0415
     result = await get_roadmap_engine().execute_roadmap(roadmap_id)
     if not result.get("ok"):
-        raise HTTPException(404, result.get("error", "not found"))
-    return JSONResponse(result)
+        raise HTTPException(404, "roadmap_execute_failed")
+    return JSONResponse({
+        "ok": True,
+        "roadmap_id": roadmap_id,
+        "status": "executed",
+        "executed_tasks": int(result.get("executed_tasks", 0) or 0) if isinstance(result, dict) else 0,
+    })
 
 
 @app.get("/roadmap/list/{tenant_id}")
@@ -28704,11 +28698,13 @@ async def tool_get(name: str, _auth=Depends(require_auth)):
 @app.post("/tools/{name}/execute")
 async def tool_execute(name: str, req: dict, _auth=Depends(require_auth)):
     from tools.registry import get_tool_registry
-    return get_tool_registry().execute(
+    result = get_tool_registry().execute(
         name,
         req.get("payload", {}),
         req.get("agent_id", "api"),
     )
+    ok = bool(result.get("ok", False)) if isinstance(result, dict) else False
+    return {"ok": ok, "tool": name, "status": "executed" if ok else "execution_failed"}
 
 
 # ── Skill catalog routes ───────────────────────────────────────────────────────
@@ -28728,11 +28724,13 @@ async def skills_suggest(goal: str = "", _auth=Depends(require_auth)):
 @app.post("/skills/{name}/execute")
 async def skill_execute(name: str, req: dict, _auth=Depends(require_auth)):
     from skills.catalog import get_skill_catalog
-    return get_skill_catalog().execute_skill(
+    result = get_skill_catalog().execute_skill(
         name,
         req.get("params", {}),
         req.get("agent_id", "api"),
     )
+    ok = bool(result.get("ok", False)) if isinstance(result, dict) else False
+    return {"ok": ok, "skill": name, "status": "executed" if ok else "execution_failed"}
 
 
 @app.on_event("startup")

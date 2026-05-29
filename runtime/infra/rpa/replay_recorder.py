@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import hashlib
 import time
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _BASE = Path(os.path.expanduser("~/.ai-employee"))
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+_SAFE_SCREENSHOT_KEY = re.compile(r"^screenshots/([0-9]{5})\.png$")
 
 
 def _safe_component(value: str, label: str) -> str:
@@ -24,12 +26,15 @@ def _safe_component(value: str, label: str) -> str:
 
 def _session_dir(tenant_id: str, session_id: str) -> Path:
     root = os.path.realpath(_BASE / "tenants")
+    tenant = _safe_component(tenant_id, "tenant_id")
+    session = _safe_component(session_id, "session_id")
+    session_key = hashlib.sha256(f"{tenant}:{session}".encode("utf-8")).hexdigest()[:32]
     d = os.path.realpath(os.path.join(
         root,
-        _safe_component(tenant_id, "tenant_id"),
-        "rpa",
         "sessions",
-        _safe_component(session_id, "session_id"),
+        session_key[:2],
+        session_key,
+        "rpa",
     ))
     if os.path.commonpath([root, d]) != root:
         raise ValueError("session path escapes tenant root")
@@ -83,8 +88,12 @@ class ReplayRecorder:
         return frames
 
     def screenshot_bytes(self, key: str) -> Optional[bytes]:
+        match = _SAFE_SCREENSHOT_KEY.fullmatch(key)
+        if not match:
+            return None
+        safe_key = f"screenshots/{int(match.group(1)):05d}.png"
         root = os.path.realpath(self._dir)
-        p = os.path.realpath(os.path.join(root, key))
+        p = os.path.realpath(os.path.join(root, safe_key))
         if os.path.commonpath([root, p]) != root:
             return None
         p = Path(p)
