@@ -224,6 +224,22 @@ const api = {
       helperAdvise:       (pid, body) => api.post(`/api/forge/projects/${pid}/helper-advise`, body),
     },
 
+    // ── Phase 9 — Interconnected Cognitive Core ─────────────────────
+    cognitive: {
+      getMemoryGraphSummary:      (pid)            => api.get(`/api/forge/projects/${pid}/memory-graph/summary`),
+      getMemoryGraphNodes:        (pid, filters)   => api.get(`/api/forge/projects/${pid}/memory-graph/nodes${filters?.node_type || filters?.search ? `?${new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([, v]) => v))).toString()}` : ''}`),
+      getMemoryGraphNode:         (pid, nodeId)    => api.get(`/api/forge/projects/${pid}/memory-graph/nodes/${nodeId}`),
+      getMemoryGraphNeighborhood: (pid, nodeId, d) => api.get(`/api/forge/projects/${pid}/memory-graph/nodes/${nodeId}/neighborhood${d ? `?depth=${d}` : ''}`),
+      consolidateMemoryGraph:     (pid, payload)   => api.post(`/api/forge/projects/${pid}/memory-graph/consolidate`, payload || {}),
+      getProjectContextPackets:   (pid)            => api.get(`/api/forge/projects/${pid}/context-packets`),
+      getRunContextPackets:       (rid)            => api.get(`/api/forge/runs/${rid}/context-packets`),
+      getAdvisoryEvents:          (pid)            => api.get(`/api/forge/projects/${pid}/advisory-events`),
+      getAdvisoryMetrics:         (pid)            => api.get(`/api/forge/projects/${pid}/advisory-metrics`),
+      getCognitiveEvents:         (pid)            => api.get(`/api/forge/projects/${pid}/cognitive-events`),
+      createCognitiveEvent:       (pid, payload)   => api.post(`/api/forge/projects/${pid}/cognitive-events`, payload),
+      consultHelperAdvisory:      (pid, payload)   => api.post(`/api/forge/projects/${pid}/helper-advisory/consult`, payload),
+    },
+
     // ── Phase 5 — Metrics / Replay / Patches / Approvals ────────────
     getForgeMetrics:     (pid)       => api.get(`/api/forge/projects/${pid}/forge-metrics`),
     getRunReplay:        (rid)       => api.get(`/api/forge/runs/${rid}/replay`),

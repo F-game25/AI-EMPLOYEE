@@ -22,6 +22,8 @@ const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
 const forgeLearning = require('../services/forge_learning')
 const forgeTraining = require('../services/forge_training')
+const forgeMemoryGraph = require('../services/forge_memory_graph')
+const forgeContextEngine = require('../services/forge_context_engine')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const STATE_DIR = path.resolve(process.env.STATE_DIR || process.env.AI_EMPLOYEE_STATE_DIR || path.join(os.homedir(), '.ai-employee', 'state'))
@@ -2992,6 +2994,18 @@ Respond with ONLY valid JSON (no markdown fences):
     appendAudit('forge_agentic_start', { run_id: runId, project_id: project.id, goal: goal.slice(0, 120), max_iters: maxIters })
     ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', ''))
 
+    // Phase 9: build a context packet for the planner stage (graceful — never blocks)
+    let plannerContext = null
+    try {
+      plannerContext = forgeContextEngine.buildContextPacket(forgeRunStore, project, run, 'planner', goal, { repoIndex: repoIdx })
+      recordCognitiveEvent(project.id, runId, 'context_packet_created', `Planner context: ${plannerContext?.selected_nodes?.length || 0} memories`, { packet_id: plannerContext?.packet_id, stage: 'planner' })
+    } catch { /* context is advisory — run proceeds without it */ }
+    // Phase 9: consult skill-selector helper advisory (advisory only — planner may ignore)
+    try {
+      const skillAdvice = await consultHelperModel(project.id, 'skill_selector', { goal, stack: repoIdx?.stack }, null, { run_id: runId, stage: 'planner' })
+      if (skillAdvice.advice) recordCognitiveEvent(project.id, runId, 'helper_model_consulted', `skill_selector advised: ${skillAdvice.advice}`, { agreement: skillAdvice.agreement })
+    } catch { /* advisory failures never block */ }
+
     for (let iter = 1; iter <= maxIters; iter++) {
       updateRun(runId, { status: 'planning' })
       // eslint-disable-next-line no-await-in-loop
@@ -3102,6 +3116,16 @@ Respond with ONLY valid JSON (no markdown fences):
     const finalRun = updateRun(runId, { status: success ? 'verified' : 'verify_failed', final_report: finalReport })
     appendAudit('forge_agentic_done', { run_id: runId, project_id: project.id, success, iterations: transcript.length, workspace_removed: workspaceCleaned })
     try { recordTaskMemory(runId, goal, transcript, success, repoIdx?.stack) } catch { /* best-effort */ }
+
+    // Phase 9: link the completed run into the Memory Graph + consolidate (best-effort)
+    setImmediate(() => {
+      try {
+        forgeMemoryGraph.linkRunToMemoryGraph(forgeRunStore, project.id, runId)
+        recordCognitiveEvent(project.id, runId, 'memory_edge_created', `Run linked to memory graph (${success ? 'success' : 'failure'})`, { run_id: runId, success })
+        const report = forgeMemoryGraph.consolidateMemoryGraph(forgeRunStore, project.id, { trigger_type: success ? 'completed_run' : 'failed_run' })
+        if (report?.contradictions_found) recordCognitiveEvent(project.id, runId, 'contradiction_detected', `${report.contradictions_found} contradiction(s) found`, report)
+      } catch { /* graph linking must never affect run result */ }
+    })
 
     // Phase 7: distill run trajectory into learning record (best-effort, never blocks result)
     setImmediate(() => {
@@ -4417,6 +4441,187 @@ Return JSON:
     if (promotion) forgeRunStore.updateModelPromotion(promotion.promotion_id, { rolled_back_at: nowIso() })
     appendAudit('model_rolled_back', { project_id: project.id, model_version_id: mv.model_version_id, restored_previous: restored })
     res.json({ ok: true, rolled_back: mv.model_version_id, restored_previous: restored })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 9 — INTERCONNECTED COGNITIVE CORE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Advisory helper consultation. ADVISORY ONLY: ruleResult is authoritative.
+  // Records every consultation in forge_advisory_events. Never throws.
+  async function consultHelperModel(projectId, modelType, input, ruleResult, opts = {}) {
+    const advisoryId = `adv-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`
+    const base = {
+      advisory_id: advisoryId, project_id: projectId, run_id: opts.run_id || null,
+      stage: opts.stage || null, advisory_type: modelType,
+      input_summary: typeof input === 'object' ? input : { value: String(input).slice(0, 200) },
+      rule_result: ruleResult ?? null, created_at: nowIso(),
+    }
+    try {
+      const active = forgeRunStore.getActiveModelVersion(projectId, modelType)
+      if (!active || !active.model_path) {
+        forgeRunStore.upsertAdvisoryEvent({ ...base, advice: {}, agreement: 'no_active_model', used_by_agent: false, overridden_by_rule: false })
+        return { model_version_id: null, advice: null, confidence: null, rule_result: ruleResult, agreement: 'no_active_model', overridden_by_rule: false, used_by_agent: false }
+      }
+      try { forgeTraining.assertInsideForgeHome(active.model_path, FORGE_HOME) } catch {
+        forgeRunStore.upsertAdvisoryEvent({ ...base, advice: {}, agreement: 'failed', used_by_agent: false, overridden_by_rule: false })
+        return { model_version_id: active.model_version_id, advice: null, confidence: null, rule_result: ruleResult, agreement: 'failed', overridden_by_rule: false, used_by_agent: false }
+      }
+      const result = await forgeTraining.runPythonTrainer({ operation: 'predict', model_path: active.model_path, input }, 15000)
+      if (!result.ok) {
+        forgeRunStore.upsertAdvisoryEvent({ ...base, model_version_id: active.model_version_id, advice: {}, agreement: 'failed', used_by_agent: false, overridden_by_rule: false })
+        return { model_version_id: active.model_version_id, advice: null, confidence: null, rule_result: ruleResult, agreement: 'failed', overridden_by_rule: false, used_by_agent: false }
+      }
+      // Compare helper vs rule. Rule result string compared loosely.
+      const ruleStr = ruleResult == null ? null : String(ruleResult.prediction ?? ruleResult.level ?? ruleResult.value ?? ruleResult).toLowerCase()
+      const adviceStr = String(result.prediction).toLowerCase()
+      const agreement = ruleStr == null ? 'not_applicable' : (adviceStr === ruleStr ? 'agree' : 'disagree')
+      // Advisory never overrides: if disagree, rule stands → overridden_by_rule true
+      const overridden = agreement === 'disagree'
+      const usedByAgent = opts.used_by_agent !== false && agreement !== 'disagree'
+      forgeRunStore.upsertAdvisoryEvent({
+        ...base, model_version_id: active.model_version_id,
+        advice: { prediction: result.prediction, ranked: result.ranked },
+        confidence: result.confidence, agreement, used_by_agent: usedByAgent, overridden_by_rule: overridden,
+      })
+      if (agreement === 'disagree') {
+        try { forgeRunStore.upsertCognitiveEvent({ event_id: `cog-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`, project_id: projectId, run_id: opts.run_id || null, event_type: 'helper_model_disagreed', title: `${modelType}: helper said ${adviceStr}, rule said ${ruleStr}`, details: { advisory_id: advisoryId }, created_at: nowIso() }) } catch { /* noop */ }
+      }
+      return { model_version_id: active.model_version_id, advice: result.prediction, confidence: result.confidence, rule_result: ruleResult, agreement, overridden_by_rule: overridden, used_by_agent: usedByAgent }
+    } catch (err) {
+      try { forgeRunStore.upsertAdvisoryEvent({ ...base, advice: {}, agreement: 'failed', used_by_agent: false, overridden_by_rule: false }) } catch { /* noop */ }
+      return { model_version_id: null, advice: null, confidence: null, rule_result: ruleResult, agreement: 'failed', overridden_by_rule: false, used_by_agent: false }
+    }
+  }
+
+  function recordCognitiveEvent(projectId, runId, eventType, title, details = {}) {
+    try {
+      forgeRunStore.upsertCognitiveEvent({
+        event_id: `cog-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+        project_id: projectId, run_id: runId || null, event_type: eventType,
+        title: String(title || '').slice(0, 300), details, created_at: nowIso(),
+      })
+    } catch { /* cognitive logging must never break a run */ }
+  }
+
+  // ── Memory Graph routes ─────────────────────────────────────────────────────
+
+  router.get('/projects/:id/memory-graph', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, summary: forgeMemoryGraph.getGraphSummary(forgeRunStore, project.id), nodes: forgeRunStore.getGraphNodes(project.id, { limit: 100 }) })
+  })
+
+  router.get('/projects/:id/memory-graph/summary', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, summary: forgeMemoryGraph.getGraphSummary(forgeRunStore, project.id) })
+  })
+
+  router.get('/projects/:id/memory-graph/nodes', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const opts = { node_type: req.query.node_type || undefined, search: req.query.search || undefined, limit: Math.min(300, parseInt(req.query.limit) || 200) }
+    res.json({ ok: true, nodes: forgeRunStore.getGraphNodes(project.id, opts) })
+  })
+
+  router.get('/projects/:id/memory-graph/nodes/:nodeId', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const node = forgeRunStore.findGraphNode(req.params.nodeId)
+    if (!node || node.project_id !== project.id) return res.status(404).json({ ok: false, error: 'node not found' })
+    forgeRunStore.touchGraphNode(node.node_id)
+    res.json({ ok: true, node, edges: forgeRunStore.getGraphEdges(project.id, { from_node_id: node.node_id }) })
+  })
+
+  router.get('/projects/:id/memory-graph/nodes/:nodeId/neighborhood', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const node = forgeRunStore.findGraphNode(req.params.nodeId)
+    if (!node || node.project_id !== project.id) return res.status(404).json({ ok: false, error: 'node not found' })
+    const depth = Math.min(3, Math.max(1, parseInt(req.query.depth) || 1))
+    res.json({ ok: true, ...forgeMemoryGraph.getGraphNeighborhood(forgeRunStore, project.id, node.node_id, depth) })
+  })
+
+  router.post('/projects/:id/memory-graph/consolidate', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    try {
+      const report = forgeMemoryGraph.consolidateMemoryGraph(forgeRunStore, project.id, { trigger_type: 'manual' })
+      recordCognitiveEvent(project.id, null, 'memory_edge_reinforced', 'Manual consolidation run', report)
+      appendAudit('memory_consolidation', { project_id: project.id, ...report })
+      res.json({ ok: true, consolidation: report })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // ── Context packet routes ───────────────────────────────────────────────────
+
+  router.get('/projects/:id/context-packets', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, packets: forgeRunStore.getContextPackets(project.id, { limit: Math.min(100, parseInt(req.query.limit) || 50) }) })
+  })
+
+  router.get('/runs/:id/context-packets', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    if (!findProject(run.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, packets: forgeRunStore.getContextPacketsForRun(req.params.id) })
+  })
+
+  // ── Advisory routes ─────────────────────────────────────────────────────────
+
+  router.get('/projects/:id/advisory-events', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const opts = { advisory_type: req.query.advisory_type || undefined, run_id: req.query.run_id || undefined, limit: Math.min(300, parseInt(req.query.limit) || 200) }
+    res.json({ ok: true, events: forgeRunStore.getAdvisoryEvents(project.id, opts) })
+  })
+
+  router.get('/projects/:id/advisory-metrics', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, metrics: forgeRunStore.getAdvisoryMetrics(project.id) })
+  })
+
+  // ── Cognitive event routes ──────────────────────────────────────────────────
+
+  router.get('/projects/:id/cognitive-events', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const opts = { run_id: req.query.run_id || undefined, event_type: req.query.event_type || undefined, limit: Math.min(200, parseInt(req.query.limit) || 100) }
+    res.json({ ok: true, events: forgeRunStore.getCognitiveEvents(project.id, opts) })
+  })
+
+  router.post('/projects/:id/cognitive-events', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const { event_type, title, details } = req.body || {}
+    if (!event_type) return res.status(400).json({ ok: false, error: 'event_type required' })
+    // Scrub any secrets the caller might pass in details
+    const safeDetails = forgeLearning.scrubSecretsFromLearningData(details || {})
+    const ev = forgeRunStore.upsertCognitiveEvent({
+      event_id: `cog-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      project_id: project.id, run_id: req.body?.run_id || null,
+      event_type: String(event_type).slice(0, 60), title: String(title || '').slice(0, 300),
+      details: safeDetails, created_at: nowIso(),
+    })
+    res.json({ ok: true, event: ev })
+  })
+
+  // ── Inline advisory consultation (manual / external) ────────────────────────
+
+  router.post('/projects/:id/helper-advisory/consult', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const { model_type, input, rule_result } = req.body || {}
+    if (!model_type || !forgeTraining.MODEL_TYPES[model_type]) {
+      return res.status(400).json({ ok: false, error: 'valid model_type required' })
+    }
+    const result = await consultHelperModel(project.id, model_type, input || {}, rule_result ?? null, { stage: req.body?.stage })
+    res.json({ ok: true, consultation: result, note: 'ADVISORY ONLY — rule/safety systems remain authoritative' })
   })
 
   return router

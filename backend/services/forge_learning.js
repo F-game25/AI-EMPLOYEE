@@ -46,6 +46,12 @@ const ENV_VALUE_PATTERN = /^([A-Z][A-Z0-9_]+=).+$/m
 function scrubString(str) {
   if (typeof str !== 'string') return str
   let out = str
+  // Standalone provider-key redaction first — these are unambiguous secret
+  // shapes that must never survive, independent of the generic patterns below.
+  out = out.replace(/sk-ant-[A-Za-z0-9_-]{16,}/gi, '[REDACTED]')
+  out = out.replace(/sk-[A-Za-z0-9]{20,}/g, '[REDACTED]')               // OpenAI-style
+  out = out.replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, '[REDACTED]')        // GitHub tokens
+  out = out.replace(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED]') // JWT
   for (const re of SECRET_PATTERNS) {
     out = out.replace(re, (match, cap) => cap
       ? match.replace(cap, '[REDACTED]')

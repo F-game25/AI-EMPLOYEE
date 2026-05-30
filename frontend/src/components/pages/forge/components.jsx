@@ -11,3 +11,4 @@ export {
   MemoryV3Pane, SafetyPane, LearningPane,
 } from './panels'
 export { TrainingPane } from './TrainingPane'
+export { CognitiveCorePanel } from './CognitiveCorePanel'

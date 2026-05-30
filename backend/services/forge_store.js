@@ -520,6 +520,128 @@ class ForgeStore {
         );
         CREATE INDEX IF NOT EXISTS idx_forge_dataset_checks_project
           ON forge_training_dataset_checks(project_id, dataset_id);
+
+        CREATE TABLE IF NOT EXISTS forge_memory_graph_nodes (
+          node_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          node_type TEXT NOT NULL,
+          source_id TEXT,
+          title TEXT,
+          summary TEXT,
+          payload_json TEXT DEFAULT '{}',
+          confidence TEXT DEFAULT 'medium',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          last_used_at TEXT,
+          usage_count INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_mg_nodes_project
+          ON forge_memory_graph_nodes(project_id, node_type);
+        CREATE INDEX IF NOT EXISTS idx_forge_mg_nodes_source
+          ON forge_memory_graph_nodes(project_id, node_type, source_id);
+
+        CREATE TABLE IF NOT EXISTS forge_memory_graph_edges (
+          edge_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          from_node_id TEXT NOT NULL,
+          to_node_id TEXT NOT NULL,
+          edge_type TEXT NOT NULL,
+          weight REAL DEFAULT 1.0,
+          evidence_json TEXT DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          last_reinforced_at TEXT,
+          reinforcement_count INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_mg_edges_from
+          ON forge_memory_graph_edges(project_id, from_node_id);
+        CREATE INDEX IF NOT EXISTS idx_forge_mg_edges_to
+          ON forge_memory_graph_edges(project_id, to_node_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_forge_mg_edges_uniq
+          ON forge_memory_graph_edges(project_id, from_node_id, to_node_id, edge_type);
+
+        CREATE TABLE IF NOT EXISTS forge_context_packets (
+          packet_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          stage TEXT,
+          goal TEXT,
+          selected_nodes_json TEXT DEFAULT '[]',
+          selected_edges_json TEXT DEFAULT '[]',
+          selected_skills_json TEXT DEFAULT '[]',
+          selected_models_json TEXT DEFAULT '[]',
+          included_files_json TEXT DEFAULT '[]',
+          excluded_reason_json TEXT DEFAULT '[]',
+          final_context_json TEXT DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_context_packets_project
+          ON forge_context_packets(project_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_forge_context_packets_run
+          ON forge_context_packets(run_id, stage);
+
+        CREATE TABLE IF NOT EXISTS forge_advisory_events (
+          advisory_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          stage TEXT,
+          model_version_id TEXT,
+          advisory_type TEXT,
+          input_summary_json TEXT DEFAULT '{}',
+          advice_json TEXT DEFAULT '{}',
+          rule_result_json TEXT DEFAULT '{}',
+          agreement TEXT,
+          confidence REAL,
+          used_by_agent INTEGER DEFAULT 0,
+          overridden_by_rule INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_advisory_project
+          ON forge_advisory_events(project_id, advisory_type, created_at);
+
+        CREATE TABLE IF NOT EXISTS forge_cognitive_events (
+          event_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          event_type TEXT NOT NULL,
+          title TEXT,
+          details_json TEXT DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_cognitive_project
+          ON forge_cognitive_events(project_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_forge_cognitive_run
+          ON forge_cognitive_events(run_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS forge_memory_consolidation_runs (
+          consolidation_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          trigger_type TEXT,
+          input_count INTEGER DEFAULT 0,
+          nodes_created INTEGER DEFAULT 0,
+          edges_created INTEGER DEFAULT 0,
+          edges_reinforced INTEGER DEFAULT 0,
+          memories_promoted INTEGER DEFAULT 0,
+          contradictions_found INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_consolidation_project
+          ON forge_memory_consolidation_runs(project_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS forge_stage_context_usage (
+          usage_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          run_id TEXT,
+          stage TEXT,
+          packet_id TEXT,
+          agent_name TEXT,
+          memory_nodes_used INTEGER DEFAULT 0,
+          skills_used INTEGER DEFAULT 0,
+          helper_models_consulted INTEGER DEFAULT 0,
+          outcome_status TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_stage_usage_project
+          ON forge_stage_context_usage(project_id, run_id);
       `)
       this.backend = 'sqlite'
       this.lastError = null
@@ -1659,6 +1781,411 @@ class ForgeStore {
         failed_jobs: count("SELECT COUNT(*) as cnt FROM forge_training_runs WHERE project_id = ? AND status = 'FAILED'", projectId),
       }
     } catch (err) { this._degrade(err); return empty }
+  }
+
+  // ── Phase 9 — Memory Graph, Context Engine, Cognitive Core ────────────────
+
+  upsertGraphNode(node) {
+    this._ensureDb()
+    if (!this._db) return node
+    const now = nowIso()
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_memory_graph_nodes
+          (node_id, project_id, node_type, source_id, title, summary, payload_json,
+           confidence, created_at, updated_at, last_used_at, usage_count)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        node.node_id, node.project_id, node.node_type, node.source_id || null,
+        (node.title || '').slice(0, 500), (node.summary || '').slice(0, 2000),
+        JSON.stringify(node.payload || {}), node.confidence || 'medium',
+        node.created_at || now, now, node.last_used_at || null, node.usage_count || 0,
+      )
+    } catch (err) { this._degrade(err) }
+    return node
+  }
+
+  findGraphNode(id) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_memory_graph_nodes WHERE node_id = ?').get(id)
+      return r ? this._parseGraphNode(r) : null
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  findGraphNodeBySource(projectId, nodeType, sourceId) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare(
+        'SELECT * FROM forge_memory_graph_nodes WHERE project_id = ? AND node_type = ? AND source_id = ? LIMIT 1'
+      ).get(projectId, nodeType, sourceId)
+      return r ? this._parseGraphNode(r) : null
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  _parseGraphNode(r) {
+    return { ...r, payload: (() => { try { return JSON.parse(r.payload_json) } catch { return {} } })() }
+  }
+
+  getGraphNodes(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_memory_graph_nodes WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.node_type) { q += ' AND node_type = ?'; args.push(opts.node_type) }
+      if (opts.search) { q += ' AND (title LIKE ? OR summary LIKE ?)'; args.push(`%${opts.search}%`, `%${opts.search}%`) }
+      q += ' ORDER BY usage_count DESC, updated_at DESC LIMIT ?'
+      args.push(opts.limit || 200)
+      return this._db.prepare(q).all(...args).map(r => this._parseGraphNode(r))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  touchGraphNode(id) {
+    this._ensureDb()
+    if (!this._db) return
+    try {
+      this._db.prepare('UPDATE forge_memory_graph_nodes SET usage_count = usage_count + 1, last_used_at = ? WHERE node_id = ?').run(nowIso(), id)
+    } catch (err) { this._degrade(err) }
+  }
+
+  updateGraphNode(id, patch) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const existing = this.findGraphNode(id)
+      if (!existing) return null
+      return this.upsertGraphNode({ ...existing, ...patch, node_id: id, payload: patch.payload || existing.payload })
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  upsertGraphEdge(edge) {
+    this._ensureDb()
+    if (!this._db) return edge
+    const now = nowIso()
+    try {
+      // Unique on (project, from, to, type) — reinforce if exists
+      const existing = this._db.prepare(
+        'SELECT edge_id, reinforcement_count, weight FROM forge_memory_graph_edges WHERE project_id = ? AND from_node_id = ? AND to_node_id = ? AND edge_type = ?'
+      ).get(edge.project_id, edge.from_node_id, edge.to_node_id, edge.edge_type)
+      if (existing) {
+        this._db.prepare('UPDATE forge_memory_graph_edges SET weight = ?, last_reinforced_at = ?, reinforcement_count = reinforcement_count + 1 WHERE edge_id = ?')
+          .run((existing.weight || 1) + (edge.weight || 0.5), now, existing.edge_id)
+        return { ...edge, edge_id: existing.edge_id, reinforced: true }
+      }
+      this._db.prepare(`
+        INSERT INTO forge_memory_graph_edges
+          (edge_id, project_id, from_node_id, to_node_id, edge_type, weight,
+           evidence_json, created_at, last_reinforced_at, reinforcement_count)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        edge.edge_id, edge.project_id, edge.from_node_id, edge.to_node_id,
+        edge.edge_type, edge.weight ?? 1.0, JSON.stringify(edge.evidence || {}),
+        edge.created_at || now, now, 0,
+      )
+    } catch (err) { this._degrade(err) }
+    return edge
+  }
+
+  reinforceGraphEdge(edgeId, amount = 0.5) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      this._db.prepare('UPDATE forge_memory_graph_edges SET weight = weight + ?, last_reinforced_at = ?, reinforcement_count = reinforcement_count + 1 WHERE edge_id = ?')
+        .run(amount, nowIso(), edgeId)
+      return this._db.prepare('SELECT * FROM forge_memory_graph_edges WHERE edge_id = ?').get(edgeId) || null
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  getGraphEdges(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_memory_graph_edges WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.from_node_id) { q += ' AND from_node_id = ?'; args.push(opts.from_node_id) }
+      if (opts.to_node_id) { q += ' AND to_node_id = ?'; args.push(opts.to_node_id) }
+      if (opts.edge_type) { q += ' AND edge_type = ?'; args.push(opts.edge_type) }
+      q += ' ORDER BY weight DESC LIMIT ?'
+      args.push(opts.limit || 500)
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r, evidence: (() => { try { return JSON.parse(r.evidence_json) } catch { return {} } })(),
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  // Neighborhood: all edges touching nodeId (both directions) + the neighbor nodes
+  getGraphNeighborhood(projectId, nodeId, depth = 1) {
+    this._ensureDb()
+    if (!this._db) return { nodes: [], edges: [] }
+    try {
+      const seen = new Set([nodeId])
+      const collectedEdges = []
+      let frontier = [nodeId]
+      for (let d = 0; d < Math.min(depth, 3); d++) {
+        const next = []
+        for (const nid of frontier) {
+          const edges = this._db.prepare(
+            'SELECT * FROM forge_memory_graph_edges WHERE project_id = ? AND (from_node_id = ? OR to_node_id = ?) ORDER BY weight DESC LIMIT 50'
+          ).all(projectId, nid, nid)
+          for (const e of edges) {
+            collectedEdges.push({ ...e, evidence: (() => { try { return JSON.parse(e.evidence_json) } catch { return {} } })() })
+            const other = e.from_node_id === nid ? e.to_node_id : e.from_node_id
+            if (!seen.has(other)) { seen.add(other); next.push(other) }
+          }
+        }
+        frontier = next
+        if (!frontier.length) break
+      }
+      const nodes = [...seen].map(id => this.findGraphNode(id)).filter(Boolean)
+      // Dedup edges by edge_id
+      const edgeMap = new Map(collectedEdges.map(e => [e.edge_id, e]))
+      return { nodes, edges: [...edgeMap.values()] }
+    } catch (err) { this._degrade(err); return { nodes: [], edges: [] } }
+  }
+
+  getGraphSummary(projectId) {
+    this._ensureDb()
+    const empty = { nodes: 0, edges: 0, high_confidence: 0, contradicted: 0, by_type: {}, top_files: [], top_skills: [], failure_patterns: 0 }
+    if (!this._db) return empty
+    try {
+      const c = (q, ...a) => this._db.prepare(q).get(...a)?.cnt || 0
+      const byType = {}
+      for (const row of this._db.prepare('SELECT node_type, COUNT(*) as cnt FROM forge_memory_graph_nodes WHERE project_id = ? GROUP BY node_type').all(projectId)) {
+        byType[row.node_type] = row.cnt
+      }
+      const topFiles = this._db.prepare(
+        "SELECT n.title, n.usage_count, COUNT(e.edge_id) as links FROM forge_memory_graph_nodes n LEFT JOIN forge_memory_graph_edges e ON (e.from_node_id = n.node_id OR e.to_node_id = n.node_id) WHERE n.project_id = ? AND n.node_type = 'file' GROUP BY n.node_id ORDER BY links DESC LIMIT 8"
+      ).all(projectId)
+      const topSkills = this._db.prepare(
+        "SELECT n.title, n.usage_count FROM forge_memory_graph_nodes n WHERE n.project_id = ? AND n.node_type = 'skill' ORDER BY n.usage_count DESC LIMIT 8"
+      ).all(projectId)
+      return {
+        nodes: c('SELECT COUNT(*) as cnt FROM forge_memory_graph_nodes WHERE project_id = ?', projectId),
+        edges: c('SELECT COUNT(*) as cnt FROM forge_memory_graph_edges WHERE project_id = ?', projectId),
+        high_confidence: c("SELECT COUNT(*) as cnt FROM forge_memory_graph_nodes WHERE project_id = ? AND confidence = 'high'", projectId),
+        contradicted: c("SELECT COUNT(*) as cnt FROM forge_memory_graph_edges WHERE project_id = ? AND edge_type = 'contradicts'", projectId),
+        by_type: byType,
+        top_files: topFiles,
+        top_skills: topSkills,
+        failure_patterns: c("SELECT COUNT(*) as cnt FROM forge_memory_graph_nodes WHERE project_id = ? AND node_type = 'failure_pattern'", projectId),
+      }
+    } catch (err) { this._degrade(err); return empty }
+  }
+
+  // ── Context packets ────────────────────────────────────────────────────────
+  upsertContextPacket(p) {
+    this._ensureDb()
+    if (!this._db) return p
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_context_packets
+          (packet_id, project_id, run_id, stage, goal, selected_nodes_json,
+           selected_edges_json, selected_skills_json, selected_models_json,
+           included_files_json, excluded_reason_json, final_context_json, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        p.packet_id, p.project_id, p.run_id || null, p.stage || null,
+        (p.goal || '').slice(0, 500),
+        JSON.stringify(p.selected_nodes || []), JSON.stringify(p.selected_edges || []),
+        JSON.stringify(p.selected_skills || []), JSON.stringify(p.selected_models || []),
+        JSON.stringify(p.included_files || []), JSON.stringify(p.excluded_reason || []),
+        JSON.stringify(p.final_context || {}), p.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return p
+  }
+
+  getContextPackets(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_context_packets WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.run_id) { q += ' AND run_id = ?'; args.push(opts.run_id) }
+      q += ' ORDER BY created_at DESC LIMIT ?'
+      args.push(opts.limit || 50)
+      return this._db.prepare(q).all(...args).map(r => this._parseContextPacket(r))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  getContextPacketsForRun(runId, limit = 50) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      return this._db.prepare('SELECT * FROM forge_context_packets WHERE run_id = ? ORDER BY created_at DESC LIMIT ?')
+        .all(runId, limit).map(r => this._parseContextPacket(r))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  _parseContextPacket(r) {
+    const pa = k => { try { return JSON.parse(r[k]) } catch { return [] } }
+    return {
+      ...r,
+      selected_nodes: pa('selected_nodes_json'), selected_edges: pa('selected_edges_json'),
+      selected_skills: pa('selected_skills_json'), selected_models: pa('selected_models_json'),
+      included_files: pa('included_files_json'), excluded_reason: pa('excluded_reason_json'),
+      final_context: (() => { try { return JSON.parse(r.final_context_json) } catch { return {} } })(),
+    }
+  }
+
+  // ── Advisory events ──────────────────────────────────────────────────────
+  upsertAdvisoryEvent(e) {
+    this._ensureDb()
+    if (!this._db) return e
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_advisory_events
+          (advisory_id, project_id, run_id, stage, model_version_id, advisory_type,
+           input_summary_json, advice_json, rule_result_json, agreement, confidence,
+           used_by_agent, overridden_by_rule, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        e.advisory_id, e.project_id, e.run_id || null, e.stage || null,
+        e.model_version_id || null, e.advisory_type || null,
+        JSON.stringify(e.input_summary || {}), JSON.stringify(e.advice || {}),
+        JSON.stringify(e.rule_result || {}), e.agreement || 'not_applicable',
+        e.confidence ?? null, e.used_by_agent ? 1 : 0, e.overridden_by_rule ? 1 : 0,
+        e.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return e
+  }
+
+  getAdvisoryEvents(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_advisory_events WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.advisory_type) { q += ' AND advisory_type = ?'; args.push(opts.advisory_type) }
+      if (opts.run_id) { q += ' AND run_id = ?'; args.push(opts.run_id) }
+      q += ' ORDER BY created_at DESC LIMIT ?'
+      args.push(opts.limit || 200)
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r,
+        input_summary: (() => { try { return JSON.parse(r.input_summary_json) } catch { return {} } })(),
+        advice: (() => { try { return JSON.parse(r.advice_json) } catch { return {} } })(),
+        rule_result: (() => { try { return JSON.parse(r.rule_result_json) } catch { return {} } })(),
+        used_by_agent: !!r.used_by_agent, overridden_by_rule: !!r.overridden_by_rule,
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  getAdvisoryMetrics(projectId) {
+    this._ensureDb()
+    const empty = { total: 0, agreement_rate: 0, helpful_disagreement_rate: 0, unsafe_disagreement_rate: 0, advisor_used_rate: 0, advisor_ignored_rate: 0, by_type: {} }
+    if (!this._db) return empty
+    try {
+      const events = this.getAdvisoryEvents(projectId, { limit: 5000 })
+      const applicable = events.filter(e => !['no_active_model', 'not_applicable'].includes(e.agreement))
+      const total = applicable.length
+      if (!total) return { ...empty, total: 0 }
+      const agree = applicable.filter(e => e.agreement === 'agree').length
+      const disagree = applicable.filter(e => e.agreement === 'disagree')
+      // Unsafe disagreement: helper suggested lower risk than rule on a risk classifier
+      const unsafe = disagree.filter(e => e.advisory_type === 'risk_classifier' && e.overridden_by_rule).length
+      const used = applicable.filter(e => e.used_by_agent).length
+      const byType = {}
+      for (const e of applicable) {
+        byType[e.advisory_type] = byType[e.advisory_type] || { total: 0, agree: 0 }
+        byType[e.advisory_type].total++
+        if (e.agreement === 'agree') byType[e.advisory_type].agree++
+      }
+      return {
+        total,
+        agreement_rate: Math.round((agree / total) * 100) / 100,
+        helpful_disagreement_rate: Math.round((disagree.filter(e => e.used_by_agent).length / total) * 100) / 100,
+        unsafe_disagreement_rate: Math.round((unsafe / total) * 100) / 100,
+        advisor_used_rate: Math.round((used / total) * 100) / 100,
+        advisor_ignored_rate: Math.round(((total - used) / total) * 100) / 100,
+        by_type: byType,
+      }
+    } catch (err) { this._degrade(err); return empty }
+  }
+
+  // ── Cognitive events ──────────────────────────────────────────────────────
+  upsertCognitiveEvent(e) {
+    this._ensureDb()
+    if (!this._db) return e
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_cognitive_events
+          (event_id, project_id, run_id, event_type, title, details_json, created_at)
+        VALUES (?,?,?,?,?,?,?)
+      `).run(
+        e.event_id, e.project_id, e.run_id || null, e.event_type,
+        (e.title || '').slice(0, 300), JSON.stringify(e.details || {}), e.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return e
+  }
+
+  getCognitiveEvents(projectId, opts = {}) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      let q = 'SELECT * FROM forge_cognitive_events WHERE project_id = ?'
+      const args = [projectId]
+      if (opts.run_id) { q += ' AND run_id = ?'; args.push(opts.run_id) }
+      if (opts.event_type) { q += ' AND event_type = ?'; args.push(opts.event_type) }
+      q += ' ORDER BY created_at DESC LIMIT ?'
+      args.push(opts.limit || 100)
+      return this._db.prepare(q).all(...args).map(r => ({
+        ...r, details: (() => { try { return JSON.parse(r.details_json) } catch { return {} } })(),
+      }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  // ── Consolidation runs ────────────────────────────────────────────────────
+  upsertConsolidationRun(c) {
+    this._ensureDb()
+    if (!this._db) return c
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_memory_consolidation_runs
+          (consolidation_id, project_id, trigger_type, input_count, nodes_created,
+           edges_created, edges_reinforced, memories_promoted, contradictions_found, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        c.consolidation_id, c.project_id, c.trigger_type || 'manual',
+        c.input_count || 0, c.nodes_created || 0, c.edges_created || 0,
+        c.edges_reinforced || 0, c.memories_promoted || 0, c.contradictions_found || 0,
+        c.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return c
+  }
+
+  getConsolidationRuns(projectId, limit = 20) {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      return this._db.prepare('SELECT * FROM forge_memory_consolidation_runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?')
+        .all(projectId, limit)
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  // ── Stage context usage ───────────────────────────────────────────────────
+  upsertStageContextUsage(u) {
+    this._ensureDb()
+    if (!this._db) return u
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_stage_context_usage
+          (usage_id, project_id, run_id, stage, packet_id, agent_name,
+           memory_nodes_used, skills_used, helper_models_consulted, outcome_status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        u.usage_id, u.project_id, u.run_id || null, u.stage || null,
+        u.packet_id || null, u.agent_name || null,
+        u.memory_nodes_used || 0, u.skills_used || 0, u.helper_models_consulted || 0,
+        u.outcome_status || null, u.created_at || nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return u
   }
 
   _degrade(err) {

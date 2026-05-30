@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { StatusPill, SectionLabel } from '../../nexus-ui'
 import api from '../../../api/client'
-import { DiffViewer, FileEditor, ChatPane, FileTree, ProjectPicker, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel, RunTimeline, UnderstandPane, AgenticPane, RunHistoryPane, RunMetricsPane, BacklogPane, DecomposerPane, SkillsLibraryPane, ModelRouterPane, CyclesPane, RoadmapPane, SuggestionsPane, MemoryV3Pane, SafetyPane, LearningPane, TrainingPane } from './components'
+import { DiffViewer, FileEditor, ChatPane, FileTree, ProjectPicker, ActionQueue, Terminal, PolicyPreview, ForgeSystemPanel, RunTimeline, UnderstandPane, AgenticPane, RunHistoryPane, RunMetricsPane, BacklogPane, DecomposerPane, SkillsLibraryPane, ModelRouterPane, CyclesPane, RoadmapPane, SuggestionsPane, MemoryV3Pane, SafetyPane, LearningPane, TrainingPane, CognitiveCorePanel } from './components'
 
 // ── SVG Icon system ─────────────────────────────────────────────────────────
 const ICONS = {
@@ -133,6 +133,7 @@ export function ForgeSectionView({ section, project, activeRun, onApprove, onRej
     safety:      <SafetyPane project={project} activeRun={activeRun} onApprove={onApprove} onReject={onReject} onContinue={onContinue} />,
     learning:    <LearningPane project={project} />,
     training:    <TrainingPane project={project} />,
+    cognitive:   <CognitiveCorePanel project={project} />,
   }
   const content = map[section]
   if (!content) return null
