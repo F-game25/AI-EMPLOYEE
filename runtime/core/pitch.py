@@ -3,6 +3,7 @@
 Workflow na blok 3:
   goedgekeurd → [genereer_pitch] → pitch klaar → Lars verstuurt ZELF
              → [markeer_gepitcht] → gepitcht
+             → [markeer_akkoord]  → akkoord
              → [markeer_betaald]  → betaald
              → [markeer_live]     → live
 
@@ -84,42 +85,41 @@ def genereer_pitch(order_id: str, *, demo_url: str = "") -> dict[str, Any]:
             "error": f"Order heeft status '{order['status']}', verwacht 'goedgekeurd'",
         }
 
-    naam   = order["bedrijfsnaam"]
-    plaats = order["plaats"]
-    prijs  = order["prijs"]
-    demo   = demo_url or order.get("demo_pad", "")
-    paypal = f"{_PAYPAL_LINK}/{int(prijs)}" if not _PAYPAL_LINK.endswith(str(int(prijs))) else _PAYPAL_LINK
+    naam    = order["bedrijfsnaam"]
+    plaats  = order["plaats"]
+    branche = order["branche"]
+    prijs   = order["prijs"]
+    demo    = demo_url or order.get("demo_pad", "")
+    paypal  = f"{_PAYPAL_LINK}/{int(prijs)}" if not _PAYPAL_LINK.endswith(str(int(prijs))) else _PAYPAL_LINK
 
-    aanhef = f"het team van {naam}" if not order.get("contact") else order["contact"]
-    demo_display = demo if demo.startswith("http") else f"bestand: {demo}"
+    demo_link = demo if demo.startswith("http") else f"http://localhost:8787/api/demos/{Path(demo).name}"
+
     prompt = (
-        f"Schrijf een kort, persoonlijk bericht (max 120 woorden) gericht aan {naam} in {plaats}. "
-        f"Begin de aanhef met 'Hoi {naam},' — gebruik NIET een verzonnen voornaam. "
-        f"De toon is: vriendelijk, direct, lokaal — niet opdringerig. "
-        f"Vertel dat ik een gratis demo-website voor ze heb klaargezet. "
-        f"Vermeld letterlijk: '{demo_display}'. "
-        f"Noem de prijs: €{prijs:.0f} eenmalig, geen maandelijkse kosten. "
-        f"Concrete volgende stap: betalen via {paypal} en dan zet ik hem live. "
-        f"Sluit af met 'Groeten, Lars'. "
-        f"Schrijf ALLEEN het bericht, geen uitleg of extra tekst."
+        f"Schrijf een persoonlijk bericht (max 120 woorden) van Lars aan {naam} in {plaats}.\n"
+        f"Verplichte structuur, in exact deze volgorde:\n"
+        f"1. Begin met: 'Hoi {naam},' gevolgd door één zin over wat ze doen ({branche} in {plaats}).\n"
+        f"2. Schrijf: 'Ik heb alvast een website voor jullie gemaakt, speciaal voor {branche} in {plaats}.'\n"
+        f"3. Schrijf: 'Bekijk hem hier: {demo_link}'\n"
+        f"4. Noem twee concrete dingen die op de site staan (passend bij {branche}).\n"
+        f"5. Sluit af met: 'Laat even weten wat je ervan vindt — ik leg het graag toe.'\n"
+        f"Daarna: 'Groeten, Lars'\n"
+        f"GEEN prijs, GEEN betaallink, GEEN verkooptaal. Schrijf ALLEEN het bericht."
     )
 
-    tekst = _llm(prompt, max_tokens=200)
+    tekst = _llm(prompt, max_tokens=300)
 
-    # Sla pitch_tekst op in de orders-tabel als die kolom bestaat
     _sla_pitch_op(order_id, tekst)
 
     return {
         "ok":          True,
         "order_id":    order_id,
         "pitch_tekst": tekst,
-        "paypal_link": paypal,
         "order":       order_ophalen(order_id),
     }
 
 
 def markeer_gepitcht(order_id: str) -> dict[str, Any]:
-    """Zet status → gepitcht. Aanroepen NADAT Lars het bericht verstuurd heeft."""
+    """Zet status → gepitcht."""
     from core.orders_store import order_ophalen, status_bijwerken
     order = order_ophalen(order_id)
     if not order:
@@ -130,14 +130,44 @@ def markeer_gepitcht(order_id: str) -> dict[str, Any]:
     return {"ok": True, "order": order}
 
 
+def markeer_akkoord(order_id: str) -> dict[str, Any]:
+    """Zet status → akkoord en genereert het vervolgbericht met prijs + PayPal-link."""
+    from core.orders_store import order_ophalen, status_bijwerken
+
+    order = order_ophalen(order_id)
+    if not order:
+        return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+    if order["status"] != "gepitcht":
+        return {"ok": False, "error": f"Verwacht status 'gepitcht', is '{order['status']}'"}
+
+    naam   = order["bedrijfsnaam"]
+    prijs  = order["prijs"]
+    paypal = f"{_PAYPAL_LINK}/{int(prijs)}" if not _PAYPAL_LINK.endswith(str(int(prijs))) else _PAYPAL_LINK
+
+    vervolg = (
+        f"Hoi {naam},\n\n"
+        f"Top dat je interesse hebt! Dan zetten we hem voor je live.\n\n"
+        f"De kosten zijn €{prijs:.0f} eenmalig — geen maandelijkse kosten.\n"
+        f"Je kunt direct betalen via: {paypal}\n\n"
+        f"Zodra de betaling binnen is, zet ik de site voor jullie live.\n\n"
+        f"Groeten, Lars"
+    )
+
+    _sla_vervolg_op(order_id, vervolg)
+    order = status_bijwerken(order_id, "akkoord")
+    order["vervolg_tekst"] = vervolg
+
+    return {"ok": True, "order": order, "vervolg_tekst": vervolg}
+
+
 def markeer_betaald(order_id: str) -> dict[str, Any]:
     """Zet status → betaald. Lars markeert dit handmatig als het geld binnen is."""
     from core.orders_store import order_ophalen, status_bijwerken
     order = order_ophalen(order_id)
     if not order:
         return {"ok": False, "error": f"Order {order_id} niet gevonden"}
-    if order["status"] not in ("gepitcht", "goedgekeurd"):
-        return {"ok": False, "error": f"Verwacht status 'gepitcht' of 'goedgekeurd', is '{order['status']}'"}
+    if order["status"] not in ("gepitcht", "goedgekeurd", "akkoord"):
+        return {"ok": False, "error": f"Verwacht status 'gepitcht', 'akkoord' of 'goedgekeurd', is '{order['status']}'"}
     order = status_bijwerken(order_id, "betaald")
     logger.info("pitch: order %s → betaald", order_id)
     return {"ok": True, "order": order}
@@ -156,21 +186,29 @@ def markeer_live(order_id: str) -> dict[str, Any]:
     return {"ok": True, "order": order}
 
 
-# ── intern: pitch opslaan in DB ───────────────────────────────────────────────
+# ── intern: tekst opslaan in DB ──────────────────────────────────────────────
 
 def _sla_pitch_op(order_id: str, tekst: str) -> None:
-    """Voeg pitch_tekst kolom toe (indien nodig) en sla de tekst op."""
     from core.orders_store import _conn
     try:
         with _conn() as conn:
-            # Voeg kolom toe als hij er nog niet is (idempotent)
             try:
                 conn.execute("ALTER TABLE orders ADD COLUMN pitch_tekst TEXT DEFAULT ''")
             except Exception:
-                pass  # kolom bestaat al
-            conn.execute(
-                "UPDATE orders SET pitch_tekst=? WHERE id=?",
-                (tekst, order_id),
-            )
+                pass
+            conn.execute("UPDATE orders SET pitch_tekst=? WHERE id=?", (tekst, order_id))
     except Exception as exc:
         logger.warning("pitch: kon pitch_tekst niet opslaan: %s", exc)
+
+
+def _sla_vervolg_op(order_id: str, tekst: str) -> None:
+    from core.orders_store import _conn
+    try:
+        with _conn() as conn:
+            try:
+                conn.execute("ALTER TABLE orders ADD COLUMN vervolg_tekst TEXT DEFAULT ''")
+            except Exception:
+                pass
+            conn.execute("UPDATE orders SET vervolg_tekst=? WHERE id=?", (tekst, order_id))
+    except Exception as exc:
+        logger.warning("pitch: kon vervolg_tekst niet opslaan: %s", exc)

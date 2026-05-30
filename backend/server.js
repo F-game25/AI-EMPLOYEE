@@ -662,10 +662,24 @@ app.get('/api/demos/:filename', (req, res) => {
   if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
   const demoPath = path.join(AI_HOME, 'state', 'artifacts', 'demos', fname);
   if (!fs.existsSync(demoPath)) return res.status(404).send('Demo niet gevonden');
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  // Allow embedding in iframes (same origin for the dashboard preview)
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.sendFile(demoPath);
+
+  // Use res.send() instead of res.sendFile() so we control every header explicitly.
+  // Helmet sets restrictive headers globally; for demo pages (standalone HTML in a new tab)
+  // we need permissive inline-style/script CSP and no download-forcing headers.
+  const html = fs.readFileSync(demoPath, 'utf8');
+  res.removeHeader('X-Download-Options');
+  res.removeHeader('Cross-Origin-Opener-Policy');
+  res.removeHeader('Cross-Origin-Resource-Policy');
+  res.set({
+    'Content-Type': 'text/html; charset=utf-8',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy':
+      "default-src 'self' data:; script-src 'self' 'unsafe-inline'; " +
+      "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; " +
+      "font-src 'self' data:; frame-ancestors 'self';",
+  });
+  res.send(html);
 });
 
 // Dashboard API — security, knowledge, memory, intelligence, cognition, integrations, hooks

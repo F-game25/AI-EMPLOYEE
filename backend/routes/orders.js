@@ -140,6 +140,34 @@ print(json.dumps(result))
     }
   });
 
+  // POST /api/orders/:id/research — research real business info (HITL: Lars klikt)
+  r.post('/:id/research', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const snippet = `
+from core.orders_store import order_ophalen, _conn
+from core.bedrijf_research import research_bedrijf
+import json
+order = order_ophalen(${JSON.stringify(id)})
+if not order:
+  print(json.dumps({"ok": False, "error": "Order niet gevonden"}))
+else:
+  data = research_bedrijf(order['bedrijfsnaam'], order['plaats'])
+  # Persist research_data on the order
+  try:
+    with _conn() as conn:
+      conn.execute("UPDATE orders SET research_data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), ${JSON.stringify(id)}))
+  except Exception as exc:
+    pass  # non-fatal — data still returned
+  print(json.dumps({"ok": True, "research_data": data}))
+`;
+      const result = await pyCall(snippet, 30_000);
+      res.status(result.ok ? 200 : 500).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // POST /api/orders/:id/demo — generate demo website, set status ter_review
   r.post('/:id/demo', requireAuth, async (req, res) => {
     try {
@@ -233,6 +261,23 @@ print(json.dumps(result))
     }
   });
 
+  // POST /api/orders/:id/akkoord — klant heeft akkoord gegeven, genereer vervolgbericht
+  r.post('/:id/akkoord', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const snippet = `
+from core.pitch import markeer_akkoord
+result = markeer_akkoord(${JSON.stringify(id)})
+print(json.dumps(result))
+`;
+      const result = await pyCall(snippet);
+      const httpStatus = result.ok ? 200 : 400;
+      res.status(httpStatus).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // POST /api/orders/:id/status — set status (gepitcht/betaald/live)
   r.post('/:id/status', requireAuth, async (req, res) => {
     try {
@@ -251,6 +296,23 @@ print(json.dumps(result))
 `;
       const result = await pyCall(snippet);
       const httpStatus = result.ok ? 200 : 400;
+      res.status(httpStatus).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/orders/:id/deploy — deploy demo naar Netlify (HITL: Lars klikt)
+  r.post('/:id/deploy', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const snippet = `
+from core.hosting import deploy_to_netlify
+result = deploy_to_netlify(${JSON.stringify(id)})
+print(json.dumps(result))
+`;
+      const result = await pyCall(snippet, 60_000);
+      const httpStatus = result.ok ? 200 : (result.error?.includes('NETLIFY_API_TOKEN') ? 400 : 500);
       res.status(httpStatus).json(result);
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });

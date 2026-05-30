@@ -165,3 +165,20 @@
   font-size: 0.8rem;
 }
 .op-card__newtab:hover { background: var(--surface-hover, #2a2a2a); color: var(--text, #eee); }
+
+.op-research {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.op-research__label { font-weight: 600; margin-bottom: 0.4rem; color: #22c55e; }
+.op-research__items { display: flex; flex-wrap: wrap; gap: 0.5rem 1.2rem; }
+.op-research__items span, .op-research__items a {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  color: var(--text, #eee); text-decoration: none;
+}
+.op-research__items a:hover { text-decoration: underline; }
+.op-research__missing { opacity: 0.45; font-style: italic; }

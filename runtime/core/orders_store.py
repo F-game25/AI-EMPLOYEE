@@ -4,7 +4,7 @@ Uses the same audit.db that AuditEngine already owns.  The `orders` table is
 created on first import via `_init_table()`.
 
 Status flow:
-  gevonden → demo_klaar → ter_review → goedgekeurd → gepitcht → betaald → live
+  gevonden → demo_klaar → ter_review → goedgekeurd → gepitcht → akkoord → betaald → live
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ _VALID_STATUSES = (
     "ter_review",
     "goedgekeurd",
     "gepitcht",
+    "akkoord",
     "betaald",
     "live",
 )
@@ -50,16 +51,24 @@ def _init_table() -> None:
                 status       TEXT NOT NULL DEFAULT 'gevonden',
                 demo_pad     TEXT DEFAULT '',
                 prijs        REAL DEFAULT 0.0,
-                aangemaakt_op TEXT NOT NULL,
-                pitch_tekst  TEXT DEFAULT ''
+                aangemaakt_op  TEXT NOT NULL,
+                pitch_tekst    TEXT DEFAULT '',
+                vervolg_tekst  TEXT DEFAULT '',
+                live_url       TEXT DEFAULT ''
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)")
-        # Add pitch_tekst column to existing databases that predate this field
-        try:
-            conn.execute("ALTER TABLE orders ADD COLUMN pitch_tekst TEXT DEFAULT ''")
-        except Exception:
-            pass  # column already exists
+        # Idempotent migrations for columns added after initial schema
+        for col, definition in (
+            ("pitch_tekst",   "TEXT DEFAULT ''"),
+            ("vervolg_tekst", "TEXT DEFAULT ''"),
+            ("live_url",      "TEXT DEFAULT ''"),
+            ("research_data", "TEXT DEFAULT ''"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {definition}")
+            except Exception:
+                pass  # column already exists
 
 
 _init_table()

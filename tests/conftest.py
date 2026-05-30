@@ -12,10 +12,12 @@ from pathlib import Path
 
 import pytest
 
-# ── Make runtime/agents importable from any test ─────────────────────────────
-_AGENTS_DIR = Path(__file__).parent.parent / "runtime" / "agents"
-if str(_AGENTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_AGENTS_DIR))
+# ── Make runtime/ and runtime/agents importable from any test ────────────────
+_RUNTIME_DIR = Path(__file__).parent.parent / "runtime"
+_AGENTS_DIR = _RUNTIME_DIR / "agents"
+for _p in (_RUNTIME_DIR, _AGENTS_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 
 @pytest.fixture(autouse=True)

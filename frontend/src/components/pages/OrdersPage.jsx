@@ -2,13 +2,14 @@ import { useEffect, useState, useCallback } from 'react'
 import api from '../../api/client'
 import './OrdersPage.css'
 
-const STATUSES = ['gevonden', 'demo_klaar', 'ter_review', 'goedgekeurd', 'gepitcht', 'betaald', 'live']
+const STATUSES = ['gevonden', 'demo_klaar', 'ter_review', 'goedgekeurd', 'gepitcht', 'akkoord', 'betaald', 'live']
 const STATUS_LABELS = {
   gevonden: 'Gevonden',
   demo_klaar: 'Demo klaar',
   ter_review: 'Ter review',
   goedgekeurd: 'Goedgekeurd',
   gepitcht: 'Gepitcht',
+  akkoord: 'Akkoord',
   betaald: 'Betaald',
   live: 'Live',
 }
@@ -152,10 +153,21 @@ function BedrijfZoekerPanel({ onCreated }) {
   )
 }
 
+function useCopy(text) {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(text || '')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return [copied, copy]
+}
+
 function PitchBox({ order, onStatusChange }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  const [copied, setCopied] = useState(false)
+  const [copiedPitch, copyPitch] = useCopy(order.pitch_tekst)
+  const [copiedVervolg, copyVervolg] = useCopy(order.vervolg_tekst)
 
   async function markStatus(newStatus) {
     setBusy(true); setErr(null)
@@ -167,33 +179,75 @@ function PitchBox({ order, onStatusChange }) {
     finally { setBusy(false) }
   }
 
-  function copy() {
-    navigator.clipboard.writeText(order.pitch_tekst || '')
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  async function markAkkoord() {
+    setBusy(true); setErr(null)
+    try {
+      const res = await api.post(`/api/orders/${order.id}/akkoord`, {})
+      if (res.ok) onStatusChange(res.order)
+      else setErr(res.error)
+    } catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+
+  async function markBetaald() {
+    setBusy(true); setErr(null)
+    try {
+      const res = await api.post(`/api/orders/${order.id}/status`, { status: 'betaald' })
+      if (res.ok) onStatusChange(res.order)
+      else setErr(res.error)
+    } catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
   }
 
   return (
     <div className="op-pitch">
-      <pre className="op-pitch__text">{order.pitch_tekst}</pre>
-      <div className="op-pitch__actions">
-        <button onClick={copy} disabled={!order.pitch_tekst}>{copied ? 'Gekopieerd!' : 'Kopieer pitch'}</button>
-        {order.status === 'goedgekeurd' && (
-          <button onClick={() => markStatus('gepitcht')} disabled={busy}>Gemarkeerd als verstuurd</button>
-        )}
-      </div>
+      {order.pitch_tekst && <>
+        <p className="op-pitch__label">Pitch (zonder prijs):</p>
+        <pre className="op-pitch__text">{order.pitch_tekst}</pre>
+        <div className="op-pitch__actions">
+          <button onClick={copyPitch}>{copiedPitch ? 'Gekopieerd!' : 'Kopieer pitch'}</button>
+          {order.status === 'goedgekeurd' && (
+            <button onClick={() => markStatus('gepitcht')} disabled={busy}>Gemarkeerd als verstuurd</button>
+          )}
+          {order.status === 'gepitcht' && (
+            <button onClick={markAkkoord} disabled={busy}>Klant heeft akkoord gegeven</button>
+          )}
+        </div>
+      </>}
+
+      {order.status === 'akkoord' && order.vervolg_tekst && <>
+        <p className="op-pitch__label">Vervolgbericht (met prijs + betaallink):</p>
+        <pre className="op-pitch__text">{order.vervolg_tekst}</pre>
+        <div className="op-pitch__actions">
+          <button onClick={copyVervolg}>{copiedVervolg ? 'Gekopieerd!' : 'Kopieer vervolgbericht'}</button>
+          <button onClick={markBetaald} disabled={busy}>Gemarkeerd als betaald</button>
+        </div>
+      </>}
+
       {err && <p className="op-err">{err}</p>}
     </div>
   )
 }
 
-function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo, onDelete }) {
+function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
   const [order, setOrder] = useState(initialOrder)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [showPitch, setShowPitch] = useState(!!initialOrder.pitch_tekst)
+  const [researchBusy, setResearchBusy] = useState(false)
+  const [researchData, setResearchData] = useState(() => {
+    try { return initialOrder.research_data ? JSON.parse(initialOrder.research_data) : null } catch { return null }
+  })
 
-  useEffect(() => { setOrder(initialOrder); setShowPitch(!!initialOrder.pitch_tekst) }, [initialOrder])
+  useEffect(() => {
+    setOrder(initialOrder)
+    setShowPitch(!!initialOrder.pitch_tekst)
+    try { setResearchData(initialOrder.research_data ? JSON.parse(initialOrder.research_data) : null) } catch { setResearchData(null) }
+  }, [initialOrder])
+
+  const [deployBusy, setDeployBusy] = useState(false)
+  const [deployResult, setDeployResult] = useState(null)
+  const [copiedHosting, copyHostingText] = useCopy(deployResult?.hosting_voorstel || '')
 
   function update(o) { setOrder(o); onRefresh() }
 
@@ -223,7 +277,6 @@ function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo, onDelete }) 
   async function generatePitch() {
     const res = await act('pitch')
     if (res.ok) {
-      // Reload the order to get pitch_tekst
       const full = await api.get(`/api/orders/${order.id}`)
       if (full.ok) { setOrder(full.order); setShowPitch(true) }
     }
@@ -239,7 +292,33 @@ function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo, onDelete }) 
     finally { setBusy(false) }
   }
 
+  async function doResearch() {
+    setResearchBusy(true); setErr(null)
+    try {
+      const res = await api.post(`/api/orders/${order.id}/research`, {})
+      if (res.ok) setResearchData(res.research_data)
+      else setErr(res.error || 'Research mislukt')
+    } catch (e) { setErr(e.message) }
+    finally { setResearchBusy(false) }
+  }
+
+  async function deployNetlify() {
+    setDeployBusy(true)
+    try {
+      const res = await api.post(`/api/orders/${order.id}/deploy`, {})
+      if (res.ok) {
+        setDeployResult(res)
+        const full = await api.get(`/api/orders/${order.id}`)
+        if (full.ok) update(full.order)
+      } else {
+        setErr(res.error || 'Deploy mislukt')
+      }
+    } catch (e) { setErr(e.message) }
+    finally { setDeployBusy(false) }
+  }
+
   const s = order.status
+  const hasNetlifyToken = true // server-side check — knop disabled als token ontbreekt
 
   return (
     <div className={`op-card op-card--${s}`}>
@@ -264,29 +343,57 @@ function OrderCard({ order: initialOrder, onRefresh, onPreviewDemo, onDelete }) 
       </div>
 
       <div className="op-card__actions">
-        {s === 'gevonden' && (
+        {s === 'gevonden' && (<>
+          <button onClick={doResearch} disabled={researchBusy}>
+            {researchBusy ? 'Research…' : researchData ? 'Research opnieuw' : 'Research bedrijf'}
+          </button>
           <button onClick={() => act('demo')} disabled={busy}>Genereer demo</button>
-        )}
+        </>)}
         {(s === 'demo_klaar' || s === 'ter_review') && (<>
-          <button onClick={() => onPreviewDemo?.(demoUrl())} disabled={!order.demo_pad}>Bekijk demo</button>
-          <a className="op-card__newtab" href={demoUrl() || '#'} target="_blank" rel="noreferrer" title="Open in nieuw tabblad">↗</a>
+          <button onClick={openDemo} disabled={!order.demo_pad}>Bekijk demo ↗</button>
           <button onClick={() => act('approve')} disabled={busy}>Keur goed</button>
         </>)}
+        {s === 'goedgekeurd' && order.demo_pad && (
+          <button onClick={openDemo}>Bekijk demo ↗</button>
+        )}
         {s === 'goedgekeurd' && !showPitch && (
           <button onClick={generatePitch} disabled={busy}>Genereer pitch</button>
         )}
-        {s === 'goedgekeurd' && order.demo_pad && (<>
-          <button onClick={() => onPreviewDemo?.(demoUrl())}>Bekijk demo</button>
-          <a className="op-card__newtab" href={demoUrl() || '#'} target="_blank" rel="noreferrer" title="Open in nieuw tabblad">↗</a>
-        </>)}
-        {s === 'gepitcht' && (
-          <button onClick={() => markStatus('betaald')} disabled={busy}>Gemarkeerd als betaald</button>
-        )}
-        {s === 'betaald' && (
+        {s === 'betaald' && (<>
+          <button onClick={deployNetlify} disabled={deployBusy}>
+            {deployBusy ? 'Deployen…' : 'Zet live via Netlify'}
+          </button>
+          {(order.live_url || deployResult?.live_url) && (<>
+            <a href={order.live_url || deployResult.live_url} target="_blank" rel="noreferrer" className="op-live-link">
+              {order.live_url || deployResult.live_url}
+            </a>
+          </>)}
+          {deployResult?.hosting_voorstel && (
+            <div className="op-hosting-voorstel">
+              <pre>{deployResult.hosting_voorstel}</pre>
+              <button onClick={copyHostingText}>{copiedHosting ? 'Gekopieerd!' : 'Kopieer hosting-voorstel'}</button>
+            </div>
+          )}
           <button onClick={() => markStatus('live')} disabled={busy}>Gemarkeerd als live</button>
-        )}
-        {s === 'live' && <span className="op-done">Live</span>}
+        </>)}
+        {s === 'live' && <span className="op-done">Live ✓{order.live_url && <> — <a href={order.live_url} target="_blank" rel="noreferrer">{order.live_url}</a></>}</span>}
       </div>
+
+      {researchData && (
+        <div className="op-research">
+          <p className="op-research__label">Research resultaten:</p>
+          <div className="op-research__items">
+            {researchData.telefoon
+              ? <span>📞 {researchData.telefoon}</span>
+              : <span className="op-research__missing">📞 Geen nummer gevonden</span>}
+            {researchData.website
+              ? <a href={researchData.website} target="_blank" rel="noreferrer">🌐 {researchData.website}</a>
+              : <span className="op-research__missing">🌐 Geen website gevonden</span>}
+            {researchData.adres && <span>📍 {researchData.adres}</span>}
+            {researchData.social?.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer">🔗 {u}</a>)}
+          </div>
+        </div>
+      )}
 
       {(showPitch || order.pitch_tekst) && (
         <PitchBox order={order} onStatusChange={o => { setOrder(o); onRefresh() }} />
@@ -301,8 +408,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
-  const [panel, setPanel] = useState(null) // null | 'form' | 'zoeker'
-  const [previewUrl, setPreviewUrl] = useState(null)
+  const [panel, setPanel] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -316,28 +422,13 @@ export default function OrdersPage() {
 
   useEffect(() => { load() }, [load])
 
-  function onCreated(order) {
-    setOrders(prev => [order, ...prev])
-    setPanel(null)
-  }
-
-  function togglePanel(name) {
-    setPanel(p => p === name ? null : name)
-  }
-
-  function handlePreviewDemo(url) {
-    setPreviewUrl(prev => prev === url ? null : url)
-  }
+  function togglePanel(name) { setPanel(p => p === name ? null : name) }
 
   async function handleDelete(id) {
     try {
       const res = await api.delete(`/api/orders/${id}`)
-      if (res.ok) {
-        setOrders(prev => prev.filter(o => o.id !== id))
-        setPreviewUrl(null)
-      } else {
-        setErr(res.error || 'Verwijderen mislukt')
-      }
+      if (res.ok) setOrders(prev => prev.filter(o => o.id !== id))
+      else setErr(res.error || 'Verwijderen mislukt')
     } catch (e) { setErr(e.message) }
   }
 
@@ -349,53 +440,27 @@ export default function OrdersPage() {
           <button
             className={panel === 'zoeker' ? 'op-btn--active' : ''}
             onClick={() => togglePanel('zoeker')}
-          >
-            {panel === 'zoeker' ? 'Annuleer' : 'Zoek bedrijven'}
-          </button>
+          >{panel === 'zoeker' ? 'Annuleer' : 'Zoek bedrijven'}</button>
           <button
             className={panel === 'form' ? 'op-btn--active' : ''}
             onClick={() => togglePanel('form')}
-          >
-            {panel === 'form' ? 'Annuleer' : '+ Handmatig'}
-          </button>
+          >{panel === 'form' ? 'Annuleer' : '+ Handmatig'}</button>
           <button onClick={load}>Vernieuwen</button>
-          {previewUrl && (
-            <button onClick={() => setPreviewUrl(null)} className="op-btn--active">✕ Sluit preview</button>
-          )}
         </div>
       </div>
 
-      {panel === 'form' && <NewOrderForm onCreated={onCreated} />}
-      {panel === 'zoeker' && <BedrijfZoekerPanel onCreated={order => setOrders(prev => [order, ...prev])} />}
+      {panel === 'form' && <NewOrderForm onCreated={o => { setOrders(prev => [o, ...prev]); setPanel(null) }} />}
+      {panel === 'zoeker' && <BedrijfZoekerPanel onCreated={o => setOrders(prev => [o, ...prev])} />}
 
       {err && <p className="op-err op-err--page">{err}</p>}
       {loading && <p className="op-loading">Laden…</p>}
 
-      <div className={`op-workspace${previewUrl ? ' op-workspace--split' : ''}`}>
-        <div className="op-list">
-          {orders.map(o => (
-            <OrderCard key={o.id} order={o} onRefresh={load} onPreviewDemo={handlePreviewDemo} onDelete={handleDelete} />
-          ))}
-          {!loading && orders.length === 0 && (
-            <p className="op-empty">Nog geen orders. Gebruik "Zoek bedrijven" of "+ Handmatig".</p>
-          )}
-        </div>
-
-        {previewUrl && (
-          <div className="op-demo-preview">
-            <div className="op-demo-preview__bar">
-              <span className="op-demo-preview__title">Demo preview</span>
-              <a href={previewUrl} target="_blank" rel="noreferrer" className="op-demo-preview__newtab">Openen in nieuw tabblad ↗</a>
-              <a href={previewUrl} download className="op-demo-preview__download">Downloaden ↓</a>
-              <button onClick={() => setPreviewUrl(null)} className="op-demo-preview__close">✕</button>
-            </div>
-            <iframe
-              src={previewUrl}
-              className="op-demo-preview__frame"
-              title="Demo preview"
-              sandbox="allow-scripts allow-same-origin"
-            />
-          </div>
+      <div className="op-list">
+        {orders.map(o => (
+          <OrderCard key={o.id} order={o} onRefresh={load} onDelete={handleDelete} />
+        ))}
+        {!loading && orders.length === 0 && (
+          <p className="op-empty">Nog geen orders. Gebruik "Zoek bedrijven" of "+ Handmatig".</p>
         )}
       </div>
     </div>

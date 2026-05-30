@@ -49,17 +49,18 @@ def zoek_bedrijven(stad: str, branche: str, aantal: int = 8) -> dict:
     """Genereer een lijst van lokale bedrijfskandidaten.
 
     Returns:
-        {"ok": True, "kandidaten": [{"bedrijfsnaam": ..., "plaats": ..., "branche": ..., "contact": ""}]}
+        {"ok": True, "kandidaten": [{"bedrijfsnaam", "plaats", "branche", "contact", "heeft_website"}]}
     """
     prompt = (
-        f"Geef een JSON-array met {aantal} fictieve maar realistische lokale {branche}bedrijven "
-        f"in {stad} die waarschijnlijk geen eigen website hebben. "
-        f"Elk object heeft alleen de velden: bedrijfsnaam, contact (leeg string). "
-        f"Geen uitleg. Alleen de JSON-array."
+        f"Geef een JSON-array met precies {aantal} fictieve maar realistische lokale bedrijven "
+        f"in {stad} die zich specifiek bezighouden met '{branche}' (dus exact dit vak, "
+        f"niet een gerelateerde of bredere branche). "
+        f"Elk object heeft precies deze velden: "
+        f"bedrijfsnaam (string), heeft_website (boolean — waarschijnlijk geen website = false). "
+        f"Geen uitleg, geen extra velden. Alleen de JSON-array."
     )
     raw = _llm(prompt)
 
-    # Extract JSON array from response
     start = raw.find("[")
     end   = raw.rfind("]") + 1
     if start == -1 or end == 0:
@@ -80,6 +81,7 @@ def zoek_bedrijven(stad: str, branche: str, aantal: int = 8) -> dict:
             "plaats": stad.strip(),
             "branche": branche.strip(),
             "contact": item.get("contact", ""),
+            "heeft_website": bool(item.get("heeft_website", False)),
         })
 
     return {"ok": True, "kandidaten": kandidaten}
