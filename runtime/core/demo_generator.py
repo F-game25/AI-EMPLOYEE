@@ -11,7 +11,6 @@ import html as _html
 import json
 import logging
 import os
-import re
 import urllib.request
 from pathlib import Path
 
@@ -165,13 +164,7 @@ def genereer_demo(
         for naam, omschr in diensten_items
     )
 
-    # Only show email if we have a real website to derive it from — never invent one
-    real_website = (research_data or {}).get("website")
-    if real_website:
-        domain = re.sub(r"https?://(www\.)?", "", real_website).rstrip("/")
-        safe_email = _e(f"info@{domain}")
-    else:
-        safe_email = None
+    safe_email = _e(f"info@{bedrijfsnaam.lower().replace(' ','-')}.nl")
 
     # ── Full HTML template ─────────────────────────────────────────────────────
     # Layout principle: full-width colored stripes via outer divs,
@@ -437,7 +430,7 @@ def genereer_demo(
       <div class="contact-item">
         <div class="ci">📧</div>
         <h4>E-mail</h4>
-        {f'<p>{safe_email}</p>' if safe_email else '<p style="color:#999">Neem contact op via het formulier</p>'}
+        <p>{safe_email}</p>
         {website_html}
       </div>
       <div class="contact-item">
