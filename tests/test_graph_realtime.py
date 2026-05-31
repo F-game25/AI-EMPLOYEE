@@ -11,6 +11,7 @@ import tempfile
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SERVER_JS  = os.path.join(REPO_ROOT, 'backend', 'server.js')
+BACKEND_DIR = os.path.join(REPO_ROOT, 'backend')
 NEURAL_PAGE = os.path.join(REPO_ROOT, 'frontend', 'src', 'components', 'pages', 'NeuralNetworkPage.jsx')
 
 
@@ -19,45 +20,63 @@ def _read(path):
         return f.read()
 
 
+def _read_backend():
+    """Read server.js + all route files (routes may be extracted from server.js)."""
+    parts = [_read(SERVER_JS)]
+    routes_dir = os.path.join(BACKEND_DIR, 'routes')
+    if os.path.isdir(routes_dir):
+        for name in os.listdir(routes_dir):
+            if name.endswith('.js'):
+                parts.append(_read(os.path.join(routes_dir, name)))
+    return '\n'.join(parts)
+
+
 # ── Source-presence tests ─────────────────────────────────────────────────────
 
 def test_brain_graph_endpoint_exists():
-    """GET /api/brain/graph endpoint must be defined in server.js."""
-    src = _read(SERVER_JS)
+    """GET /api/brain/graph endpoint must be defined in server.js or a route file."""
+    src = _read_backend()
     assert "'/api/brain/graph'" in src or '"/api/brain/graph"' in src, \
-        "/api/brain/graph endpoint not found in server.js"
+        "/api/brain/graph endpoint not found in server.js or backend/routes/"
 
 
 def test_watch_graph_file_function_exists():
-    """watchGraphFile function must be defined in server.js."""
-    src = _read(SERVER_JS)
+    """watchGraphFile function must be defined in server.js or a route file."""
+    src = _read_backend()
     assert 'watchGraphFile' in src, \
-        "watchGraphFile function not found in server.js"
+        "watchGraphFile function not found in server.js or backend/routes/"
 
 
 def test_brain_graph_updated_broadcast_exists():
-    """brain:graph_updated broadcast call must be present in server.js."""
-    src = _read(SERVER_JS)
+    """brain:graph_updated broadcast call must be present in server.js or a route file."""
+    src = _read_backend()
     assert "brain:graph_updated" in src, \
-        "brain:graph_updated broadcast not found in server.js"
+        "brain:graph_updated broadcast not found in server.js or backend/routes/"
 
 
 def test_graph_delta_endpoint_exists():
-    """GET /api/brain/graph/delta endpoint must be defined in server.js."""
-    src = _read(SERVER_JS)
+    """GET /api/brain/graph/delta endpoint must be defined in server.js or a route file."""
+    src = _read_backend()
     assert "'/api/brain/graph/delta'" in src or '"/api/brain/graph/delta"' in src, \
-        "/api/brain/graph/delta endpoint not found in server.js"
+        "/api/brain/graph/delta endpoint not found in server.js or backend/routes/"
 
 
 def test_delta_endpoint_has_require_auth():
     """Delta endpoint must use requireAuth middleware."""
-    src = _read(SERVER_JS)
-    # Find the delta route and verify requireAuth appears nearby
-    idx = src.find('/api/brain/graph/delta')
-    assert idx != -1, "delta endpoint not found"
-    snippet = src[max(0, idx - 20):idx + 120]
-    assert 'requireAuth' in snippet, \
-        f"requireAuth not found near /api/brain/graph/delta. Snippet: {snippet!r}"
+    src = _read_backend()
+    # Search all occurrences — route may be in a different file than the index entry
+    idx = 0
+    found = False
+    while True:
+        idx = src.find('/api/brain/graph/delta', idx)
+        if idx == -1:
+            break
+        snippet = src[max(0, idx - 20):idx + 200]
+        if 'requireAuth' in snippet:
+            found = True
+            break
+        idx += 1
+    assert found, "/api/brain/graph/delta found but requireAuth not nearby in any backend file"
 
 
 def test_frontend_listens_for_brain_graph_updated():

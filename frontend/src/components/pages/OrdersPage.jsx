@@ -176,6 +176,50 @@ function useCopy(text) {
   return [copied, copy]
 }
 
+function StuurNaarKlantPanel({ orderId }) {
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [copiedUrl, copyUrl] = useCopy(data?.demo_url || '')
+
+  async function laden() {
+    setBusy(true); setErr(null)
+    try {
+      const res = await api.get(`/api/orders/${orderId}/stuur-link`)
+      if (res.ok) setData(res)
+      else setErr(res.error || 'Fout bij ophalen link')
+    } catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+
+  if (!data) return (
+    <div className="op-stuur">
+      <button className="op-stuur__open" onClick={laden} disabled={busy}>
+        {busy ? 'Laden…' : 'Stuur naar klant'}
+      </button>
+      {err && <p className="op-err">{err}</p>}
+    </div>
+  )
+
+  return (
+    <div className="op-stuur op-stuur--open">
+      <p className="op-stuur__label">Stuur naar klant</p>
+      <div className="op-stuur__url">{data.demo_url}</div>
+      <div className="op-stuur__actions">
+        <a className="op-stuur__btn op-stuur__btn--wa" href={data.whatsapp_url} target="_blank" rel="noreferrer">
+          WhatsApp
+        </a>
+        <a className="op-stuur__btn op-stuur__btn--email" href={data.email_url} target="_blank" rel="noreferrer">
+          E-mail
+        </a>
+        <button className="op-stuur__btn op-stuur__btn--copy" onClick={copyUrl}>
+          {copiedUrl ? 'Gekopieerd!' : 'Kopieer link'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PitchBox({ order, onStatusChange }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -448,6 +492,10 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
             {researchData.social?.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer">🔗 {u}</a>)}
           </div>
         </div>
+      )}
+
+      {order.demo_pad && (
+        <StuurNaarKlantPanel orderId={order.id} />
       )}
 
       {(showPitch || order.pitch_tekst) && (

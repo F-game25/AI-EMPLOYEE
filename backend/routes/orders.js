@@ -364,6 +364,43 @@ print(json.dumps(result))
     }
   });
 
+  // GET /api/orders/:id/stuur-link — generate WhatsApp/email/SMS share links (HITL: Lars klikt zelf)
+  r.get('/:id/stuur-link', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const snippet = `
+from core.orders_store import order_ophalen
+o = order_ophalen(${JSON.stringify(id)})
+import json; print(json.dumps(o or {}))
+`;
+      const order = await pyCall(snippet, 10_000);
+      if (!order || !order.id) return res.status(404).json({ ok: false, error: 'Order niet gevonden' });
+
+      const fname = (order.demo_pad || '').split('/').pop();
+      if (!fname) return res.status(400).json({ ok: false, error: 'Nog geen demo gegenereerd voor dit order' });
+
+      const host = BASE_URL || (req.protocol + '://' + req.get('host'));
+      const demo_url = `${host}/api/demos/${fname}`;
+      const bedrijf = order.bedrijfsnaam || 'uw bedrijf';
+
+      const waText = `Goedemiddag,\n\nIk heb een gratis demo-website gemaakt voor ${bedrijf}. U kunt deze hier bekijken:\n${demo_url}\n\nIk hoor graag wat u ervan vindt!\n\nMet vriendelijke groet,\nLars`;
+      const emailSubject = `Uw nieuwe website — ${bedrijf}`;
+      const emailBody = `Goedemiddag,\n\nIk heb een gratis demo-website gemaakt voor ${bedrijf}.\nBekijk hem hier: ${demo_url}\n\nIk hoor graag uw reactie.\n\nMet vriendelijke groet,\nLars`;
+
+      res.json({
+        ok: true,
+        demo_url,
+        whatsapp_url: `https://wa.me/?text=${encodeURIComponent(waText)}`,
+        email_subject: emailSubject,
+        email_body: emailBody,
+        email_url: `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`,
+        sms_text: `Demo-website voor ${bedrijf}: ${demo_url}`,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // DELETE /api/orders/:id — archive/delete an order (for dedup cleanup)
   r.delete('/:id', requireAuth, async (req, res) => {
     try {
