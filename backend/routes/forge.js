@@ -120,7 +120,7 @@ function latestVerificationPassed(run) {
 }
 
 function slugify(value) {
-  return String(value || 'project')
+  return String(value || 'project').slice(0, 200)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
@@ -626,6 +626,10 @@ function persistActions(newActions) {
 function generateUnifiedDiff(beforeContent, afterContent, filePath) {
   const before = String(beforeContent || '').split('\n')
   const after  = String(afterContent  || '').split('\n')
+  const MAX_DIFF_LINES = 50000
+  if (before.length > MAX_DIFF_LINES || after.length > MAX_DIFF_LINES) {
+    return `--- ${filePath}\n+++ ${filePath}\n@@ diff truncated: file too large (>${MAX_DIFF_LINES} lines) @@\n`
+  }
   if (before.join('\n') === after.join('\n')) return ''
 
   // LCS-based diff using Myers algorithm (simple O(ND) implementation)
@@ -1266,6 +1270,21 @@ async function callPythonChat(message, timeoutMs = 30000) {
   return { ok: false, error: 'No LLM available. Start Ollama (ollama serve) or set ANTHROPIC_API_KEY in ~/.ai-employee/.env for cloud fallback.' }
 }
 
+function _makeForgeRateLimit(max, windowMs = 60000) {
+  const hits = new Map()
+  return (req, res, next) => {
+    const key = req.ip || 'anon'
+    const now = Date.now()
+    const entry = hits.get(key) || { count: 0, reset: now + windowMs }
+    if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs }
+    entry.count++
+    hits.set(key, entry)
+    if (entry.count > max) return res.status(429).json({ ok: false, error: 'Too many requests' })
+    next()
+  }
+}
+const _rl_forge_fs = _makeForgeRateLimit(30)  // 30/min per IP for filesystem routes
+
 module.exports = function createForgeRouter(requireAuth, opts = {}) {
   const rlRuns = opts.rlRuns || ((_req, _res, next) => next())
   const router = express.Router()
@@ -1789,7 +1808,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   })
 
   // Rejects a staged action; removes its staged files from the workspace.
-  router.post('/runs/:id/reject-action', requireAuth, (req, res) => {
+  router.post('/runs/:id/reject-action', requireAuth, _rl_forge_fs, (req, res) => {
     const run = findRun(req.params.id)
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
     const actionId = String(req.body?.action_id || '').trim()
@@ -4697,7 +4716,7 @@ Return JSON:
   })
 
   // POST /api/forge/training-runs/:id/evaluate — run evaluation gate
-  router.post('/training-runs/:id/evaluate', requireAuth, async (req, res) => {
+  router.post('/training-runs/:id/evaluate', requireAuth, _rl_forge_fs, async (req, res) => {
     const tr = forgeRunStore.findTrainingRun(req.params.id)
     if (!tr) return res.status(404).json({ ok: false, error: 'training run not found' })
     const project = findProject(tr.project_id)

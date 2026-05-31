@@ -2105,7 +2105,7 @@ const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline â
 // GET endpoints (fast; never trigger a model load)
 ['models', 'health', 'status', 'lifecycle/status', 'quantization/status',
  'quantization/available', 'quantization/pull/status'].forEach((seg) => {
-  app.get(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
+  app.get(`/api/model-fabric/${seg}`, requireAuth, _rl_api_global, async (req, res) => {
     try {
       const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { timeout: 15000 });
       return res.status(ok ? 200 : 502).json(data);
@@ -2117,7 +2117,7 @@ const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline â
 ['route', 'llm', 'slm', 'vision/analyze', 'vision/segment', 'generate/visual',
  'actions/execute', 'rag/query', 'rag/ingest', 'quantization/select',
  'quantization/pull', 'models/unload-idle'].forEach((seg) => {
-  app.post(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
+  app.post(`/api/model-fabric/${seg}`, requireAuth, _rl_api_global, async (req, res) => {
     try {
       const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { method: 'POST', body: req.body });
       return res.status(ok ? 200 : 502).json(data);
