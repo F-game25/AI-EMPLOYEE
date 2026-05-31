@@ -2344,6 +2344,105 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     }
   })
 
+  // POST /api/forge/mirofish — swarm belief simulation for any decision (not just markets)
+  // Body: { question, options?: [string], context?, n_agents?, n_rounds? }
+  // Returns: { winner, confidence, distribution, dissent, rationale }
+  router.post('/mirofish', requireAuth, async (req, res) => {
+    const question = String(req.body?.question || '').trim()
+    if (!question) return res.status(400).json({ ok: false, error: 'question required' })
+    const options = Array.isArray(req.body?.options) ? req.body.options.slice(0, 6) : []
+    const context = String(req.body?.context || '').slice(0, 2000)
+    const n_agents = Math.min(20, Math.max(3, parseInt(req.body?.n_agents) || 7))
+    const n_rounds = Math.min(30, Math.max(3, parseInt(req.body?.n_rounds) || 10))
+
+    const REPO_ROOT_MF = path.resolve(__dirname, '..', '..')
+    const RUNTIME_DIR_MF = path.join(REPO_ROOT_MF, 'runtime')
+    const AI_HOME_MF = path.resolve(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'))
+
+    const optionsStr = options.length ? `Options: ${JSON.stringify(options)}` : ''
+    const snippet = `
+import sys, os, json, random
+sys.path.insert(0, ${JSON.stringify(RUNTIME_DIR_MF)})
+os.environ.setdefault('AI_HOME', ${JSON.stringify(AI_HOME_MF)})
+
+# MiroFish belief propagation — generalized for any decision
+question = ${JSON.stringify(question)}
+options = ${JSON.stringify(options)}
+context_text = ${JSON.stringify(context)}
+n_agents = ${n_agents}
+n_rounds = ${n_rounds}
+
+class _Agent:
+    def __init__(self, rng):
+        self.bias = rng.gauss(0, 0.15)
+        self.herd = rng.uniform(0.1, 0.7)
+        self.exp = rng.uniform(0.4, 1.0)
+        self.belief = rng.uniform(0.3, 0.7)
+    def update(self, signal, crowd, rng):
+        noise = rng.gauss(0, (1 - self.exp) * 0.06)
+        blended = (1 - self.herd) * signal + self.herd * crowd
+        self.belief = max(0.02, min(0.98, blended + self.bias * 0.08 + noise))
+
+seed = hash(question + context_text) & 0x7FFFFFFF
+rng = random.Random(seed)
+
+# If options provided, score each option separately
+if options:
+    scores = {}
+    for opt in options:
+        agents = [_Agent(rng) for _ in range(n_agents)]
+        signal = 0.5 + rng.gauss(0, 0.1)
+        for _ in range(n_rounds):
+            crowd = sum(a.belief for a in agents) / n_agents
+            round_signal = max(0.02, min(0.98, signal + rng.gauss(0, 0.03)))
+            for a in agents:
+                a.update(round_signal, crowd, rng)
+        beliefs = [a.belief for a in agents]
+        scores[opt] = sum(beliefs) / len(beliefs)
+    total = sum(scores.values())
+    normalized = {k: round(v / total, 3) for k, v in scores.items()}
+    winner = max(normalized, key=normalized.get)
+    conf = normalized[winner]
+    dist = normalized
+else:
+    # Binary yes/no question
+    agents = [_Agent(rng) for _ in range(n_agents)]
+    signal = 0.5 + rng.gauss(0, 0.12)
+    for _ in range(n_rounds):
+        crowd = sum(a.belief for a in agents) / n_agents
+        for a in agents:
+            a.update(signal, crowd, rng)
+    beliefs = [a.belief for a in agents]
+    prob_yes = sum(beliefs) / len(beliefs)
+    std = (sum((b - prob_yes)**2 for b in beliefs) / len(beliefs))**0.5
+    bull = sum(1 for b in beliefs if b > 0.5)
+    agreement = max(bull, n_agents - bull) / n_agents
+    conf = max(0.0, min(1.0, agreement - std * 1.5))
+    winner = 'YES' if prob_yes > 0.5 else 'NO'
+    dist = {'YES': round(prob_yes, 3), 'NO': round(1 - prob_yes, 3)}
+
+print(json.dumps({'winner': winner, 'confidence': round(conf, 3), 'distribution': dist, 'n_agents': n_agents, 'n_rounds': n_rounds}))
+`
+    try {
+      const result = await new Promise((resolve, reject) => {
+        let stdout = '', stderr = ''
+        const child = spawn(process.env.PYTHON_BIN || 'python3', ['-c', snippet], {
+          env: { ...process.env, AI_HOME: AI_HOME_MF, PYTHONPATH: RUNTIME_DIR_MF },
+          timeout: 15_000,
+        })
+        child.stdout.on('data', d => { stdout += d })
+        child.stderr.on('data', d => { stderr += d })
+        child.on('close', code => {
+          if (code !== 0) return reject(new Error(`mirofish exit ${code}: ${stderr.slice(0, 200)}`))
+          try { resolve(JSON.parse(stdout.trim().split('\n').pop() || '{}')) } catch { reject(new Error('parse error')) }
+        })
+      })
+      res.json({ ok: true, question, ...result })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
   router.post('/verify', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_verify')) return
     const project = findProject(req.body?.project_id)
@@ -2756,10 +2855,12 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   }
   engine.forgeAgentStatus = forgeAgentStatus
 
-  function setForgeAgentStatus(name, status, task = '') {
+  function setForgeAgentStatus(name, status, task = '', extra = {}) {
     if (forgeAgentStatus[name]) {
       forgeAgentStatus[name].status = status
       forgeAgentStatus[name].task = task
+      if (extra.swarm_used != null) forgeAgentStatus[name].swarm_used = extra.swarm_used
+      if (extra.swarm_confidence != null) forgeAgentStatus[name].swarm_confidence = extra.swarm_confidence
     }
   }
 
@@ -2798,10 +2899,28 @@ Respond with ONLY valid JSON (no markdown fences) matching this schema:
 
     let plannerOutput = null
     let raw = ''
+    let plannerSwarmUsed = false
+
+    // Swarm planning: 3 agents propose plans, best JSON plan wins
+    const usePlannerSwarm = process.env.FORGE_SWARM !== '0'
+    if (usePlannerSwarm) {
+      try {
+        const swarmResult = await callSwarm(prompt, 'analysis', { n_agents: 3, timeout_s: 70 })
+        if (swarmResult?.answer) {
+          raw = swarmResult.answer
+          plannerSwarmUsed = true
+          logger.info(`[forge-planner] swarm: confidence=${swarmResult.confidence} winner=agent${swarmResult.winner_agent}`)
+        }
+      } catch (e) {
+        logger.warn('[forge-planner] swarm failed, single call:', e?.message)
+      }
+    }
+
+    if (!raw) {
+      try { const r = await callPythonChat(prompt, 60000); raw = r?.response || r?.reply || '' } catch { /* */ }
+    }
+
     try {
-      const r = await callPythonChat(prompt, 60000)
-      raw = r?.response || r?.reply || ''
-      // Strip markdown fences if present
       const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
       plannerOutput = JSON.parse(cleaned)
     } catch {
@@ -2809,9 +2928,9 @@ Respond with ONLY valid JSON (no markdown fences) matching this schema:
     }
 
     const duration_ms = Date.now() - t0
-    recordAgentOutcome(project.id, 'planner', { run_id: runId, goal, success: !!plannerOutput, duration_ms })
-    setForgeAgentStatus('planner', 'done', 'Plan ready')
-    return { agent: 'planner', status: 'done', output: plannerOutput, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+    recordAgentOutcome(project.id, 'planner', { run_id: runId, goal, success: !!plannerOutput, duration_ms, swarm_used: plannerSwarmUsed })
+    setForgeAgentStatus('planner', 'done', `Plan ready${plannerSwarmUsed ? ' (swarm)' : ''}`, { swarm_used: plannerSwarmUsed })
+    return { agent: 'planner', status: 'done', output: plannerOutput, duration_ms, swarm_used: plannerSwarmUsed, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
   async function runCoderAgent(project, plannerStage, goal, root, runId, iter) {
@@ -2865,7 +2984,7 @@ Each file must be in a code block labelled with its relative path.`
 
     const duration_ms = Date.now() - t0
     recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length, swarm_used: swarmUsed })
-    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated${swarmUsed ? ' (swarm)' : ''}`)
+    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated${swarmUsed ? ' (swarm)' : ''}`, { swarm_used: swarmUsed })
     return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length, swarm_used: swarmUsed }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 

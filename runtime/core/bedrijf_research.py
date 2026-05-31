@@ -110,23 +110,9 @@ def _score_website(url: str) -> tuple[str, str]:
     return "goede_site", "Site ziet er redelijk modern uit"
 
 
-def research_bedrijf(bedrijfsnaam: str, plaats: str) -> dict[str, Any]:
-    """Search the web for real info about a business.
-
-    Returns a dict with keys:
-      telefoon       : str | None
-      adres          : str | None
-      website        : str | None
-      website_status : "geen_site" | "slechte_site" | "goede_site"
-      website_reden  : str  — Dutch explanation for Lars
-      social         : list[str]
-      snippet        : str
-      bron           : str
-    """
-    query = f'"{bedrijfsnaam}" "{plaats}"'
-    html  = _ddg_snippet(query)
-    text  = _strip_tags(html)
-
+def _parse_single_result(html: str) -> dict[str, Any]:
+    """Parse one DuckDuckGo HTML result into structured fields."""
+    text = _strip_tags(html)
     phones    = _NL_PHONE.findall(text)
     postcodes = _NL_POST.findall(text)
     socials   = _SOCIAL.findall(text)
@@ -146,23 +132,103 @@ def research_bedrijf(bedrijfsnaam: str, plaats: str) -> dict[str, Any]:
         adres = text[max(0, idx - 30):idx + 20].strip()
         adres = re.sub(r"\s+", " ", adres)
 
+    return {
+        "telefoon": phones[0] if phones else None,
+        "adres":    adres,
+        "website":  website,
+        "social":   list(dict.fromkeys(socials))[:3],
+        "snippet":  text[:500].strip(),
+    }
+
+
+def _merge_results(results: list[dict[str, Any]], queries: list[str]) -> dict[str, Any]:
+    """Merge results from multiple swarm queries — prefer non-None fields."""
+    merged: dict[str, Any] = {"telefoon": None, "adres": None, "website": None, "social": [], "snippet": ""}
+    seen_socials: set[str] = set()
+    for r in results:
+        for field in ("telefoon", "adres", "website"):
+            if merged[field] is None and r.get(field):
+                merged[field] = r[field]
+        for s in r.get("social", []):
+            if s not in seen_socials:
+                seen_socials.add(s)
+                merged["social"].append(s)
+        if not merged["snippet"] and r.get("snippet"):
+            merged["snippet"] = r["snippet"]
+    merged["social"] = merged["social"][:5]
+    merged["bron"] = " | ".join(queries)
+    return merged
+
+
+def research_bedrijf(bedrijfsnaam: str, plaats: str) -> dict[str, Any]:
+    """Search the web for real info about a business using parallel swarm queries.
+
+    Runs 3 DuckDuckGo queries in parallel with different angles, merges the
+    richest results. This finds phone numbers and websites that a single query
+    would miss.
+
+    Returns a dict with keys:
+      telefoon       : str | None
+      adres          : str | None
+      website        : str | None
+      website_status : "geen_site" | "slechte_site" | "goede_site"
+      website_reden  : str
+      social         : list[str]
+      snippet        : str
+      bron           : str
+    """
+    # Swarm: 3 parallel queries with different search angles
+    queries = [
+        f'"{bedrijfsnaam}" "{plaats}"',
+        f'{bedrijfsnaam} {plaats} telefoon website',
+        f'{bedrijfsnaam} {plaats} contact',
+    ]
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    raw_results: list[dict[str, Any]] = []
+
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="research-swarm") as pool:
+        futures = {pool.submit(_ddg_snippet, q): q for q in queries}
+        for fut in as_completed(futures, timeout=20):
+            q = futures[fut]
+            try:
+                html = fut.result()
+                if html:
+                    raw_results.append(_parse_single_result(html))
+            except Exception as exc:
+                logger.debug("research swarm query '%s' failed: %s", q, exc)
+
+    if not raw_results:
+        # total fallback: single query
+        html = _ddg_snippet(queries[0])
+        raw_results = [_parse_single_result(html)] if html else []
+
+    merged = _merge_results(raw_results, queries)
+
+    telefoon  = merged["telefoon"]
+    postcodes = []
+    adres     = merged["adres"]
+
+    website = merged["website"]
+
     if website:
         website_status, website_reden = _score_website(website)
     else:
         website_status, website_reden = "geen_site", "Geen website gevonden — ideale kandidaat"
 
     result: dict[str, Any] = {
-        "telefoon":       phones[0] if phones else None,
-        "adres":          adres if adres else None,
+        "telefoon":       telefoon,
+        "adres":          adres,
         "website":        website,
         "website_status": website_status,
         "website_reden":  website_reden,
-        "social":         list(dict.fromkeys(socials))[:3],
-        "snippet":        text[:500].strip(),
-        "bron":           query,
+        "social":         merged["social"],
+        "snippet":        merged["snippet"],
+        "bron":           merged["bron"],
+        "swarm_queries":  len(raw_results),
     }
     logger.info(
-        "bedrijf_research: '%s' %s — website=%s status=%s",
-        bedrijfsnaam, plaats, website, website_status,
+        "bedrijf_research: '%s' %s — website=%s status=%s queries=%d",
+        bedrijfsnaam, plaats, website, website_status, len(raw_results),
     )
     return result
