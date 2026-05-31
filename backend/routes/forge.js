@@ -1182,6 +1182,64 @@ async function _callClaude(message, timeoutMs) {
   }
 }
 
+// Calls the Python swarm engine: N agents in parallel, belief propagation, best answer.
+// task_type: "code" | "analysis" | "pitch" | "general"
+// opts: { n_agents, timeout_s }
+async function callSwarm(prompt, task_type = 'general', opts = {}) {
+  const REPO_ROOT_FORGE = path.resolve(__dirname, '..', '..')
+  const RUNTIME_DIR_FORGE = path.join(REPO_ROOT_FORGE, 'runtime')
+  const AI_HOME_FORGE = path.resolve(
+    process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee')
+  )
+  const n_agents = opts.n_agents || (task_type === 'code' ? 5 : task_type === 'analysis' ? 4 : 3)
+  const timeout_s = opts.timeout_s || 90
+
+  const snippet = `
+import sys, os, json
+sys.path.insert(0, ${JSON.stringify(RUNTIME_DIR_FORGE)})
+os.environ.setdefault('AI_HOME', ${JSON.stringify(AI_HOME_FORGE)})
+from core.swarm_engine import SwarmEngine, SwarmTask
+engine = SwarmEngine(n_agents=${n_agents})
+task = SwarmTask(
+    goal=${JSON.stringify(prompt)},
+    task_type=${JSON.stringify(task_type)},
+    n_agents=${n_agents},
+    timeout_s=${timeout_s},
+)
+result = engine.run_sync(task)
+print(json.dumps({
+    'answer': result.answer,
+    'confidence': result.confidence,
+    'winner_agent': result.winner_agent,
+    'n_agents': result.n_agents,
+    'duration_ms': result.duration_ms,
+    'dissent': result.dissent,
+    'provider': result.provider,
+}))
+`
+  return new Promise((resolve, reject) => {
+    let stdout = '', stderr = ''
+    const child = spawn(process.env.PYTHON_BIN || 'python3', ['-c', snippet], {
+      env: { ...process.env, AI_HOME: AI_HOME_FORGE, PYTHONPATH: RUNTIME_DIR_FORGE },
+      timeout: (timeout_s + 30) * 1000,
+    })
+    child.stdout.on('data', d => { stdout += d })
+    child.stderr.on('data', d => { stderr += d })
+    child.on('close', code => {
+      if (code !== 0) return reject(new Error(`swarm exit ${code}: ${stderr.slice(0, 200)}`))
+      try {
+        const line = stdout.trim().split('\n').pop() || '{}'
+        resolve(JSON.parse(line))
+      } catch {
+        reject(new Error(`swarm parse error: ${stdout.slice(0, 200)}`))
+      }
+    })
+  })
+}
+
+// Expose swarm via HTTP for other parts of the system
+// POST /api/forge/swarm { prompt, task_type, n_agents, timeout_s }
+
 async function callPythonChat(message, timeoutMs = 30000) {
   // 1. Try local Ollama first (free, private, no API cost)
   const ollamaResult = await _callOllama(
@@ -2268,6 +2326,24 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     }
   }
 
+  // POST /api/forge/swarm — run a swarm of N agents on any prompt
+  // Usable by: AscendForge, pitch generator, research pipeline, any route.
+  // Body: { prompt, task_type?, n_agents?, timeout_s? }
+  router.post('/swarm', requireAuth, async (req, res) => {
+    const prompt = String(req.body?.prompt || '').trim()
+    if (!prompt) return res.status(400).json({ ok: false, error: 'prompt required' })
+    const task_type = ['code', 'analysis', 'pitch', 'general'].includes(req.body?.task_type)
+      ? req.body.task_type : 'general'
+    const n_agents = Math.min(10, Math.max(2, parseInt(req.body?.n_agents) || 0))
+    const timeout_s = Math.min(300, Math.max(10, parseInt(req.body?.timeout_s) || 90))
+    try {
+      const result = await callSwarm(prompt, task_type, { n_agents, timeout_s })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
   router.post('/verify', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_verify')) return
     const project = findProject(req.body?.project_id)
@@ -2764,13 +2840,33 @@ Output the COMPLETE file content for every file that needs to be created or modi
 Each file must be in a code block labelled with its relative path.`
 
     let aiText = ''
-    try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+    let swarmUsed = false
+    const useSwarm = process.env.FORGE_SWARM !== '0' // enabled by default
+
+    if (useSwarm) {
+      // Swarm mode: run N agents in parallel, pick consensus answer
+      try {
+        const swarmResult = await callSwarm(prompt, 'code', { timeout_s: 100 })
+        if (swarmResult?.answer) {
+          aiText = swarmResult.answer
+          swarmUsed = true
+          logger.info(`[forge-coder] swarm: ${swarmResult.n_agents} agents, confidence=${swarmResult.confidence}, winner=agent${swarmResult.winner_agent}`)
+        }
+      } catch (swarmErr) {
+        logger.warn('[forge-coder] swarm failed, falling back to single call:', swarmErr?.message)
+      }
+    }
+
+    if (!aiText) {
+      try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+    }
+
     const actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
 
     const duration_ms = Date.now() - t0
-    recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length })
-    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated`)
-    return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+    recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length, swarm_used: swarmUsed })
+    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated${swarmUsed ? ' (swarm)' : ''}`)
+    return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length, swarm_used: swarmUsed }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
   // Build a dynamic command list from the detected stack, checking which scripts exist.
