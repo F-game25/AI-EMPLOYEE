@@ -3,6 +3,7 @@
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
+const { snapshot, agentLoad, formatLocation, taskDurationMs, findBestAgent } = require('../services/agent_lifecycle');
 
 // ── Category → subsystem skill mapping ────────────────────────────────────────
 // Maps agent_capabilities.json categories to internal subsystem skill tokens
@@ -82,17 +83,6 @@ function loadAgentCatalog() {
 
 const AGENT_CATALOG = loadAgentCatalog();
 
-// Task processing duration bounds (per task execution).
-// Base range 800-2400ms, scaled by agent–task affinity.
-// More specialized agents execute faster within their domain.
-const PROCESS_MS_MIN = 800;
-const PROCESS_MS_MAX = 2400;
-// Additional complexity multiplier range for tasks outside agent specialty.
-const MISMATCH_PENALTY_MS = 600;
-// Default assumed message length when task has no message (baseline complexity).
-const DEFAULT_MSG_LENGTH = 40;
-// Message length at which tasks are considered maximally complex.
-const MSG_LENGTH_NORMALIZATION = 200;
 // How long an inactive running agent waits before being scaled back to idle.
 const IDLE_SCALE_DOWN_MS = 20000;
 // Agent runtime scheduler frequency (persistent event-driven loop tick).
@@ -141,39 +131,6 @@ function _modeMaxActive() {
   return agents.length;
 }
 
-// Deterministic task duration model.
-// Factors: base time + message length influence + subsystem affinity.
-// Agent with matching skill → faster; mismatch → penalty.
-function _taskDurationMs(agent, task) {
-  const msgLen = (task && task.message) ? task.message.length : DEFAULT_MSG_LENGTH;
-  // Base duration: scales linearly with message length (longer = more complex)
-  const lengthFactor = Math.min(msgLen / MSG_LENGTH_NORMALIZATION, 1); // 0..1
-  const base = PROCESS_MS_MIN + Math.round(lengthFactor * (PROCESS_MS_MAX - PROCESS_MS_MIN));
-  // Affinity check: agent has relevant skill for this subsystem?
-  const subsystem = (task && task.subsystem) || 'general';
-  const hasSkill = agent && agent.skills && agent.skills.includes(subsystem);
-  const penalty = hasSkill ? 0 : MISMATCH_PENALTY_MS;
-  // Small deterministic jitter based on task sequence to avoid identical timings
-  const jitter = ((_seq * 37) % 200) - 100; // -100..+100ms
-  return Math.max(PROCESS_MS_MIN, base + penalty + jitter);
-}
-
-function _snapshot(agent) {
-  return {
-    id: agent.id,
-    name: agent.name,
-    type: agent.type,
-    state: agent.state,
-    health: agent.health,
-    task: agent.currentTask ? agent.currentTask.message : null,
-    queueSize: agent.taskQueue.length,
-    tasksCompleted: agent.tasksCompleted,
-    location: agent.location || 'idle',
-    description: agent.description || '',
-    capabilities: agent.capabilities || [],
-  };
-}
-
 function _broadcastAgentUpdate() {
   events.emit('agent:update', getAgents());
 }
@@ -187,10 +144,6 @@ function _updateRobotSignal(agent, details = {}) {
     location: details.location || agent.location || agent.state || 'idle',
     updatedAt: new Date().toISOString(),
   };
-}
-
-function _formatLocation(processingStage, subsystem) {
-  return `${processingStage}:${subsystem || 'general'}`;
 }
 
 function _setState(agent, nextState) {
@@ -223,34 +176,6 @@ function _deactivateAgent(agent) {
 
 function _runningAgents() {
   return agents.filter((a) => a.state === 'running' || a.state === 'busy');
-}
-
-function _findBestAgent(subsystem, categoryHint) {
-  const running = _runningAgents();
-  if (running.length === 0) return null;
-
-  // 1. Prefer agents whose category (type) matches the intent category hint.
-  if (categoryHint) {
-    const categoryMatched = running.filter((a) => a.type === categoryHint);
-    if (categoryMatched.length > 0) {
-      return categoryMatched.slice().sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
-    }
-  }
-
-  // 2. Prefer agents with the specific subsystem skill (not just 'general').
-  if (subsystem && subsystem !== 'general') {
-    const specialists = running.filter((a) => a.skills.includes(subsystem));
-    if (specialists.length > 0) {
-      return specialists.slice().sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
-    }
-  }
-
-  // 3. Fallback: least-loaded running agent.
-  return running.slice().sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
-}
-
-function _agentLoad(agent) {
-  return (agent.currentTask ? 1 : 0) + agent.taskQueue.length;
 }
 
 function _activateForDemand(subsystem, categoryHint) {
@@ -307,7 +232,7 @@ function _tick() {
       agent.currentTask = null;
       agent.tasksCompleted += 1;
       _setState(agent, 'running');
-      agent.location = _formatLocation('completed', completedTask.subsystem);
+      agent.location = formatLocation('completed', completedTask.subsystem);
       _updateRobotSignal(agent, {
         taskId: completedTask.id,
         subsystem: completedTask.subsystem || 'general',
@@ -317,7 +242,7 @@ function _tick() {
       const shouldFail = Boolean(completedTask?.metadata?.forceFail);
       if (shouldFail) {
         events.emit('task:failed', {
-          agent: _snapshot(agent),
+          agent: snapshot(agent),
           task: {
             ...completedTask,
             error: 'forced_failure',
@@ -326,7 +251,7 @@ function _tick() {
         });
       } else {
         events.emit('task:completed', {
-          agent: _snapshot(agent),
+          agent: snapshot(agent),
           task: completedTask,
           finishedAt: new Date().toISOString(),
         });
@@ -338,10 +263,10 @@ function _tick() {
     if (!agent.currentTask && agent.taskQueue.length > 0 && agent.state !== 'idle') {
       const task = agent.taskQueue.shift();
       task.startedAt = new Date().toISOString();
-      task.finishAt = now + _taskDurationMs(agent, task);
+      task.finishAt = now + taskDurationMs(agent, task, _seq);
       agent.currentTask = task;
       _setState(agent, 'busy');
-      agent.location = _formatLocation('processing', task.subsystem);
+      agent.location = formatLocation('processing', task.subsystem);
       _updateRobotSignal(agent, {
         taskId: task.id,
         subsystem: task.subsystem || 'general',
@@ -349,7 +274,7 @@ function _tick() {
       });
       agent.health = task.queueDepth > HEALTH_DEGRADED_QUEUE_THRESHOLD ? 'degraded' : 'healthy';
       events.emit('task:started', {
-        agent: _snapshot(agent),
+        agent: snapshot(agent),
         task,
         startedAt: task.startedAt,
       });
@@ -398,7 +323,7 @@ function stopAllAgents(reason = 'manual_stop') {
     if (agent.currentTask) {
       cancelledTasks += 1;
       events.emit('task:failed', {
-        agent: _snapshot(agent),
+        agent: snapshot(agent),
         task: {
           ...agent.currentTask,
           error: createCancellationError(reason),
@@ -435,14 +360,11 @@ function enqueueTask({ message, subsystem = 'general', categoryHint = null, meta
     activateAgents(1);
   }
 
-  let selected = _findBestAgent(subsystem, categoryHint);
-  if (!selected) {
-    selected = _findBestAgent(subsystem, categoryHint);
-  }
+  let selected = findBestAgent(_runningAgents(), subsystem, categoryHint);
   if (!selected) {
     selected = agents
       .slice()
-      .sort((a, b) => _agentLoad(a) - _agentLoad(b))[0];
+      .sort((a, b) => agentLoad(a) - agentLoad(b))[0];
     _activateAgent(selected);
   }
 
@@ -458,7 +380,7 @@ function enqueueTask({ message, subsystem = 'general', categoryHint = null, meta
   selected.taskQueue.push(task);
   selected.lastActivityAt = _now();
   if (selected.state === 'idle') _activateAgent(selected);
-  selected.location = _formatLocation('queued', subsystem);
+  selected.location = formatLocation('queued', subsystem);
   _updateRobotSignal(selected, {
     taskId: task.id,
     subsystem: subsystem || 'general',
@@ -474,7 +396,7 @@ function enqueueTask({ message, subsystem = 'general', categoryHint = null, meta
 }
 
 function getAgents() {
-  return agents.map(_snapshot);
+  return agents.map(snapshot);
 }
 
 function getRunningAgentCount() {
@@ -494,7 +416,7 @@ function getRobotSignal() {
   }
   if (!active) return { ...lastRobotSignal };
   const activeLocation = active.currentTask
-    ? _formatLocation('processing', active.currentTask.subsystem)
+    ? formatLocation('processing', active.currentTask.subsystem)
     : (active.location || lastRobotSignal.location || 'idle');
   return {
     agentId: active.id,
