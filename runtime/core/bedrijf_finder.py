@@ -56,7 +56,10 @@ def zoek_bedrijven(stad: str, branche: str, aantal: int = 8) -> dict:
         f"in {stad} die zich specifiek bezighouden met '{branche}' (dus exact dit vak, "
         f"niet een gerelateerde of bredere branche). "
         f"Elk object heeft precies deze velden: "
-        f"bedrijfsnaam (string), heeft_website (boolean — waarschijnlijk geen website = false). "
+        f"bedrijfsnaam (string), "
+        f"heeft_website (boolean — waarschijnlijk geen website = false), "
+        f"website_kwaliteit (string — een van: 'geen', 'slecht', 'matig', 'goed' — "
+        f"schat in hoe goed hun website waarschijnlijk is; kleine lokale bedrijven = 'geen' of 'slecht'). "
         f"Geen uitleg, geen extra velden. Alleen de JSON-array."
     )
     raw = _llm(prompt)
@@ -82,6 +85,7 @@ def zoek_bedrijven(stad: str, branche: str, aantal: int = 8) -> dict:
             "branche": branche.strip(),
             "contact": item.get("contact", ""),
             "heeft_website": bool(item.get("heeft_website", False)),
+            "website_kwaliteit": item.get("website_kwaliteit", "onbekend"),
         })
 
     return {"ok": True, "kandidaten": kandidaten}

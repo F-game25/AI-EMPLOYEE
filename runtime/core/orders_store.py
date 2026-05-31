@@ -60,10 +60,11 @@ def _init_table() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)")
         # Idempotent migrations for columns added after initial schema
         for col, definition in (
-            ("pitch_tekst",   "TEXT DEFAULT ''"),
-            ("vervolg_tekst", "TEXT DEFAULT ''"),
-            ("live_url",      "TEXT DEFAULT ''"),
-            ("research_data", "TEXT DEFAULT ''"),
+            ("pitch_tekst",      "TEXT DEFAULT ''"),
+            ("vervolg_tekst",    "TEXT DEFAULT ''"),
+            ("live_url",         "TEXT DEFAULT ''"),
+            ("research_data",    "TEXT DEFAULT ''"),
+            ("betaal_referentie","TEXT DEFAULT ''"),
         ):
             try:
                 conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {definition}")
@@ -141,6 +142,19 @@ def order_verwijderen(order_id: str) -> dict[str, Any]:
             return {"ok": False, "error": f"Order {order_id} niet gevonden"}
         conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
     return {"ok": True, "deleted": order_id}
+
+
+def betaalreferentie_opslaan(order_id: str, referentie: str) -> dict[str, Any]:
+    """Sla een PayPal-transactiereferentie op en zet status → betaald."""
+    with _conn() as conn:
+        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+        conn.execute(
+            "UPDATE orders SET betaal_referentie=?, status='betaald' WHERE id=?",
+            (referentie.strip(), order_id),
+        )
+    return {"ok": True, "order": order_ophalen(order_id)}
 
 
 def pitch_bijwerken(order_id: str, pitch_tekst: str) -> dict[str, Any]:

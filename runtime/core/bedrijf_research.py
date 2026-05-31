@@ -1,11 +1,16 @@
 """Bedrijf Research — haal echte info op over een bedrijf via DuckDuckGo.
 
 Geen verzonnen gegevens: velden die niet gevonden worden staan op None.
-Lars beslist zelf wat hij aanvult.
+
+Website-kwaliteitsscore (website_status):
+  "geen_site"   — geen website gevonden → ideale klant
+  "slechte_site" — site gevonden maar waarschijnlijk verouderd/mobiel-onvriendelijk → kans
+  "goede_site"  — site ziet er modern uit → sla over, of pitch redesign
+
+Lars beslist zelf wat hij doet met elke kandidaat.
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 import urllib.parse
@@ -30,7 +35,30 @@ _SOCIAL   = re.compile(
     r"/[A-Za-z0-9._/-]+",
     re.IGNORECASE,
 )
-_URL      = re.compile(r"https?://[^\s\"<>]+", re.IGNORECASE)
+_URL = re.compile(r"https?://[^\s\"<>]+", re.IGNORECASE)
+
+_SKIP_DOMAINS = (
+    "duckduckgo", "google", "facebook", "instagram", "linkedin",
+    "twitter", "bing", "yahoo", "kvk.nl", "w3.org", "schema.org",
+    "mozilla.org", "apple.com", "microsoft.com", "openstreetmap",
+    "wikimedia", "wikipedia", "cdn.", "ajax.", "jquery",
+)
+
+# HTML signals that suggest a modern, well-maintained site
+_MODERN_SIGNALS = re.compile(
+    r"viewport|bootstrap|tailwind|react|vue|next\.js|gatsby|webflow|"
+    r"elementor|divi|shopify|woocommerce|wp-content/themes/[a-z-]+-2[012][0-9]",
+    re.IGNORECASE,
+)
+# Signals that suggest an old/bad site
+_OLD_SIGNALS = re.compile(
+    r"table\s+width|<font\s|bgcolor=|frameset|flash|\.swf|"
+    r"wp-content/themes/(twentyten|twentyeleven|twentytwelve|twentythirteen|twentyfourteen)|"
+    r"copyright\s+20(0[0-9]|1[0-5])",
+    re.IGNORECASE,
+)
+# No viewport meta = not mobile-friendly
+_VIEWPORT = re.compile(r'<meta[^>]+name=["\']viewport', re.IGNORECASE)
 
 
 def _fetch(url: str, timeout: int = 10) -> str:
@@ -49,7 +77,6 @@ def _fetch(url: str, timeout: int = 10) -> str:
 
 
 def _ddg_snippet(query: str) -> str:
-    """Fetch the DuckDuckGo HTML results page and return the visible text."""
     url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote_plus(query)
     return _fetch(url, timeout=12)
 
@@ -58,59 +85,84 @@ def _strip_tags(html: str) -> str:
     return re.sub(r"<[^>]+>", " ", html)
 
 
+def _score_website(url: str) -> tuple[str, str]:
+    """Fetch the site and return (website_status, website_reden).
+
+    website_status: "geen_site" | "slechte_site" | "goede_site"
+    website_reden : Dutch explanation shown to Lars
+    """
+    html = _fetch(url, timeout=8)
+    if not html:
+        return "slechte_site", "Site niet bereikbaar of geeft geen antwoord"
+
+    old_hits   = len(_OLD_SIGNALS.findall(html))
+    modern_hits = len(_MODERN_SIGNALS.findall(html))
+    has_viewport = bool(_VIEWPORT.search(html))
+
+    if not has_viewport:
+        return "slechte_site", "Niet mobielvriendelijk (geen viewport meta)"
+    if old_hits >= 2 and modern_hits == 0:
+        return "slechte_site", f"Verouderd design ({old_hits} oude signalen gevonden)"
+    if modern_hits >= 2:
+        return "goede_site", f"Moderne site ({modern_hits} moderne signalen)"
+    if old_hits >= 1:
+        return "slechte_site", "Mogelijk verouderd — controleer zelf"
+    return "goede_site", "Site ziet er redelijk modern uit"
+
+
 def research_bedrijf(bedrijfsnaam: str, plaats: str) -> dict[str, Any]:
     """Search the web for real info about a business.
 
     Returns a dict with keys:
-      telefoon  : str | None  — first NL phone number found
-      adres     : str | None  — first postcode+city snippet found
-      website   : str | None  — most likely official website URL
-      social    : list[str]   — social media profile URLs found
-      snippet   : str         — raw text snippet (first 500 chars)
-      bron      : str         — search query used
+      telefoon       : str | None
+      adres          : str | None
+      website        : str | None
+      website_status : "geen_site" | "slechte_site" | "goede_site"
+      website_reden  : str  — Dutch explanation for Lars
+      social         : list[str]
+      snippet        : str
+      bron           : str
     """
     query = f'"{bedrijfsnaam}" "{plaats}"'
     html  = _ddg_snippet(query)
     text  = _strip_tags(html)
 
-    phones   = _NL_PHONE.findall(text)
+    phones    = _NL_PHONE.findall(text)
     postcodes = _NL_POST.findall(text)
-    socials  = _SOCIAL.findall(text)
+    socials   = _SOCIAL.findall(text)
 
-    # Best-guess website: non-DDG, non-social, non-infrastructure URL in results
-    _SKIP_DOMAINS = (
-        "duckduckgo", "google", "facebook", "instagram", "linkedin",
-        "twitter", "bing", "yahoo", "kvk.nl", "w3.org", "schema.org",
-        "mozilla.org", "apple.com", "microsoft.com", "openstreetmap",
-        "wikimedia", "wikipedia", "cdn.", "ajax.", "jquery",
-    )
     website = None
     for url in _URL.findall(html):
         u = url.lower()
         if any(skip in u for skip in _SKIP_DOMAINS):
             continue
-        # Must look like a real business site (ends at TLD, not a deep path to a resource)
         if re.search(r"https?://[a-z0-9.-]+\.[a-z]{2,4}/?$", u):
             website = url.rstrip("/")
             break
 
     adres = None
     if postcodes:
-        # Try to extract a short address string around the postcode
         idx = text.find(postcodes[0])
-        adres = text[max(0, idx-30):idx+20].strip()
+        adres = text[max(0, idx - 30):idx + 20].strip()
         adres = re.sub(r"\s+", " ", adres)
 
+    if website:
+        website_status, website_reden = _score_website(website)
+    else:
+        website_status, website_reden = "geen_site", "Geen website gevonden — ideale kandidaat"
+
     result: dict[str, Any] = {
-        "telefoon": phones[0] if phones else None,
-        "adres":    adres if adres else None,
-        "website":  website,
-        "social":   list(dict.fromkeys(socials))[:3],  # deduplicate, max 3
-        "snippet":  text[:500].strip(),
-        "bron":     query,
+        "telefoon":       phones[0] if phones else None,
+        "adres":          adres if adres else None,
+        "website":        website,
+        "website_status": website_status,
+        "website_reden":  website_reden,
+        "social":         list(dict.fromkeys(socials))[:3],
+        "snippet":        text[:500].strip(),
+        "bron":           query,
     }
     logger.info(
-        "bedrijf_research: '%s' %s — telefoon=%s website=%s",
-        bedrijfsnaam, plaats, result["telefoon"], result["website"],
+        "bedrijf_research: '%s' %s — website=%s status=%s",
+        bedrijfsnaam, plaats, website, website_status,
     )
     return result

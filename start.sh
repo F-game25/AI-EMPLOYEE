@@ -291,6 +291,34 @@ EOF
 
 _PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
 
+# ── [2/3] Ensure Ollama is running (local AI — must be online before backend) ─
+_OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+_ollama_running() { curl -fsS --max-time 2 "${_OLLAMA_HOST}/api/tags" > /dev/null 2>&1; }
+if command -v ollama > /dev/null 2>&1; then
+  if _ollama_running; then
+    _ok "Ollama already running at ${_OLLAMA_HOST}"
+  else
+    _log "Starting Ollama..."
+    _OLLAMA_PID_FILE="$APP_RUN_DIR/ollama.pid"
+    nohup ollama serve >> "$APP_LOG_DIR/ollama.log" 2>&1 </dev/null &
+    echo "$!" > "$_OLLAMA_PID_FILE"
+    # Wait up to 10 s for Ollama to be ready
+    for _oi in $(seq 1 20); do
+      sleep 0.5
+      if _ollama_running; then
+        _ok "Ollama ready at ${_OLLAMA_HOST}"
+        break
+      fi
+    done
+    if ! _ollama_running; then
+      _warn "Ollama did not respond within 10 s — chat will fall back to cloud providers"
+    fi
+  fi
+else
+  _warn "Ollama not installed — local AI unavailable. Chat will use cloud providers."
+  _warn "  Install: curl -fsSL https://ollama.com/install.sh | sh"
+fi
+
 # ── [2.5/3] Start Python AI backend (LLM pipeline) ───────────────────────────
 # The Node.js frontend proxy calls http://127.0.0.1:${_PYTHON_BACKEND_PORT}/api/chat
 # to reach the real LLM pipeline.  Without this process, every chat message

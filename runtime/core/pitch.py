@@ -169,17 +169,26 @@ def markeer_akkoord(order_id: str) -> dict[str, Any]:
     return {"ok": True, "order": order, "vervolg_tekst": vervolg, "paypal_placeholder": paypal_placeholder}
 
 
-def markeer_betaald(order_id: str) -> dict[str, Any]:
-    """Zet status → betaald. Lars markeert dit handmatig als het geld binnen is."""
-    from core.orders_store import order_ophalen, status_bijwerken
+def markeer_betaald(order_id: str, referentie: str = "") -> dict[str, Any]:
+    """Zet status → betaald. Vereist een PayPal-transactiereferentie als bewijs van betaling."""
+    from core.orders_store import order_ophalen, betaalreferentie_opslaan
+    if not referentie or not referentie.strip():
+        return {
+            "ok": False,
+            "error": (
+                "Vul eerst de PayPal-transactiereferentie in. "
+                "Je vindt deze in je PayPal-account onder 'Activiteit' → de betaling → 'Transactie-ID'. "
+                "Zo weet het systeem zeker dat het geld echt binnen is."
+            ),
+        }
     order = order_ophalen(order_id)
     if not order:
         return {"ok": False, "error": f"Order {order_id} niet gevonden"}
-    if order["status"] not in ("gepitcht", "goedgekeurd", "akkoord"):
-        return {"ok": False, "error": f"Verwacht status 'gepitcht', 'akkoord' of 'goedgekeurd', is '{order['status']}'"}
-    order = status_bijwerken(order_id, "betaald")
-    logger.info("pitch: order %s → betaald", order_id)
-    return {"ok": True, "order": order}
+    if order["status"] != "akkoord":
+        return {"ok": False, "error": f"Verwacht status 'akkoord', is '{order['status']}' — klant moet eerst akkoord geven"}
+    result = betaalreferentie_opslaan(order_id, referentie)
+    logger.info("pitch: order %s → betaald (ref: %s)", order_id, referentie)
+    return result
 
 
 def markeer_live(order_id: str) -> dict[str, Any]:

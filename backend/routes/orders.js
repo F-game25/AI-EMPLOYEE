@@ -294,7 +294,30 @@ print(json.dumps(result))
     }
   });
 
-  // POST /api/orders/:id/status — set status (gepitcht/betaald/live)
+  // POST /api/orders/:id/betaald — mark as paid; requires PayPal transaction reference
+  r.post('/:id/betaald', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { referentie } = req.body || {};
+      if (!referentie || !referentie.trim()) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Vul de PayPal-transactiereferentie in. Je vindt deze in je PayPal-account onder Activiteit → de betaling → Transactie-ID.',
+        });
+      }
+      const snippet = `
+from core.pitch import markeer_betaald
+result = markeer_betaald(${JSON.stringify(id)}, referentie=${JSON.stringify(referentie.trim())})
+print(json.dumps(result))
+`;
+      const result = await pyCall(snippet);
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/orders/:id/status — set status (gepitcht/live)
   r.post('/:id/status', requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
@@ -303,7 +326,13 @@ print(json.dumps(result))
       if (!ALLOWED.includes(newStatus)) {
         return res.status(400).json({ ok: false, error: `Status moet een van ${ALLOWED.join('/')} zijn` });
       }
-      const fnMap = { gepitcht: 'markeer_gepitcht', betaald: 'markeer_betaald', live: 'markeer_live' };
+      const fnMap = { gepitcht: 'markeer_gepitcht', live: 'markeer_live' };
+      if (newStatus === 'betaald') {
+        return res.status(400).json({
+          ok: false,
+          error: 'Gebruik de /betaald route met een PayPal-transactiereferentie',
+        });
+      }
       const fn = fnMap[newStatus];
       const snippet = `
 from core.pitch import ${fn}
