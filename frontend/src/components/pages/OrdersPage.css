@@ -182,3 +182,19 @@
 }
 .op-research__items a:hover { text-decoration: underline; }
 .op-research__missing { opacity: 0.45; font-style: italic; }
+
+.op-deploy__warn {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+}
+.op-deploy__warn code {
+  background: rgba(0, 0, 0, 0.18);
+  padding: 0 0.25em;
+  border-radius: 3px;
+}

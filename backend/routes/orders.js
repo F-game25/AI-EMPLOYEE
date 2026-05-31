@@ -93,6 +93,22 @@ print(json.dumps(result))
     }
   });
 
+  // GET /api/orders/hosting/status — is NETLIFY_API_TOKEN ingesteld? (UI gate't de deploy-knop)
+  // MOET vóór '/:id' staan, anders vangt de :id-route 'hosting' op.
+  r.get('/hosting/status', requireAuth, async (req, res) => {
+    try {
+      const snippet = `
+import os
+print(json.dumps({"has_token": bool(os.environ.get("NETLIFY_API_TOKEN", ""))}))
+`;
+      const result = await pyCall(snippet, 10_000);
+      res.json(result);
+    } catch (err) {
+      // Bij twijfel: meld geen token, zodat de UI veilig blijft (knop disabled).
+      res.json({ has_token: false, error: err.message });
+    }
+  });
+
   // GET /api/orders/:id — single order
   r.get('/:id', requireAuth, async (req, res) => {
     try {

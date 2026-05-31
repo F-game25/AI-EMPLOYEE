@@ -144,7 +144,16 @@ def markeer_akkoord(order_id: str) -> dict[str, Any]:
     prijs  = order["prijs"]
     paypal = f"{_PAYPAL_LINK}/{int(prijs)}" if not _PAYPAL_LINK.endswith(str(int(prijs))) else _PAYPAL_LINK
 
+    # PAYPAL_LINK niet ingesteld → de placeholder zou anders naar een klant gaan.
+    paypal_placeholder = _PAYPAL_LINK == "https://paypal.me/jouwlink"
+    waarschuwing = (
+        "⚠️ LET OP: PAYPAL_LINK is niet ingesteld — de betaallink hieronder is een PLACEHOLDER. "
+        "Zet PAYPAL_LINK=https://paypal.me/jouwnaam in ~/.ai-employee/.env en herstart de server "
+        "vóór je dit bericht verstuurt.\n\n"
+    ) if paypal_placeholder else ""
+
     vervolg = (
+        f"{waarschuwing}"
         f"Hoi {naam},\n\n"
         f"Top dat je interesse hebt! Dan zetten we hem voor je live.\n\n"
         f"De kosten zijn €{prijs:.0f} eenmalig — geen maandelijkse kosten.\n"
@@ -157,7 +166,7 @@ def markeer_akkoord(order_id: str) -> dict[str, Any]:
     order = status_bijwerken(order_id, "akkoord")
     order["vervolg_tekst"] = vervolg
 
-    return {"ok": True, "order": order, "vervolg_tekst": vervolg}
+    return {"ok": True, "order": order, "vervolg_tekst": vervolg, "paypal_placeholder": paypal_placeholder}
 
 
 def markeer_betaald(order_id: str) -> dict[str, Any]:

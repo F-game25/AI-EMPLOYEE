@@ -89,8 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-ins
 ```
 
 ### Other install options
-- Linux advanced: `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash`
-- macOS: `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash`
+- Linux & macOS (advanced): `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash` — detecteert automatisch je OS
 - Windows: use `quick-install-windows.bat` or `install-windows.ps1`
 
 Full guide: [INSTALL.md](INSTALL.md)

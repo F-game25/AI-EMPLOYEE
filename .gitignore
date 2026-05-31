@@ -79,3 +79,13 @@ test_results/system_report.json
 # ASCEND AI build output
 ascend-ai/backend/static/
 ascend-ai/frontend/node_modules/
+
+# Generated runtime state — these are produced at runtime, never source.
+state/artifacts/
+runtime/state/
+state/code_index/
+state/generated_images/
+state/research_screenshots/
+state/boot_metrics.json
+state/*.pre-chroma
+.claude/scheduled_tasks.lock

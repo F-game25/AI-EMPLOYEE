@@ -318,7 +318,18 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
   }
 
   const s = order.status
-  const hasNetlifyToken = true // server-side check — knop disabled als token ontbreekt
+
+  // Of NETLIFY_API_TOKEN op de server is ingesteld — bepaalt of de deploy-knop werkt.
+  // null = nog onbekend (laden), true/false = serverantwoord.
+  const [hasNetlifyToken, setHasNetlifyToken] = useState(null)
+  useEffect(() => {
+    if (s !== 'betaald') return
+    let alive = true
+    api.get('/api/orders/hosting/status')
+      .then(r => { if (alive) setHasNetlifyToken(!!r.has_token) })
+      .catch(() => { if (alive) setHasNetlifyToken(false) })
+    return () => { alive = false }
+  }, [s])
 
   return (
     <div className={`op-card op-card--${s}`}>
@@ -360,9 +371,20 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
           <button onClick={generatePitch} disabled={busy}>Genereer pitch</button>
         )}
         {s === 'betaald' && (<>
-          <button onClick={deployNetlify} disabled={deployBusy}>
+          <button
+            onClick={deployNetlify}
+            disabled={deployBusy || hasNetlifyToken === false}
+            title={hasNetlifyToken === false ? 'Stel eerst NETLIFY_API_TOKEN in (~/.ai-employee/.env)' : ''}
+          >
             {deployBusy ? 'Deployen…' : 'Zet live via Netlify'}
           </button>
+          {hasNetlifyToken === false && (
+            <p className="op-deploy__warn">
+              ⚠️ NETLIFY_API_TOKEN niet ingesteld. Maak een gratis token op netlify.com
+              (Account → Applications → New access token) en zet
+              <code> NETLIFY_API_TOKEN=… </code> in <code>~/.ai-employee/.env</code>, herstart daarna de server.
+            </p>
+          )}
           {(order.live_url || deployResult?.live_url) && (<>
             <a href={order.live_url || deployResult.live_url} target="_blank" rel="noreferrer" className="op-live-link">
               {order.live_url || deployResult.live_url}
