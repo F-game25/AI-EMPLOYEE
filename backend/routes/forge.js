@@ -3080,7 +3080,7 @@ Each file must be in a code block labelled with its relative path.`
       return { agent: 'security', status: 'blocked', output, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
     }
 
-    // Stage 2: LLM semantic security review
+    // Stage 2: LLM semantic security review — swarm of 3 for higher confidence
     const fileList = actions.slice(0, 4).map(a => `File: ${a.file_path}\n${(a.content || '').slice(0, 500)}`).join('\n---\n')
     const prompt = `You are a security reviewer. Scan the following staged code changes for: secrets, injection, auth bypass, path traversal, unsafe exec, insecure CORS, hardcoded credentials.
 
@@ -3094,18 +3094,31 @@ Respond with ONLY valid JSON (no markdown fences):
 }`
 
     let secOutput = { verdict: 'pass', findings: [], summary: 'No security issues found' }
+    let secSwarmUsed = false
     try {
-      const r = await callPythonChat(prompt, 30000)
-      const raw = r?.response || r?.reply || ''
-      const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
-      const parsed = JSON.parse(cleaned)
-      if (parsed.verdict && Array.isArray(parsed.findings)) secOutput = parsed
-    } catch { /* fallback to pass */ }
+      if (process.env.FORGE_SWARM !== '0') {
+        const sw = await callSwarm(prompt, 'analysis', { n_agents: 3, timeout_s: 40 })
+        if (sw?.answer) {
+          const cleaned = sw.answer.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+          const parsed = JSON.parse(cleaned)
+          if (parsed.verdict && Array.isArray(parsed.findings)) { secOutput = parsed; secSwarmUsed = true }
+        }
+      }
+    } catch { /* */ }
+    if (!secSwarmUsed) {
+      try {
+        const r = await callPythonChat(prompt, 30000)
+        const raw = r?.response || r?.reply || ''
+        const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+        const parsed = JSON.parse(cleaned)
+        if (parsed.verdict && Array.isArray(parsed.findings)) secOutput = parsed
+      } catch { /* fallback to pass */ }
+    }
 
     const duration_ms = Date.now() - t0
-    recordAgentOutcome(project.id, 'security', { run_id: runId, success: secOutput.verdict !== 'block', duration_ms, findings: secOutput.findings?.length || 0 })
-    setForgeAgentStatus('security', secOutput.verdict === 'block' ? 'failed' : 'done', secOutput.summary?.slice(0, 60) || 'Done')
-    return { agent: 'security', status: secOutput.verdict === 'block' ? 'blocked' : 'done', output: secOutput, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+    recordAgentOutcome(project.id, 'security', { run_id: runId, success: secOutput.verdict !== 'block', duration_ms, findings: secOutput.findings?.length || 0, swarm_used: secSwarmUsed })
+    setForgeAgentStatus('security', secOutput.verdict === 'block' ? 'failed' : 'done', secOutput.summary?.slice(0, 60) || 'Done', { swarm_used: secSwarmUsed })
+    return { agent: 'security', status: secOutput.verdict === 'block' ? 'blocked' : 'done', output: secOutput, duration_ms, swarm_used: secSwarmUsed, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
   async function runDebugAgent(project, testerStage, coderActions, root, runId, iter, retryN) {
@@ -3194,21 +3207,32 @@ Respond with ONLY valid JSON (no markdown fences):
 }`
 
     let reviewerOutput = { verdict: 'pass', findings: [], summary: 'Review skipped (no staged files or LLM unavailable)' }
+    let reviewSwarmUsed = false
     let raw = ''
     try {
-      const r = await callPythonChat(prompt, 45000)
-      raw = r?.response || r?.reply || ''
-      const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
-      const parsed = JSON.parse(cleaned)
-      if (parsed.verdict && Array.isArray(parsed.findings)) reviewerOutput = parsed
-    } catch {
-      reviewerOutput.raw_output = raw
+      if (process.env.FORGE_SWARM !== '0') {
+        const sw = await callSwarm(prompt, 'analysis', { n_agents: 3, timeout_s: 50 })
+        if (sw?.answer) {
+          const cleaned = sw.answer.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+          const parsed = JSON.parse(cleaned)
+          if (parsed.verdict && Array.isArray(parsed.findings)) { reviewerOutput = parsed; reviewSwarmUsed = true }
+        }
+      }
+    } catch { /* */ }
+    if (!reviewSwarmUsed) {
+      try {
+        const r = await callPythonChat(prompt, 45000)
+        raw = r?.response || r?.reply || ''
+        const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+        const parsed = JSON.parse(cleaned)
+        if (parsed.verdict && Array.isArray(parsed.findings)) reviewerOutput = parsed
+      } catch { reviewerOutput.raw_output = raw }
     }
 
     const duration_ms = Date.now() - t0
-    recordAgentOutcome(project.id, 'reviewer', { run_id: runId, success: reviewerOutput.verdict !== 'block', duration_ms, findings: reviewerOutput.findings?.length || 0 })
-    setForgeAgentStatus('reviewer', reviewerOutput.verdict === 'block' ? 'failed' : 'done', reviewerOutput.summary?.slice(0, 60) || 'Done')
-    return { agent: 'reviewer', status: reviewerOutput.verdict === 'block' ? 'blocked' : 'done', output: reviewerOutput, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+    recordAgentOutcome(project.id, 'reviewer', { run_id: runId, success: reviewerOutput.verdict !== 'block', duration_ms, findings: reviewerOutput.findings?.length || 0, swarm_used: reviewSwarmUsed })
+    setForgeAgentStatus('reviewer', reviewerOutput.verdict === 'block' ? 'failed' : 'done', reviewerOutput.summary?.slice(0, 60) || 'Done', { swarm_used: reviewSwarmUsed })
+    return { agent: 'reviewer', status: reviewerOutput.verdict === 'block' ? 'blocked' : 'done', output: reviewerOutput, duration_ms, swarm_used: reviewSwarmUsed, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
   // Builds the structured Final Report V2 for a completed or failed agentic run.
@@ -3391,10 +3415,12 @@ Respond with ONLY valid JSON (no markdown fences):
         }
       }
       updateRun(runId, { status: 'reviewing' })
+      // Security + Reviewer run in parallel — both are read-only analysis, no ordering dependency
       // eslint-disable-next-line no-await-in-loop
-      const securityStage = await runSecurityAgent(project, actions.filter(a => a.status === 'staged'), runId)
-      // eslint-disable-next-line no-await-in-loop
-      const reviewerStage = await runReviewerAgent(project, actions.filter(a => a.status === 'staged'), plannerStage.output, runId, securityStage)
+      const [securityStage, reviewerStage] = await Promise.all([
+        runSecurityAgent(project, actions.filter(a => a.status === 'staged'), runId),
+        runReviewerAgent(project, actions.filter(a => a.status === 'staged'), plannerStage.output, runId, null),
+      ])
       const securityBlock = securityStage.output?.verdict === 'block'
       const reviewerBlock = reviewerStage.output?.verdict === 'block'
       const blocked = securityBlock || reviewerBlock

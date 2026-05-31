@@ -148,8 +148,31 @@ def markeer_akkoord(order_id: str) -> dict[str, Any]:
     if order["status"] != "gepitcht":
         return {"ok": False, "error": f"Verwacht status 'gepitcht', is '{order['status']}'"}
 
-    naam   = order["bedrijfsnaam"]
-    prijs  = order["prijs"]
+    naam    = order["bedrijfsnaam"]
+    branche = order.get("branche", "")
+    prijs   = order["prijs"]
+
+    # MiroFish pricing confidence — simulate 50 belief agents to score acceptance probability
+    prijs_advies = ""
+    try:
+        import random as _rng, math as _math
+        _seed = hash(f"{naam}:{prijs}:{branche}") & 0x7FFFFFFF
+        _r = _rng.Random(_seed)
+        _n = 50
+        _signal = max(0.1, min(0.9, 1.0 - (prijs / 600.0)))  # higher price → lower signal
+        _beliefs = [_r.uniform(0.3, 0.7) for _ in range(_n)]
+        for _ in range(8):
+            _crowd = sum(_beliefs) / _n
+            _beliefs = [max(0.02, min(0.98, (1 - _r.uniform(0.1, 0.5)) * _signal + _r.uniform(0.1, 0.5) * _crowd + _r.gauss(0, 0.03))) for _ in _beliefs]
+        _prob_accept = sum(_beliefs) / _n
+        if _prob_accept < 0.45:
+            prijs_advies = f"[Swarm: prijs €{prijs:.0f} heeft lage acceptatiekans ({_prob_accept:.0%}) — overweeg €{max(199, prijs - 50):.0f}]"
+        elif _prob_accept > 0.72:
+            prijs_advies = f"[Swarm: prijs €{prijs:.0f} heeft hoge acceptatiekans ({_prob_accept:.0%})]"
+        logger.info("pitch: mirofish pricing prob_accept=%.2f prijs=%.0f", _prob_accept, prijs)
+    except Exception as _exc:
+        logger.debug("pitch: mirofish pricing fout: %s", _exc)
+
     paypal = f"{_PAYPAL_LINK}/{int(prijs)}" if not _PAYPAL_LINK.endswith(str(int(prijs))) else _PAYPAL_LINK
 
     # PAYPAL_LINK niet ingesteld → de placeholder zou anders naar een klant gaan.
@@ -174,7 +197,7 @@ def markeer_akkoord(order_id: str) -> dict[str, Any]:
     order = status_bijwerken(order_id, "akkoord")
     order["vervolg_tekst"] = vervolg
 
-    return {"ok": True, "order": order, "vervolg_tekst": vervolg, "paypal_placeholder": paypal_placeholder}
+    return {"ok": True, "order": order, "vervolg_tekst": vervolg, "paypal_placeholder": paypal_placeholder, "prijs_advies": prijs_advies}
 
 
 def markeer_betaald(order_id: str, referentie: str = "") -> dict[str, Any]:

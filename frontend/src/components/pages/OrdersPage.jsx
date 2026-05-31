@@ -181,6 +181,7 @@ function PitchBox({ order, onStatusChange }) {
   const [err, setErr] = useState(null)
   const [copiedPitch, copyPitch] = useCopy(order.pitch_tekst)
   const [copiedVervolg, copyVervolg] = useCopy(order.vervolg_tekst)
+  const [prijsAdvies, setPrijsAdvies] = useState('')
 
   async function markStatus(newStatus) {
     setBusy(true); setErr(null)
@@ -196,8 +197,10 @@ function PitchBox({ order, onStatusChange }) {
     setBusy(true); setErr(null)
     try {
       const res = await api.post(`/api/orders/${order.id}/akkoord`, {})
-      if (res.ok) onStatusChange(res.order)
-      else setErr(res.error)
+      if (res.ok) {
+        if (res.prijs_advies) setPrijsAdvies(res.prijs_advies)
+        onStatusChange(res.order)
+      } else setErr(res.error)
     } catch (e) { setErr(e.message) }
     finally { setBusy(false) }
   }
@@ -236,6 +239,11 @@ function PitchBox({ order, onStatusChange }) {
 
       {order.status === 'akkoord' && order.vervolg_tekst && <>
         <p className="op-pitch__label">Vervolgbericht (met prijs + betaallink):</p>
+        {prijsAdvies && (
+          <div className={`op-prijs-advies ${prijsAdvies.includes('lage') ? 'op-prijs-advies--warn' : 'op-prijs-advies--ok'}`}>
+            🐟 {prijsAdvies}
+          </div>
+        )}
         <pre className="op-pitch__text">{order.vervolg_tekst}</pre>
         <div className="op-pitch__actions">
           <button onClick={copyVervolg}>{copiedVervolg ? 'Gekopieerd!' : 'Kopieer vervolgbericht'}</button>
