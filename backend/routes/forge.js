@@ -1064,19 +1064,82 @@ function _replyText(d) {
   return d && (d.response || d.reply || d.content || d.answer || '')
 }
 
-// Calls the Python LLM backend; if that yields no usable reply (auth/LLM unavailable),
-// falls back to direct local Ollama so AscendForge codegen works in local-first setups.
-async function callPythonChat(message, timeoutMs = 30000) {
-  const py = await _httpJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}/api/chat`, { message }, timeoutMs)
-  if (_replyText(py)) return { ok: true, ...py }
+// LLM router for AscendForge — local-first, cloud as fallback.
+//
+// Priority order:
+//   1. Ollama (local, free, private) — preferred for all tasks
+//   2. Claude Sonnet (cloud, costs tokens) — only if Ollama unavailable or returns empty
+//
+// Set FORGE_OLLAMA_MODEL to a coding model (e.g. qwen2.5-coder:7b, codellama:13b, deepseek-coder:6.7b).
+// Set ANTHROPIC_API_KEY only as fallback — it will not be used as long as Ollama responds.
+// Set FORCE_CLOUD=1 to skip Ollama and go straight to Claude (not recommended).
 
-  // Fallback → direct Ollama. Forge codegen prefers a coding-specialized model.
-  const host = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '')
-  const model = process.env.FORGE_OLLAMA_MODEL || process.env.OLLAMA_CODE_MODEL ||
-    'qwen2.5-coder:14b'
-  const og = await _httpJson(`${host}/api/generate`, { model, prompt: message, stream: false }, timeoutMs)
-  if (og && og.response) return { ok: true, response: og.response, provider: 'ollama' }
-  return { ok: false, error: py.error || og.error || 'no_reply' }
+const _OLLAMA_HOST_FORGE = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '')
+const _OLLAMA_CODE_MODEL = process.env.FORGE_OLLAMA_MODEL || process.env.OLLAMA_CODE_MODEL || 'qwen2.5-coder:7b'
+const _CLAUDE_MODEL = process.env.FORGE_CLAUDE_MODEL || 'claude-sonnet-4-6'
+
+let _anthropicClient = null
+function _getAnthropic() {
+  if (_anthropicClient) return _anthropicClient
+  const key = process.env.ANTHROPIC_API_KEY
+  if (!key) return null
+  try {
+    const { Anthropic } = require('@anthropic-ai/sdk')
+    _anthropicClient = new Anthropic({ apiKey: key })
+    return _anthropicClient
+  } catch { return null }
+}
+
+async function _callOllama(prompt, timeoutMs) {
+  if (process.env.FORCE_CLOUD === '1') return null
+  const result = await _httpJson(
+    `${_OLLAMA_HOST_FORGE}/api/generate`,
+    { model: _OLLAMA_CODE_MODEL, prompt, stream: false, options: { num_predict: 4096 } },
+    timeoutMs,
+  )
+  if (result && result.response && result.response.trim().length > 10) {
+    return { ok: true, response: result.response, provider: 'ollama', model: _OLLAMA_CODE_MODEL }
+  }
+  return null
+}
+
+async function _callClaude(message, timeoutMs) {
+  const client = _getAnthropic()
+  if (!client) return null
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const isArray = Array.isArray(message)
+    const messages = isArray
+      ? message
+      : [{ role: 'user', content: String(message) }]
+    const resp = await client.messages.create(
+      { model: _CLAUDE_MODEL, max_tokens: 4096, messages },
+      { signal: controller.signal },
+    )
+    clearTimeout(timer)
+    const text = resp.content?.[0]?.text || ''
+    if (!text) return null
+    return { ok: true, response: text, provider: 'claude', model: _CLAUDE_MODEL }
+  } catch (err) {
+    if (err.name !== 'AbortError') console.error('[forge] Claude call failed:', err.message)
+    return null
+  }
+}
+
+async function callPythonChat(message, timeoutMs = 30000) {
+  // 1. Try local Ollama first (free, private, no API cost)
+  const ollamaResult = await _callOllama(
+    Array.isArray(message) ? message.map(m => `${m.role}: ${m.content}`).join('\n') : message,
+    Math.min(timeoutMs, 120_000),
+  )
+  if (ollamaResult) return ollamaResult
+
+  // 2. Cloud fallback: Claude Sonnet — only if Ollama is down/empty AND key is set
+  const claudeResult = await _callClaude(message, timeoutMs)
+  if (claudeResult) return claudeResult
+
+  return { ok: false, error: 'No LLM available. Start Ollama (ollama serve) or set ANTHROPIC_API_KEY in ~/.ai-employee/.env for cloud fallback.' }
 }
 
 module.exports = function createForgeRouter(requireAuth, opts = {}) {
@@ -1777,24 +1840,60 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     const systemPrompt = buildForgeSystemPrompt(project, treeSnippet, historySnippet) + codeContext
 
     try {
-      const aiResult = await callPythonChat(`${systemPrompt}\n\nUser: ${content}`)
-      const text = aiResult?.response || aiResult?.reply || aiResult?.content ||
-        `I'll help with: "${content}". Please ensure the Python AI backend is running for full AI responses.`
+      const fullPrompt = `${systemPrompt}\n\nUser: ${content}`
+      let text = ''
 
-      // Stream in 3-word chunks at ~30 ms cadence to simulate token streaming
-      const words = text.split(' ')
-      let i = 0
-      await new Promise(resolve => {
-        const tick = setInterval(() => {
-          const chunk = words.slice(i, i + 3).join(' ')
-          if (chunk) send('token', { text: (i > 0 ? ' ' : '') + chunk })
-          i += 3
-          if (i >= words.length) {
-            clearInterval(tick)
-            resolve()
-          }
-        }, 30)
-      })
+      // Real streaming: Claude → true SSE tokens; Ollama → streamed chunks; fallback → word simulation
+      const anthropic = _getAnthropic()
+      const ollamaUp = process.env.FORCE_CLOUD !== '1' && await _httpJson(`${_OLLAMA_HOST_FORGE}/api/tags`, {}, 2000).then(r => !!r).catch(() => false)
+
+      if (ollamaUp) {
+        // Ollama streaming via /api/generate with stream:true
+        await new Promise((resolve, reject) => {
+          const http = require('http')
+          const body = JSON.stringify({ model: _OLLAMA_CODE_MODEL, prompt: fullPrompt, stream: true })
+          const req = http.request(`${_OLLAMA_HOST_FORGE}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+            timeout: 120_000,
+          }, (r) => {
+            r.on('data', chunk => {
+              try {
+                const lines = chunk.toString().split('\n').filter(Boolean)
+                for (const line of lines) {
+                  const obj = JSON.parse(line)
+                  if (obj.response) { send('token', { text: obj.response }); text += obj.response }
+                  if (obj.done) resolve()
+                }
+              } catch { /* partial chunk — ignore */ }
+            })
+            r.on('end', resolve)
+            r.on('error', reject)
+          })
+          req.on('error', reject)
+          req.on('timeout', () => { req.destroy(); resolve() })
+          req.write(body)
+          req.end()
+        })
+      } else if (anthropic) {
+        // Claude real streaming
+        const stream = anthropic.messages.stream({
+          model: _CLAUDE_MODEL,
+          max_tokens: 4096,
+          messages: [{ role: 'user', content: fullPrompt }],
+        })
+        for await (const chunk of stream) {
+          const token = chunk.delta?.text || ''
+          if (token) { send('token', { text: token }); text += token }
+        }
+      } else {
+        // No LLM available — word-by-word simulation of error message
+        text = 'No LLM available. Start Ollama (ollama serve) or set ANTHROPIC_API_KEY in ~/.ai-employee/.env as cloud fallback.'
+        for (const word of text.split(' ')) {
+          send('token', { text: word + ' ' })
+          await new Promise(r => setTimeout(r, 20))
+        }
+      }
 
       const actions = extractCodeActions(text, project)
       for (const a of actions) {
