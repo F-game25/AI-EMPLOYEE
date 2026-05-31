@@ -1884,91 +1884,9 @@ function sampleSystemStatus() {
 
 // GET /health — FAST health check for boot polling (no external calls)
 // Returns immediately with Node.js uptime and status.
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-  });
-});
 
 // GET /health/full — detailed health check (external calls, slow)
 // Called by dashboard, not by boot scripts. Includes all subsystem checks.
-app.get('/health/full', requireAuth, async (req, res) => {
-  const checks = {
-    node: { status: 'ok' },
-    python_backend: { status: 'pending' },
-    llm_api: { status: 'pending' },
-    database: { status: 'pending' },
-  };
-
-  // Check Python backend
-  try {
-    const pythonHealthUrl = `http://127.0.0.1:${PYTHON_BACKEND_PORT}/health`;
-    const pythonRes = await Promise.race([
-      fetch(pythonHealthUrl),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
-    ]);
-    checks.python_backend.status = pythonRes.ok ? 'ok' : 'degraded';
-  } catch (e) {
-    checks.python_backend.status = 'down';
-    checks.python_backend.error = e.message;
-  }
-
-  // Check LLM API connectivity (Anthropic, OpenRouter, or Ollama)
-  try {
-    const llmBackend = process.env.LLM_BACKEND || 'anthropic';
-    if (llmBackend === 'anthropic') {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        checks.llm_api.status = 'unconfigured';
-      } else {
-        // Quick validation: fetch models list
-        const modelRes = await Promise.race([
-          fetch('https://api.anthropic.com/v1/models', {
-            headers: { Authorization: `Bearer ${apiKey}` }
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
-        ]);
-        checks.llm_api.status = modelRes.ok ? 'ok' : 'degraded';
-        checks.llm_api.provider = 'anthropic';
-      }
-    } else if (llmBackend === 'ollama') {
-      const ollamaUrl = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
-      const ollamaRes = await Promise.race([
-        fetch(`${ollamaUrl}/api/tags`),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
-      ]);
-      checks.llm_api.status = ollamaRes.ok ? 'ok' : 'down';
-      checks.llm_api.provider = 'ollama';
-    }
-  } catch (e) {
-    checks.llm_api.status = 'down';
-    checks.llm_api.error = e.message;
-  }
-
-  // Check database
-  try {
-    if (db) {
-      const result = db.prepare('SELECT 1').get();
-      checks.database.status = result ? 'ok' : 'degraded';
-    }
-  } catch (e) {
-    checks.database.status = 'down';
-    checks.database.error = e.message;
-  }
-
-  // Overall status
-  const overallStatus = Object.values(checks).every(c => c.status !== 'down') ? 'healthy' : 'degraded';
-  const statusCode = overallStatus === 'healthy' ? 200 : 503;
-
-  res.status(statusCode).json({
-    status: overallStatus,
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    checks,
-  });
-});
 
 // POST /internal/events — Neural Brain bridge: localhost-only ingress used by
 // the Python runtime (problem-solver-ui :18790) to push events onto the
@@ -1986,65 +1904,18 @@ const _INTERNAL_EVENT_ALLOWLIST = new Set([
   'orchestrator:queued', 'memory:router:trace', 'event_stream',
   'objective:update', 'chat:message', 'security:update',
 ]);
-app.post('/internal/events', express.json({ limit: '2mb' }), (req, res) => {
-  const rawIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
-  const isLocal = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1';
-  if (!isLocal) return res.status(403).json({ ok: false, error: 'localhost only' });
-  const { event, data } = req.body || {};
-  if (typeof event !== 'string' || !event) {
-    return res.status(400).json({ ok: false, error: 'event required' });
-  }
-  if (event.length > 120) {
-    return res.status(400).json({ ok: false, error: 'event name too long' });
-  }
-  if (!_INTERNAL_EVENT_ALLOWLIST.has(event)) {
-    return res.status(400).json({ ok: false, error: 'unknown event type' });
-  }
-  try {
-    broadcaster.broadcast(event, data || {});
-    // Blacklight events get priority broadcast with structured payload
-    if (event === 'blacklight:status' || event === 'blacklight:mode_change' || event === 'blacklight:lockdown') {
-      broadcaster.broadcast('security:update', { event, ...data });
-      if (data && typeof data.threat_score === 'number') {
-        _lastBlacklightStatus = { ...data, updated_at: Date.now() };
-      }
-    }
-    return res.json({ ok: true });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e && e.message || e) });
-  }
-});
 
 // GET /api/security/status — Blacklight + system control state (localhost or auth)
-app.get('/api/security/status', requireAuth, (req, res) => {
-  res.json({ ok: true, ...(_lastBlacklightStatus || { threat_score: 0, mode: 'NORMAL', active_threats: [] }) });
-});
 
 // Track last known Blacklight status for the status endpoint
 let _lastBlacklightStatus = null;
 
 // POST /api/auth/token — exchange the master secret for a 24h JWT
 // Body: { secret: "<JWT_SECRET_KEY from ~/.ai-employee/.env>" }
-app.post('/api/auth/token', _rl_auth_token, (req, res) => {
-  const body = validate(SCHEMAS.authToken, req, res);
-  if (!body) return;
-  if (body.secret !== JWT_SECRET) {
-    return res.status(401).json({ ok: false, error: 'Invalid secret' });
-  }
-  const token = jwt.sign({ sub: 'admin', type: 'access', role: 'admin', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-  res.json({ ok: true, token, expires_in: JWT_EXPIRES_IN });
-});
 
 // GET /api/auth/auto-token — issues a short-lived JWT for localhost dashboard access (no secret needed)
 // Only allows requests from loopback. Uses raw socket remoteAddress (unforgeable) — not req.ip
 // which is X-Forwarded-For aware and trivially spoofable via `trust proxy: 1`.
-app.get('/api/auth/auto-token', _rl_auto_token, (req, res) => {
-  const rawIp = req.socket?.remoteAddress || '';
-  const isLocal = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1';
-  if (!isLocal) return res.status(403).json({ ok: false, error: 'Only available from localhost' });
-  const token = jwt.sign({ sub: 'operator', type: 'access', role: 'operator', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: '8h' });
-  res.json({ ok: true, token });
-});
 
 function pythonServiceAuthorization(req) {
   const payload = req.jwtPayload || {};
@@ -2063,218 +1934,14 @@ function pythonServiceAuthorization(req) {
 
 // GET /api/identity/public — public identity info (no auth required)
 // Returns instance name and color palette for onboarding/branding
-app.get('/api/identity/public', async (req, res) => {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const identityFile = path.join(AI_HOME, 'identity.json');
-    if (!fs.existsSync(identityFile)) {
-      return res.json({
-        instance_name: 'Initializing...',
-        color_palette: { primary: '#a855f7', accent: '#e5c76b' },
-        user_chosen: null
-      });
-    }
-    const identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
-    res.json({
-      instance_name: identity.instance_name,
-      user_chosen: identity.user_chosen,
-      color_palette: identity.color_palette,
-      tenant_id: identity.tenant_id
-    });
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to read identity' });
-  }
-});
 
 // GET /api/onboarding/palettes — generate 3 color palettes for onboarding
-app.get('/api/onboarding/palettes', requireAuth, (req, res) => {
-  const generatePalette = () => {
-    const hue = Math.random() * 0.3 + 0.65;  // 65-95% of hue circle (purples/magentas)
-    const saturation = 0.6 + Math.random() * 0.3;  // 60-90%
-    const toHex = (h, s, l) => {
-      const c = (1 - Math.abs(2 * l - 1)) * s;
-      const x = c * (1 - Math.abs((h * 6) % 2 - 1));
-      const m = l - c / 2;
-      let r = 0, g = 0, b = 0;
-      if (h < 1/6) [r, g, b] = [c, x, 0];
-      else if (h < 1/3) [r, g, b] = [x, c, 0];
-      else if (h < 1/2) [r, g, b] = [0, c, x];
-      else if (h < 2/3) [r, g, b] = [0, x, c];
-      else if (h < 5/6) [r, g, b] = [x, 0, c];
-      else [r, g, b] = [c, 0, x];
-      return '#' + [r + m, g + m, b + m].map(x => Math.round((x) * 255).toString(16).padStart(2, '0')).join('');
-    };
-    return {
-      primary: toHex(hue, saturation, 0.4),
-      accent: toHex(hue, saturation * 0.8, 0.55),
-      secondary: toHex((hue + 0.15) % 1.0, saturation * 0.7, 0.4)
-    };
-  };
-  res.json({
-    palettes: [generatePalette(), generatePalette(), generatePalette()]
-  });
-});
 
 // POST /api/identity/finalize — save user onboarding choices
-app.post('/api/identity/finalize', requireAuth, async (req, res) => {
-  const _bodyIdentity = validate(SCHEMAS.identityFinalize, req, res);
-  if (!_bodyIdentity) return;
-  try {
-    const { user_chosen, instance_name, voice_preset, color_palette } = _bodyIdentity;
-    const fs = require('fs');
-    const path = require('path');
-    const homedir = process.env.HOME || process.env.USERPROFILE;
-    const identityFile = path.join(homedir, '.ai-employee', 'identity.json');
 
-    // Ensure directory exists
-    const dir = path.dirname(identityFile);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-    // Load or create identity
-    let identity;
-    if (fs.existsSync(identityFile)) {
-      identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
-    } else {
-      // Create minimal identity if doesn't exist
-      identity = {
-        tenant_id: `tnt_${Math.random().toString(36).substr(2, 12)}`,
-        instance_name: instance_name || 'Aurora-Prime',
-        user_chosen: null,
-        color_palette: color_palette || { primary: '#a855f7', accent: '#e5c76b' },
-        voice_preset: voice_preset || 'professional',
-        emergent: { vocabulary_signature: [], favorite_agents: [], work_pattern: null, tone_drift: 0.0 },
-        created_at: new Date().toISOString(),
-        evolution_log: []
-      };
-    }
-
-    // Update with user choices
-    if (user_chosen) identity.user_chosen = user_chosen;
-    if (instance_name) identity.instance_name = instance_name;
-    if (voice_preset) identity.voice_preset = voice_preset;
-    if (color_palette) identity.color_palette = color_palette;
-
-    // Log finalization
-    identity.evolution_log = identity.evolution_log || [];
-    identity.evolution_log.push({
-      event: 'identity_finalized',
-      timestamp: new Date().toISOString(),
-      user_chosen,
-      voice_preset
-    });
-
-    // Write back
-    fs.writeFileSync(identityFile, JSON.stringify(identity, null, 2));
-    res.json({ ok: true, identity });
-  } catch (e) {
-    console.error('Failed to finalize identity:', e);
-    res.status(500).json({ error: 'Failed to save identity' });
-  }
-});
-
-app.get('/version', (req, res) => {
-  res.set('Cache-Control', 'no-store, must-revalidate');
-  // Authenticated callers get full version details; unauthenticated get minimal response.
-  // This prevents enumeration of git commit hashes and server start timestamps by attackers.
-  const isAuthed = (() => {
-    try {
-      const authHeader = req.headers.authorization || '';
-      if (!authHeader.startsWith('Bearer ')) return false;
-      jwt.verify(authHeader.slice(7), JWT_SECRET);
-      return true;
-    } catch (_) { return false; }
-  })();
-  if (!isAuthed) {
-    return res.json({ ok: true });
-  }
-  let versionState = null;
-  try {
-    const versionFile = path.join(REPO_ROOT, 'state', 'version.json');
-    if (fs.existsSync(versionFile)) {
-      versionState = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
-    }
-  } catch (_e) { /* ignore */ }
-  res.json({
-    commit: GIT_COMMIT,
-    timestamp: new Date().toISOString(),
-    started_at: SERVER_START_TIMESTAMP,
-    version_state: versionState,
-  });
-});
-
-app.get('/agents', requireAuth, (req, res) => {
-  res.json({ agents: getAgents() });
-});
-
-app.get('/internal/agents', requireLocalhost, (req, res) => {
-  res.json({ agents: getAgents(), internal: true });
-});
-
-app.post('/agents/activate', requireAuth, (req, res) => {
-  const _bodyActivate = validate(SCHEMAS.agentsActivate, req, res);
-  if (!_bodyActivate) return;
-  const { count } = _bodyActivate;
-  const out = activateAgents(typeof count === 'number' ? count : undefined);
-  res.json({ ok: true, ...out, mode: getMode(), agents: getAgents() });
-});
-
-app.get('/status', requireAuth, (req, res) => {
-  const stats = sampleSystemStatus();
-  res.json({ status: 'online', agents: stats.total_agents, running_agents: stats.running_agents, timestamp: stats.timestamp });
-});
 
 // Aliases for tests and external callers that expect /api/ prefix
-app.get('/api/status', requireAuth, (req, res) => {
-  const stats = sampleSystemStatus();
-  res.json({ status: 'online', agents: stats.total_agents, running_agents: stats.running_agents, timestamp: stats.timestamp });
-});
-app.get('/api/health', requireAuth, (req, res) => {
-  const stats = sampleSystemStatus();
-  const agents = getAgents();
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: stats.uptime ?? `${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
-    node_ok: true,
-    python_backend: _systemReady.python_ok === true,
-    python_ok: _systemReady.python_ok === true,
-    llm_ok: _systemReady.llm_ok === true,
-    readiness_phase: _readiness.phase,
-    degraded: _systemReady.python_ok !== true,
-    agents_active: agents.filter(a => a.state === 'active').length,
-    tasks_running: runtimeState.taskQueue?.filter(t => t.status === 'running').length ?? 0,
-    threat_level: runtimeState.threatLevel ?? 'LOW',
-    cost_today: (runtimeState.costToday ?? 0).toFixed(2),
-    memory_pct: stats.memory_pct ?? stats.memory ?? 0,
-    mode: runtimeState.systemMode ?? 'BALANCED',
-  });
-});
 
-app.get('/api/runtime/identity', requireAuth, (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json({
-    ok: true,
-    app: 'AETERNUS NEXUS',
-    runtime: 'AI-EMPLOYEE',
-    mode: RUNTIME_MODE,
-    nonce: RUNTIME_NONCE,
-    buildId: process.env.AI_EMPLOYEE_BUILD_ID || latestCommit(),
-    repoRoot: REPO_ROOT,
-    appHome: AI_HOME,
-    stateDir: STATE_DIR,
-    logDir: LOG_DIR,
-    runDir: RUN_DIR,
-    ports: {
-      node: Number(PORT),
-      python: Number(PYTHON_BACKEND_PORT),
-    },
-    pid: process.pid,
-    platform: process.platform,
-    arch: process.arch,
-    startedAt: SERVER_START_TIMESTAMP,
-  });
-});
 
 function normalizeGraphNode(raw, index = 0) {
   if (!raw || typeof raw !== 'object') return null;
@@ -2378,43 +2045,6 @@ async function checkNeuralGraphReady() {
   }
 }
 
-app.get('/api/readiness', async (req, res) => {
-  const degradedReasons = [];
-  // Self-heal: the boot poll for Python is one-shot. If it's marked not-ready,
-  // re-probe live so readiness recovers when Python comes up after Node.
-  if (!_readiness.pythonReady) {
-    try {
-      const hr = await Promise.race([
-        fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/health`),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 1200)),
-      ]);
-      if (hr?.ok) { _readiness.pythonReady = true; if (_readiness.phase === 'BOOTING') _readiness.phase = 'READY'; }
-    } catch (_) {}
-  }
-  const graphProbe = await checkNeuralGraphReady();
-  const neuralBrainReady = _readiness.pythonReady === true;
-  const graphReady = graphProbe.ok === true;
-  if (!HAS_FRONTEND_DIST) degradedReasons.push('frontend_dist_missing');
-  if (!_readiness.pythonReady) degradedReasons.push('python_backend_not_ready');
-  if (_readiness.pythonReady && !_readiness.subsystemsReady) degradedReasons.push('python_subsystems_degraded');
-  if (!neuralBrainReady) degradedReasons.push('neural_brain_not_ready');
-  if (!graphReady) degradedReasons.push('graph_not_ready');
-  res.json({
-    ok: true,
-    nodeReady: true,
-    apiReady: true,
-    frontendDist: HAS_FRONTEND_DIST,
-    frontendIndex: HAS_FRONTEND_DIST,
-    phase: _readiness.phase,
-    pythonReady: _readiness.pythonReady,
-    subsystemsReady: _readiness.subsystemsReady,
-    neuralBrainReady,
-    graphReady,
-    degraded: degradedReasons.length > 0,
-    degradedReasons,
-    timestamp: new Date().toISOString(),
-  });
-});
 
 async function probeHttp(url, timeoutMs = 900) {
   try {
@@ -2473,273 +2103,6 @@ function statusFromEnv(keys, { any = false } = {}) {
   return { status: missing.length === 0 ? 'live' : 'not_configured', missing };
 }
 
-app.get('/api/capabilities/status', requireAuth, async (_req, res) => {
-  const checkedAt = new Date().toISOString();
-  const pythonProbe = _readiness.pythonReady
-    ? { ok: true, status: 200 }
-    : await probeHttp(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/health`);
-  if (pythonProbe.ok) {
-    _readiness.pythonReady = true;
-    if (_readiness.phase === 'BOOTING') _readiness.phase = 'READY';
-  }
-
-  const ollamaHost = process.env.OLLAMA_HOST || process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
-  const ollamaProbe = await probeHttp(`${String(ollamaHost).replace(/\/$/, '')}/api/tags`);
-  const fishSpeechHost = process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL || 'http://127.0.0.1:8080';
-  const fishSpeechProbe = await probeHttp(`${String(fishSpeechHost).replace(/\/$/, '')}/v1/health`);
-  const llmProviders = [
-    ['anthropic_llm', 'Anthropic LLM', ['ANTHROPIC_API_KEY']],
-    ['openai_llm', 'OpenAI LLM', ['OPENAI_API_KEY']],
-    ['openrouter_llm', 'OpenRouter LLM', ['OPENROUTER_API_KEY']],
-    ['groq_llm', 'Groq LLM', ['GROQ_API_KEY']],
-  ];
-  const providerRecords = llmProviders.map(([id, label, requiredEnv]) => {
-    const env = statusFromEnv(requiredEnv);
-    return capabilityRecord({
-      id,
-      label,
-      status: env.status,
-      category: 'llm',
-      required_env: requiredEnv,
-      missing_env: env.missing,
-      setup_action: env.status === 'live' ? 'test' : 'configure_env',
-      details: env.status === 'live' ? `${label} key is present.` : `${label} requires ${env.missing.join(', ')}.`,
-      docs_hint: 'Configure provider keys in ~/.ai-employee/.env or Settings.',
-    });
-  });
-  const activeProviderCount = providerRecords.filter((record) => record.status === 'live').length + (ollamaProbe.ok ? 1 : 0);
-
-  const emailRequired = ['SENDGRID_API_KEY', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'];
-  const emailConfigured = !!process.env.SENDGRID_API_KEY
-    || (!!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS);
-  const emailMissing = emailConfigured
-    ? []
-    : emailRequired.filter((key) => !process.env[key]);
-  const apolloEnv = statusFromEnv(['APOLLO_API_KEY']);
-  const linkedinEnv = statusFromEnv(['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN']);
-  const stateWritable = (() => {
-    try {
-      fs.accessSync(STATE_DIR, fs.constants.R_OK | fs.constants.W_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  const artifactsWritable = (() => {
-    try {
-      fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
-      fs.accessSync(ARTIFACTS_DIR, fs.constants.R_OK | fs.constants.W_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-
-  const capabilities = [
-    capabilityRecord({
-      id: 'node_backend',
-      label: 'Node Backend',
-      status: 'live',
-      category: 'runtime',
-      setup_action: 'view_logs',
-      details: `Gateway is running on port ${PORT}.`,
-      docs_hint: 'Node owns auth, WebSocket, dashboard APIs, and Python proxying.',
-      proof: { started_at: SERVER_START_TIMESTAMP, port: PORT },
-    }),
-    capabilityRecord({
-      id: 'python_backend',
-      label: 'Python Backend',
-      status: pythonProbe.ok ? 'live' : 'unavailable',
-      category: 'runtime',
-      setup_action: pythonProbe.ok ? 'test' : 'start_service',
-      details: pythonProbe.ok
-        ? `Python health responded on port ${PYTHON_BACKEND_PORT}.`
-        : `Python did not respond on port ${PYTHON_BACKEND_PORT}.`,
-      docs_hint: 'Start the Python AI backend before marking task execution fully live.',
-      proof: { port: PYTHON_BACKEND_PORT, probe: pythonProbe },
-    }),
-    capabilityRecord({
-      id: 'frontend_build',
-      label: 'Frontend Build',
-      status: HAS_FRONTEND_DIST ? 'live' : 'not_configured',
-      category: 'runtime',
-      setup_action: HAS_FRONTEND_DIST ? 'none' : 'run_build',
-      details: HAS_FRONTEND_DIST ? 'Built frontend assets are available.' : 'frontend/dist/index.html is missing.',
-      docs_hint: 'Run npm --prefix frontend run build to produce production assets.',
-    }),
-    capabilityRecord({
-      id: 'websocket_event_bus',
-      label: 'WebSocket Event Bus',
-      status: 'live',
-      category: 'runtime',
-      setup_action: 'test',
-      details: 'Node WebSocket upgrade handler is mounted; clients still need a valid token.',
-      docs_hint: 'Use the dashboard connection pill and event feed to confirm live client traffic.',
-    }),
-    capabilityRecord({
-      id: 'auth_session',
-      label: 'Auth / Session',
-      status: JWT_SECRET ? 'live' : 'not_configured',
-      category: 'security',
-      required_env: ['JWT_SECRET_KEY'],
-      missing_env: JWT_SECRET ? [] : ['JWT_SECRET_KEY'],
-      setup_action: JWT_SECRET ? 'test' : 'configure_env',
-      details: JWT_SECRET ? 'JWT signing secret is configured.' : 'JWT_SECRET_KEY is required before startup.',
-      docs_hint: 'Local admin tokens are available from /api/auth/auto-token.',
-    }),
-    capabilityRecord({
-      id: 'ollama_local_model',
-      label: 'Ollama / Local Model',
-      status: ollamaProbe.ok ? 'live' : 'not_configured',
-      category: 'llm',
-      required_env: ['OLLAMA_HOST'],
-      missing_env: process.env.OLLAMA_HOST || process.env.OLLAMA_URL ? [] : ['OLLAMA_HOST'],
-      setup_action: ollamaProbe.ok ? 'test' : 'start_service',
-      details: ollamaProbe.ok ? `Ollama responded at ${ollamaHost}.` : `No Ollama response from ${ollamaHost}.`,
-      docs_hint: 'Start Ollama and pull the configured local model to enable local fallback.',
-      proof: { host: ollamaHost, probe: ollamaProbe },
-    }),
-    capabilityRecord({
-      id: 'fish_speech_s2_local_voice',
-      label: 'Fish Speech S2 Local Voice',
-      status: fishSpeechProbe.ok ? 'live' : 'not_configured',
-      category: 'execution',
-      required_env: ['FISH_SPEECH_URL'],
-      missing_env: process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL ? [] : ['FISH_SPEECH_URL'],
-      setup_action: fishSpeechProbe.ok ? 'test' : 'start_service',
-      details: fishSpeechProbe.ok
-        ? `Fish Speech responded at ${fishSpeechHost}.`
-        : `No Fish Speech response from ${fishSpeechHost}; voice falls back to local OS TTS if available.`,
-      docs_hint: 'Run Fish Speech S2 locally on port 8080 to replace robotic OS speech with a natural system-owned voice.',
-      proof: { host: fishSpeechHost, probe: fishSpeechProbe },
-    }),
-    capabilityRecord({
-      id: 'llm_provider_routing',
-      label: 'LLM Provider Routing',
-      status: activeProviderCount > 0 ? 'live' : 'not_configured',
-      category: 'llm',
-      setup_action: activeProviderCount > 0 ? 'test' : 'configure_env',
-      details: activeProviderCount > 0
-        ? `${activeProviderCount} provider path(s) appear usable.`
-        : 'No remote provider key or local Ollama service is currently usable.',
-      docs_hint: 'Configure at least one model provider before expecting high-quality LLM responses.',
-    }),
-    ...providerRecords,
-    capabilityRecord({
-      id: 'tool_registry',
-      label: 'Tool / Skill Registry',
-      status: fs.existsSync(path.join(REPO_ROOT, 'runtime', 'config', 'skills_library.json')) ? 'live' : 'unavailable',
-      category: 'execution',
-      setup_action: 'test',
-      details: 'Skill registry file is present for planner/executor lookup.',
-      docs_hint: 'Tools still report their own configured/unconfigured state per provider.',
-    }),
-    capabilityRecord({
-      id: 'real_execution_engine',
-      label: 'Real Execution Engine',
-      status: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'live' : 'unavailable',
-      category: 'execution',
-      setup_action: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'test' : 'view_logs',
-      details: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'backend/run_execution.py exists.' : 'backend/run_execution.py is missing.',
-      docs_hint: 'Execution proof must include artifacts, traces, provider IDs, or explicit dry-run output.',
-    }),
-    capabilityRecord({
-      id: 'money_mode',
-      label: 'Money Mode',
-      status: 'dry_run',
-      category: 'money',
-      setup_action: 'run_doctor',
-      details: 'Money Mode is available as an approval-gated dry-run layer until external accounts are configured.',
-      docs_hint: 'Publishing, outreach, payments, paid-task acceptance, and account changes require approval.',
-    }),
-    capabilityRecord({
-      id: 'email_outreach',
-      label: 'Email / Outreach',
-      status: emailConfigured ? 'live' : 'not_configured',
-      category: 'integration',
-      required_env: emailRequired,
-      missing_env: emailMissing,
-      setup_action: emailConfigured ? 'test' : 'configure_env',
-      details: emailConfigured ? 'At least one email provider path is configured.' : 'Email requires SendGrid or a complete SMTP env set.',
-      docs_hint: 'Outbound email remains approval-gated even when configured.',
-    }),
-    capabilityRecord({
-      id: 'apollo_search',
-      label: 'Apollo Lead Search',
-      status: apolloEnv.status,
-      category: 'integration',
-      required_env: ['APOLLO_API_KEY'],
-      missing_env: apolloEnv.missing,
-      setup_action: apolloEnv.status === 'live' ? 'test' : 'configure_env',
-      details: apolloEnv.status === 'live' ? 'Apollo API key is present.' : 'Lead discovery needs APOLLO_API_KEY for live provider calls.',
-      docs_hint: 'Unconfigured lead discovery must be labeled mock/fallback/dry-run.',
-    }),
-    capabilityRecord({
-      id: 'linkedin_post',
-      label: 'LinkedIn Posting',
-      status: linkedinEnv.status,
-      category: 'integration',
-      required_env: ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN'],
-      missing_env: linkedinEnv.missing,
-      setup_action: linkedinEnv.status === 'live' ? 'test' : 'configure_env',
-      details: linkedinEnv.status === 'live' ? 'LinkedIn posting credentials are present.' : 'LinkedIn posting needs access token and person URN.',
-      docs_hint: 'Posting is never automatic; it requires an approval decision.',
-    }),
-    capabilityRecord({
-      id: 'artifact_storage',
-      label: 'Proof / Artifact Storage',
-      status: artifactsWritable ? 'live' : 'unavailable',
-      category: 'execution',
-      setup_action: artifactsWritable ? 'none' : 'view_logs',
-      details: artifactsWritable ? `Artifact directory is writable: ${ARTIFACTS_DIR}` : `Artifact directory is not writable: ${ARTIFACTS_DIR}`,
-      docs_hint: 'Generated outputs should link to stored artifacts or explain why none was produced.',
-    }),
-    capabilityRecord({
-      id: 'memory_store',
-      label: 'Memory / Vector Store',
-      status: stateWritable ? 'live' : 'unavailable',
-      category: 'memory',
-      setup_action: stateWritable ? 'test' : 'view_logs',
-      details: stateWritable ? `State directory is readable and writable: ${STATE_DIR}` : `State directory is not writable: ${STATE_DIR}`,
-      docs_hint: 'Memory health is degraded when vector/knowledge stores are unavailable or fallback-only.',
-    }),
-    capabilityRecord({
-      id: 'startup_warnings',
-      label: 'Startup / Runtime Warnings',
-      status: _readiness.subsystemsReady ? 'live' : (_readiness.pythonReady ? 'fallback' : 'unavailable'),
-      category: 'runtime',
-      setup_action: 'view_logs',
-      details: _readiness.subsystemsReady
-        ? 'Startup readiness reports all known subsystems ready.'
-        : 'Startup readiness still has degraded subsystem signals.',
-      docs_hint: 'Review /api/readiness and logs when this is fallback or unavailable.',
-    }),
-  ];
-
-  const counts = capabilities.reduce((acc, capability) => {
-    acc[capability.status] = (acc[capability.status] || 0) + 1;
-    return acc;
-  }, {});
-  const notLive = capabilities.filter((capability) => capability.status !== 'live');
-  const recommended = notLive.find((capability) => capability.status === 'unavailable')
-    || notLive.find((capability) => capability.status === 'not_configured')
-    || notLive.find((capability) => capability.status === 'fallback')
-    || null;
-
-  res.json({
-    ok: true,
-    checked_at: checkedAt,
-    states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable', 'error'],
-    counts,
-    next_recommended_action: recommended ? {
-      capability_id: recommended.id,
-      label: recommended.label,
-      setup_action: recommended.setup_action,
-      details: recommended.details,
-    } : null,
-    capabilities,
-  });
-});
 
 // ── Neural Brain data endpoints (proxy to Python if up, fallback to stubs) ───
 // Internal service token so Node→Python proxy calls pass the Python auth gate.
@@ -2773,103 +2136,11 @@ async function proxyNeuralBrain(path, fallback) {
 
 // Rich native-graph proxy (89+ nodes) — the snapshot endpoint can be empty, so expose
 // the live graph directly. Authenticated via the internal service token in proxyNeuralBrain.
-app.get('/api/neural-brain/graph', requireAuth, async (req, res) => {
-  const depth = Number(req.query.depth) || 2;
-  const limit = Number(req.query.limit) || 200;
-  const data = await proxyNeuralBrain(`/api/neural-brain/graph?depth=${depth}&limit=${limit}`, { nodes: [], links: [] });
-  res.json(normalizeDashboardGraph(data));
-});
 
-app.get('/api/neural-brain/memory/status', requireAuth, async (req, res) => {
-  const data = await proxyNeuralBrain('/api/neural-brain/memory/status', {
-    count: 0, last_write_ts: null, recent: [],
-  });
-  res.json(data);
-});
-
-app.get('/api/neural-brain/memory/list', requireAuth, async (req, res) => {
-  const data = await proxyNeuralBrain('/api/neural-brain/memory/list', {
-    items: [], total: 0, page: 1,
-  });
-  res.json(data);
-});
-
-app.delete('/api/neural-brain/memory/:id', requireAuth, async (req, res) => {
-  try {
-    const memId = encodeURIComponent(String(req.params.id || '').trim());
-    if (!memId) return res.status(400).json({ ok: false, error: 'id required' });
-    const r = await fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/memory/${memId}`, { method: 'DELETE' });
-    if (r?.ok) return res.json(await r.json());
-  } catch (_) {}
-  res.json({ ok: true });
-});
-
-app.get('/api/neural-brain/graph/status', requireAuth, async (req, res) => {
-  const data = await proxyNeuralBrain('/api/neural-brain/graph/status', {
-    node_count: 0, edge_count: 0, recent_nodes: [],
-  });
-  res.json(data);
-});
-
-app.get('/api/neural-brain/graph/snapshot', requireAuth, async (req, res) => {
-  let data = await proxyNeuralBrain('/api/neural-brain/graph/snapshot', {
-    nodes: [], links: [], stats: {},
-  });
-  if (!Array.isArray(data?.nodes) || data.nodes.length === 0) {
-    data = await proxyNeuralBrain('/api/neural-brain/graph', data);
-  }
-  res.json(normalizeDashboardGraph(data));
-});
-
-app.get('/api/neural-brain/threads', requireAuth, async (req, res) => {
-  const data = await proxyNeuralBrain('/api/neural-brain/threads', { threads: [] });
-  res.json(data);
-});
 
 // ── Four living memory graphs (WS3): shortterm|longterm|relations|unified ──────
 const _MEMORY_GRAPH_VIEWS = new Set(['shortterm', 'longterm', 'relations', 'unified']);
-app.get('/api/memory/graph/:view', requireAuth, async (req, res) => {
-  const { view } = req.params;
-  if (!_MEMORY_GRAPH_VIEWS.has(view)) return res.status(400).json({ error: 'unknown view', nodes: [], links: [] });
-  const limit = Number(req.query.limit) || 300;
-  // Forward Python payload as-is — it already carries decay/status/val fields the
-  // living-graph renderer needs, which normalizeDashboardGraph would strip.
-  const data = await proxyNeuralBrain(`/api/neural-brain/graph/views/${view}?limit=${limit}`, { nodes: [], links: [], stats: {}, view });
-  // Resilience: if Python is down/empty, serve relations|unified from the Node-side
-  // native graph (same SQLite that backs /api/brain/graph) so Memory Graphs never
-  // goes blank just because the Python backend is offline.
-  if ((!data.nodes || data.nodes.length === 0) && (view === 'relations' || view === 'unified')) {
-    try {
-      const snap = getNativeMemoryGraph({ stateDir: STATE_DIR, repoRoot: REPO_ROOT }).snapshot(limit);
-      if (snap?.nodes?.length) {
-        return res.json({ nodes: snap.nodes, links: snap.links || [], stats: { node_count: snap.nodes.length, link_count: (snap.links || []).length }, view, source: 'native_fallback' });
-      }
-    } catch (_) { /* fall through to honest empty */ }
-  }
-  res.json(data);
-});
 
-app.post('/api/neural-brain/think', requireAuth, async (req, res) => {
-  try {
-    const r = await Promise.race([
-      fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/think`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req.body),
-      }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
-    ]);
-    if (r?.ok) return res.json(await r.json());
-  } catch (_) {}
-  res.json({ response: 'Neural Brain offline — Python backend not running.', status: 'offline' });
-});
-
-app.get('/api/neural-brain/forge/evolution/status', requireAuth, async (req, res) => {
-  const data = await proxyNeuralBrain('/api/neural-brain/forge/evolution/status', {
-    mode: 'SAFE', patches_proposed: 0, patches_applied: 0,
-  });
-  res.json(data);
-});
 
 // ── Model Fabric proxy (Python /api/model-fabric/*) ─────────────────────────────
 // Generic GET/POST passthrough with the internal service token. Honest offline
@@ -2931,38 +2202,9 @@ app.post(/^\/api\/model-fabric\/models\/(.+)\/reload-with-quant$/, requireAuth, 
 });
 
 // ── Agent fleet controls ──────────────────────────────────────────────────────
-app.post('/api/agents/start-all', requireAuth, (req, res) => {
-  res.json({ ok: true, action: 'start-all' });
-});
-app.post('/api/agents/pause-all', requireAuth, (req, res) => {
-  res.json({ ok: true, action: 'pause-all' });
-});
-app.post('/api/agents/stop-all', requireAuth, (req, res) => {
-  res.json({ ok: true, action: 'stop-all' });
-});
-app.get('/api/agents', requireAuth, (req, res) => {
-  const agents = getAgents();
-  // Merge live forge agent statuses if the engine exposes them
-  let forgeAgents = [];
-  try {
-    const { getAscendForgeEngine } = require('./ascendforge/engine');
-    const eng = getAscendForgeEngine();
-    if (eng.forgeAgentStatus) forgeAgents = Object.values(eng.forgeAgentStatus);
-  } catch { /* engine not loaded yet — skip */ }
-  const response = {
-    agents: [...agents, ...forgeAgents],
-    tenant: req.tenant ? { tenant_id: req.tenant.tenantId, org_name: req.tenant.orgName } : null,
-  };
-  res.json(response);
-});
 
 // ── Subsystem API endpoints ───────────────────────────────────────────────────
 
-app.get('/api/system/stats', requireAuth, (req, res) => {
-  const stats = sampleSystemStatus();
-  // Expose cpu_percent as canonical field (alias of cpu_usage) for test/e2e compatibility
-  res.json({ ...stats, cpu_percent: stats.cpu_usage ?? stats.cpu ?? 0 });
-});
 
 function execText(command, timeout = 1200) {
   try {
@@ -3084,38 +2326,6 @@ function runtimeWarnings() {
   return warnings;
 }
 
-app.get('/api/system/processes', requireAuth, (_req, res) => {
-  res.json({ ok: true, generated_at: new Date().toISOString(), processes: parsePsRows() });
-});
-
-app.get('/api/system/ports', requireAuth, (_req, res) => {
-  res.json({ ok: true, generated_at: new Date().toISOString(), ports: parseListeningPorts() });
-});
-
-app.get('/api/system/storage', requireAuth, (_req, res) => {
-  res.json({ ok: true, generated_at: new Date().toISOString(), storage: storageRows() });
-});
-
-app.get('/api/system/runtime-warnings', requireAuth, (_req, res) => {
-  const warnings = runtimeWarnings();
-  res.json({ ok: true, generated_at: new Date().toISOString(), status: warnings.length ? 'degraded' : 'live', warnings });
-});
-
-app.get('/api/system/services', requireAuth, (_req, res) => {
-  const ports = parseListeningPorts();
-  const portStatus = (port) => ports.some((row) => row.port === Number(port) && row.status === 'listening');
-  const warnings = runtimeWarnings();
-  res.json({
-    ok: true,
-    generated_at: new Date().toISOString(),
-    services: [
-      { id: 'node_backend', name: 'Node Backend', status: portStatus(PORT) ? 'live' : 'degraded', port: Number(PORT), uptime: process.uptime(), restart_available: false, log_link: null },
-      { id: 'python_backend', name: 'Python Backend', status: _readiness.pythonReady || portStatus(PYTHON_BACKEND_PORT) ? 'live' : 'unavailable', port: Number(PYTHON_BACKEND_PORT), uptime: null, restart_available: false, log_link: null },
-      { id: 'frontend_build', name: 'Frontend Build', status: HAS_FRONTEND_DIST ? 'live' : 'not_configured', port: null, uptime: null, restart_available: false, log_link: null },
-      { id: 'runtime_warnings', name: 'Runtime Warnings', status: warnings.length ? 'degraded' : 'live', port: null, uptime: null, restart_available: false, last_error: warnings[0]?.details || null },
-    ],
-  });
-});
 
 function collectExpressRoutes() {
   const routes = [];
@@ -3145,27 +2355,6 @@ function collectExpressRoutes() {
   return routes.sort((a, b) => a.route.localeCompare(b.route) || a.method.localeCompare(b.method));
 }
 
-app.get('/api/admin/api-catalog', requireAuth, (_req, res) => {
-  const nodeRoutes = collectExpressRoutes();
-  const pythonRoutes = [
-    { route: '/api/tasks/run', method: 'POST', auth_required: true, source: 'python', compatibility: 'canonical_agent_controller', response_contract: 'agent_controller_task_result', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
-    { route: '/api/chat', method: 'POST', auth_required: true, source: 'python', compatibility: 'canonical_llm_pipeline', response_contract: 'chat_result', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
-    { route: '/health', method: 'GET', auth_required: false, source: 'python', compatibility: 'health', response_contract: 'health', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
-  ];
-  const routes = [...nodeRoutes, ...pythonRoutes];
-  const counts = routes.reduce((acc, route) => {
-    acc.total = (acc.total || 0) + 1;
-    acc[route.source] = (acc[route.source] || 0) + 1;
-    acc[route.compatibility] = (acc[route.compatibility] || 0) + 1;
-    return acc;
-  }, { total: 0 });
-  res.json({
-    ok: true,
-    generated_at: new Date().toISOString(),
-    counts,
-    routes,
-  });
-});
 
 function buildObservabilitySnapshot() {
   const stats = sampleSystemStatus();
@@ -3215,143 +2404,6 @@ function buildObservabilitySnapshot() {
   };
 }
 
-app.get('/api/observability/snapshot', requireAuth, (req, res) => {
-  res.json(buildObservabilitySnapshot());
-});
-
-app.get('/api/observability/events', requireAuth, (req, res) => {
-  res.json({ events: (runtimeState.observability.events || []).slice(0, 200) });
-});
-
-app.get('/api/security/aztsa/status', requireAuth, (req, res) => {
-  const requiredSecrets = [
-    secretStore.describe('API_GATEWAY_KEY', { aliases: ['AZTSA_GATEWAY_KEY'] }),
-    secretStore.describe('JWT_SECRET', { aliases: ['JWT_SECRET_KEY'] }),
-  ];
-  res.json({
-    gateway: apiGatewayProtector.status(),
-    secret_health: {
-      required: requiredSecrets,
-      missing: requiredSecrets.filter((item) => !item.configured).map((item) => item.name),
-    },
-    anomaly_response: anomalyResponder.status(),
-    offline_security_sync: securitySyncPolicy.status(),
-    honeypot: {
-      events: apiGatewayProtector.recentHoneypot(20),
-    },
-    updated_at: new Date().toISOString(),
-  });
-});
-
-app.get('/api/security/honeypot/events', requireAuth, (req, res) => {
-  const limitRaw = Number((req.query || {}).limit || 50);
-  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, limitRaw)) : 50;
-  res.json({
-    events: apiGatewayProtector.recentHoneypot(limit),
-    total: apiGatewayProtector.status().honeypot_events,
-  });
-});
-
-app.post('/api/security/offline-sync', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.securityOfflineSync, req, res);
-  if (!body) return;
-  const online = body.online !== false;
-  const state = securitySyncPolicy.setOnline(online);
-  res.json({
-    status: state,
-    applied_online: online,
-  });
-});
-
-app.post('/api/security/anomaly/evaluate', requireAuth, (req, res) => {
-  const result = anomalyResponder.evaluate();
-  res.json(result);
-});
-
-app.post('/api/security/gateway/strict-mode', requireAuth, (req, res) => {
-  const _bodyGateway = validate(SCHEMAS.securityGatewayStrict, req, res);
-  if (!_bodyGateway) return;
-  const enabled = Boolean(_bodyGateway.enabled);
-  const strict = apiGatewayProtector.setStrictMode(enabled, 'manual_override');
-  res.json({
-    strict_mode: strict,
-    gateway: apiGatewayProtector.status(),
-  });
-});
-
-app.get('/api/mode', requireAuth, (req, res) => {
-  const mode = getMode();
-  const robotSignal = getRobotSignal();
-  const template = buildMoneyTemplate({
-    message: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general orchestration',
-    subsystem: robotSignal ? robotSignal.subsystem : 'general',
-    mode,
-    runningAgents: getRunningAgentCount(),
-    totalAgents: getAgents().length,
-  });
-  res.json({
-    mode,
-    robot_location: robotSignal && robotSignal.location ? robotSignal.location : 'idle',
-    thinking_mode: buildThinkingSummary(mode, template, robotSignal),
-    money_template: mode === 'MONEYMODE' ? template : null,
-  });
-});
-
-app.post('/api/mode', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.modeSet, req, res);
-  if (!body) return;
-  const next = body.mode.toUpperCase();
-  const mode = setMode(next);
-  if (mode === 'MONEYMODE' && !runtimeState.objectiveState.money_mode.current_objective) {
-    setObjectiveWaiting('money_mode');
-  }
-  const robotSignal = getRobotSignal();
-  const template = buildMoneyTemplate({
-    message: robotSignal && robotSignal.subsystem ? robotSignal.subsystem : 'general orchestration',
-    subsystem: robotSignal ? robotSignal.subsystem : 'general',
-    mode,
-    runningAgents: getRunningAgentCount(),
-    totalAgents: getAgents().length,
-  });
-  res.json({
-    mode,
-    robot_location: robotSignal && robotSignal.location ? robotSignal.location : 'idle',
-    thinking_mode: buildThinkingSummary(mode, template, robotSignal),
-    money_template: mode === 'MONEYMODE' ? template : null,
-  });
-});
-
-app.get('/api/brain/status', requireAuth, (req, res) => {
-  const nn = subsystems.getNNStatus();
-  const core = brain.status();
-  res.json({
-    ...nn,
-    ...core,
-    updated_at: nn.updated_at || core.last_update || new Date().toISOString(),
-  });
-});
-
-app.get('/internal/brain/status', requireLocalhost, (req, res) => {
-  const core = brain.status() || {};
-  const insights = brain.insights() || {};
-  const strategies = Array.isArray(insights.learned_strategies) ? insights.learned_strategies.length : 0;
-  const active = Boolean(core.available && core.active);
-  res.json({
-    status: active ? 'online' : 'offline',
-    initialized: active,
-    strategies_loaded: strategies,
-    updated_at: core.last_update || insights.updated_at || new Date().toISOString(),
-  });
-});
-
-app.get('/api/brain/insights', requireAuth, (req, res) => {
-  res.json(brain.insights());
-});
-
-app.get('/api/brain/activity', requireAuth, (req, res) => {
-  const limit = Number(req.query.limit || 20);
-  res.json(brain.activity(limit));
-});
 
 app.get('/api/brain/neurons', requireAuth, _cache_neurons, (req, res) => {
   res.json(brain.neurons());
@@ -6443,238 +5495,33 @@ const learningLadder = require('./core/learning_ladder');
 const agentLearningProfile = require('./core/agent_learning_profile');
 
 // POST /api/learning-ladder/build  { topic }
-app.post('/api/learning-ladder/build', requireAuth, (req, res) => {
-  const _bodyLadder = validate(SCHEMAS.learningLadderBuild, req, res);
-  if (!_bodyLadder) return;
-  const topic = String(_bodyLadder.topic || '').trim();
-  try {
-    const ladder = learningLadder.buildLadder(topic);
-    addActivity(`[LEARNING] Ladder built: ${topic}`, 'learning');
-    res.json({ ok: true, ladder });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // POST /api/learning-ladder/complete  { topic, level, success, milestone_output, score, notes }
-app.post('/api/learning-ladder/complete', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.learningLadderComplete, req, res);
-  if (!body) return;
-  const topic = String(body.topic || '').trim();
-  const level = parseInt(body.level, 10);
-  try {
-    const result = learningLadder.recordLevelCompletion({
-      topic,
-      level,
-      success: Boolean(body.success),
-      milestoneOutput: String(body.milestone_output || ''),
-      score: parseFloat(body.score) || 0,
-      notes: String(body.notes || ''),
-    });
-    const status = result.learned ? 'LEARNED' : 'NOT LEARNED';
-    addActivity(`[LEARNING] Level ${level} ${status}: ${topic}`, 'learning');
-    res.json({ ok: true, result });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // GET /api/learning-ladder/progress?topic=...
-app.get('/api/learning-ladder/progress', requireAuth, (req, res) => {
-  const topic = String(req.query.topic || '').trim();
-  if (!topic) return res.status(400).json({ ok: false, error: 'topic query param is required' });
-  try {
-    const progress = learningLadder.getProgress(topic);
-    res.json({ ok: true, ...progress });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // GET /api/learning-ladder/all
-app.get('/api/learning-ladder/all', requireAuth, (req, res) => {
-  try {
-    const topics = learningLadder.getAllTopics();
-    const metrics = learningLadder.getMetrics();
-    res.json({ ok: true, topics, metrics });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // ── Agent Learning Profile API ────────────────────────────────────────────────
 
 // POST /api/agents/:agent_id/ladder/assign  { topic }
-app.post('/api/agents/:agent_id/ladder/assign', requireAuth, (req, res) => {
-  const agentId = String(req.params.agent_id || '').trim();
-  const _bodyAssign = validate(SCHEMAS.agentLadderAssign, req, res);
-  if (!_bodyAssign) return;
-  const topic = String(_bodyAssign.topic || '').trim();
-  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  try {
-    const result = agentLearningProfile.assignLadder(agentId, topic);
-    addActivity(`[LEARNING] Ladder '${topic}' assigned to agent ${agentId}`, 'learning');
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // POST /api/agents/:agent_id/ladder/advance  { level, success, milestone_output, score, notes }
-app.post('/api/agents/:agent_id/ladder/advance', requireAuth, (req, res) => {
-  const agentId = String(req.params.agent_id || '').trim();
-  const body = validate(SCHEMAS.agentLadderAdvance, req, res);
-  if (!body) return;
-  const level = parseInt(body.level, 10);
-  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  try {
-    const result = agentLearningProfile.advanceAgent({
-      agentId,
-      level,
-      success: Boolean(body.success),
-      score: parseFloat(body.score) || 0,
-      milestoneOutput: String(body.milestone_output || ''),
-      notes: String(body.notes || ''),
-    });
-    const status = result.learned ? `LEARNED (grade: ${result.grade})` : 'NOT LEARNED';
-    addActivity(`[LEARNING] Agent ${agentId} Level ${level} ${status}`, 'learning');
-    res.json({ ok: true, result });
-  } catch (err) {
-    const status = err.message.includes('no learning ladder') ? 404 : 500;
-    res.status(status).json({ ok: false, error: err.message });
-  }
-});
 
 // GET /api/agents/:agent_id/grade
-app.get('/api/agents/:agent_id/grade', requireAuth, (req, res) => {
-  const agentId = String(req.params.agent_id || '').trim();
-  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  try {
-    const grade = agentLearningProfile.getAgentGrade(agentId);
-    res.json({ ok: true, ...grade });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // GET /api/agents/:agent_id/profile
-app.get('/api/agents/:agent_id/profile', requireAuth, (req, res) => {
-  const agentId = String(req.params.agent_id || '').trim();
-  if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  try {
-    const profile = agentLearningProfile.getAgentProfile(agentId);
-    res.json({ ok: true, ...profile });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // GET /api/agents/grades
-app.get('/api/agents/grades', requireAuth, _cache_grades, (req, res) => {
-  try {
-    const profiles = agentLearningProfile.getAllProfiles();
-    const metrics = agentLearningProfile.getMetrics();
-    res.json({ ok: true, profiles, metrics });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // ── System halt / restart ─────────────────────────────────────────────────────
 
 let systemHalted = false;
 
-app.post('/api/system/halt', requireAuth, (req, res) => {
-  validate(SCHEMAS.systemHalt, req, res); // optional body, validation is a no-op if body absent
-  systemHalted = true;
-  runtimeState.agents = runtimeState.agents.map(a => ({ ...a, status: 'stopped' }));
-  broadcaster.broadcast('system:halted', { halted: true, at: new Date().toISOString() });
-  broadcaster.broadcast('agents:list', { agents: runtimeState.agents });
-  res.json({ ok: true, halted: true, at: new Date().toISOString() });
-});
-
-app.post('/api/system/restart', requireAuth, (req, res) => {
-  systemHalted = false;
-  runtimeState.agents = runtimeState.agents.map(a => ({ ...a, status: 'idle' }));
-  broadcaster.broadcast('system:halted', { halted: false, at: new Date().toISOString() });
-  broadcaster.broadcast('agents:list', { agents: runtimeState.agents });
-  res.json({ ok: true, halted: false, at: new Date().toISOString() });
-});
-
-app.get('/api/system/halt', requireAuth, (req, res) => {
-  res.json({ ok: true, halted: systemHalted });
-});
 
 // ── System health ─────────────────────────────────────────────────────────────
 const _srvStartMs = Date.now()
 
-app.get('/api/system/uptime', requireAuth, (req, res) => {
-  const ms = Date.now() - _srvStartMs
-  const s  = Math.floor(ms / 1000)
-  res.json({
-    ok: true,
-    status: 'partial',
-    source: 'node_process',
-    uptime_ms: ms,
-    uptime_human: `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ${s%60}s`,
-    started_at: new Date(_srvStartMs).toISOString(),
-    pid: process.pid,
-    node_version: process.version,
-    services: [{
-      name: 'backend',
-      uptime_30d: null,
-      uptime_90d: null,
-      incidents_30d: null,
-      mttr_minutes: null,
-      status: 'live',
-      uptime_seconds: s,
-      source: 'node_process',
-    }],
-    details: 'Historical uptime percentages require persisted service checks; unavailable fields are null.',
-  })
-})
-
-app.get('/api/system/sla', requireAuth, (req, res) => {
-  try {
-    const tasks = readJsonSafe(statePath('tasks.json'), [])
-    const llmCalls = readJsonlSafe(statePath('llm_calls.jsonl'), 2000)
-    const cutoff = Date.now() - 86400000
-    const recent = (Array.isArray(tasks) ? tasks : []).filter(t => new Date(t.created_at || t.timestamp || 0).getTime() > cutoff)
-    const failed = recent.filter(t => t.status === 'failed' || t.status === 'error').length
-    const total  = recent.length
-    const recentCalls = llmCalls.filter(c => new Date(c.timestamp || c.ts || c.created_at || 0).getTime() > cutoff)
-    const latencies = recentCalls.map(c => Number(c.duration_ms || c.latency_ms || 0)).filter(Boolean).sort((a, b) => a - b)
-    const failedCalls = recentCalls.filter(c => c.ok === false || c.status === 'error').length
-    const successRate = total ? parseFloat(((total - failed) / total * 100).toFixed(1)) : null
-    res.json({
-      ok: true,
-      status: total || recentCalls.length ? 'live' : 'unavailable',
-      source: total || recentCalls.length ? 'task_and_llm_call_logs' : 'no_recent_telemetry',
-      success_rate: successRate,
-      total_tasks: total,
-      failed_tasks: failed,
-      window: '24h',
-      targets: { p99_9: 99.9, p99_5: 99.5 },
-      current: {
-        uptime: successRate,
-        p95_latency_ms: latencies.length ? latencies[Math.floor(latencies.length * 0.95)] : null,
-        error_rate_pct: recentCalls.length ? parseFloat((failedCalls / recentCalls.length * 100).toFixed(2)) : null,
-      },
-      totals: { tasks_24h: total, failed_tasks_24h: failed, llm_calls_24h: recentCalls.length, failed_llm_calls_24h: failedCalls },
-    })
-  } catch { res.json({ ok: true, status: 'unavailable', source: 'error', success_rate: null, total_tasks: 0, failed_tasks: 0, window: '24h', current: { uptime: null, p95_latency_ms: null, error_rate_pct: null } }) }
-})
-
-app.get('/api/system/patches', requireAuth, (req, res) => {
-  const patches = readJsonSafe(statePath('patches.json'), [])
-  res.json({ ok: true, patches: Array.isArray(patches) ? patches : [], count: Array.isArray(patches) ? patches.length : 0 })
-})
-
-app.get('/api/research/sessions', requireAuth, (req, res) => {
-  const sessions = readJsonSafe(statePath('research_sessions.json'), [])
-  const budget   = readJsonSafe(statePath('research_budget.json'), {})
-  res.json({ ok: true, sessions: Array.isArray(sessions) ? sessions.slice(-50) : [], budget })
-})
 
 // ── Prompt Inspector endpoints ────────────────────────────────────────────────
 
@@ -6709,35 +5556,6 @@ function addPromptTrace(raw) {
 // Inject trace capture into /api/chat pipeline
 const _origChatHandler = null; // hoisted in server.js chat route already — we hook via broadcaster
 
-app.get('/api/prompt-traces', requireAuth, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
-  res.json({ ok: true, traces: promptTraceStore.slice(0, limit), total: promptTraceStore.length });
-});
-
-app.get('/api/prompt-trace/:id', requireAuth, (req, res) => {
-  const trace = promptTraceStore.find(t => t.id === req.params.id);
-  if (!trace) return res.status(404).json({ ok: false, error: 'Trace not found' });
-  res.json({ ok: true, trace });
-});
-
-app.delete('/api/prompt-traces', requireAuth, (req, res) => {
-  promptTraceStore.length = 0;
-  res.json({ ok: true, cleared: true });
-});
-
-app.get('/api/prompt-inspector/config', requireAuth, (req, res) => {
-  res.json({ ok: true, config: promptInspectorConfig });
-});
-
-app.post('/api/prompt-inspector/config', requireAuth, (req, res) => {
-  promptInspectorConfig = { ...promptInspectorConfig, ...(req.body || {}) };
-  res.json({ ok: true, config: promptInspectorConfig, inspector_status: promptInspectorConfig });
-});
-
-app.patch('/api/prompt-inspector/config', requireAuth, (req, res) => {
-  promptInspectorConfig = { ...promptInspectorConfig, ...(req.body || {}) };
-  res.json({ ok: true, config: promptInspectorConfig, inspector_status: promptInspectorConfig });
-});
 
 // ── Legacy Forge task tracking + missing endpoint aliases ────────────────────
 // Canonical /api/forge/status is served by backend/routes/forge.js because that
@@ -6823,37 +5641,10 @@ app.post('/api/forge/code-ai', requireAuth, async (req, res) => {
 // ── AI Middleware Layer ────────────────────────────────────────────────────────
 
 // POST /api/middleware/process — unified multi-model input processing
-app.post('/api/middleware/process', requireAuth, async (req, res) => {
-  const _bodyMiddleware = validate(SCHEMAS.middlewareProcess, req, res);
-  if (!_bodyMiddleware) return;
-  try {
-    const result = await requestPythonJSON('/api/middleware/process', 'POST', _bodyMiddleware);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // GET /api/middleware/status — active model roles + Wave Field routing status
-app.get('/api/middleware/status', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/api/middleware/status', 'GET');
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message, wavefield_enabled: false, active_models: [] });
-  }
-});
 
 // POST /api/money/task  { task, mode }
-app.post('/api/money/task', requireAuth, (req, res) => {
-  const _bodyMoneyTask = validate(SCHEMAS.moneyTask, req, res);
-  if (!_bodyMoneyTask) return;
-  const { task = '' } = _bodyMoneyTask;
-  const label = String(task).trim();
-  const run = runPipeline('opportunity');
-  addActivity(`[MONEY] Task: ${label || 'unnamed'}`, 'automation');
-  res.json({ success: true, ok: true, status: { active: true, task: label, pipeline: run.pipeline }, run_id: run.id });
-});
 
 const WORKSPACE_UPLOAD_EXTENSIONS = new Set(['.py', '.js', '.ts', '.jsx', '.tsx', '.md', '.txt', '.json', '.sh', '.css', '.html', '.csv', '.yaml', '.yml']);
 const WORKSPACE_UPLOAD_MAX_SIZE = 50 * 1024 * 1024;
@@ -6890,57 +5681,8 @@ function resolveWorkspaceFile(relPath) {
 }
 
 // POST /api/workspace/upload — upload file(s) into ~/.ai-employee/workspace/uploads
-app.post('/api/workspace/upload', requireAuth, _rl_upload, (req, res) => {
-  workspaceUpload.fields([{ name: 'files', maxCount: 100 }, { name: 'file', maxCount: 100 }])(req, res, err => {
-    if (err) {
-      const tooLarge = err.code === 'LIMIT_FILE_SIZE';
-      return res.status(tooLarge ? 413 : 400).json({
-        ok: false,
-        error: tooLarge ? 'File too large' : 'Upload failed',
-        details: tooLarge ? `Maximum file size is ${WORKSPACE_UPLOAD_MAX_SIZE / 1024 / 1024}MB` : err.message,
-      });
-    }
-
-    const uploaded = [
-      ...(req.files?.files || []),
-      ...(req.files?.file || []),
-    ];
-
-    if (!uploaded.length) {
-      return res.status(400).json({ ok: false, error: 'No files provided' });
-    }
-
-    const files = uploaded.map(file => ({
-      id: path.relative(WORKSPACE_DIR, file.path),
-      name: file.originalname,
-      path: path.relative(WORKSPACE_DIR, file.path),
-      size: file.size,
-      mtime: Date.now(),
-    }));
-
-    res.json({ ok: true, files, count: files.length });
-  });
-});
 
 // GET /api/workspace/files — list files in ~/.ai-employee/workspace/
-app.get('/api/workspace/files', requireAuth, (req, res) => {
-  try {
-    const walk = (dir, base) => {
-      if (!fs.existsSync(dir)) return [];
-      return fs.readdirSync(dir).flatMap(name => {
-        const full = path.join(dir, name);
-        const rel  = base ? `${base}/${name}` : name;
-        const stat = fs.statSync(full);
-        if (stat.isDirectory()) return walk(full, rel);
-        return [{ name, path: rel, size: stat.size, mtime: stat.mtimeMs }];
-      });
-    };
-    const files = walk(WORKSPACE_DIR, '').sort((a, b) => b.mtime - a.mtime);
-    res.json({ files, workspace: WORKSPACE_DIR });
-  } catch (e) {
-    res.json({ files: [], workspace: WORKSPACE_DIR });
-  }
-});
 
 // DELETE /api/workspace/files/<relative-path> — delete one workspace file.
 app.delete(/^\/api\/workspace\/files\/(.+)$/, requireAuth, (req, res) => {
@@ -6958,247 +5700,24 @@ app.delete(/^\/api\/workspace\/files\/(.+)$/, requireAuth, (req, res) => {
 });
 
 // GET /api/errors  — error audit log (e2e + external callers)
-app.get('/api/errors', requireAuth, (req, res) => {
-  const limit = Math.min(200, parseInt((req.query || {}).limit) || 100);
-  const errors = (_auditLog || [])
-    .filter((e) => e.risk_score >= 0.6 || String(e.action || '').includes('fail') || String(e.action || '').includes('error'))
-    .slice(0, limit);
-  res.json(errors);
-});
 
 // ── Machine Identity ──────────────────────────────────────────────────────────
 
-app.get('/api/identity', requireAuth, (req, res) => {
-  const path = require('path');
-  const fs = require('fs');
-  const idPath = statePath('identity.json');
-  try {
-    if (fs.existsSync(idPath)) {
-      res.json(JSON.parse(fs.readFileSync(idPath, 'utf8')));
-    } else {
-      const crypto = require('crypto');
-      const fp = crypto.createHash('sha256')
-        .update(os.hostname()).update(String(os.cpus().length)).digest('hex').slice(0, 16);
-      const names = ['Athena', 'Orion', 'Nova', 'Atlas', 'Echo', 'Cipher', 'Nexus', 'Pulse', 'Axiom', 'Vega'];
-      const id = {
-        id: crypto.randomUUID(),
-        fingerprint: fp,
-        name: names[parseInt(fp.slice(0, 4), 16) % names.length],
-        hostname: os.hostname(),
-        created_at: new Date().toISOString(),
-        first_boot: true,
-      };
-      const dir = path.dirname(idPath);
-      require('fs').mkdirSync(dir, { recursive: true });
-      require('fs').writeFileSync(idPath, JSON.stringify(id, null, 2));
-      res.json(id);
-    }
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // ── Settings Management ───────────────────────────────────────────────────────
 
-app.get('/api/system/settings/coding-ai', requireAuth, (req, res) => {
-  try {
-    const envPath = path.join(AI_HOME, '.env');
-    const settings = { provider: 'anthropic', model: 'claude-sonnet-4-6', has_openrouter_key: false };
-    if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, 'utf8');
-      const match = content.match(/OPENROUTER_API_KEY=(.+)/);
-      if (match && match[1]) {
-        settings.has_openrouter_key = true;
-      }
-    }
-    res.json(settings);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/system/settings/coding-ai', requireAuth, (req, res) => {
-  const _bodyCodingAi = validate(SCHEMAS.codingAiSettings, req, res);
-  if (!_bodyCodingAi) return;
-  try {
-    const { provider, model, openrouter_api_key } = _bodyCodingAi;
-    const envPath = path.join(AI_HOME, '.env');
-    const dir = path.dirname(envPath);
-    fs.mkdirSync(dir, { recursive: true });
-
-    let content = '';
-    if (fs.existsSync(envPath)) {
-      content = fs.readFileSync(envPath, 'utf8');
-      // Remove old key if present
-      content = content.replace(/OPENROUTER_API_KEY=.+\n?/g, '');
-    }
-
-    // Add new key if provided
-    if (openrouter_api_key && openrouter_api_key.trim()) {
-      content += `OPENROUTER_API_KEY=${openrouter_api_key.trim()}\n`;
-    }
-
-    fs.writeFileSync(envPath, content);
-
-    // Update process env for immediate use
-    if (openrouter_api_key) {
-      process.env.OPENROUTER_API_KEY = openrouter_api_key.trim();
-    }
-
-    res.json({ ok: true, provider, model, key_saved: !!openrouter_api_key });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // ── Agent Catalog ─────────────────────────────────────────────────────────────
 
-app.get('/api/agents/list', requireAuth, (req, res) => {
-  try {
-    const agents = getAgents().map(a => ({
-      id: a.id,
-      description: a.description || '',
-      state: a.state || 'idle',
-      type: a.type || 'general',
-      category: a.category || '',
-      lastActivityAt: a.lastActivityAt || null,
-      tasksCompleted: a.tasksCompleted || 0,
-    }));
-    res.json({ agents, count: agents.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // ── Auto-Update System ─────────────────────────────────────────────────────────
 
-app.get('/api/system/update-status', requireAuth, (req, res) => {
-  const updaterPath = path.join(os.homedir(), '.ai-employee', 'state', 'updater.json');
-  const versionPath = path.join(os.homedir(), '.ai-employee', 'state', 'version.json');
-  try {
-    const updater = fs.existsSync(updaterPath) ? JSON.parse(fs.readFileSync(updaterPath, 'utf8')) : {};
-    const version = fs.existsSync(versionPath) ? JSON.parse(fs.readFileSync(versionPath, 'utf8')) : {};
-    res.json({ updater, version, has_update: updater.update_available || false });
-  } catch {
-    res.json({ updater: {}, version: {}, has_update: false });
-  }
-});
-
-app.get('/api/system/build-hash', requireAuth, (req, res) => {
-  const versionPath = path.join(os.homedir(), '.ai-employee', 'state', 'version.json');
-  try {
-    res.json(JSON.parse(fs.readFileSync(versionPath, 'utf8')));
-  } catch {
-    res.json({ last_commit: 'unknown' });
-  }
-});
-
-app.post('/api/system/check-updates', requireAuth, (req, res) => {
-  const triggerPath = path.join(os.homedir(), '.ai-employee', 'run', 'updater.trigger');
-  try {
-    fs.mkdirSync(path.dirname(triggerPath), { recursive: true });
-    fs.writeFileSync(triggerPath, 'check');
-    res.json({ ok: true, triggered: true });
-  } catch (e) {
-    res.json({ ok: false, error: e.message });
-  }
-});
-
-app.post('/api/system/apply-update', requireAuth, (req, res) => {
-  const triggerPath = path.join(os.homedir(), '.ai-employee', 'run', 'updater.trigger');
-  try {
-    fs.mkdirSync(path.dirname(triggerPath), { recursive: true });
-    fs.writeFileSync(triggerPath, 'force');
-    res.json({ ok: true, triggered: true });
-  } catch (e) {
-    res.json({ ok: false, error: e.message });
-  }
-});
 
 // ── Live update endpoint (SSE) ────────────────────────────────────────────────
 let _updateRunning = false;
-app.post('/api/system/run-update', requireAuth, (req, res) => {
-  if (_updateRunning) return res.status(409).json({ ok: false, error: 'Update already in progress' });
-  const updaterPaths = [
-    path.join(REPO_ROOT, 'runtime', 'agents', 'auto-updater', 'auto_updater.py'),
-    path.join(os.homedir(), '.ai-employee', 'agents', 'auto-updater', 'auto_updater.py'),
-  ];
-  const updaterScript = updaterPaths.find(p => fs.existsSync(p));
-  if (!updaterScript) return res.status(503).json({ ok: false, error: 'auto_updater.py not found' });
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.setTimeout(0);
-  res.flushHeaders();
-  const send = (type, data) => { try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch (_) {} };
-  send('start', { message: 'Starting update...', ts: Date.now() });
-  _updateRunning = true;
-  const keepalive = setInterval(() => send('ping', { ts: Date.now() }), 15000);
-  const child = spawn(process.env.PYTHON_BIN || 'python3', [updaterScript, '--once'], {
-    env: { ...process.env, AI_EMPLOYEE_REPO_DIR: REPO_ROOT, PYTHONUNBUFFERED: '1' },
-    cwd: REPO_ROOT,
-  });
-  const parseAndSend = (chunk, level) => {
-    chunk.toString().split('\n').filter(l => l.trim()).forEach(line => {
-      let stage = 'running';
-      if (/fetch|Fetching/i.test(line))                   stage = 'fetching';
-      if (/compar|diff|check/i.test(line))                stage = 'comparing';
-      if (/download|apply|Updating/i.test(line))          stage = 'applying';
-      if (/build|npm/i.test(line))                        stage = 'building';
-      if (/restart|reload/i.test(line))                   stage = 'restarting';
-      if (/up.to.date|already|✓|complete/i.test(line))   stage = 'done';
-      send('log', { line, stage, level, ts: Date.now() });
-    });
-  };
-  child.stdout.on('data', chunk => parseAndSend(chunk, 'info'));
-  child.stderr.on('data', chunk => parseAndSend(chunk, 'warn'));
-  child.on('close', (code) => {
-    clearInterval(keepalive);
-    _updateRunning = false;
-    const success = code === 0;
-    send('complete', { success, exit_code: code, message: success ? 'Update complete' : `Update failed (exit ${code})`, ts: Date.now() });
-    res.end();
-    if (success) {
-      broadcaster.broadcast('system:update:complete', { ts: new Date().toISOString(), source: 'run-update' });
-      _indexCache = null;
-    }
-  });
-  child.on('error', (err) => { clearInterval(keepalive); _updateRunning = false; send('error', { message: err.message, ts: Date.now() }); res.end(); });
-  req.on('close', () => { if (_updateRunning) { child.kill('SIGTERM'); _updateRunning = false; } });
-});
 
 // ── Auto-Update Settings + Watchdog Status ────────────────────────────────────
 
-app.get('/api/system/auto-update-settings', requireAuth, (_req, res) => {
-  res.json(autoUpdateWatchdog.getStatus());
-});
-
-app.patch('/api/system/auto-update-settings', requireAuth, (req, res) => {
-  const allowed = ['auto_update_enabled','update_channel','update_interval_minutes',
-                   'auto_restart_on_update','watchdog_enabled','watchdog_interval_seconds',
-                   'watchdog_max_failures'];
-  const patch = {};
-  for (const k of allowed) {
-    if (req.body[k] !== undefined) patch[k] = req.body[k];
-  }
-  // Coerce types
-  if (patch.update_interval_minutes !== undefined) patch.update_interval_minutes = Math.max(15, parseInt(patch.update_interval_minutes, 10) || 60);
-  if (patch.watchdog_interval_seconds !== undefined) patch.watchdog_interval_seconds = Math.max(10, parseInt(patch.watchdog_interval_seconds, 10) || 30);
-  if (patch.watchdog_max_failures !== undefined) patch.watchdog_max_failures = Math.max(1, parseInt(patch.watchdog_max_failures, 10) || 3);
-  const settings = autoUpdateWatchdog.applySettings(patch);
-  broadcaster.broadcast('system:update:settings_changed', { settings });
-  res.json({ ok: true, settings });
-});
-
-app.post('/api/system/trigger-update', requireAuth, (_req, res) => {
-  autoUpdateWatchdog.triggerManualUpdate();
-  res.json({ ok: true, message: 'Update triggered' });
-});
-
-app.get('/api/system/watchdog-status', requireAuth, (_req, res) => {
-  res.json(autoUpdateWatchdog.getStatus().watchdog);
-});
 
 // ── Task Tracking System ──────────────────────────────────────────────────────
 // Stores live task progress; in-memory with TTL cleanup (use Redis for production)
@@ -7941,6 +6460,12 @@ function watchGraphFile() {
       const edges_count = Array.isArray(raw.links || raw.edges) ? (raw.links || raw.edges).length : 0;
       _graphLastNodeCount = nodes_count;
       _graphLastEdgeCount = edges_count;
+      // Keep graphDeltaState in sync so extracted route (agents-brain.js) reads fresh values
+      if (global._graphDeltaState) {
+        global._graphDeltaState.lastMtimeMs   = stat.mtimeMs;
+        global._graphDeltaState.lastNodeCount = nodes_count;
+        global._graphDeltaState.lastEdgeCount = edges_count;
+      }
       broadcaster.broadcast('brain:graph_updated', { nodes_count, edges_count, ts: Date.now() });
     } catch (_) {
       broadcaster.broadcast('brain:graph_updated', { nodes_count: 0, edges_count: 0, ts: Date.now() });
@@ -7951,13 +6476,6 @@ function watchGraphFile() {
 }
 
 // ── Graph delta endpoint ──────────────────────────────────────────────────────
-app.get('/api/brain/graph/delta', requireAuth, (req, res) => {
-  const since = Number(req.query.since) || 0;
-  const snapshot_ts = _graphLastMtimeMs || Date.now();
-  // Full snapshot is the source of truth; we return delta: [] with full: true
-  // so the client knows to refresh from /api/brain/graph or /api/neural-brain/graph.
-  res.json({ delta: [], full: true, snapshot_ts, nodes_count: _graphLastNodeCount, edges_count: _graphLastEdgeCount });
-});
 
 setInterval(() => {
   broadcaster.broadcast('system:status', sampleSystemStatus());
@@ -8115,61 +6633,8 @@ app.get('/api/history/:taskId', requireAuth, (req, res) => {
 
 // ── Error Recovery API ────────────────────────────────────────────────────────
 
-app.get('/api/errors/recent', requireAuth, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit || 10), 50);
-  res.json({ errors: errorRecovery.getRecentErrors(limit) });
-});
-
-app.post('/api/errors/report', requireAuth, (req, res) => {
-  const _bodyErrReport = validate(SCHEMAS.errorReport, req, res);
-  if (!_bodyErrReport) return;
-  const { error, context } = _bodyErrReport;
-  if (!error) return res.status(400).json({ error: 'error required' });
-
-  const logged = errorRecovery.logError(error, context);
-  const recovery = errorRecovery.buildRecoveryAction(error, context);
-
-  res.json({ logged, recovery });
-});
 
 // Prometheus metrics endpoint — optionally gated by METRICS_TOKEN env var
-app.get('/metrics', (req, res) => {
-  const metricsToken = process.env.METRICS_TOKEN;
-  if (metricsToken) {
-    const authHeader = req.headers['authorization'] || '';
-    if (authHeader !== `Bearer ${metricsToken}`) {
-      return res.status(401).type('text/plain').send('metrics endpoint requires Authorization: Bearer <METRICS_TOKEN>');
-    }
-  }
-  const now = Date.now();
-  const uptime = now - startTime;
-  const activeAgents = getAgents().length;
-  const metrics = [
-    `# HELP ai_employee_uptime_ms Application uptime in milliseconds`,
-    `# TYPE ai_employee_uptime_ms gauge`,
-    `ai_employee_uptime_ms ${uptime}`,
-    `# HELP ai_employee_agents_active Number of active agents`,
-    `# TYPE ai_employee_agents_active gauge`,
-    `ai_employee_agents_active ${activeAgents}`,
-    `# HELP ai_employee_tasks_total Total tasks processed`,
-    `# TYPE ai_employee_tasks_total counter`,
-    `ai_employee_tasks_total ${taskMetrics.completed + taskMetrics.failed}`,
-    `# HELP ai_employee_tasks_completed_total Completed tasks`,
-    `# TYPE ai_employee_tasks_completed_total counter`,
-    `ai_employee_tasks_completed_total ${taskMetrics.completed}`,
-    `# HELP ai_employee_tasks_failed_total Failed tasks`,
-    `# TYPE ai_employee_tasks_failed_total counter`,
-    `ai_employee_tasks_failed_total ${taskMetrics.failed}`,
-    `# HELP ai_employee_errors_total Total errors`,
-    `# TYPE ai_employee_errors_total counter`,
-    `ai_employee_errors_total ${errorRecovery.getTotalErrors()}`,
-    `# HELP ai_employee_api_calls_total Total API calls`,
-    `# TYPE ai_employee_api_calls_total counter`,
-    `ai_employee_api_calls_total ${apiCallCounter}`,
-  ].join('\n');
-
-  res.type('text/plain; version=0.0.4').send(metrics + '\n');
-});
 
 // ── Global /api/* catch-all rate limiter ──────────────────────────────────────
 // Runs after all specific-route middlewares. Requests that already consumed a
