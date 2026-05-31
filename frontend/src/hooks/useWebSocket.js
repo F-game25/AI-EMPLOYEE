@@ -148,7 +148,30 @@ function connectSingleton() {
       return
     }
     if (evt.code === 4401) {
-      sessionStorage.removeItem('ai_jwt')
+      // Token expired — try to refresh silently before reconnecting
+      import('../api/client').then(({ default: api }) => {
+        api.refreshToken?.().then(newToken => {
+          if (newToken) {
+            sessionStorage.setItem('ai_jwt', newToken)
+            localStorage.setItem('ai_jwt', newToken)
+            _reconnectAttempts = 0
+            clearTimeout(_reconnectTimer)
+            _reconnectTimer = setTimeout(connectSingleton, 500)
+          } else {
+            // Refresh failed — clear token, user needs to log in again
+            sessionStorage.removeItem('ai_jwt')
+            localStorage.removeItem('ai_jwt')
+            sys.addHeartbeatLog({ text: '[SYSTEM] Sessie verlopen — log opnieuw in', level: 'error', ts: Date.now() })
+          }
+        }).catch(() => {
+          sessionStorage.removeItem('ai_jwt')
+          localStorage.removeItem('ai_jwt')
+        })
+        return
+      }).catch(() => {
+        sessionStorage.removeItem('ai_jwt')
+      })
+      return
     }
 
     _reconnectAttempts += 1

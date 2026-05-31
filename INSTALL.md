@@ -61,8 +61,10 @@ bash install.sh
 
 ## 🍎 macOS (Monterey 12+, Ventura, Sonoma)
 
+Zelfde commando als Linux — `install.sh` detecteert macOS automatisch:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
 ```
 
 > Homebrew is required. The installer will offer to install it automatically if missing.

@@ -5,9 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash -s -- --zero-config
 #
 # ─── Platform guide ────────────────────────────────────────────────────────────
-#   Linux:   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
-#   macOS:   curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install-mac.sh | bash
-#   Windows: Download quick-install-windows.bat from the main branch on GitHub
+#   Linux/macOS: curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash
+#   Windows:     Download quick-install-windows.bat from the main branch on GitHub
 # ───────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -49,12 +48,8 @@ fi
 command -v curl >/dev/null 2>&1 || err "curl is required. Install it first."
 
 # ── Platform detection ─────────────────────────────────────────────────────────
-OS="$(uname -s)"
-if [[ "$OS" == "Darwin" ]]; then
-  log "macOS detected — redirecting to macOS-specific installer..."
-  exec bash <(curl -fsSL "$BASE_URL/quick-install-mac.sh") "$@"
-fi
-# Linux falls through to the standard installer below
+# install.sh is cross-platform: it self-dispatches to the macOS flow on Darwin.
+# Both Linux and macOS therefore use the same quick-install.sh → install.sh path.
 
 # ── Clone or update the full repository to a permanent location ────────────────
 # Running install.sh from a permanent repo directory is required so that:
