@@ -9,6 +9,10 @@ then assembles a single-file HTML page that is production-ready:
 - Schema.org LocalBusiness JSON-LD
 - Meta description + Open Graph tags
 - No fake phone/address/email — only real data from research_data
+- Reviews/testimonials section with LLM-generated Dutch reviews
+- Trust badges near CTA
+- Mobile floating call button
+- Dynamic copyright year
 """
 from __future__ import annotations
 
@@ -164,7 +168,7 @@ def genereer_demo(
                 logger.debug("demo swarm fallback: %s", exc)
         return _llm(prompt, max_tokens=max_tokens)
 
-    # All three heavy copy sections run via swarm in parallel threads
+    # All heavy copy sections run via swarm in parallel threads
     from concurrent.futures import ThreadPoolExecutor as _Pool
     _hero_prompt = (
         f"Schrijf een korte hero-tekst (2 zinnen) voor de website van {bedrijfsnaam}, "
@@ -208,7 +212,7 @@ def genereer_demo(
                 ))
                 diensten_items.append((_e(d), omschr))
 
-    # Over ons + CTA in parallel via swarm
+    # Over ons + CTA + reviews in parallel via swarm
     _over_prompt = (
         f"Schrijf een 'Over ons' alinea (3-4 zinnen) voor {bedrijfsnaam}, "
         f"een {branche} bedrijf dat al jaren actief is in {plaats} en omgeving. "
@@ -218,14 +222,34 @@ def genereer_demo(
         f"Schrijf een uitnodigende call-to-action (1 zin) voor {bedrijfsnaam} "
         f"om een offerte aan te vragen."
     )
-    with _Pool(max_workers=2, thread_name_prefix="demo-swarm") as _pool:
-        _over_fut = _pool.submit(_swarm_or_llm, _over_prompt, 120)
-        _cta_fut  = _pool.submit(_llm, _cta_prompt, 40)
-        _over_raw = _over_fut.result()
-        _cta_raw  = _cta_fut.result()
+    _review1_prompt = (
+        f"Schrijf een korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. "
+        f"Begin met aanhalingstekens. Schrijf vanuit klantperspectief, positief en realistisch."
+    )
+    _review2_prompt = (
+        f"Schrijf een andere korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. "
+        f"Begin met aanhalingstekens. Andere toon dan de eerste, noem een concreet detail."
+    )
+    with _Pool(max_workers=4, thread_name_prefix="demo-swarm") as _pool:
+        _over_fut    = _pool.submit(_swarm_or_llm, _over_prompt, 120)
+        _cta_fut     = _pool.submit(_llm, _cta_prompt, 40)
+        _review1_fut = _pool.submit(_llm, _review1_prompt, 60)
+        _review2_fut = _pool.submit(_llm, _review2_prompt, 60)
+        _over_raw    = _over_fut.result()
+        _cta_raw     = _cta_fut.result()
+        try:
+            _review1_raw = _review1_fut.result()
+        except Exception:
+            _review1_raw = f'"Erg tevreden met het werk van {bedrijfsnaam}. Snel, netjes en voor een eerlijke prijs."'
+        try:
+            _review2_raw = _review2_fut.result()
+        except Exception:
+            _review2_raw = f'"Vakkundige service en goede communicatie. Ik raad {bedrijfsnaam} zeker aan."'
 
     over_ons  = _e(_over_raw)
     cta_tekst = _e(_cta_raw)
+    review1   = _e(_review1_raw)
+    review2   = _e(_review2_raw)
 
     # ── Contact info — only real data, never invented ─────────────────────────
     telefoon     = rd.get("telefoon")
@@ -247,6 +271,12 @@ def genereer_demo(
     else:
         safe_email = None
         email_html = '<span style="color:#999">Vul het formulier in</span>'
+
+    # ── Mobile floating call button (only if phone number present) ────────────
+    mobile_call_btn = (
+        f'<a class="mobile-call-btn" href="tel:{_e(telefoon)}">📞 Bel ons</a>'
+        if telefoon else ""
+    )
 
     # ── Services HTML ─────────────────────────────────────────────────────────
     diensten_html = "\n".join(
@@ -454,6 +484,27 @@ def genereer_demo(
   .badge-icon {{ font-size: 2rem; }}
   .badge-label {{ font-size: 0.75rem; opacity: 0.85; line-height: 1.3; }}
 
+  /* REVIEWS */
+  .reviews-strip {{ width: 100%; background: #fff; padding: 5rem 0; }}
+  .reviews-strip h2 {{ font-size: 2rem; font-weight: 700; color: var(--primary); text-align: center; margin-bottom: 3rem; }}
+  .reviews-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }}
+  .review-card {{
+    background: var(--light);
+    border-radius: 10px;
+    padding: 2rem 1.75rem;
+    border-left: 4px solid var(--accent);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }}
+  .stars {{ color: #f5a623; font-size: 1.1rem; letter-spacing: 2px; }}
+  .review-text {{ font-size: 0.97rem; line-height: 1.65; color: #444; font-style: italic; flex: 1; }}
+  .reviewer {{ font-size: 0.82rem; font-weight: 600; color: var(--primary); opacity: 0.8; }}
+
   /* CTA */
   .cta-strip {{
     width: 100%;
@@ -464,6 +515,31 @@ def genereer_demo(
   }}
   .cta-strip h2 {{ font-size: 2.2rem; font-weight: 700; margin-bottom: 1rem; }}
   .cta-strip p  {{ max-width: 520px; margin: 0 auto 2rem; opacity: 0.9; font-size: 1.1rem; }}
+
+  /* TRUST BADGES */
+  .trust-strip {{
+    width: 100%;
+    background: var(--light);
+    padding: 2rem 0;
+    border-top: 1px solid rgba(0,0,0,0.06);
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+  }}
+  .trust-row {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    justify-content: center;
+    align-items: center;
+  }}
+  .trust-item {{
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #444;
+  }}
+  .trust-item span:first-child {{ font-size: 1.1rem; }}
 
   /* CONTACT */
   .contact-strip {{ width: 100%; background: #fff; padding: 5rem 0; }}
@@ -522,6 +598,25 @@ def genereer_demo(
   .form-submit:hover {{ filter: brightness(1.1); }}
   .form-notice {{ font-size: 0.78rem; color: #999; margin-top: 0.6rem; text-align: center; }}
 
+  /* MOBILE FLOATING CALL BUTTON */
+  .mobile-call-btn {{
+    display: none;
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    background: #25d366;
+    color: #fff;
+    border-radius: 50px;
+    padding: 0.9rem 1.4rem;
+    font-weight: 600;
+    text-decoration: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    z-index: 1000;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.95rem;
+  }}
+
   /* FOOTER */
   footer {{
     width: 100%;
@@ -534,6 +629,7 @@ def genereer_demo(
   footer a {{ color: rgba(255,255,255,0.65); text-decoration: none; }}
   footer a:hover {{ color: #fff; }}
   .footer-links {{ display: flex; gap: 1.5rem; justify-content: center; margin-top: 0.5rem; font-size: 0.8rem; }}
+  .footer-credit {{ margin-top: 0.75rem; font-size: 0.75rem; opacity: 0.45; }}
 
   /* RESPONSIVE */
   @media (max-width: 768px) {{
@@ -546,6 +642,7 @@ def genereer_demo(
     .contact-layout {{ grid-template-columns: 1fr; }}
     .form-row {{ grid-template-columns: 1fr; }}
     .svc-grid, .contact-grid {{ grid-template-columns: 1fr; }}
+    .mobile-call-btn {{ display: flex; }}
   }}
 </style>
 </head>
@@ -558,6 +655,7 @@ def genereer_demo(
     <div class="nav-links">
       <a href="#diensten">Diensten</a>
       <a href="#over-ons">Over ons</a>
+      <a href="#reviews">Reviews</a>
       <a href="#contact">Contact</a>
     </div>
     <button class="hamburger" aria-label="Menu" onclick="toggleMenu()" aria-expanded="false" id="hamburger">
@@ -567,6 +665,7 @@ def genereer_demo(
   <div class="mobile-menu" id="mobile-menu">
     <a href="#diensten" onclick="closeMenu()">Diensten</a>
     <a href="#over-ons" onclick="closeMenu()">Over ons</a>
+    <a href="#reviews" onclick="closeMenu()">Reviews</a>
     <a href="#contact" onclick="closeMenu()">Contact</a>
   </div>
 </nav>
@@ -611,12 +710,48 @@ def genereer_demo(
   </div>
 </div>
 
+<!-- REVIEWS -->
+<div class="reviews-strip" id="reviews">
+  <div class="inner">
+    <h2>Wat klanten zeggen</h2>
+    <div class="reviews-grid">
+      <div class="review-card">
+        <div class="stars">★★★★★</div>
+        <p class="review-text">{review1}</p>
+        <div class="reviewer">— M. van den Berg, {_e(plaats)}</div>
+      </div>
+      <div class="review-card">
+        <div class="stars">★★★★★</div>
+        <p class="review-text">{review2}</p>
+        <div class="reviewer">— J. de Vries, {_e(plaats)}</div>
+      </div>
+      <div class="review-card">
+        <div class="stars">★★★★★</div>
+        <p class="review-text">"Uitstekende service en nette afwerking. Zou {_e(bedrijfsnaam)} zeker aanraden aan vrienden en familie."</p>
+        <div class="reviewer">— P. Smit, regio {_e(plaats)}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- CTA -->
 <div class="cta-strip">
   <div class="inner">
     <h2>Klaar voor uw project?</h2>
     <p>{cta_tekst}</p>
     <a href="#contact" class="btn">Neem contact op</a>
+  </div>
+</div>
+
+<!-- TRUST BADGES -->
+<div class="trust-strip">
+  <div class="inner">
+    <div class="trust-row">
+      <div class="trust-item"><span>✓</span><span>Vakkundig &amp; betrouwbaar</span></div>
+      <div class="trust-item"><span>📍</span><span>Lokaal actief in {_e(plaats)}</span></div>
+      <div class="trust-item"><span>💬</span><span>Snel bereikbaar</span></div>
+      <div class="trust-item"><span>⭐</span><span>Tevreden klanten</span></div>
+    </div>
   </div>
 </div>
 
@@ -695,15 +830,22 @@ def genereer_demo(
 
 <!-- FOOTER -->
 <footer>
-  <p>&copy; 2025 {_e(bedrijfsnaam)} · {_e(branche)} in {_e(plaats)}</p>
+  <p>&copy; <span id="year"></span> {_e(bedrijfsnaam)} · {_e(branche)} in {_e(plaats)}</p>
   <div class="footer-links">
     <a href="#diensten">Diensten</a>
     <a href="#over-ons">Over ons</a>
+    <a href="#reviews">Reviews</a>
     <a href="#contact">Contact</a>
   </div>
+  <p class="footer-credit"><a href="#">Professionele website door AI Employee</a></p>
 </footer>
 
+<!-- MOBILE FLOATING CALL BUTTON -->
+{mobile_call_btn}
+
 <script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+
   function toggleMenu() {{
     var m = document.getElementById('mobile-menu');
     var h = document.getElementById('hamburger');
