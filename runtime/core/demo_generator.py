@@ -146,18 +146,43 @@ def genereer_demo(
 
     logger.info("demo_generator: genereren voor '%s' (%s, %s)", bedrijfsnaam, plaats, branche)
 
-    # ── LLM calls — all outputs html-escaped before template insertion ────────
-    hero_tekst = _e(_llm(
-        f"Schrijf een korte hero-tekst (2 zinnen) voor de website van {bedrijfsnaam}, "
-        f"een {branche} bedrijf in {plaats}. Spreek de bezoeker direct aan.",
-        max_tokens=80,
-    ))
+    # ── Swarm copy generation — hero + meta + over_ons + cta in parallel ────
+    # 3 agents write each section from a different angle; best is chosen by
+    # the swarm engine's belief propagation. Falls back to single LLM if swarm
+    # unavailable (Ollama offline / SWARM_DEMO=0).
+    _use_swarm = os.environ.get("SWARM_DEMO", "1") != "0"
 
-    meta_description = _e(_llm(
+    def _swarm_or_llm(prompt: str, max_tokens: int = 300) -> str:
+        """Run swarm if available, fall back to single LLM call."""
+        if _use_swarm:
+            try:
+                from core.swarm_engine import swarm_pitch
+                result = swarm_pitch(prompt, context=f"{bedrijfsnaam}, {branche} in {plaats}", n_agents=3)
+                if result.answer and result.confidence > 0.3:
+                    return result.answer
+            except Exception as exc:
+                logger.debug("demo swarm fallback: %s", exc)
+        return _llm(prompt, max_tokens=max_tokens)
+
+    # All three heavy copy sections run via swarm in parallel threads
+    from concurrent.futures import ThreadPoolExecutor as _Pool
+    _hero_prompt = (
+        f"Schrijf een korte hero-tekst (2 zinnen) voor de website van {bedrijfsnaam}, "
+        f"een {branche} bedrijf in {plaats}. Spreek de bezoeker direct aan."
+    )
+    _meta_prompt = (
         f"Schrijf een Google meta-description (max 155 tekens) voor {bedrijfsnaam}, "
-        f"{branche} in {plaats}. Zakelijk, met een duidelijke call-to-action.",
-        max_tokens=60,
-    ))
+        f"{branche} in {plaats}. Zakelijk, met een duidelijke call-to-action."
+    )
+    with _Pool(max_workers=2, thread_name_prefix="demo-swarm") as _pool:
+        _hero_fut = _pool.submit(_swarm_or_llm, _hero_prompt, 80)
+        _meta_fut = _pool.submit(_llm, _meta_prompt, 60)  # meta is short, single call fine
+        _hero_raw  = _hero_fut.result()
+        _meta_raw  = _meta_fut.result()
+
+    # ── LLM calls — all outputs html-escaped before template insertion ────────
+    hero_tekst = _e(_hero_raw)
+    meta_description = _e(_meta_raw)
 
     diensten_items: list[tuple[str, str]] = []
     if diensten:
@@ -183,18 +208,24 @@ def genereer_demo(
                 ))
                 diensten_items.append((_e(d), omschr))
 
-    over_ons = _e(_llm(
+    # Over ons + CTA in parallel via swarm
+    _over_prompt = (
         f"Schrijf een 'Over ons' alinea (3-4 zinnen) voor {bedrijfsnaam}, "
         f"een {branche} bedrijf dat al jaren actief is in {plaats} en omgeving. "
-        f"Nadruk op vakmanschap en betrouwbaarheid.",
-        max_tokens=120,
-    ))
-
-    cta_tekst = _e(_llm(
+        f"Nadruk op vakmanschap en betrouwbaarheid."
+    )
+    _cta_prompt = (
         f"Schrijf een uitnodigende call-to-action (1 zin) voor {bedrijfsnaam} "
-        f"om een offerte aan te vragen.",
-        max_tokens=40,
-    ))
+        f"om een offerte aan te vragen."
+    )
+    with _Pool(max_workers=2, thread_name_prefix="demo-swarm") as _pool:
+        _over_fut = _pool.submit(_swarm_or_llm, _over_prompt, 120)
+        _cta_fut  = _pool.submit(_llm, _cta_prompt, 40)
+        _over_raw = _over_fut.result()
+        _cta_raw  = _cta_fut.result()
+
+    over_ons  = _e(_over_raw)
+    cta_tekst = _e(_cta_raw)
 
     # ── Contact info — only real data, never invented ─────────────────────────
     telefoon     = rd.get("telefoon")

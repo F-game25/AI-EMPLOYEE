@@ -1134,6 +1134,17 @@ const _OLLAMA_CODE_MODEL = process.env.FORGE_OLLAMA_MODEL || process.env.OLLAMA_
 const _CLAUDE_MODEL = process.env.FORGE_CLAUDE_MODEL || 'claude-sonnet-4-6'
 
 let _anthropicClient = null
+// Runtime swarm config — changeable via API without server restart
+const _swarmConfig = {
+  enabled: process.env.FORGE_SWARM !== '0',
+  n_agents_code: parseInt(process.env.SWARM_AGENTS_CODE) || 5,
+  n_agents_analysis: parseInt(process.env.SWARM_AGENTS_ANALYSIS) || 3,
+}
+function isSwarmEnabled() { return _swarmConfig.enabled }
+function swarmAgents(type) {
+  return type === 'code' ? _swarmConfig.n_agents_code : _swarmConfig.n_agents_analysis
+}
+
 function _getAnthropic() {
   if (_anthropicClient) return _anthropicClient
   const key = process.env.ANTHROPIC_API_KEY
@@ -2329,6 +2340,24 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   // POST /api/forge/swarm — run a swarm of N agents on any prompt
   // Usable by: AscendForge, pitch generator, research pipeline, any route.
   // Body: { prompt, task_type?, n_agents?, timeout_s? }
+  // GET /api/forge/swarm/config — current swarm settings
+  router.get('/swarm/config', requireAuth, (_req, res) => {
+    res.json({ ok: true, ..._swarmConfig })
+  })
+
+  // POST /api/forge/swarm/config — toggle swarm on/off and set agent counts at runtime
+  router.post('/swarm/config', requireAuth, (req, res) => {
+    const { enabled, n_agents, n_agents_code, n_agents_analysis } = req.body || {}
+    if (typeof enabled === 'boolean') _swarmConfig.enabled = enabled
+    if (Number.isInteger(n_agents) && n_agents >= 2 && n_agents <= 20) {
+      _swarmConfig.n_agents_code = n_agents
+      _swarmConfig.n_agents_analysis = Math.max(2, Math.round(n_agents * 0.6))
+    }
+    if (Number.isInteger(n_agents_code)) _swarmConfig.n_agents_code = Math.min(20, Math.max(2, n_agents_code))
+    if (Number.isInteger(n_agents_analysis)) _swarmConfig.n_agents_analysis = Math.min(20, Math.max(2, n_agents_analysis))
+    res.json({ ok: true, ..._swarmConfig })
+  })
+
   router.post('/swarm', requireAuth, async (req, res) => {
     const prompt = String(req.body?.prompt || '').trim()
     if (!prompt) return res.status(400).json({ ok: false, error: 'prompt required' })
@@ -2902,10 +2931,10 @@ Respond with ONLY valid JSON (no markdown fences) matching this schema:
     let plannerSwarmUsed = false
 
     // Swarm planning: 3 agents propose plans, best JSON plan wins
-    const usePlannerSwarm = process.env.FORGE_SWARM !== '0'
+    const usePlannerSwarm = isSwarmEnabled()
     if (usePlannerSwarm) {
       try {
-        const swarmResult = await callSwarm(prompt, 'analysis', { n_agents: 3, timeout_s: 70 })
+        const swarmResult = await callSwarm(prompt, 'analysis', { n_agents: swarmAgents('analysis'), timeout_s: 70 })
         if (swarmResult?.answer) {
           raw = swarmResult.answer
           plannerSwarmUsed = true
@@ -2960,12 +2989,12 @@ Each file must be in a code block labelled with its relative path.`
 
     let aiText = ''
     let swarmUsed = false
-    const useSwarm = process.env.FORGE_SWARM !== '0' // enabled by default
+    const useSwarm = isSwarmEnabled() // runtime-toggleable
 
     if (useSwarm) {
       // Swarm mode: run N agents in parallel, pick consensus answer
       try {
-        const swarmResult = await callSwarm(prompt, 'code', { timeout_s: 100 })
+        const swarmResult = await callSwarm(prompt, 'code', { n_agents: swarmAgents('code'), timeout_s: 100 })
         if (swarmResult?.answer) {
           aiText = swarmResult.answer
           swarmUsed = true
@@ -3096,8 +3125,8 @@ Respond with ONLY valid JSON (no markdown fences):
     let secOutput = { verdict: 'pass', findings: [], summary: 'No security issues found' }
     let secSwarmUsed = false
     try {
-      if (process.env.FORGE_SWARM !== '0') {
-        const sw = await callSwarm(prompt, 'analysis', { n_agents: 3, timeout_s: 40 })
+      if (isSwarmEnabled()) {
+        const sw = await callSwarm(prompt, 'analysis', { n_agents: swarmAgents('analysis'), timeout_s: 40 })
         if (sw?.answer) {
           const cleaned = sw.answer.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
           const parsed = JSON.parse(cleaned)
@@ -3210,8 +3239,8 @@ Respond with ONLY valid JSON (no markdown fences):
     let reviewSwarmUsed = false
     let raw = ''
     try {
-      if (process.env.FORGE_SWARM !== '0') {
-        const sw = await callSwarm(prompt, 'analysis', { n_agents: 3, timeout_s: 50 })
+      if (isSwarmEnabled()) {
+        const sw = await callSwarm(prompt, 'analysis', { n_agents: swarmAgents('analysis'), timeout_s: 50 })
         if (sw?.answer) {
           const cleaned = sw.answer.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
           const parsed = JSON.parse(cleaned)

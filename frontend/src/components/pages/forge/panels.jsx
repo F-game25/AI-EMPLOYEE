@@ -577,50 +577,63 @@ export function PolicyPreview({ actions }) {
 }
 
 function SwarmToggle() {
-  const [enabled, setEnabled] = useState(true)
+  const [cfg, setCfg] = useState({ enabled: true, n_agents_code: 5, n_agents_analysis: 3 })
   const [busy, setBusy] = useState(false)
-  const [agents, setAgents] = useState(null)
+  const [expanded, setExpanded] = useState(false)
 
-  async function toggle() {
+  useEffect(() => {
+    JGET('/api/forge/swarm/config').then(r => r.json()).then(r => { if (r.ok) setCfg(r) }).catch(() => {})
+  }, [])
+
+  async function patch(update) {
     setBusy(true)
     try {
-      const res = await JPOST('/api/forge/swarm/config', { enabled: !enabled, n_agents: agents }).then(r => r.json())
-      if (res.ok) setEnabled(!enabled)
-    } catch { /* server may not support yet — toggle locally */ setEnabled(e => !e) }
+      const res = await JPOST('/api/forge/swarm/config', update).then(r => r.json())
+      if (res.ok) setCfg(res)
+    } catch { setCfg(c => ({ ...c, ...update })) }
     finally { setBusy(false) }
   }
 
+  const c = `${cfg.n_agents_code}c/${cfg.n_agents_analysis}a`
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--af-border)', marginTop: 8 }}>
-      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--af-text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', flex: 1 }}>
-        Swarm Mode
-      </span>
-      {agents !== null && (
-        <select
-          value={agents}
-          onChange={e => setAgents(Number(e.target.value))}
-          style={{ fontSize: 10, background: 'var(--af-surface)', color: 'var(--af-text)', border: '1px solid var(--af-border)', borderRadius: 4, padding: '2px 4px' }}
-        >
-          {[2,3,4,5,7,10].map(n => <option key={n} value={n}>{n} agents</option>)}
-        </select>
+    <div style={{ borderTop: '1px solid var(--af-border)', marginTop: 8, paddingTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--af-text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', flex: 1 }}>
+          Swarm {cfg.enabled && <span style={{ color: '#60A5FA', fontWeight: 400 }}>({c})</span>}
+        </span>
+        <button
+          onClick={() => patch({ enabled: !cfg.enabled })}
+          disabled={busy}
+          style={{
+            padding: '3px 10px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: 'none', cursor: 'pointer',
+            background: cfg.enabled ? 'rgba(96,165,250,0.2)' : 'rgba(156,163,175,0.15)',
+            color: cfg.enabled ? '#60A5FA' : 'var(--af-text-dim)',
+            outline: cfg.enabled ? '1px solid rgba(96,165,250,0.4)' : '1px solid var(--af-border)',
+          }}
+        >{cfg.enabled ? 'ON' : 'OFF'}</button>
+        <button
+          onClick={() => setExpanded(e => !e)}
+          style={{ fontSize: 9, padding: '2px 6px', background: 'transparent', border: '1px solid var(--af-border)', borderRadius: 4, color: 'var(--af-text-dim)', cursor: 'pointer' }}
+          title="Configure agent counts"
+        >⚙</button>
+      </div>
+      {expanded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          {[['Code agents', 'n_agents_code', cfg.n_agents_code], ['Analysis agents', 'n_agents_analysis', cfg.n_agents_analysis]].map(([label, key, val]) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, color: 'var(--af-text-dim)', flex: 1 }}>{label}</span>
+              <select
+                value={val}
+                onChange={e => patch({ [key]: Number(e.target.value) })}
+                style={{ fontSize: 10, background: 'var(--af-surface)', color: 'var(--af-text)', border: '1px solid var(--af-border)', borderRadius: 4, padding: '2px 4px' }}
+              >
+                {[2, 3, 4, 5, 7, 10].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
       )}
-      <button
-        onClick={toggle}
-        disabled={busy}
-        style={{
-          padding: '3px 10px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: 'none', cursor: 'pointer',
-          background: enabled ? 'rgba(96,165,250,0.2)' : 'rgba(156,163,175,0.15)',
-          color: enabled ? '#60A5FA' : 'var(--af-text-dim)',
-          outline: enabled ? '1px solid rgba(96,165,250,0.4)' : '1px solid var(--af-border)',
-        }}
-      >
-        {enabled ? 'ON' : 'OFF'}
-      </button>
-      <button
-        onClick={() => setAgents(a => a === null ? 5 : null)}
-        style={{ fontSize: 9, padding: '2px 6px', background: 'transparent', border: '1px solid var(--af-border)', borderRadius: 4, color: 'var(--af-text-dim)', cursor: 'pointer' }}
-        title="Configure agent count"
-      >⚙</button>
     </div>
   )
 }
