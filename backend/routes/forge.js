@@ -20,6 +20,9 @@ const { spawn, spawnSync } = require('child_process')
 const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforge/engine')
 const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
+const forgeWorkspace = require('../services/forge_workspace')
+const forgePath = require('../services/forge_path')
+const forgeDiff = require('../services/forge_diff')
 const forgeLearning = require('../services/forge_learning')
 const forgeTraining = require('../services/forge_training')
 const forgeMemoryGraph = require('../services/forge_memory_graph')
@@ -176,68 +179,12 @@ function updateAction(id, patch) {
   return updated.find(action => action.id === id) || null
 }
 
-function safeProjectRoot(project) {
-  const root = path.resolve(project.root_path || '')
-  return root
-}
-
-// Symlink-safe path containment check. Resolves symlinks on existing paths
-// to prevent breakout attacks where a symlink points outside the root.
-function safeResolve(root, relativePath) {
-  const target = path.resolve(root, String(relativePath || ''))
-  if (target !== root && !target.startsWith(root + path.sep)) {
-    const err = new Error('path escapes root boundary')
-    err.status = 403
-    throw err
-  }
-  // For existing paths, resolve symlinks and re-check containment
-  try {
-    if (fs.existsSync(target)) {
-      const real = fs.realpathSync(target)
-      if (real !== root && !real.startsWith(root + path.sep)) {
-        const err = new Error('symlink escapes root boundary')
-        err.status = 403
-        throw err
-      }
-    }
-  } catch (e) {
-    if (e.status === 403) throw e
-    // lstat/realpath failure on broken symlink — reject it
-    const err = new Error('path resolution failed (possible broken symlink)')
-    err.status = 403
-    throw err
-  }
-  return target
-}
-
-function resolveInsideProject(project, relativePath) {
-  return safeResolve(safeProjectRoot(project), relativePath)
-}
-
-function normalizeRelPath(filePath) {
-  return String(filePath || '')
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '')
-    .replace(/\.\.+/g, '.')
-}
-
-function isProtectedPath(project, filePath) {
-  const normalized = normalizeRelPath(filePath)
-  if (project.target_type !== 'internal_repo') return false
-  return PROTECTED_PATH_PATTERNS.some(pattern => pattern.test(normalized))
-}
-
-function canWritePath(project, filePath) {
-  if (project.write_access !== true) return false
-  const allowed = Array.isArray(project.allowed_write_paths) && project.allowed_write_paths.length
-    ? project.allowed_write_paths
-    : ['.']
-  const normalized = normalizeRelPath(filePath)
-  return allowed.some(prefix => {
-    const p = normalizeRelPath(prefix)
-    return p === '.' || normalized === p || normalized.startsWith(p.replace(/\/+$/, '') + '/')
-  })
-}
+function safeProjectRoot(project) { return forgePath.safeProjectRoot(project) }
+function safeResolve(root, rel) { return forgePath.safeResolve(root, rel) }
+function resolveInsideProject(project, rel) { return forgePath.resolveInsideProject(project, rel) }
+function normalizeRelPath(filePath) { return forgePath.normalizeRelPath(filePath) }
+function isProtectedPath(project, filePath) { return forgePath.isProtectedPath(project, filePath) }
+function canWritePath(project, filePath) { return forgePath.canWritePath(project, filePath) }
 
 function buildTree(dir, base = dir, depth = 0) {
   if (depth > 5 || !fs.existsSync(dir)) return []
@@ -342,132 +289,15 @@ function validateRunActionPolicy(action, project) {
   }
 }
 
-function runWorkspaceRoot(runId) {
-  return path.join(RUN_WORKSPACES_DIR, runId, 'workspace')
-}
-
-function copyProjectToWorkspace(project, workspaceRoot) {
-  const srcRoot = safeProjectRoot(project)
-  ensureDir(workspaceRoot)
-  let copiedFiles = 0
-  let copiedBytes = 0
-
-  const copyDir = (src, dest) => {
-    if (copiedFiles >= MAX_STAGED_COPY_FILES || copiedBytes >= MAX_STAGED_COPY_BYTES) return
-    ensureDir(dest)
-    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-      if (PROJECT_SKIP.has(entry.name) || entry.name.startsWith('.forge_')) continue
-      const from = path.join(src, entry.name)
-      const to = path.join(dest, entry.name)
-      if (entry.isDirectory()) {
-        copyDir(from, to)
-        continue
-      }
-      if (!entry.isFile()) continue
-      const stat = fs.statSync(from)
-      if (copiedFiles + 1 > MAX_STAGED_COPY_FILES || copiedBytes + stat.size > MAX_STAGED_COPY_BYTES) return
-      ensureDir(path.dirname(to))
-      fs.copyFileSync(from, to)
-      copiedFiles += 1
-      copiedBytes += stat.size
-    }
-  }
-
-  copyDir(srcRoot, workspaceRoot)
-  return { copied_files: copiedFiles, copied_bytes: copiedBytes, truncated: copiedFiles >= MAX_STAGED_COPY_FILES || copiedBytes >= MAX_STAGED_COPY_BYTES }
-}
-
-function runGit(root, args, timeoutMs = 10000) {
-  const result = spawnSync('git', ['-C', root, ...args], {
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    maxBuffer: 1024 * 1024,
-  })
-  return {
-    ok: result.status === 0,
-    status: result.status,
-    stdout: String(result.stdout || '').trim(),
-    stderr: String(result.stderr || result.error?.message || '').trim(),
-  }
-}
-
-function gitWorkspaceSource(project) {
-  const root = safeProjectRoot(project)
-  const inside = runGit(root, ['rev-parse', '--is-inside-work-tree'])
-  if (!inside.ok || inside.stdout !== 'true') return { ok: false, reason: 'not_git_repo' }
-  const top = runGit(root, ['rev-parse', '--show-toplevel'])
-  if (!top.ok || !top.stdout) return { ok: false, reason: 'git_root_unavailable', detail: top.stderr }
-  const status = runGit(top.stdout, ['status', '--porcelain'])
-  if (!status.ok) return { ok: false, reason: 'git_status_failed', detail: status.stderr }
-  if (status.stdout) return { ok: false, reason: 'dirty_source_tree' }
-  const head = runGit(top.stdout, ['rev-parse', '--verify', 'HEAD'])
-  if (!head.ok || !head.stdout) return { ok: false, reason: 'head_unavailable', detail: head.stderr }
-  return { ok: true, root: top.stdout, head: head.stdout }
-}
-
-function createGitWorktreeWorkspace(project, workspaceRoot) {
-  const source = gitWorkspaceSource(project)
-  if (!source.ok) return { ok: false, reason: source.reason, detail: source.detail || null }
-  ensureDir(path.dirname(workspaceRoot))
-  const added = runGit(source.root, ['worktree', 'add', '--detach', workspaceRoot, source.head], 60000)
-  if (!added.ok) {
-    return { ok: false, reason: 'worktree_add_failed', detail: added.stderr || added.stdout }
-  }
-  return {
-    ok: true,
-    workspace_mode: 'git_worktree',
-    git_root: source.root,
-    git_head: source.head,
-    created_from: source.head,
-  }
-}
-
-function ensureRunWorkspace(run, project) {
-  const workspace = runWorkspaceRoot(run.id)
-  if (fs.existsSync(path.join(workspace, '.forge_workspace.json'))) return workspace
-  if (fs.existsSync(workspace)) removeRunWorkspace(run.id)
-  let workspaceInfo = createGitWorktreeWorkspace(project, workspace)
-  if (!workspaceInfo.ok) {
-    const copy = copyProjectToWorkspace(project, workspace)
-    workspaceInfo = {
-      workspace_mode: 'directory_copy',
-      fallback_reason: workspaceInfo.reason || 'worktree_unavailable',
-      fallback_detail: workspaceInfo.detail || null,
-      ...copy,
-    }
-  }
-  fs.writeFileSync(path.join(workspace, '.forge_workspace.json'), JSON.stringify({
-    run_id: run.id,
-    project_id: project.id,
-    source_root: safeProjectRoot(project),
-    created_at: nowIso(),
-    ...workspaceInfo,
-  }, null, 2))
-  return workspace
-}
-
-function resolveInsideWorkspace(workspaceRoot, relativePath) {
-  return safeResolve(workspaceRoot, normalizeRelPath(relativePath))
-}
-
-function readWorkspaceMetadata(workspaceRoot) {
-  return readJson(path.join(workspaceRoot, '.forge_workspace.json'), null)
-}
-
-function removeRunWorkspace(runId) {
-  const workspace = runWorkspaceRoot(runId)
-  const runDir = path.dirname(workspace)
-  const meta = readWorkspaceMetadata(workspace)
-  if (meta?.workspace_mode === 'git_worktree' && meta.git_root) {
-    const removed = runGit(meta.git_root, ['worktree', 'remove', '--force', workspace], 60000)
-    if (!removed.ok && fs.existsSync(workspace)) fs.rmSync(workspace, { recursive: true, force: true })
-    runGit(meta.git_root, ['worktree', 'prune'], 60000)
-  } else if (fs.existsSync(workspace)) {
-    fs.rmSync(workspace, { recursive: true, force: true })
-  }
-  if (fs.existsSync(runDir)) fs.rmSync(runDir, { recursive: true, force: true })
-  return { workspace, workspace_mode: meta?.workspace_mode || 'unknown' }
-}
+function runWorkspaceRoot(runId) { return forgeWorkspace.runWorkspaceRoot(runId) }
+function copyProjectToWorkspace(project, workspaceRoot) { return forgeWorkspace.copyProjectToWorkspace(project, workspaceRoot) }
+function runGit(root, args, timeoutMs) { return forgeWorkspace.runGit(root, args, timeoutMs) }
+function gitWorkspaceSource(project) { return forgeWorkspace.gitWorkspaceSource(project) }
+function createGitWorktreeWorkspace(project, workspaceRoot) { return forgeWorkspace.createGitWorktreeWorkspace(project, workspaceRoot) }
+function ensureRunWorkspace(run, project) { return forgeWorkspace.ensureRunWorkspace(run, project) }
+function resolveInsideWorkspace(workspaceRoot, rel) { return forgeWorkspace.resolveInsideWorkspace(workspaceRoot, rel) }
+function readWorkspaceMetadata(workspaceRoot) { return forgeWorkspace.readWorkspaceMetadata(workspaceRoot) }
+function removeRunWorkspace(runId) { return forgeWorkspace.removeRunWorkspace(runId) }
 
 function stageRunAction(run, project, action) {
   const policy = validateRunActionPolicy(action, project)
@@ -622,97 +452,8 @@ function persistActions(newActions) {
   return newActions
 }
 
-// Produces a standard unified diff (RFC 3281-compatible) with 3-line context.
-function generateUnifiedDiff(beforeContent, afterContent, filePath) {
-  const before = String(beforeContent || '').split('\n')
-  const after  = String(afterContent  || '').split('\n')
-  const MAX_DIFF_LINES = 50000
-  if (before.length > MAX_DIFF_LINES || after.length > MAX_DIFF_LINES) {
-    return `--- ${filePath}\n+++ ${filePath}\n@@ diff truncated: file too large (>${MAX_DIFF_LINES} lines) @@\n`
-  }
-  if (before.join('\n') === after.join('\n')) return ''
-
-  // LCS-based diff using Myers algorithm (simple O(ND) implementation)
-  const lcs = (a, b) => {
-    const m = a.length, n = b.length
-    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
-    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1])
-    const seq = []
-    let i = m, j = n
-    while (i > 0 && j > 0) {
-      if (a[i-1] === b[j-1]) { seq.unshift([i-1, j-1]); i--; j-- }
-      else if (dp[i-1][j] >= dp[i][j-1]) i--
-      else j--
-    }
-    return seq
-  }
-
-  const common = lcs(before, after)
-  const ops = [] // { type: 'ctx'|'del'|'add', bi: before-idx, ai: after-idx, line: string }
-  let bi = 0, ai = 0
-  for (const [cb, ca] of common) {
-    while (bi < cb) { ops.push({ type: 'del', bi, line: before[bi] }); bi++ }
-    while (ai < ca) { ops.push({ type: 'add', ai, line: after[ai]  }); ai++ }
-    ops.push({ type: 'ctx', bi, ai, line: before[bi] }); bi++; ai++
-  }
-  while (bi < before.length) { ops.push({ type: 'del', bi, line: before[bi] }); bi++ }
-  while (ai < after.length)  { ops.push({ type: 'add', ai, line: after[ai]  }); ai++ }
-
-  // Group into hunks with CONTEXT=3
-  const CTX = 3
-  const changed = ops.reduce((acc, op, i) => { if (op.type !== 'ctx') acc.push(i); return acc }, [])
-  if (!changed.length) return ''
-
-  const hunks = []
-  let hunkOps = null, hunkStart = -1
-  for (const ci of changed) {
-    const lo = Math.max(0, ci - CTX), hi = Math.min(ops.length - 1, ci + CTX)
-    if (hunkOps && lo <= hunkStart + hunkOps.length + CTX) {
-      // extend current hunk
-      const needed = ops.slice(hunkStart + hunkOps.length, hi + 1)
-      hunkOps.push(...needed)
-    } else {
-      if (hunkOps) hunks.push({ start: hunkStart, ops: hunkOps })
-      hunkStart = lo
-      hunkOps = ops.slice(lo, hi + 1)
-    }
-  }
-  if (hunkOps) hunks.push({ start: hunkStart, ops: hunkOps })
-
-  const lines = [`--- a/${filePath}`, `+++ b/${filePath}`]
-  for (const { start, ops: hops } of hunks) {
-    const dels = hops.filter(o => o.type !== 'add')
-    const adds = hops.filter(o => o.type !== 'del')
-    const bStart = (dels[0]?.bi ?? 0) + 1
-    const aStart = (adds[0]?.ai ?? 0) + 1
-    lines.push(`@@ -${bStart},${dels.length} +${aStart},${adds.length} @@`)
-    for (const op of hops) {
-      if (op.type === 'ctx') lines.push(` ${op.line}`)
-      else if (op.type === 'del') lines.push(`-${op.line}`)
-      else lines.push(`+${op.line}`)
-    }
-  }
-  return lines.join('\n')
-}
-
-// Legacy shim — kept for non-agentic run paths that still call it.
-function buildDiffForFiles(files) {
-  if (!files?.length) return null
-  // For new-file-only scenarios generate a proper unified diff
-  if (files.length === 1) {
-    const ud = generateUnifiedDiff('', files[0].content || '', files[0].path)
-    return ud ? { unified: ud, path: files[0].path, isNew: true } : null
-  }
-  return {
-    path: `${files.length} files`,
-    isNew: true,
-    hunks: files.slice(0, 4).map(file => ({
-      header: `create ${file.path}`,
-      lines: String(file.content || '').split('\n').slice(0, 40).map(line => ({ type: 'add', content: line })),
-    })),
-  }
-}
+function generateUnifiedDiff(before, after, filePath) { return forgeDiff.generateUnifiedDiff(before, after, filePath) }
+function buildDiffForFiles(files) { return forgeDiff.buildDiffForFiles(files) }
 
 function createPlan(engine, project, payload = {}) {
   const goal = String(payload.goal || payload.content || payload.task || '').trim()
