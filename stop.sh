@@ -81,6 +81,9 @@ _kill_pid_file "$APP_RUN_DIR/python-backend.pid" "Python AI backend (app data)"
 _kill_repo_processes "node .*backend/server.js|node backend/server.js" "Node.js server (repo cwd)"
 _kill_repo_processes "python.*problem-solver-ui/server.py|problem-solver-ui/server.py" "Python AI backend (repo cwd)"
 
+# ── Stop Ollama if we started it ─────────────────────────────────────────────
+_kill_pid_file "$APP_RUN_DIR/ollama.pid" "Ollama (local AI)"
+
 # ── Clean up stale pid files ──────────────────────────────────────────────────
 rm -f "$APP_RUN_DIR/"*.pid 2>/dev/null || true
 

@@ -136,17 +136,30 @@ function BedrijfZoekerPanel({ onCreated }) {
             <span>{kandidaten.length} kandidaten gevonden</span>
             <button onClick={voegAlleToe} disabled={Object.values(creating).some(Boolean)}>Voeg alle toe</button>
           </div>
-          {kandidaten.map((k, i) => (
-            <div key={i} className="op-zoeker__item">
-              <div>
-                <strong>{k.bedrijfsnaam}</strong>
-                <span className="op-card__branche"> — {k.branche} in {k.plaats}</span>
+          {kandidaten.map((k, i) => {
+            const ws = k.website_kwaliteit || (k.heeft_website ? 'onbekend' : 'geen')
+            const wsBadge = {
+              geen:     { label: '✓ Geen site', cls: 'ws-geen' },
+              slecht:   { label: '⚡ Slechte site', cls: 'ws-slecht' },
+              matig:    { label: '~ Matige site', cls: 'ws-matig' },
+              goed:     { label: '✗ Goede site', cls: 'ws-goed' },
+              onbekend: { label: '? Website', cls: 'ws-onbekend' },
+            }[ws] || { label: ws, cls: 'ws-onbekend' }
+            return (
+              <div key={i} className={`op-zoeker__item${ws === 'goed' ? ' op-zoeker__item--skip' : ''}`}>
+                <div>
+                  <strong>{k.bedrijfsnaam}</strong>
+                  <span className="op-card__branche"> — {k.branche} in {k.plaats}</span>
+                  <span className={`op-ws-badge op-ws-badge--${wsBadge.cls}`}>{wsBadge.label}</span>
+                  {ws === 'goed' && <span className="op-zoeker__skip-hint"> Heeft al goede site — waarschijnlijk overslaan</span>}
+                </div>
+                <button onClick={() => voegToe(k, i)} disabled={creating[i] || ws === 'goed'}
+                  title={ws === 'goed' ? 'Dit bedrijf heeft al een goede website' : ''}>
+                  {creating[i] ? 'Toevoegen…' : ws === 'goed' ? 'Heeft al site' : '+ Toevoegen'}
+                </button>
               </div>
-              <button onClick={() => voegToe(k, i)} disabled={creating[i]}>
-                {creating[i] ? 'Toevoegen…' : '+ Toevoegen'}
-              </button>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -189,10 +202,16 @@ function PitchBox({ order, onStatusChange }) {
     finally { setBusy(false) }
   }
 
+  const [referentie, setReferentie] = useState('')
+
   async function markBetaald() {
+    if (!referentie.trim()) {
+      setErr('Vul de PayPal-transactiereferentie in voordat je markeert als betaald.')
+      return
+    }
     setBusy(true); setErr(null)
     try {
-      const res = await api.post(`/api/orders/${order.id}/status`, { status: 'betaald' })
+      const res = await api.post(`/api/orders/${order.id}/betaald`, { referentie })
       if (res.ok) onStatusChange(res.order)
       else setErr(res.error)
     } catch (e) { setErr(e.message) }
@@ -220,7 +239,21 @@ function PitchBox({ order, onStatusChange }) {
         <pre className="op-pitch__text">{order.vervolg_tekst}</pre>
         <div className="op-pitch__actions">
           <button onClick={copyVervolg}>{copiedVervolg ? 'Gekopieerd!' : 'Kopieer vervolgbericht'}</button>
-          <button onClick={markBetaald} disabled={busy}>Gemarkeerd als betaald</button>
+        </div>
+        <div className="op-betaald-check">
+          <p className="op-pitch__label">Betaling ontvangen? Vul het PayPal-transactie-ID in:</p>
+          <p className="op-betaald-check__hint">Te vinden in PayPal → Activiteit → klik op de betaling → Transactie-ID</p>
+          <div className="op-betaald-check__row">
+            <input
+              className="op-betaald-check__input"
+              placeholder="bijv. 5TY05013RG0287623"
+              value={referentie}
+              onChange={e => setReferentie(e.target.value)}
+            />
+            <button onClick={markBetaald} disabled={busy || !referentie.trim()}>
+              {busy ? 'Bezig…' : 'Betaling bevestigen'}
+            </button>
+          </div>
         </div>
       </>}
 
@@ -404,6 +437,20 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
       {researchData && (
         <div className="op-research">
           <p className="op-research__label">Research resultaten:</p>
+          {researchData.website_status && (() => {
+            const statusMap = {
+              geen_site:    { label: '✓ Geen website — ideale kandidaat', cls: 'ws-geen' },
+              slechte_site: { label: '⚡ Slechte/verouderde website — kans!', cls: 'ws-slecht' },
+              goede_site:   { label: '✗ Al een goede website — overweeg te skippen', cls: 'ws-goed' },
+            }
+            const s = statusMap[researchData.website_status] || { label: researchData.website_status, cls: 'ws-onbekend' }
+            return (
+              <div className={`op-ws-status op-ws-status--${s.cls}`}>
+                <strong>{s.label}</strong>
+                {researchData.website_reden && <span> — {researchData.website_reden}</span>}
+              </div>
+            )
+          })()}
           <div className="op-research__items">
             {researchData.telefoon
               ? <span>📞 {researchData.telefoon}</span>
