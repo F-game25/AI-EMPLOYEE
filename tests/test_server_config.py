@@ -16,10 +16,18 @@ import pytest
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 _REPO_ROOT = Path(__file__).parent.parent
-_SERVER_PY = _REPO_ROOT / "runtime" / "agents" / "problem-solver-ui" / "server.py"
+_PY_DIR    = _REPO_ROOT / "runtime" / "agents" / "problem-solver-ui"
+_SERVER_PY = _PY_DIR / "server.py"
 _AGENT_CAPS = _REPO_ROOT / "runtime" / "config" / "agent_capabilities.json"
 
-_SERVER_SRC: str = _SERVER_PY.read_text()
+# After Phase 3 split, constants live in constants.py and the embedded
+# dashboard HTML (incl. setInterval guards) lives in dashboard.py.
+# Concatenate all three so existing regex tests keep working unchanged.
+_SERVER_SRC: str = "\n".join(
+    (_PY_DIR / f).read_text()
+    for f in ("server.py", "constants.py", "dashboard.py")
+    if (_PY_DIR / f).exists()
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
