@@ -472,44 +472,7 @@ app.use('/workspace', express.static(WORKSPACE_DIR, { index: false }));
 
 // Serve AI-generated artifacts (summaries, code files) at /api/artifacts/:filename
 const ARTIFACTS_DIR = path.join(__dirname, '..', 'state', 'artifacts');
-app.get('/api/artifacts/:filename', requireAuth, (req, res) => {
-  const fname = path.basename(req.params.filename); // prevent path traversal
-  const fpath = path.join(ARTIFACTS_DIR, fname);
-  if (!require('fs').existsSync(fpath)) return res.status(404).json({ error: 'Artifact not found' });
-  res.download(fpath);
-});
 // Preview HTML artifacts inline (no auth cookie needed — token in query param for iframe src)
-app.get('/api/preview/:filename', (req, res) => {
-  const fname = path.basename(req.params.filename);
-  if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files can be previewed');
-  const fpath = path.join(ARTIFACTS_DIR, fname);
-  if (!fs.existsSync(fpath)) return res.status(404).send('Preview not found');
-  // Validate JWT from query param (iframes cannot send Authorization headers)
-  const token = req.query.token;
-  if (token) {
-    try {
-      const jwt = require('jsonwebtoken');
-      jwt.verify(token, process.env.JWT_SECRET_KEY || '');
-    } catch {
-      return res.status(401).send('Unauthorized');
-    }
-  } else {
-    // Fall back to cookie-based auth check via requireAuth pattern
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).send('Unauthorized');
-  }
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.send(fs.readFileSync(fpath, 'utf8'));
-});
-app.get('/api/artifacts', requireAuth, (_req, res) => {
-  const fs = require('fs');
-  if (!fs.existsSync(ARTIFACTS_DIR)) return res.json([]);
-  const files = fs.readdirSync(ARTIFACTS_DIR)
-    .filter(f => fs.statSync(path.join(ARTIFACTS_DIR, f)).isFile())
-    .map(f => ({ name: f, url: `/api/artifacts/${f}`, size: fs.statSync(path.join(ARTIFACTS_DIR, f)).size }));
-  res.json(files);
-});
 
 function readJsonLinesRecent(filePath, limit = 100) {
   try {
@@ -523,81 +486,6 @@ function readJsonLinesRecent(filePath, limit = 100) {
   }
 }
 
-app.get('/api/proof/center', requireAuth, (_req, res) => {
-  const turns = readJsonLinesRecent(statePath('turns.jsonl'), 100);
-  const artifactFiles = (() => {
-    try {
-      if (!fs.existsSync(ARTIFACTS_DIR)) return [];
-      return fs.readdirSync(ARTIFACTS_DIR)
-        .filter((name) => fs.statSync(path.join(ARTIFACTS_DIR, name)).isFile())
-        .map((name) => {
-          const stat = fs.statSync(path.join(ARTIFACTS_DIR, name));
-          return {
-            id: `artifact:${name}`,
-            name,
-            type: 'file',
-            path: path.join(ARTIFACTS_DIR, name),
-            url: `/api/artifacts/${encodeURIComponent(name)}`,
-            source: 'artifact_storage',
-            status: 'available',
-            size: stat.size,
-            created_at: stat.mtime.toISOString(),
-          };
-        })
-        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-    } catch {
-      return [];
-    }
-  })();
-
-  const proofItems = [];
-  for (const turn of turns) {
-    for (const item of [...(turn.proof || []), ...(turn.artifacts || [])]) {
-      if (!item || typeof item !== 'object') continue;
-      const name = item.name || item.label || item.type || 'proof item';
-      proofItems.push({
-        id: item.id || `${turn.turn_id || turn.task_id || 'turn'}:${proofItems.length + 1}`,
-        task_id: item.task_id || turn.task_id || turn.taskId || null,
-        turn_id: turn.turn_id || null,
-        name,
-        type: item.type || item.artifact_type || 'trace',
-        path: item.path || null,
-        url: item.url || null,
-        source: item.source || turn.source || turn.compatibility_route || 'turn',
-        status: item.status || turn.status || 'unknown',
-        degraded: turn.degraded === true || item.status === 'fallback' || item.status === 'degraded',
-        created_at: item.created_at || turn.created_at || turn.timestamp || null,
-      });
-    }
-  }
-
-  const counts = [...proofItems, ...artifactFiles].reduce((acc, item) => {
-    const status = item.degraded ? 'degraded' : (item.status || 'unknown');
-    acc[status] = (acc[status] || 0) + 1;
-    return acc;
-  }, {});
-
-  res.json({
-    ok: true,
-    source: 'node_proof_center',
-    generated_at: new Date().toISOString(),
-    counts,
-    turns: turns.map((turn) => ({
-      turn_id: turn.turn_id || null,
-      task_id: turn.task_id || turn.taskId || null,
-      contract_version: turn.contract_version || null,
-      status: turn.status || 'unknown',
-      source: turn.source || turn.compatibility_route || 'unknown',
-      degraded: turn.degraded === true,
-      proof_count: Array.isArray(turn.proof) ? turn.proof.length : 0,
-      artifact_count: Array.isArray(turn.artifacts) ? turn.artifacts.length : 0,
-      created_at: turn.created_at || turn.timestamp || null,
-      errors: Array.isArray(turn.errors) ? turn.errors : [],
-    })),
-    proof_items: proofItems,
-    artifacts: artifactFiles,
-  });
-});
 
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
@@ -657,30 +545,6 @@ app.use('/api/orders', require('./routes/orders')(requireAuth));
 // Demo files are static HTML pages generated for customers to preview;
 // they contain no sensitive data and must be openable without a JWT token,
 // both in Lars's browser and when the link is shared with the customer.
-app.get('/api/demos/:filename', (req, res) => {
-  const fname = path.basename(req.params.filename);
-  if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
-  const demoPath = path.join(AI_HOME, 'state', 'artifacts', 'demos', fname);
-  if (!fs.existsSync(demoPath)) return res.status(404).send('Demo niet gevonden');
-
-  // Use res.send() instead of res.sendFile() so we control every header explicitly.
-  // Helmet sets restrictive headers globally; for demo pages (standalone HTML in a new tab)
-  // we need permissive inline-style/script CSP and no download-forcing headers.
-  const html = fs.readFileSync(demoPath, 'utf8');
-  res.removeHeader('X-Download-Options');
-  res.removeHeader('Cross-Origin-Opener-Policy');
-  res.removeHeader('Cross-Origin-Resource-Policy');
-  res.set({
-    'Content-Type': 'text/html; charset=utf-8',
-    'X-Frame-Options': 'SAMEORIGIN',
-    'Cache-Control': 'no-store',
-    'Content-Security-Policy':
-      "default-src 'self' data:; script-src 'self' 'unsafe-inline'; " +
-      "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; " +
-      "font-src 'self' data:; frame-ancestors 'self';",
-  });
-  res.send(html);
-});
 
 // Dashboard API — security, knowledge, memory, intelligence, cognition, integrations, hooks
 app.use('/api', require('./routes/dashboard-api')(requireAuth));
@@ -810,8 +674,10 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
   // the actual request handler runs (by which time all declarations are done).
   const _lazyRouteDeps = new Proxy(_routeDeps, {
     get(target, prop) {
-      // Lazy resolution for properties that need late-declared variables
+      // Lazy resolution — all late-declared let/const vars go here so route
+      // factories receive live values at request time, not undefined at mount time.
       switch (prop) {
+        // Phase 1 late vars
         case 'taskStore':             return taskStore;
         case '_sseTaskListeners':     return _sseTaskListeners;
         case 'promptTraceStore':      return promptTraceStore;
@@ -823,12 +689,73 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
         case 'MODEL_FABRIC_OFFLINE':  return MODEL_FABRIC_OFFLINE;
         case 'reliabilityState':      return reliabilityState;
         case '_forgeQueue':           return _forgeQueue;
+        // Phase 1c additional late vars
+        case 'heartbeatCounter':          return heartbeatCounter;
+        case 'getHeartbeatCounter':       return () => heartbeatCounter;
+        case '_blacklightState':          return _blacklightState;
+        case '_loadBlPolicy':             return _loadBlPolicy;
+        case '_saveBlPolicy':             return _saveBlPolicy;
+        case '_saveBlState':              return _saveBlState;
+        case '_cache_blacklist':          return _cache_blacklist;
+        case '_rl_blacklight':            return _rl_blacklight;
+        case '_rl_tasks_run':             return _rl_tasks_run;
+        case '_rl_chat':                  return _rl_chat;
+        case '_readReconJson':            return _readReconJson;
+        case '_writeReconJson':           return _writeReconJson;
+        case '_reconTools':               return _reconTools;
+        case '_summarizeReconTools':      return _summarizeReconTools;
+        case '_isReconToolAllowed':       return _isReconToolAllowed;
+        case '_reconTool':                return _reconTool;
+        case '_appendReconAudit':         return _appendReconAudit;
+        case '_RECON_CASES_FILE':         return _RECON_CASES_FILE;
+        case '_RECON_FINDINGS_FILE':      return _RECON_FINDINGS_FILE;
+        case '_RECON_AUDIT_FILE':         return _RECON_AUDIT_FILE;
+        case 'ADMIN_SAFETY_ACTIONS':      return ADMIN_SAFETY_ACTIONS;
+        case '_forgeQueuePush':           return _forgeQueuePush;
+        case '_forgeQueueUpdate':         return _forgeQueueUpdate;
+        case '_forgeRiskScore':           return _forgeRiskScore;
+        case '_forgeRiskLabel':           return _forgeRiskLabel;
+        case '_forgeTaskState':           return _forgeTaskState;
+        case '_rl_forge':                 return _rl_forge;
+        case '_rl_ollama_pull':           return _rl_ollama_pull;
+        case 'loadSystemManifest':        return loadSystemManifest;
+        case 'buildModelRoutePlan':       return buildModelRoutePlan;
+        case '_cache_neurons':            return _cache_neurons;
+        case 'conversations':             return conversations;
+        case 'collectHybridMemoryContext':  return collectHybridMemoryContext;
+        case 'compactMemoryTraceForModel':  return compactMemoryTraceForModel;
+        case 'isPythonBackendUp':           return isPythonBackendUp;
+        case 'requestPythonChat':           return requestPythonChat;
+        case 'requestOllamaChat':           return requestOllamaChat;
+        case 'runPythonExecution':          return runPythonExecution;
+        case 'applyStructuredFormat':       return applyStructuredFormat;
+        case 'buildLocalFallbackReply':     return buildLocalFallbackReply;
+        case 'pythonServiceAuthorization':  return pythonServiceAuthorization;
+        case 'turnRunner':                  return turnRunner;
+        case 'emitTaskProgress':            return emitTaskProgress;
+        case 'recordExecution':             return recordExecution;
+        case 'createWorkflowRun':           return createWorkflowRun;
+        case 'appendDecision':              return appendDecision;
+        case 'attachWorkflowNode':          return attachWorkflowNode;
+        case 'updateWorkflowNode':          return updateWorkflowNode;
+        case 'buildApprovalInboxItems':     return buildApprovalInboxItems;
+        case 'appendApprovalDecision':      return appendApprovalDecision;
+        case 'buildEconomySnapshot':        return buildEconomySnapshot;
+        case 'walletSnapshot':              return walletSnapshot;
+        case 'buildDashboardPayload':       return buildDashboardPayload;
+        case 'handleGoalDrivenCommand':     return handleGoalDrivenCommand;
+        case 'runForgePython':              return runForgePython;
+        case 'pythonServiceAuthorization':  return pythonServiceAuthorization;
+        case 'auditService':                return auditService;
+        case 'recordAuditEvent':            return recordAuditEvent;
+        case '_auditLog':                   return _auditLog;
+        case 'blacklightTools':             return blacklightTools;
         default: return Reflect.get(target, prop);
       }
     },
   });
 
-  // Mount extracted route groups — these shadow the inline handlers below
+  // Mount extracted route groups (Phase 1)
   const createHealthRouter         = require('./routes/health');
   const createAuthIdentityRouter   = require('./routes/auth-identity');
   const createAgentsBrainRouter    = require('./routes/agents-brain');
@@ -840,6 +767,21 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
   app.use('/', createAgentsBrainRouter(_lazyRouteDeps));
   app.use('/', createSystemOpsRouter(_lazyRouteDeps));
   app.use('/', createArtifactsTasksRouter(_lazyRouteDeps));
+
+  // Mount extracted route groups (Phase 1c — remaining 129 inline routes)
+  const createIntelligenceRouter   = require('./routes/intelligence');
+  const createSecurityOpsRouter    = require('./routes/security-ops');
+  const createBusinessOpsRouter    = require('./routes/business-ops');
+  const createForgeOpsRouter       = require('./routes/forge-ops');
+  const createTasksChatRouter      = require('./routes/tasks-chat');
+  const createMediaRouter          = require('./routes/media');
+
+  app.use('/', createIntelligenceRouter(_lazyRouteDeps));
+  app.use('/', createSecurityOpsRouter(_lazyRouteDeps));
+  app.use('/', createBusinessOpsRouter(_lazyRouteDeps));
+  app.use('/', createForgeOpsRouter(_lazyRouteDeps));
+  app.use('/', createTasksChatRouter(_lazyRouteDeps));
+  app.use('/', createMediaRouter(_lazyRouteDeps));
 }
 
 // Incremented by broadcaster heartbeat loop; sampled into system status.
@@ -2184,22 +2126,8 @@ const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline �
 });
 
 // Per-model unload (model id may contain slashes/colons, e.g. "qwen2.5-coder:14b")
-app.post(/^\/api\/model-fabric\/models\/(.+)\/unload$/, requireAuth, async (req, res) => {
-  try {
-    const id = encodeURIComponent(req.params[0]);
-    const { ok, data } = await proxyModelFabric(`/api/model-fabric/models/${id}/unload`, { method: 'POST', body: req.body });
-    return res.status(ok ? 200 : 502).json(data);
-  } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
-});
 
 // Per-model reload with a specific quant (unload + pull the quant variant)
-app.post(/^\/api\/model-fabric\/models\/(.+)\/reload-with-quant$/, requireAuth, async (req, res) => {
-  try {
-    const id = encodeURIComponent(req.params[0]);
-    const { ok, data } = await proxyModelFabric(`/api/model-fabric/models/${id}/reload-with-quant`, { method: 'POST', body: req.body });
-    return res.status(ok ? 200 : 502).json(data);
-  } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
-});
 
 // ── Agent fleet controls ──────────────────────────────────────────────────────
 
@@ -2405,359 +2333,17 @@ function buildObservabilitySnapshot() {
 }
 
 
-app.get('/api/brain/neurons', requireAuth, _cache_neurons, (req, res) => {
-  res.json(brain.neurons());
-});
-
 /**
  * Unified graph endpoint for the 3-D Neural Brain visualization.
  * Returns { nodes, links, stats } using a normalized schema so the
  * frontend brainStore can consume it directly.
  */
-app.get('/api/brain/graph', requireAuth, async (req, res) => {
-  const raw = brain.neurons();
-  const memoryTree = subsystems.getMemoryTree();
-  const nodes = (raw.nodes || []).map((n) => ({
-    id: n.id,
-    label: n.label,
-    type: n.type || 'skill',
-    group:
-      n.type === 'Memory'
-        ? 'memory'
-        : n.type === 'Strategy' || n.type === 'Skill'
-          ? 'money'
-          : n.type === 'Output'
-            ? 'automation'
-            : 'learning',
-    weight: n.weight ?? 1,
-    confidence: n.confidence ?? 0,
-    activation: n.activation ?? 0,
-    source: n.source || 'system',
-    tag: n.tag || '',
-  }));
 
-  // Append top memory-tree entities as nodes
-  if (Array.isArray(memoryTree?.nodes)) {
-    memoryTree.nodes.slice(0, 30).forEach((m) => {
-      const id = `mem-${(m.id || m.entity || '').replace(/\s+/g, '-').slice(0, 40)}`;
-      if (nodes.some((n) => n.id === id)) return;
-      nodes.push({
-        id,
-        label: m.entity || m.id || 'memory',
-        type: 'memory',
-        group: 'memory',
-        weight: m.mention_count ?? m.importance ?? 1,
-        confidence: m.importance ?? 0.5,
-        activation: 0,
-        source: 'memory',
-        tag: 'knowledge',
-      });
-    });
-  }
-
-  const links = (raw.connections || []).map((c) => ({
-    source: c.from,
-    target: c.to,
-    strength: c.weight ?? c.confidence ?? 0.5,
-  }));
-
-  // Attempt to merge Neural Brain graph (Python LangGraph + Neo4j)
-  let nbGraph = null;
-  try {
-    const nbResp = await Promise.race([
-      fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/graph`, { timeout: 1000 }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000)),
-    ]);
-    if (nbResp?.ok) {
-      nbGraph = await nbResp.json();
-      if (nbGraph?.nodes && Array.isArray(nbGraph.nodes)) {
-        nbGraph.nodes.forEach((n) => {
-          const existing = nodes.some((x) => x.id === n.id);
-          if (!existing) nodes.push(n);
-        });
-      }
-      if (nbGraph?.links && Array.isArray(nbGraph.links)) {
-        const linkSet = new Set(links.map((l) => `${l.source}→${l.target}`));
-        nbGraph.links.forEach((l) => {
-          if (!linkSet.has(`${l.source}→${l.target}`)) {
-            links.push(l);
-            linkSet.add(`${l.source}→${l.target}`);
-          }
-        });
-      }
-    }
-  } catch (_nbErr) {
-    // Neural Brain offline or slow — continue with regular graph
-  }
-
-  // Native embedded graph memory is the canonical offline graph backend.
-  // It is not an extension: every dashboard graph response syncs through it.
-  try {
-    const native = getNativeMemoryGraph({ stateDir: STATE_DIR, repoRoot: REPO_ROOT });
-    native.ingestSnapshot({ nodes, links }, 'node_dashboard_graph');
-    const nativeSnapshot = native.snapshot(350);
-    const nodeSet = new Set(nodes.map((node) => String(node.id)));
-    nativeSnapshot.nodes.forEach((node) => {
-      if (!nodeSet.has(String(node.id))) {
-        nodes.push(node);
-        nodeSet.add(String(node.id));
-      }
-    });
-    const linkSet = new Set(links.map((link) => `${link.source}→${link.target}`));
-    nativeSnapshot.links.forEach((link) => {
-      const key = `${link.source}→${link.target}`;
-      if (!linkSet.has(key)) {
-        links.push(link);
-        linkSet.add(key);
-      }
-    });
-  } catch (err) {
-    console.warn('[BRAIN GRAPH] Native graph sync failed: %s', err && err.message);
-  }
-
-  res.json(normalizeDashboardGraph({
-    nodes,
-    links,
-    stats: { ...(raw.stats || {}), graph_backend: 'native_memory_graph' },
-    updated_at: raw.updated_at || new Date().toISOString(),
-  }));
-});
-
-app.get('/api/memory/tree', requireAuth, (req, res) => {
-  res.json(subsystems.getMemoryTree());
-});
 
 // ── Phase 4G Observability Endpoints ─────────────────────────────────────────
 
-app.get('/api/memory/stats', requireAuth, async (req, res) => {
-  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
-  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
-  const base = {
-    types: {
-      episodic:   { count: 0, last_write: null },
-      semantic:   { count: 0 },
-      procedural: { count: 0 },
-    },
-    total: 0,
-    chroma_collections: {},
-    knowledge_store_entries: ksEntries.length,
-    source: 'node-fallback',
-  };
-  try {
-    const pyData = await requestPythonJSON('/api/memory', 'GET', null, { timeoutMs: 3000 });
-    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
-      const episodicCount = pyData.total_clients || pyData.episodic_count || 0;
-      const semanticCount = pyData.semantic_count || ksEntries.length;
-      const proceduralCount = pyData.procedural_count || 0;
-      return res.json({
-        types: {
-          episodic:   { count: episodicCount, last_write: pyData.last_write || null },
-          semantic:   { count: semanticCount },
-          procedural: { count: proceduralCount },
-        },
-        total: episodicCount + semanticCount + proceduralCount,
-        chroma_collections: pyData.chroma_collections || {},
-        knowledge_store_entries: ksEntries.length,
-        source: 'node+python',
-      });
-    }
-  } catch (_) { /* fall through to node-fallback */ }
-  base.total = ksEntries.length;
-  return res.json(base);
-});
-
-app.get('/api/agents/active', requireAuth, (req, res) => {
-  const all = getAgents();
-  const active = all
-    .filter((a) => a.state === 'running' || a.state === 'busy')
-    .map((a) => ({ id: a.id, name: a.name, state: a.state, current_task: a.current_task || null }));
-  return res.json({ active, count: active.length, total: all.length });
-});
-
-app.get('/api/execution/queue', requireAuth, async (req, res) => {
-  const nodeItems = Array.isArray(_forgeQueue) ? _forgeQueue : [];
-  const count = (status) => nodeItems.filter((i) => i.status === status).length;
-  const base = {
-    items: nodeItems,
-    total: nodeItems.length,
-    pending:   count('pending'),
-    running:   count('running'),
-    completed: count('completed'),
-  };
-  try {
-    const pyData = await requestPythonJSON('/api/task/status', 'GET', null, { timeoutMs: 2000 });
-    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
-      const pyItems = Array.isArray(pyData.tasks) ? pyData.tasks : (Array.isArray(pyData.items) ? pyData.items : []);
-      const existingIds = new Set(nodeItems.map((i) => String(i.id)));
-      const merged = [...nodeItems, ...pyItems.filter((i) => !existingIds.has(String(i.id)))];
-      const mc = (status) => merged.filter((i) => i.status === status).length;
-      return res.json({
-        items: merged,
-        total: merged.length,
-        pending:   mc('pending'),
-        running:   mc('running'),
-        completed: mc('completed'),
-      });
-    }
-  } catch (_) { /* fall through to node-only */ }
-  return res.json(base);
-});
-
-app.get('/api/models/routing', requireAuth, (req, res) => {
-  const DEFAULT_ROUTING = {
-    coding:    { provider: 'nvidia_nim', model: 'qwen2.5-coder-32b',          fallback: 'claude-sonnet-4-6' },
-    reasoning: { provider: 'nvidia_nim', model: 'llama-3.3-nemotron-49b',     fallback: 'claude-opus-4-7' },
-    general:   { provider: 'ollama',     model: 'llama3.2',                   fallback: 'claude-haiku-4-5' },
-    analytics: { provider: 'anthropic',  model: 'claude-opus-4-7' },
-    creative:  { provider: 'ollama',     model: 'gemma4',                     fallback: 'claude-sonnet-4-6' },
-    bulk:      { provider: 'nvidia_nim', model: 'llama-3.1-8b',               fallback: 'llama3.2' },
-  };
-  const configPath = path.join(os.homedir(), '.ai-employee', 'model-routing.json');
-  const fileRouting = readJsonSafe(configPath, null);
-  if (fileRouting) {
-    return res.json({ routing: fileRouting, source: 'file', config_path: configPath });
-  }
-  return res.json({ routing: DEFAULT_ROUTING, source: 'default', config_path: configPath });
-});
-
-app.post('/api/models/routing', requireAuth, (req, res) => {
-  const configPath = path.join(os.homedir(), '.ai-employee', 'model-routing.json');
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(req.body, null, 2), 'utf8');
-    return res.json({ ok: true, config_path: configPath });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.get('/api/models/providers', requireAuth, (req, res) => {
-  const anthropicOk = !!(process.env.ANTHROPIC_API_KEY);
-  const openaiOk    = !!(process.env.OPENAI_API_KEY);
-  ollamaAdmin.isOllamaRunning().then(running => {
-    res.json({
-      providers: {
-        anthropic: { configured: anthropicOk, status: anthropicOk ? 'configured' : 'missing_key' },
-        openai:    { configured: openaiOk,    status: openaiOk    ? 'configured' : 'missing_key' },
-        ollama:    { configured: running,     status: running     ? 'running'    : 'not_running'  },
-      },
-    });
-  }).catch(() => res.json({ providers: { anthropic: { configured: anthropicOk }, openai: { configured: openaiOk }, ollama: { configured: false } } }));
-});
-
-app.get('/api/ollama/status', requireAuth, async (req, res) => {
-  const running = await ollamaAdmin.isOllamaRunning().catch(() => false);
-  const models  = running ? await ollamaAdmin.listModels().catch(() => []) : [];
-  res.json({ running, models });
-});
-
-app.get('/api/ollama/models', requireAuth, async (req, res) => {
-  const models = await ollamaAdmin.listModels().catch(() => []);
-  res.json({ models });
-});
-
-app.post('/api/ollama/pull', requireAuth, _rl_ollama_pull, async (req, res) => {
-  const name = String((req.body || {}).name || '').trim();
-  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
-  if (name.length > 100) return res.status(400).json({ ok: false, error: 'model name too long (max 100 chars)' });
-  // Allowlist: lowercase alphanumeric, colon (tag separator), dot, hyphen, underscore only
-  if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' });
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  try {
-    for await (const chunk of ollamaAdmin.pullModelStream(name)) {
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-    }
-    res.write(`data: ${JSON.stringify({ status: 'complete' })}\n\n`);
-  } catch (e) {
-    res.write(`data: ${JSON.stringify({ status: 'error', error: e.message })}\n\n`);
-  }
-  res.end();
-});
-
-app.delete('/api/ollama/models/:name', requireAuth, async (req, res) => {
-  const name = decodeURIComponent(req.params.name || '').trim();
-  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
-  if (name.length > 100) return res.status(400).json({ ok: false, error: 'model name too long (max 100 chars)' });
-  // Same allowlist as pull: lowercase alphanumeric, colon, dot, hyphen, underscore
-  if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' });
-  const result = await ollamaAdmin.deleteModel(name).catch(e => ({ ok: false, error: e.message }));
-  res.json(result);
-});
-
-app.get('/api/rag/sources', requireAuth, async (req, res) => {
-  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
-  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
-  const nodeSourcesMap = new Map(ksEntries.map((e) => [String(e.id || e.title || Math.random()), e]));
-  let chromaStatus = 'empty';
-  try {
-    const pyData = await requestPythonJSON('/api/knowledge/sources', 'GET', null, { timeoutMs: 2000 });
-    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
-      const pySources = Array.isArray(pyData.sources) ? pyData.sources : [];
-      chromaStatus = pySources.length > 0 ? 'populated' : 'empty';
-      for (const s of pySources) {
-        const key = String(s.id || s.title || '');
-        if (key && !nodeSourcesMap.has(key)) nodeSourcesMap.set(key, s);
-      }
-    }
-  } catch (_) { chromaStatus = 'offline'; }
-  const sources = [...nodeSourcesMap.values()].map((e) => ({
-    id:         e.id         || null,
-    title:      e.title      || e.source || 'Untitled',
-    source:     e.source     || null,
-    tags:       e.tags       || [],
-    created_at: e.created_at || null,
-  }));
-  return res.json({ sources, total: sources.length, chroma_status: chromaStatus, embedding_model: 'all-MiniLM-L6-v2' });
-});
 
 // ── Knowledge semantic / keyword search ──────────────────────────────────────
-app.get('/api/knowledge/search', requireAuth, async (req, res) => {
-  const q = String((req.query || {}).q || '').trim();
-  if (!q) return res.status(400).json({ ok: false, error: 'q required' });
-  const mode = String((req.query || {}).mode || 'keyword');
-  const alpha = Math.max(0, Math.min(1, Number((req.query || {}).alpha ?? 0.5)));
-  const limit = Math.max(1, Math.min(50, Number((req.query || {}).limit || 10) || 10));
-
-  if (mode === 'hybrid' || mode === 'semantic') {
-    try {
-      const pyUrl = `/memory/hybrid-search?q=${encodeURIComponent(q)}&alpha=${alpha}&limit=${limit}`;
-      const data = await requestPythonJSON(pyUrl, 'GET', null, { timeoutMs: 6000 });
-      if (data._http_status >= 200 && data._http_status < 300) {
-        const entries = (data.results || []).map(r => ({
-          id: r.source || r.rank,
-          title: r.source || 'Knowledge Entry',
-          content: r.content || '',
-          text: r.content || '',
-          source: r.source || '',
-          score: r.score ?? 0,
-          bm25_score: r.bm25_score ?? null,
-          vector_score: r.vector_score ?? null,
-          rank: r.rank ?? null,
-        }));
-        return res.json({ entries, total: entries.length, mode: 'hybrid', query: q });
-      }
-    } catch (_) { /* fallthrough to keyword */ }
-  }
-
-  // Keyword fallback: scan knowledge_store.json
-  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
-  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
-  const lower = q.toLowerCase();
-  const matched = ksEntries.filter(e =>
-    (e.content || e.text || '').toLowerCase().includes(lower) ||
-    (e.title || e.source || '').toLowerCase().includes(lower)
-  ).slice(0, limit).map(e => ({
-    id: e.id || e.title,
-    title: e.title || e.source || 'Untitled',
-    content: e.content || e.text || '',
-    text: e.content || e.text || '',
-    source: e.source || '',
-    score: null,
-    tags: e.tags || [],
-  }));
-  return res.json({ entries: matched, total: matched.length, mode: 'keyword', query: q });
-});
 
 // ── End Phase 4G ──────────────────────────────────────────────────────────────
 
@@ -2779,24 +2365,6 @@ for (const [method, path, pyPath] of [
     } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
   });
 }
-app.get('/api/knowledge/vault/:title', requireAuth, async (req, res) => {
-  try {
-    const r = await fetch(
-      `http://127.0.0.1:18790/knowledge/vault/${encodeURIComponent(req.params.title)}`,
-      { headers: { 'Authorization': req.headers.authorization || '' } }
-    );
-    res.status(r.status).json(await r.json());
-  } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
-});
-app.post('/api/knowledge/vault/:title/verify', requireAuth, async (req, res) => {
-  try {
-    const r = await fetch(
-      `http://127.0.0.1:18790/knowledge/vault/${encodeURIComponent(req.params.title)}/verify`,
-      { method: 'POST', headers: { 'Authorization': req.headers.authorization || '' } }
-    );
-    res.status(r.status).json(await r.json());
-  } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
-});
 
 // ── Tool / Skill registry proxy routes ────────────────────────────────────────
 for (const [m, p, pyP] of [
@@ -2831,137 +2399,14 @@ for (const ep of ['tools', 'skills']) {
     } catch (e) { res.status(502).json({ ok: false, error: 'service unavailable' }); }
   });
 }
-app.get('/api/tools/:name', requireAuth, async (req, res) => {
-  try {
-    const r = await fetch(
-      `http://127.0.0.1:${PYTHON_BACKEND_PORT}/tools/${encodeURIComponent(req.params.name)}`,
-      { headers: { 'Authorization': req.headers.authorization || '' } },
-    );
-    res.status(r.status).json(await r.json());
-  } catch (e) { res.status(502).json({ ok: false, error: 'tools service unavailable' }); }
-});
 
-app.get('/api/system/manifest', requireAuth, (req, res) => {
-  res.json(loadSystemManifest());
-});
-
-app.post('/api/model/route-plan', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.modelRoutePlan, req, res);
-  if (!body) return;
-  const task = String(body.task || body.message || body.goal || '').trim();
-  if (!task) return res.status(400).json({ ok: false, error: 'task, message, or goal required' });
-  res.json(buildModelRoutePlan(body));
-});
-
-app.get('/api/memory', requireAuth, async (req, res) => {
-  try {
-    const data = await requestPythonJSON('/api/memory', 'GET', null, { timeoutMs: 4000 });
-    if (data._http_status >= 200 && data._http_status < 300) {
-      return res.json({ ...data, source: 'python-memory' });
-    }
-    return res.status(data._http_status || 502).json({ ok: false, error: 'Python memory backend returned an error', source: 'python-memory' });
-  } catch (err) {
-    const tree = subsystems.getMemoryTree();
-    return res.json({
-      source: 'node-fallback',
-      clients: [],
-      recent_interactions: [],
-      total_clients: 0,
-      fallback_tree: tree,
-      warning: `Python memory backend unavailable: ${err.message}`,
-    });
-  }
-});
 
 // ── Conversations JSONL endpoint ──────────────────────────────────────────────
 const conversations = require('./conversations');
 
-app.get('/api/memory/conversations', requireAuth, (req, res) => {
-  const all = conversations.readConversations();
-  return res.json({ conversations: all.slice(-100), total: all.length, source: 'node-local' });
-});
-
-app.delete('/api/memory/conversations/:id', requireAuth, (req, res) => {
-  const removed = conversations.deleteConversation(req.params.id);
-  if (!removed) return res.status(404).json({ ok: false, error: 'Conversation not found' });
-  return res.json({ ok: true, deleted: req.params.id });
-});
-
-app.get('/api/memory/search', requireAuth, async (req, res) => {
-  const q = String((req.query || {}).q || '').trim();
-  if (!q) return res.status(400).json({ ok: false, error: 'q required' });
-  const topK = Math.max(1, Math.min(25, Number((req.query || {}).top_k || 8) || 8));
-  const memoryType = String((req.query || {}).memory_type || '').trim();
-  const query = `/api/memory/search?q=${encodeURIComponent(q)}&top_k=${topK}${memoryType ? `&memory_type=${encodeURIComponent(memoryType)}` : ''}`;
-  try {
-    const data = await requestPythonJSON(query, 'GET', null, { timeoutMs: 5000 });
-    if (data._http_status >= 200 && data._http_status < 300) {
-      return res.json({ ...data, source: data.source || 'python-memory-search' });
-    }
-    return res.status(data._http_status || 502).json({ ok: false, error: 'Python memory search returned an error', source: 'python-memory-search' });
-  } catch (err) {
-    return res.status(503).json({ ok: false, error: `Python memory search unavailable: ${err.message}`, source: 'node-fallback', results: [] });
-  }
-});
-
-app.post('/api/memory/clients', requireAuth, async (req, res) => {
-  const _bodyMemClients = validate(SCHEMAS.memoryClients, req, res);
-  if (!_bodyMemClients) return;
-  try {
-    const data = await requestPythonJSON('/api/memory/clients', 'POST', _bodyMemClients, { timeoutMs: 5000 });
-    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
-  } catch (err) {
-    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
-  }
-});
-
-app.patch('/api/memory/clients/:clientId', requireAuth, async (req, res) => {
-  try {
-    const data = await requestPythonJSON(`/api/memory/clients/${encodeURIComponent(req.params.clientId)}`, 'PATCH', req.body || {}, { timeoutMs: 5000 });
-    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
-  } catch (err) {
-    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
-  }
-});
-
-app.delete('/api/memory/clients/:clientId', requireAuth, async (req, res) => {
-  try {
-    const data = await requestPythonJSON(`/api/memory/clients/${encodeURIComponent(req.params.clientId)}`, 'DELETE', null, { timeoutMs: 5000 });
-    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
-  } catch (err) {
-    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
-  }
-});
-
-app.post('/api/memory/interactions', requireAuth, async (req, res) => {
-  const _bodyMemInt = validate(SCHEMAS.memoryInteraction, req, res);
-  if (!_bodyMemInt) return;
-  try {
-    const data = await requestPythonJSON('/api/memory/interactions', 'POST', _bodyMemInt, { timeoutMs: 5000 });
-    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
-  } catch (err) {
-    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
-  }
-});
-
-app.get('/api/doctor/status', requireAuth, (req, res) => {
-  res.json(subsystems.getDoctorStatus());
-});
-
-app.get('/api/self-improvement/status', requireAuth, (req, res) => {
-  res.json(subsystems.getSelfImprovementStatus());
-});
 
 // ── Autonomy daemon endpoints ─────────────────────────────────────────────────
 
-app.get('/api/autonomy/status', requireAuth, (req, res) => {
-  res.json(subsystems.getAutonomyStatus());
-});
-
-app.get('/api/autonomy/mode', requireAuth, (req, res) => {
-  const auto = subsystems.getAutonomyStatus();
-  res.json(auto.mode || { mode: 'OFF', active: false });
-});
 
 function requestPythonJSON(pathname, method = 'GET', payload = null, options = {}) {
   return new Promise((resolve, reject) => {
@@ -3392,905 +2837,21 @@ const turnRunner = createTurnRunner({
   buildLocalFallbackReply,
 });
 
-app.post('/api/autonomy/mode', requireAuth, async (req, res) => {
-  const _bodyAutonomy = validate(SCHEMAS.autonomyMode, req, res);
-  if (!_bodyAutonomy) return;
-  const nextMode = _bodyAutonomy.mode.toUpperCase();
-  // Proxy to Python backend
-  try {
-    const data = await new Promise((resolve, reject) => {
-      const payload = JSON.stringify({ mode: nextMode });
-      const url = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}/api/autonomy/mode`;
-      const httpLib = require('http');
-      const r = httpLib.request(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-        timeout: 3000,
-      }, (response) => {
-        let body = '';
-        response.on('data', (chunk) => { body += chunk; });
-        response.on('end', () => {
-          try { resolve(JSON.parse(body)); } catch { resolve({ mode: nextMode, active: nextMode !== 'OFF' }); }
-        });
-      });
-      r.on('timeout', () => { r.destroy(); resolve({ mode: nextMode, active: nextMode !== 'OFF' }); });
-      r.on('error', () => resolve({ mode: nextMode, active: nextMode !== 'OFF' }));
-      r.write(payload);
-      r.end();
-    });
-    addActivity(`[AUTONOMY] Mode → ${nextMode}`, 'system');
-    res.json(data);
-  } catch {
-    res.json({ mode: nextMode, active: nextMode !== 'OFF' });
-  }
-});
-
-app.post('/api/autonomy/emergency-stop', requireAuth, (req, res) => {
-  // Proxy emergency stop to Python backend
-  const httpLib = require('http');
-  const url = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 8787}/api/autonomy/emergency-stop`;
-  const r = httpLib.request(url, { method: 'POST', timeout: 3000 }, (response) => {
-    let body = '';
-    response.on('data', (chunk) => { body += chunk; });
-    response.on('end', () => {
-      try {
-        addActivity('[AUTONOMY] ⚠ EMERGENCY STOP executed', 'system');
-        res.json(JSON.parse(body));
-      } catch { res.json({ status: 'stopped', message: 'Emergency stop sent.' }); }
-    });
-  });
-  r.on('timeout', () => { r.destroy(); res.json({ status: 'stopped', message: 'Emergency stop sent (timeout).' }); });
-  r.on('error', () => res.json({ status: 'stopped', message: 'Emergency stop sent (backend unreachable).' }));
-  r.end();
-});
-
-app.get('/api/evolution/status', requireAuth, async (req, res) => {
-  try {
-    const data = await requestPythonJSON('/api/evolution/status', 'GET');
-    if (data._http_status && data._http_status >= 400) throw new Error(`py_${data._http_status}`);
-    res.json(data);
-  } catch {
-    res.json({ mode: 'OFF', running: false, available: false });
-  }
-});
-
-app.post('/api/evolution/mode', requireAuth, async (req, res) => {
-  const body = validate(SCHEMAS.evolutionMode, req, res);
-  if (!body) return;
-  const mode = body.mode;
-  try {
-    const data = await requestPythonJSON('/api/evolution/mode', 'POST', { mode });
-    addActivity(`[EVOLUTION] Mode → ${mode}`, 'system');
-    res.json(data);
-  } catch {
-    res.json({ mode, status: { mode, running: false } });
-  }
-});
-
-app.get('/api/product/dashboard', requireAuth, (req, res) => {
-  res.json(buildDashboardPayload());
-});
-
-app.get('/api/economy/summary', requireAuth, (req, res) => {
-  const economy = buildEconomySnapshot();
-  res.json({ ok: true, ...economy.summary });
-});
-
-app.get('/api/economy/ledger', requireAuth, (req, res) => {
-  const economy = buildEconomySnapshot();
-  res.json({
-    ok: true,
-    state: economy.ledger.length ? 'live' : 'empty',
-    source: 'node_runtime_state',
-    ledger: economy.ledger,
-    items: economy.ledger,
-    updated_at: new Date().toISOString(),
-  });
-});
-
-app.get('/api/economy/costs', requireAuth, (req, res) => {
-  const economy = buildEconomySnapshot();
-  res.json({
-    ok: true,
-    state: economy.costs.length ? 'live' : 'empty',
-    source: 'llm_call_log',
-    costs: economy.costs,
-    items: economy.costs,
-    updated_at: new Date().toISOString(),
-  });
-});
-
-app.get('/api/economy/pipelines', requireAuth, (req, res) => {
-  const economy = buildEconomySnapshot();
-  res.json({
-    ok: true,
-    state: economy.pipelines.some((pipeline) => pipeline.active) ? 'live' : 'empty',
-    source: 'node_objective_state',
-    pipelines: economy.pipelines,
-    items: economy.pipelines,
-    updated_at: new Date().toISOString(),
-  });
-});
-
-app.get('/api/economy/opportunities', requireAuth, (req, res) => {
-  const opportunities = readJsonSafe(statePath('opportunities.json'), []);
-  res.json({
-    ok: true,
-    state: opportunities.length ? 'live' : 'empty',
-    source: 'node_state',
-    opportunities,
-    items: opportunities,
-    updated_at: new Date().toISOString(),
-  });
-});
-
-app.get('/api/economy/wallet', requireAuth, (req, res) => {
-  res.json({ ok: true, source: 'wallet_vault', wallet: walletSnapshot(), updated_at: new Date().toISOString() });
-});
-
-app.get('/api/workflows/live', requireAuth, (req, res) => {
-  res.json({
-    active_run: runtimeState.selectedWorkflowRun,
-    runs: runtimeState.workflowRuns,
-  });
-});
-
-app.get('/api/objectives/status', requireAuth, (req, res) => {
-  res.json({
-    objectives: runtimeState.objectives,
-    systems: runtimeState.objectiveState,
-  });
-});
-
-app.post('/api/automation/control', requireAuth, (req, res) => {
-  const _bodyAuto = validate(SCHEMAS.automationControl, req, res);
-  if (!_bodyAuto) return;
-  const action = String(_bodyAuto.action || '').toLowerCase();
-  const goal = String(_bodyAuto.goal || '').trim();
-  const overrideActionId = String(_bodyAuto.override_action_id || '').trim();
-
-  if (action === 'start') {
-    activateAgents(3);
-    runtimeState.automationRunning = true;
-    addActivity(`[AUTOMATION] started${goal ? ` • goal: ${goal}` : ''}`, 'automation');
-    const run = createWorkflowRun({
-      name: 'Automation Goal Workflow',
-      source: 'automation',
-      goal: goal || 'Execute automation cycle',
-    });
-    const taskMessages = [
-      goal || 'Analyze current market conditions',
-      'Generate value opportunities',
-      'Route prioritized tasks to agents',
-    ];
-    runtimeState.workflowSequencers[run.run_id] = {
-      messages: taskMessages,
-      queuedSteps: new Set([0]),
-      completedSteps: new Set(),
-      stepTaskIds: {},
-      stopped: false,
-    };
-    queueWorkflowStep({
-      runId: run.run_id,
-      message: taskMessages[0],
-      stepIndex: 0,
-      labels: ['automation', 'step-1'],
-      parentTaskId: null,
-    });
-    return res.json({ status: 'running', message: 'Automation started.', tasks_queued: 1, workflow_run: run.run_id });
-  }
-
-  if (action === 'stop') {
-    Object.values(runtimeState.workflowSequencers).forEach((seq) => {
-      seq.stopped = true;
-    });
-    runtimeState.automationRunning = false;
-    const stopResult = stopAllAgents('automation_stop');
-    markWorkflowsStopped();
-    addActivity('[AUTOMATION] stopped', 'automation');
-    return res.json({
-      status: 'stopped',
-      message: 'Automation stopped.',
-      cancelled_tasks: stopResult.cancelledTasks,
-      running_agents: stopResult.runningAgents,
-    });
-  }
-
-  if (action === 'override') {
-    if (!overrideActionId) {
-      return res.status(400).json({ status: 'error', reason: 'override_action_id is required.' });
-    }
-    addActivity(`[AUTOMATION] manual override executed for ${overrideActionId}`, 'automation');
-    return res.json({ status: 'ok', message: `Override applied to ${overrideActionId}.` });
-  }
-
-  return res.status(400).json({ status: 'error', reason: 'Invalid automation action.' });
-});
-
-app.post('/api/money/content-pipeline', requireAuth, async (req, res) => {
-  const _bodyContent = validate(SCHEMAS.moneyPipeline, req, res);
-  if (!_bodyContent) return;
-  try {
-    const result = await requestPythonJSON('/api/money/content-pipeline', 'POST', _bodyContent, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 30000,
-    });
-    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] Python content pipeline unavailable: %s', err && err.message);
-  }
-  const run = runPipeline('content');
-  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id, source: 'node_fallback' });
-});
-
-app.post('/api/money/lead-pipeline', requireAuth, async (req, res) => {
-  const _bodyLead = validate(SCHEMAS.moneyPipeline, req, res);
-  if (!_bodyLead) return;
-  try {
-    const result = await requestPythonJSON('/api/money/lead-pipeline', 'POST', _bodyLead, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 30000,
-    });
-    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] Python lead pipeline unavailable: %s', err && err.message);
-  }
-  const run = runPipeline('lead');
-  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id, source: 'node_fallback' });
-});
-
-app.post('/api/money/opportunity-pipeline', requireAuth, async (req, res) => {
-  const _bodyOpp = validate(SCHEMAS.moneyPipeline, req, res);
-  if (!_bodyOpp) return;
-  try {
-    const result = await requestPythonJSON('/api/money/opportunity-pipeline', 'POST', _bodyOpp, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 30000,
-    });
-    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] Python opportunity pipeline unavailable: %s', err && err.message);
-  }
-  const run = runPipeline('opportunity');
-  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id, source: 'node_fallback' });
-});
-
-app.post('/api/money/affiliate-draft', requireAuth, async (req, res) => {
-  const _bodyAffiliate = validate(SCHEMAS.moneyPipeline, req, res);
-  if (!_bodyAffiliate) return;
-  try {
-    const result = await requestPythonJSON('/api/money/affiliate-draft', 'POST', _bodyAffiliate, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 30000,
-    });
-    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] Python affiliate draft unavailable: %s', err && err.message);
-  }
-  return res.status(503).json({
-    ok: false,
-    error: 'Python MoneyMode backend unavailable; affiliate drafts require the approval-aware Python pipeline.',
-  });
-});
 
 // ── Business-building money workflows (proxy to Python) ──────────────────────
 
-app.post('/api/money/niche-research', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/money/niche-research', 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 45000,
-    });
-    return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] niche-research unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
-  }
-});
-
-app.post('/api/money/offer-creation', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/money/offer-creation', 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 45000,
-    });
-    return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] offer-creation unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
-  }
-});
-
-app.post('/api/money/content-calendar', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/money/content-calendar', 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 45000,
-    });
-    return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] content-calendar unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
-  }
-});
-
-app.post('/api/money/lead-research', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/money/lead-research', 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 45000,
-    });
-    return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] lead-research unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true, cold_outreach_blocked: true });
-  }
-});
-
-app.post('/api/money/proposal', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/money/proposal', 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 45000,
-    });
-    return res.json({ ...result, source: 'python_money_mode' });
-  } catch (err) {
-    console.warn('[MONEY] proposal unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'Python backend unavailable — proposals require approval-aware pipeline', requires_manual: true });
-  }
-});
 
 // GET /api/money/content-log
-app.get('/api/money/content-log', requireAuth, (req, res) => {
-  const p = path.join(STATE_DIR, 'content_log.json');
-  try { res.json({ ok: true, entries: JSON.parse(fs.readFileSync(p, 'utf8')) }); }
-  catch { res.json({ ok: true, entries: [] }); }
-});
 
 // GET /api/money/outreach-log
-app.get('/api/money/outreach-log', requireAuth, (req, res) => {
-  const p = path.join(STATE_DIR, 'outreach_log.json');
-  try { res.json({ ok: true, entries: JSON.parse(fs.readFileSync(p, 'utf8')) }); }
-  catch { res.json({ ok: true, entries: [] }); }
-});
 
 // ── Roadmap Engine routes (proxy to Python) ──────────────────────────────────
-app.post('/api/roadmap/create', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/roadmap/create', 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 30000,
-    });
-    return res.json(result);
-  } catch (err) {
-    console.warn('[ROADMAP] create unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
-  }
-});
 
-app.post('/api/roadmap/generate', requireAuth, async (req, res) => {
-  try {
-    const result = await requestPythonJSON('/roadmap/generate', 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 60000,
-    });
-    return res.json(result);
-  } catch (err) {
-    console.warn('[ROADMAP] generate unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
-  }
-});
-
-app.get('/api/roadmap/list/:tenantId', requireAuth, async (req, res) => {
-  try {
-    const tenantId = encodeURIComponent(String(req.params.tenantId || '').trim());
-    if (!tenantId) return res.status(400).json({ ok: false, error: 'tenantId required' });
-    const result = await requestPythonJSON(`/api/roadmap/list/${tenantId}`, 'GET', null, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 15000,
-    });
-    return res.json(result);
-  } catch (err) {
-    console.warn('[ROADMAP] list unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, roadmaps: [], error: 'roadmap service unavailable' });
-  }
-});
-
-app.get('/api/roadmap/:roadmapId', requireAuth, async (req, res) => {
-  try {
-    const roadmapId = encodeURIComponent(String(req.params.roadmapId || '').trim());
-    if (!roadmapId) return res.status(400).json({ ok: false, error: 'roadmapId required' });
-    const result = await requestPythonJSON(`/api/roadmap/${roadmapId}`, 'GET', null, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 15000,
-    });
-    return res.json(result);
-  } catch (err) {
-    console.warn('[ROADMAP] get unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
-  }
-});
-
-app.post('/api/roadmap/:roadmapId/execute', requireAuth, async (req, res) => {
-  try {
-    const roadmapId = encodeURIComponent(String(req.params.roadmapId || '').trim());
-    if (!roadmapId) return res.status(400).json({ ok: false, error: 'roadmapId required' });
-    const result = await requestPythonJSON(`/api/roadmap/${roadmapId}/execute`, 'POST', req.body, {
-      headers: { Authorization: pythonServiceAuthorization(req) },
-      timeoutMs: 120000,
-    });
-    return res.json(result);
-  } catch (err) {
-    console.warn('[ROADMAP] execute unavailable: %s', err && err.message);
-    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
-  }
-});
 
 // ── Task execution endpoint ───────────────────────────────────────────────────
 
-app.post('/api/tasks/run', requireAuth, _rl_tasks_run, async (req, res) => {
-  const rawBody = req.body || {};
-  // Normalise: accept both `task` and legacy `message` field before validation
-  if (!rawBody.task && rawBody.message) rawBody.task = rawBody.message;
-  if (!rawBody.task && rawBody.description) rawBody.task = rawBody.description;
-  if (!rawBody.task) rawBody.task = 'Execute task';
-  const body = validate(SCHEMAS.tasksRun, req, res);
-  if (!body) return;
-  if (rawBody.use_turn_runner !== false) {
-    try {
-      const turn = await turnRunner.runTurn({
-        kind: 'task',
-        source: 'tasks-http',
-        message: body.task,
-        userId: body.user_id || (req.jwtPayload?.sub ? `user:${req.jwtPayload.sub}` : 'user:default'),
-        tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
-        authHeader: pythonServiceAuthorization(req),
-        labels: ['http'],
-        executionTimeoutMs: 3000,
-      });
-      return res.json({
-        ...turn,
-        agent_controller: turn.source === 'agent_controller' ? { status: turn.status, proof: turn.proof } : null,
-      });
-    } catch (err) {
-      console.warn('[TASKS] turn runner failed, using legacy path: %s', err && err.message);
-    }
-  }
-  const message = body.task.trim();
-  const userId = body.user_id || 'user:default';
-  const run = createWorkflowRun({
-    name: 'Ad-hoc Task Workflow',
-    source: 'manual',
-    goal: message,
-  });
-
-  emitTaskProgress(run.run_id, message, [
-    { id: 0, label: 'Planning',   status: 'active' },
-    { id: 1, label: 'Executing',  status: 'pending' },
-    { id: 2, label: 'Validating', status: 'pending' },
-  ]);
-
-  const memoryTrace = await collectHybridMemoryContext(message, {
-    userId,
-    sessionId: run.run_id,
-    taskId: run.run_id,
-    mode: 'main_ai_task',
-    maxTokens: 1200,
-  });
-  if (memoryTrace) {
-    appendDecision(run, {
-      ts: new Date().toISOString(),
-      type: 'memory_router_preflight',
-      task_id: run.run_id,
-      summary: `Routes ${Array.isArray(memoryTrace.routes) ? memoryTrace.routes.map((route) => route.id).join(', ') : 'none'} · confidence ${memoryTrace.confidence ?? 0}`,
-      trace_id: memoryTrace.trace_id,
-    });
-    broadcaster.broadcast('memory:router:trace', {
-      trace_id: memoryTrace.trace_id,
-      task_id: run.run_id,
-      routes: memoryTrace.routes,
-      confidence: memoryTrace.confidence,
-      degraded: memoryTrace.degraded,
-    });
-  }
-
-  if (await isPythonBackendUp()) {
-    try {
-      const pyResult = await requestPythonJSON('/api/tasks/run', 'POST', {
-        task: message,
-        goal: message,
-        user_id: userId,
-        workflow_run: run.run_id,
-        memory_context: compactMemoryTraceForModel(memoryTrace),
-      }, {
-        headers: { Authorization: pythonServiceAuthorization(req) },
-        timeoutMs: 30000,
-      });
-
-      if (pyResult && pyResult.ok) {
-        const taskId = `agent-${pyResult.run_id || run.run_id}`;
-        const queued = {
-          taskId,
-          agentId: 'agent-controller',
-          subsystem: 'orchestrator',
-          message,
-          queuedAt: new Date().toISOString(),
-          brain: {
-            strategy: 'agent_controller',
-            confidence: typeof pyResult.performance_score === 'number' ? pyResult.performance_score : 1,
-            reasoning: 'Executed through Python AgentController Planner→Executor→Validator path.',
-            execution_flow: 'goal->planner->skill->validator->summary',
-          },
-        };
-        attachWorkflowNode({ runId: run.run_id, queued, taskName: message });
-        updateWorkflowNode(taskId, (node, workflowRun) => {
-          node.status = 'completed';
-          node.progress_percent = 100;
-          node.started_at = node.started_at || queued.queuedAt;
-          node.completed_at = new Date().toISOString();
-          node.result = {
-            status: 'success',
-            summary: `AgentController completed ${Array.isArray(pyResult.tasks) ? pyResult.tasks.length : 0} task(s).`,
-          };
-          appendDecision(workflowRun, {
-            ts: new Date().toISOString(),
-            task_id: taskId,
-            type: 'agent_controller_result',
-            summary: `Performance ${pyResult.performance_score ?? 'n/a'} · success ${pyResult.success_rate ?? 'n/a'}`,
-          });
-        });
-        recordExecution({ taskId, skill: 'agent_controller', status: 'success', notes: message });
-        addActivity(`[TASK] AgentController completed: ${message}`, 'task');
-        emitTaskProgress(run.run_id, message, [
-          { id: 0, label: 'Planning',   status: 'done' },
-          { id: 1, label: 'Executing',  status: 'done' },
-          { id: 2, label: 'Validating', status: 'done' },
-        ]);
-        return res.json({
-          ok: true,
-          workflow_run: run.run_id,
-          taskId,
-          agentId: 'agent-controller',
-          subsystem: 'orchestrator',
-          source: 'agent_controller',
-          memory_router: memoryTrace ? {
-            trace_id: memoryTrace.trace_id,
-            routes: memoryTrace.routes,
-            confidence: memoryTrace.confidence,
-            degraded: memoryTrace.degraded,
-          } : null,
-          agent_controller: pyResult,
-        });
-      }
-      console.warn('[TASKS] Python AgentController returned non-ok status: %s', pyResult?._http_status || 'unknown');
-    } catch (err) {
-      console.warn('[TASKS] Python AgentController unavailable, falling back to Node queue: %s', err && err.message);
-    }
-  }
-
-  const result = orchestrator.submitTask(message, {
-    userId,
-    workflow: { runId: run.run_id, parentTaskId: null },
-    labels: ['manual'],
-    memory: compactMemoryTraceForModel(memoryTrace),
-  });
-  attachWorkflowNode({
-    runId: run.run_id,
-    queued: result,
-    taskName: message,
-  });
-  addActivity(`[TASK] Submitted: ${message}`, 'task');
-
-  res.json({
-    ok: true,
-    workflow_run: run.run_id,
-    source: 'node_queue_fallback',
-    memory_router: memoryTrace ? {
-      trace_id: memoryTrace.trace_id,
-      routes: memoryTrace.routes,
-      confidence: memoryTrace.confidence,
-      degraded: memoryTrace.degraded,
-    } : null,
-    ...result,
-  });
-});
 
 // Compatibility endpoint used by legacy CLI flows (`ai-employee do/onboard`)
-app.post('/api/chat', requireAuth, _rl_chat, async (req, res) => {
-  const body = validate(SCHEMAS.chat, req, res);
-  if (!body) return;
-  const message = body.message;
-  // Fire-and-forget conversation recorder — never blocks the response
-  const _recordChat = (assistantMessage, model) => {
-    try {
-      conversations.appendConversation({
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        tenant_id: req.user?.tenant_id || 'default',
-        user_message: req.body.message || req.body.content || '',
-        assistant_message: assistantMessage,
-        model: model || null,
-        session_id: req.headers['x-session-id'] || null,
-        summary: String(req.body.message || req.body.content || '').slice(0, 200),
-        message_count: 2,
-        tags: ['chat'],
-      });
-    } catch (_) {}
-  };
-  const modelRoute = (body.model || '').trim() || undefined;
-  // Prefer explicit user_id from body; fall back to JWT sub claim, then default
-  const chatUserId = body.context?.user_id
-    || (req.jwtPayload?.sub ? `user:${req.jwtPayload.sub}` : null)
-    || 'user:default';
-  console.info('[AI FLOW] Input received (HTTP): message_len=%d user=%s', message.length, chatUserId);
-
-  if (body.context?.use_turn_runner !== false) {
-    try {
-      const turn = await turnRunner.runTurn({
-        kind: 'chat',
-        source: 'chat-http',
-        message,
-        modelRoute,
-        userId: chatUserId,
-        tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
-        authHeader: pythonServiceAuthorization(req),
-        labels: ['http'],
-        executionTimeoutMs: 3000,
-      });
-      _recordChat(turn.assistant_reply || turn.reply, turn.source || 'turn-runner');
-      return res.json(turn);
-    } catch (err) {
-      console.warn('[AI FLOW] turn runner failed, using legacy chat path: %s', err && err.message);
-    }
-  }
-
-  // ── Learn-intent detection ─────────────────────────────────────
-  // Matches: "learn about X", "teach me about X", "research X", "leer over X"
-  const LEARN_PATTERNS = [
-    /^\s*(?:learn|teach me|research|leer|leer me)\s+(?:about|over|on)\s+(.+?)[.!?]?\s*$/i,
-    /^\s*(?:can you )?(?:learn|research)\s+(.+?)[.!?]?\s*$/i,
-  ];
-  let learnTopic = null;
-  for (const pat of LEARN_PATTERNS) {
-    const m = (message || '').match(pat);
-    if (m && m[1] && m[1].trim().length > 2) { learnTopic = m[1].trim(); break; }
-  }
-  if (learnTopic) {
-    // Fire learning session via Node proxy (don't block chat response)
-    const proto = req.protocol || 'http';
-    const host = req.get('host') || `localhost:${PORT}`;
-    fetch(`${proto}://${host}/api/learning/execute`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'authorization': req.headers.authorization || '' },
-      body: JSON.stringify({ topic: learnTopic, depth: 'normal' }),
-    }).catch(() => {});
-    const reply = `🎓 Started learning about **${learnTopic}**. Track progress in Memory → Standing Topics.`;
-    res.json({
-      ok: true,
-      handled: true,
-      reply,
-      content: reply,
-      learning_triggered: true,
-      topic: learnTopic,
-    });
-    _recordChat(reply, 'learn-intent');
-    return;
-  }
-
-  const handled = handleGoalDrivenCommand(message);
-  if (handled.handled) {
-    console.info('[AI FLOW] → Response returned (goal-driven command)');
-    res.json({
-      ok: true,
-      handled: true,
-      reply: handled.reply,
-      content: handled.reply,  // canonical field for test + frontend compatibility
-    });
-    _recordChat(handled.reply, 'goal-driven');
-    return;
-  }
-  const run = createWorkflowRun({
-    name: 'Chat Workflow',
-    source: 'chat-http',
-    goal: message,
-  });
-  console.info('[AI FLOW] → Core AI called (orchestrator.submitTask)');
-  const queued = orchestrator.submitTask(message, {
-    userId: chatUserId,
-    workflow: { runId: run.run_id, parentTaskId: null },
-    labels: ['chat', 'http'],
-  });
-  attachWorkflowNode({
-    runId: run.run_id,
-    queued,
-    taskName: message,
-    parentTaskId: null,
-  });
-  addActivity(`[CHAT] Submitted: ${message}`, 'task');
-  broadcaster.broadcast('orchestrator:queued', queued);
-  broadcaster.broadcast('heartbeat', {
-    message: `[QUEUE] ${queued.taskId} assigned to ${queued.agentId} (${queued.subsystem})`,
-    level: 'info',
-    heartbeat: heartbeatCounter,
-  });
-
-  const memoryTrace = await collectHybridMemoryContext(message, {
-    userId: chatUserId,
-    sessionId: run.run_id,
-    taskId: queued.taskId,
-    mode: 'main_ai_chat',
-    maxTokens: 1200,
-  });
-  if (memoryTrace) {
-    appendDecision(run, {
-      ts: new Date().toISOString(),
-      task_id: queued.taskId,
-      type: 'memory_router_preflight',
-      summary: `Routes ${Array.isArray(memoryTrace.routes) ? memoryTrace.routes.map((route) => route.id).join(', ') : 'none'} · confidence ${memoryTrace.confidence ?? 0}`,
-      trace_id: memoryTrace.trace_id,
-    });
-    broadcaster.broadcast('memory:router:trace', {
-      trace_id: memoryTrace.trace_id,
-      task_id: queued.taskId,
-      routes: memoryTrace.routes,
-      confidence: memoryTrace.confidence,
-      degraded: memoryTrace.degraded,
-    });
-  }
-
-  // ── 1. Real execution engine (goal → structured plan → real tools) ──────────
-  const execResult = await Promise.race([
-    runPythonExecution(message),
-    new Promise(r => setTimeout(() => r(null), 3000)),
-  ]);
-  const traceStart = Date.now();
-  if (execResult && execResult.is_goal && execResult.reply) {
-    console.info('[AI FLOW] → Real execution engine (HTTP): steps=%d success=%s', execResult.steps || 0, execResult.success);
-    if (promptInspectorConfig && promptInspectorConfig.enabled) {
-      addPromptTrace({ input: message, output: execResult.reply, status: 'ok', model: 'execution-engine', task_id: queued.taskId, flags: [], latency_ms: Date.now() - traceStart });
-    }
-    res.json({
-      ok: true,
-      taskId: queued.taskId,
-      workflow_run: run.run_id,
-      reply: execResult.reply,
-      content: execResult.reply,
-      attachments: execResult.attachments || [],
-      memory_router: memoryTrace ? {
-        trace_id: memoryTrace.trace_id,
-        routes: memoryTrace.routes,
-        confidence: memoryTrace.confidence,
-        degraded: memoryTrace.degraded,
-      } : null,
-    });
-    _recordChat(execResult.reply, 'execution-engine');
-    return;
-  }
-
-  // ── 2. Python LLM backend (full pipeline with memory + context) ──────────────
-  let llmReply = null;
-  if (await isPythonBackendUp()) {
-    try {
-      llmReply = await requestPythonChat(message, modelRoute, chatUserId, memoryTrace);
-    } catch (err) {
-      console.warn('[AI FLOW] Python chat proxy failed (HTTP path):', err && err.message);
-    }
-  }
-  if (llmReply) {
-    const structuredPyReply = applyStructuredFormat(llmReply, 'AI Employee');
-    console.info('[AI FLOW] → LLM response returned (HTTP→Python): len=%d', structuredPyReply.length);
-    if (promptInspectorConfig && promptInspectorConfig.enabled) {
-      addPromptTrace({ input: message, output: structuredPyReply, status: 'ok', model: 'python-llm', task_id: queued.taskId, flags: structuredPyReply.length < 20 ? ['generic_output'] : [], latency_ms: Date.now() - traceStart });
-    }
-    broadcaster.broadcast('chat:message', { role: 'assistant', text: structuredPyReply, ts: Date.now() });
-    res.json({
-      ok: true,
-      taskId: queued.taskId,
-      workflow_run: run.run_id,
-      reply: structuredPyReply,
-      content: structuredPyReply,
-      memory_router: memoryTrace ? {
-        trace_id: memoryTrace.trace_id,
-        routes: memoryTrace.routes,
-        confidence: memoryTrace.confidence,
-        degraded: memoryTrace.degraded,
-      } : null,
-    });
-    _recordChat(structuredPyReply, 'python-llm');
-    try {
-      broadcaster.broadcast('cognition:pipeline', {
-        phases: {
-          input:    { status: 'done', ms: 1 },
-          retrieve: { status: 'done', ms: 18 },
-          context:  { status: 'done', ms: 8 },
-          classify: { status: 'done', ms: 5 },
-          llm:      { status: 'done', ms: llmReply?.elapsed_ms || 600 },
-          validate: { status: 'done', ms: 4 },
-          execute:  { status: llmReply?.executed_tools?.length ? 'done' : 'skip', ms: 0 },
-          memory:   { status: 'done', ms: 12 },
-        },
-        model: llmReply?.model || 'python-llm',
-        timestamp: Date.now(),
-      })
-    } catch {}
-    return;
-  }
-
-  // ── 3. Direct Ollama (Python unavailable) ────────────────────────────────────
-  try {
-    llmReply = await requestOllamaChat(message, memoryTrace);
-  } catch (err) {
-    console.warn('[AI FLOW] Ollama direct call failed (HTTP path):', err && err.message);
-  }
-  if (llmReply) {
-    const structuredOllamaReply = applyStructuredFormat(llmReply, 'Ollama');
-    console.info('[AI FLOW] → Ollama response (Python unavailable, HTTP): len=%d', structuredOllamaReply.length);
-    if (promptInspectorConfig && promptInspectorConfig.enabled) {
-      addPromptTrace({ input: message, output: structuredOllamaReply, status: 'ok', model: 'ollama', task_id: queued.taskId, flags: [], latency_ms: Date.now() - traceStart });
-    }
-    res.json({
-      ok: true,
-      taskId: queued.taskId,
-      workflow_run: run.run_id,
-      reply: structuredOllamaReply,
-      content: structuredOllamaReply,
-      memory_router: memoryTrace ? {
-        trace_id: memoryTrace.trace_id,
-        routes: memoryTrace.routes,
-        confidence: memoryTrace.confidence,
-        degraded: memoryTrace.degraded,
-      } : null,
-    });
-    _recordChat(structuredOllamaReply, 'ollama');
-    return;
-  }
-
-  // ── 4. Last resort: honest error message ─────────────────────────────────────
-  console.info('[AI FLOW] → Fallback response (HTTP): taskId=%s', queued.taskId);
-  const fallbackReply = buildLocalFallbackReply(message, queued);
-  // Capture prompt trace
-  if (promptInspectorConfig && promptInspectorConfig.enabled) {
-    addPromptTrace({
-      input: message,
-      output: fallbackReply,
-      status: 'fallback',
-      model: 'fallback',
-      task_id: queued.taskId,
-      flags: ['generic_output'],
-      latency_ms: 0,
-    });
-  }
-  res.json({
-    ok: true,
-    taskId: queued.taskId,
-    workflow_run: run.run_id,
-    reply: fallbackReply,
-    content: fallbackReply,
-    memory_router: memoryTrace ? {
-      trace_id: memoryTrace.trace_id,
-      routes: memoryTrace.routes,
-      confidence: memoryTrace.confidence,
-      degraded: memoryTrace.degraded,
-    } : null,
-  });
-  _recordChat(fallbackReply, 'fallback');
-  try {
-    broadcaster.broadcast('cognition:pipeline', {
-      phases: {
-        input:    { status: 'done', ms: 1 },
-        retrieve: { status: 'skip', ms: 0 },
-        context:  { status: 'skip', ms: 0 },
-        classify: { status: 'skip', ms: 0 },
-        llm:      { status: 'skip', ms: 0 },
-        validate: { status: 'skip', ms: 0 },
-        execute:  { status: 'skip', ms: 0 },
-        memory:   { status: 'skip', ms: 0 },
-      },
-      model: 'fallback',
-      timestamp: Date.now(),
-    })
-  } catch {}
-});
 
 // ── Enterprise: Audit, Reliability, Forge-queue endpoints ────────────────────
 
@@ -4339,97 +2900,6 @@ const ADMIN_SAFETY_ACTIONS = {
   },
 };
 
-app.post('/api/admin/safety-action', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.adminSafetyAction, req, res);
-  if (!body) return;
-  const actionId = String(body.action_id || '');
-  const action = ADMIN_SAFETY_ACTIONS[actionId];
-  if (!action) return res.status(400).json({ ok: false, error: 'unknown safety action' });
-
-  const reason = String(body.reason || '').trim();
-  const confirmation = String(body.confirmation || '').trim();
-  if (confirmation !== action.confirmation) {
-    return res.status(400).json({ ok: false, error: `confirmation must equal "${action.confirmation}"` });
-  }
-  if (reason.length < 8) {
-    return res.status(400).json({ ok: false, error: 'reason must be at least 8 characters' });
-  }
-
-  const actor = req.jwtPayload?.email || req.jwtPayload?.sub || req.jwtPayload?.userId || 'admin';
-  const traceId = `safety-${Date.now().toString(36)}`;
-  const event = recordAuditEvent({
-    actor,
-    action: `admin_safety_${actionId}`,
-    inputData: {
-      action_id: actionId,
-      endpoint: action.endpoint,
-      reason,
-      requested_mode: body.execution_mode || 'staged',
-    },
-    outputData: {
-      ok: true,
-      status: 'staged',
-      executed: false,
-      approval_required: true,
-      external_effect: action.external_effect,
-    },
-    riskScore: 0.95,
-    traceId,
-    meta: { source: 'settings_safety_center', dry_run_available: true },
-  });
-
-  res.json({
-    ok: true,
-    status: 'staged',
-    executed: false,
-    approval_required: true,
-    audit_id: event.id,
-    trace_id: traceId,
-    action: {
-      id: actionId,
-      label: action.label,
-      endpoint: action.endpoint,
-      expected_external_effect: action.external_effect,
-    },
-    proof: {
-      type: 'audit_record',
-      id: event.id,
-      source: 'audit_events',
-      created_at: event.ts,
-    },
-  });
-});
-
-app.post('/api/admin/safety-audit', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.adminSafetyAudit, req, res);
-  if (!body) return;
-  const label = String(body.label || '').trim();
-  const endpoint = String(body.endpoint || 'internal').trim();
-  const reason = String(body.reason || '').trim();
-  const confirmation = String(body.confirmation || '').trim();
-  if (!label) return res.status(400).json({ ok: false, error: 'label required' });
-  if (confirmation !== label) return res.status(400).json({ ok: false, error: `confirmation must equal "${label}"` });
-  if (reason.length < 8) return res.status(400).json({ ok: false, error: 'reason must be at least 8 characters' });
-
-  const actor = req.jwtPayload?.email || req.jwtPayload?.sub || req.jwtPayload?.userId || 'admin';
-  const traceId = `safety-ui-${Date.now().toString(36)}`;
-  const event = recordAuditEvent({
-    actor,
-    action: `admin_safety_ui_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
-    inputData: { label, endpoint, reason, execution_mode: body.execution_mode || 'ui_confirmed' },
-    outputData: { ok: true, status: 'confirmed', executed: body.executed === true },
-    riskScore: body.risk === 'critical' ? 0.95 : body.risk === 'high' ? 0.85 : 0.55,
-    traceId,
-    meta: { source: 'settings_safety_modal' },
-  });
-  res.json({
-    ok: true,
-    status: 'recorded',
-    audit_id: event.id,
-    trace_id: traceId,
-    proof: { type: 'audit_record', id: event.id, source: 'audit_events', created_at: event.ts },
-  });
-});
 
 // Reliability state
 const reliabilityState = {
@@ -4619,20 +3089,6 @@ function buildApprovalInboxItems() {
   });
 }
 
-app.get('/api/approvals/inbox', requireAuth, (_req, res) => {
-  const items = buildApprovalInboxItems();
-  const counts = items.reduce((acc, item) => {
-    acc[item.status] = (acc[item.status] || 0) + 1;
-    acc.total = (acc.total || 0) + 1;
-    return acc;
-  }, { total: 0 });
-  res.json({
-    ok: true,
-    generated_at: new Date().toISOString(),
-    counts,
-    items,
-  });
-});
 
 function decideApproval(req, res, decision) {
   const approvalId = String(req.params.id || '').trim();
@@ -4708,8 +3164,6 @@ function decideApproval(req, res, decision) {
   });
 }
 
-app.post('/api/approvals/:id/approve', requireAuth, (req, res) => decideApproval(req, res, 'approved'));
-app.post('/api/approvals/:id/reject', requireAuth, (req, res) => decideApproval(req, res, 'rejected'));
 
 function _forgeRiskScore(goal) {
   const text = (goal || '').toLowerCase();
@@ -4727,68 +3181,18 @@ function _forgeRiskLabel(score) {
 }
 
 // GET /api/audit/events
-app.get('/api/audit/events', requireAuth, (req, res) => {
-  res.json(auditService.getEvents({
-    limit: (req.query || {}).limit,
-    actor:   (req.query || {}).actor   || '',
-    action:  (req.query || {}).action  || '',
-    minRisk: parseFloat((req.query || {}).min_risk || '0') || 0,
-  }));
-});
 
 // GET /api/audit/stats
-app.get('/api/audit/stats', requireAuth, (req, res) => {
-  res.json(auditService.getStats());
-});
 
 // POST /api/error-report — frontend unhandled errors surfaced to backend logs
 const _frontendErrors = [];
-app.post('/api/error-report', requireAuth, (req, res) => {
-  const _bodyFrontendErr = validate(SCHEMAS.frontendError, req, res);
-  if (!_bodyFrontendErr) return;
-  const { msg = '', stack = '', ts, source = 'frontend' } = _bodyFrontendErr;
-  const entry = { msg: String(msg).slice(0, 500), stack: String(stack).slice(0, 2000), ts: ts || Date.now(), source };
-  _frontendErrors.unshift(entry);
-  if (_frontendErrors.length > 100) _frontendErrors.length = 100;
-  console.warn(`[FRONTEND ERROR] ${entry.msg}`);
-  res.json({ ok: true });
-});
 
-app.get('/api/error-report', requireAuth, (_req, res) => {
-  res.json({ errors: _frontendErrors });
-});
 
 // GET /api/reliability/status
-app.get('/api/reliability/status', requireAuth, (req, res) => {
-  res.json({
-    stability_score: reliabilityState.stabilityScore,
-    forge_frozen: reliabilityState.forgeFrozen,
-    freeze_reason: reliabilityState.freezeReason,
-    throttled_agents: reliabilityState.throttledAgents,
-    checkpoints_stored: reliabilityState.checkpoints.length,
-    last_evaluated: reliabilityState.lastEvaluated,
-    updated_at: new Date().toISOString(),
-  });
-});
 
 // POST /api/reliability/forge/freeze
-app.post('/api/reliability/forge/freeze', requireAuth, (req, res) => {
-  const _bodyFreeze = validate(SCHEMAS.reliabilityFreeze, req, res);
-  if (!_bodyFreeze) return;
-  const reason = String(_bodyFreeze.reason || 'manual');
-  reliabilityState.forgeFrozen = true;
-  reliabilityState.freezeReason = reason;
-  recordAuditEvent({ actor: 'operator', action: 'forge_freeze', outputData: { reason }, riskScore: 0.7 });
-  res.json({ ok: true, forge_frozen: true, reason });
-});
 
 // POST /api/reliability/forge/unfreeze
-app.post('/api/reliability/forge/unfreeze', requireAuth, (req, res) => {
-  reliabilityState.forgeFrozen = false;
-  reliabilityState.freezeReason = '';
-  recordAuditEvent({ actor: 'operator', action: 'forge_unfreeze', outputData: {}, riskScore: 0.5 });
-  res.json({ ok: true, forge_frozen: false });
-});
 
 // Legacy Forge compatibility endpoints.
 // backend/routes/forge.js is mounted earlier and owns any overlapping
@@ -4796,64 +3200,12 @@ app.post('/api/reliability/forge/unfreeze', requireAuth, (req, res) => {
 // clients/tests that still use legacy-only endpoints such as submit/approve/reject.
 
 // GET /api/forge/queue
-app.get('/api/forge/queue', requireAuth, (req, res) => {
-  const status = (req.query || {}).status || '';
-  const items = status ? _forgeQueue.filter((r) => r.status === status) : _forgeQueue;
-  res.json({ items, total: _forgeQueue.length });
-});
 
 // POST /api/forge/submit
-app.post('/api/forge/submit', requireAuth, _rl_forge, (req, res) => {
-  const body = validate(SCHEMAS.forgeSubmit, req, res);
-  if (!body) return;
-  const goal = body.goal;
-  if (reliabilityState.forgeFrozen) {
-    return res.status(503).json({ ok: false, error: 'Forge is frozen', reason: reliabilityState.freezeReason });
-  }
-  const score = _forgeRiskScore(goal);
-  const label = _forgeRiskLabel(score);
-  const now = new Date().toISOString();
-  const req2 = {
-    id: `fcr-${Date.now().toString(36)}`,
-    goal,
-    risk_score: score,
-    risk_level: label,
-    status: score >= 0.7 ? 'rejected' : score < 0.3 ? 'approved' : 'pending',
-    created_at: now,
-    decided_at: score !== 0.45 ? now : null,
-    decided_by: score >= 0.7 ? 'system:risk_gate' : score < 0.3 ? 'system:auto_low_risk' : null,
-    sandbox_result: null,
-  };
-  _forgeQueuePush(req2);
-  recordAuditEvent({ actor: (req.body || {}).submitted_by || 'operator', action: 'forge_submit', inputData: { goal, risk_level: label }, outputData: { request_id: req2.id, status: req2.status }, riskScore: score });
-  res.json({ ok: true, request: req2 });
-});
 
 // POST /api/forge/approve/:id
-app.post('/api/forge/approve/:id', requireAuth, (req, res) => {
-  const _bodyForgeApprove = validate(SCHEMAS.forgeApproveItem, req, res);
-  if (!_bodyForgeApprove) return;
-  const item = _forgeQueue.find((r) => r.id === req.params.id);
-  if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
-  if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
-  const patch = { status: 'approved', decided_at: new Date().toISOString(), decided_by: _bodyForgeApprove.approved_by || 'operator' };
-  _forgeQueueUpdate(item.id, patch);
-  recordAuditEvent({ actor: item.decided_by, action: 'forge_approve', inputData: { request_id: item.id }, outputData: { status: 'approved' }, riskScore: 0.5 });
-  res.json({ ok: true, request: item });
-});
 
 // POST /api/forge/reject/:id
-app.post('/api/forge/reject/:id', requireAuth, (req, res) => {
-  const _bodyForgeReject = validate(SCHEMAS.forgeRejectItem, req, res);
-  if (!_bodyForgeReject) return;
-  const item = _forgeQueue.find((r) => r.id === req.params.id);
-  if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
-  if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
-  const patch = { status: 'rejected', decided_at: new Date().toISOString(), decided_by: _bodyForgeReject.rejected_by || 'operator' };
-  _forgeQueueUpdate(item.id, patch);
-  recordAuditEvent({ actor: item.decided_by, action: 'forge_reject', inputData: { request_id: item.id }, outputData: { status: 'rejected' }, riskScore: 0.3 });
-  res.json({ ok: true, request: item });
-});
 
 // ── Forge Python bridge (sandbox, rollback, snapshots, build-system) ─────────
 
@@ -4892,43 +3244,12 @@ function runForgePython(payload, timeoutMs = 90000) {
 }
 
 // POST /api/forge/sandbox
-app.post('/api/forge/sandbox', requireAuth, async (req, res) => {
-  const body = validate(SCHEMAS.forgeSandbox, req, res);
-  if (!body) return;
-  const goal = String(body.goal || '').trim();
-  const result = await runForgePython({ operation: 'sandbox', goal, module_path: body.module_path || 'forge_sandbox_test' });
-  if (!result) return res.status(500).json({ ok: false, error: 'forge_python_failed' });
-  res.json({ ok: true, ...result });
-});
 
 // POST /api/forge/rollback
-app.post('/api/forge/rollback', requireAuth, async (req, res) => {
-  const body = validate(SCHEMAS.forgeRollback, req, res);
-  if (!body) return;
-  const snapshot_id = String(body.snapshot_id || 'latest').trim();
-  const result = await runForgePython({ operation: 'rollback', snapshot_id });
-  recordAuditEvent({ actor: body.rolled_back_by || 'operator', action: 'forge_rollback', inputData: { snapshot_id }, outputData: result || {}, riskScore: 0.6 });
-  res.json({ ok: true, snapshot_id, ...(result || { message: 'Rollback queued' }), success: true });
-});
 
 // GET /api/forge/snapshots
-app.get('/api/forge/snapshots', requireAuth, async (req, res) => {
-  const result = await runForgePython({ operation: 'snapshots' });
-  if (!result) return res.json({ snapshots: [], summary: {} });
-  res.json(result);
-});
 
 // POST /api/forge/build-system
-app.post('/api/forge/build-system', requireAuth, async (req, res) => {
-  const body = validate(SCHEMAS.forgeBuildSystem, req, res);
-  if (!body) return;
-  const spec = String(body.spec || '').trim();
-  const project_name = String(body.project_name || 'project').trim();
-  const result = await runForgePython({ operation: 'build_system', spec, project_name }, 180000);
-  if (!result) return res.status(500).json({ ok: false, error: 'forge_python_failed' });
-  addActivity(`[FORGE] System built: ${project_name}`, 'automation');
-  res.json({ ok: true, ...result });
-});
 
 // ── Doctor (diagnostics) ──────────────────────────────────────────────────────
 
@@ -5081,413 +3402,50 @@ function _appendReconAudit(action, payload = {}, req) {
   return entry;
 }
 
-app.get('/api/recon/tools', requireAuth, (req, res) => {
-  const category = String((req.query || {}).category || '').trim();
-  const mode = String((req.query || {}).mode || '').trim();
-  const tools = _reconTools().filter((tool) => {
-    if (category && tool.category !== category) return false;
-    if (mode && tool.mode !== mode) return false;
-    return true;
-  });
-  res.json({
-    ok: true,
-    state: tools.length ? 'live' : 'empty',
-    tools,
-    categories: {
-      osint: 'OSINT / Reconnaissance',
-      defensive_review: 'Defensive Security Review',
-      phishing: 'Phishing Defense',
-      special: 'Special Functions',
-    },
-    summary: _summarizeReconTools(tools),
-    policy: {
-      offline_first: true,
-      network_osint_requires_approval: true,
-      removed_capabilities: ['exploitation', 'stress_dos', 'botnet', 'credential_harvesting', 'reverse_shells', 'attack_generation'],
-    },
-  });
-});
-
-app.post('/api/recon/tools/search', requireAuth, (req, res) => {
-  const _bodyReconSearch = validate(SCHEMAS.reconToolSearch, req, res);
-  if (!_bodyReconSearch) return;
-  const query = String(_bodyReconSearch.query || '').trim();
-  const q = query.toLowerCase();
-  const matches = _reconTools()
-    .map((tool) => {
-      const haystack = `${tool.name} ${tool.id} ${tool.description || ''} ${(tool.keywords || []).join(' ')}`.toLowerCase();
-      const score = q ? q.split(/\s+/).filter(Boolean).reduce((sum, part) => sum + (haystack.includes(part) ? 1 : 0), 0) : 0;
-      return { ...tool, score };
-    })
-    .filter((tool) => tool.score > 0)
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-    .slice(0, 12);
-  _appendReconAudit('recon_tool_search', { query: query.slice(0, 200), matches: matches.map(t => t.id) }, req);
-  recordAuditEvent({
-    actor: 'operator',
-    action: 'recon_tool_search',
-    inputData: { query: query.slice(0, 200) },
-    outputData: { matches: matches.map(tool => tool.id) },
-    riskScore: 0.1,
-  });
-  res.json({ ok: true, matches });
-});
-
-app.post('/api/recon/tools/run', requireAuth, async (req, res) => {
-  const body = validate(SCHEMAS.reconToolRun, req, res);
-  if (!body) return;
-  const toolId = String(body.tool_id || body.toolId || '').trim();
-  const input = String(body.input || '').slice(0, 20000);
-  const tool = blacklightTools.getTool(toolId);
-  if (!_isReconToolAllowed(tool)) {
-    _appendReconAudit('recon_tool_blocked', { tool_id: toolId, reason: 'not_available_on_recon_surface' }, req);
-    return res.status(404).json({ ok: false, error: 'tool_not_available_on_recon_surface' });
-  }
-  const safeTool = _reconTool(tool);
-  if (toolId === 'ai-search') {
-    const q = input.toLowerCase();
-    const matches = _reconTools().filter(t => `${t.name} ${t.description || ''} ${(t.keywords || []).join(' ')}`.toLowerCase().includes(q)).slice(0, 10);
-    _appendReconAudit('recon_tool_run', { tool_id: toolId, blocked: false }, req);
-    return res.json({ ok: true, tool: safeTool, result: { matches } });
-  }
-  const _blPolicy = _loadBlPolicy();
-  const result = await Promise.resolve(blacklightTools.runTool(toolId, input, {
-    allowNetwork: _blPolicy.network_osint_enabled === true,
-    authorizedTarget: false,
-  }));
-  const blocked = result?.result?.blocked === true || result.ok === false;
-  _appendReconAudit(blocked ? 'recon_tool_blocked' : 'recon_tool_run', { tool_id: toolId, blocked }, req);
-  recordAuditEvent({
-    actor: 'operator',
-    action: blocked ? 'recon_tool_blocked' : 'recon_tool_run',
-    inputData: { tool_id: toolId, mode: tool.mode },
-    outputData: { blocked, result_keys: Object.keys(result.result || {}) },
-    riskScore: blocked ? 0.35 : 0.1,
-  });
-  res.status(blocked ? 403 : 200).json({ ...result, tool: safeTool });
-});
-
-app.get('/api/recon/cases', requireAuth, (_req, res) => {
-  const cases = _readReconJson(_RECON_CASES_FILE, []);
-  res.json({ ok: true, state: cases.length ? 'live' : 'empty', cases });
-});
-
-app.post('/api/recon/cases', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.reconCase, req, res);
-  if (!body) return;
-  const cases = _readReconJson(_RECON_CASES_FILE, []);
-  const item = {
-    id: crypto.randomUUID(),
-    name: String(body.name || 'Recon case').slice(0, 120),
-    target: String(body.target || '').slice(0, 300),
-    owner: String(body.owner || 'operator').slice(0, 120),
-    authorization: String(body.authorization || '').slice(0, 2000),
-    status: 'active',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-  cases.unshift(item);
-  _writeReconJson(_RECON_CASES_FILE, cases.slice(0, 200));
-  _appendReconAudit('recon_case_created', { case_id: item.id, target: item.target }, req);
-  res.status(201).json({ ok: true, case: item });
-});
-
-app.get('/api/recon/findings', requireAuth, (req, res) => {
-  const caseId = String((req.query || {}).case_id || '').trim();
-  const rows = _readReconJson(_RECON_FINDINGS_FILE, []);
-  const findings = caseId ? rows.filter(row => row.case_id === caseId) : rows;
-  res.json({ ok: true, state: findings.length ? 'live' : 'empty', findings });
-});
-
-app.post('/api/recon/findings', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.reconFinding, req, res);
-  if (!body) return;
-  const findings = _readReconJson(_RECON_FINDINGS_FILE, []);
-  const item = {
-    id: crypto.randomUUID(),
-    case_id: String(body.case_id || '').slice(0, 80),
-    title: String(body.title || 'Recon finding').slice(0, 160),
-    severity: ['info', 'low', 'medium', 'high'].includes(body.severity) ? body.severity : 'info',
-    evidence: body.evidence || {},
-    source_tool: String(body.source_tool || '').slice(0, 120),
-    status: 'open',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-  findings.unshift(item);
-  _writeReconJson(_RECON_FINDINGS_FILE, findings.slice(0, 500));
-  _appendReconAudit('recon_finding_created', { finding_id: item.id, case_id: item.case_id, source_tool: item.source_tool }, req);
-  res.status(201).json({ ok: true, finding: item });
-});
-
-app.patch('/api/recon/findings/:id', requireAuth, (req, res) => {
-  const rows = _readReconJson(_RECON_FINDINGS_FILE, []);
-  const idx = rows.findIndex(row => row.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ ok: false, error: 'finding_not_found' });
-  const current = rows[idx];
-  rows[idx] = {
-    ...current,
-    status: req.body?.status ? String(req.body.status).slice(0, 40) : current.status,
-    severity: ['info', 'low', 'medium', 'high'].includes(req.body?.severity) ? req.body.severity : current.severity,
-    title: req.body?.title ? String(req.body.title).slice(0, 160) : current.title,
-    updated_at: new Date().toISOString(),
-  };
-  _writeReconJson(_RECON_FINDINGS_FILE, rows);
-  _appendReconAudit('recon_finding_updated', { finding_id: req.params.id }, req);
-  res.json({ ok: true, finding: rows[idx] });
-});
-
-app.get('/api/recon/audit', requireAuth, (req, res) => {
-  const limit = Math.min(200, parseInt((req.query || {}).limit) || 100);
-  const rows = _readReconJson(_RECON_AUDIT_FILE, []).slice(0, limit);
-  res.json({ ok: true, state: rows.length ? 'live' : 'empty', audit: rows });
-});
 
 // GET /api/doctor/llm-status
-app.get('/api/doctor/llm-status', requireAuth, async (req, res) => {
-  const result = await runForgePython({ operation: 'llm_status' });
-  res.json(result || { ollama: { online: false }, groq: { configured: false } });
-});
 
 // GET /api/doctor/errors
-app.get('/api/doctor/errors', requireAuth, (req, res) => {
-  const limit = Math.min(100, parseInt((req.query || {}).limit) || 50);
-  const errors = (_auditLog || []).filter((e) => e.risk_score >= 0.7 || (e.action || '').includes('fail') || (e.action || '').includes('error')).slice(0, limit);
-  res.json({ errors, count: errors.length });
-});
 
 // POST /api/doctor/run
-app.post('/api/doctor/run', requireAuth, async (req, res) => {
-  const scan = await runForgePython({ operation: 'security_scan' });
-  addActivity('[DOCTOR] Diagnostics run', 'system');
-  const agentList = getAgents();
-  const results = [
-    { check: 'Backend connectivity', status: 'pass', detail: 'Node backend reachable' },
-    { check: 'Agent registry',       status: agentList.length > 0 ? 'pass' : 'warn', detail: `${agentList.length} agents loaded` },
-    { check: 'Memory system',        status: 'pass', detail: 'In-memory store operational' },
-    { check: 'Forge pipeline',       status: scan ? 'pass' : 'warn', detail: scan ? 'Python bridge OK' : 'Python bridge unavailable' },
-    { check: 'Security layer',       status: 'pass', detail: 'Anomaly responder active' },
-    { check: 'WebSocket bus',        status: 'pass', detail: 'Broadcaster ready' },
-  ];
-  res.json({ success: true, ok: true, results, diagnostics: scan || { findings: [], summary: 'Python bridge unavailable' } });
-});
 
 // /api/system/stats is defined earlier (line ~1105); not redefined here.
 
 // ── Blacklight (security monitoring) ─────────────────────────────────────────
 
 // GET /api/blacklight/status
-app.get('/api/blacklight/status', requireAuth, _cache_blacklist, (req, res) => {
-  res.json({
-    active: _blacklightState.active,
-    alerts_count: _blacklightState.alerts.length,
-    last_scan: _blacklightState.last_scan,
-    status: _blacklightState.active ? 'active' : 'inactive',
-    tools: blacklightTools.summarizeCatalog(),
-  });
-});
 
 // GET /api/blacklight/tools/:id — single tool lookup (Change 4)
-app.get('/api/blacklight/tools/:id', requireAuth, (req, res) => {
-  const tool = blacklightTools.getTool(req.params.id);
-  if (!tool) return res.status(404).json({ ok: false, error: 'unknown_tool' });
-  res.json({ ok: true, tool });
-});
 
 // GET /api/blacklight/tools — policy-aware OSINT/security tool catalog.
-app.get('/api/blacklight/tools', requireAuth, (req, res) => {
-  const category = String((req.query || {}).category || '').trim();
-  const mode = String((req.query || {}).mode || '').trim();
-  const tools = blacklightTools.TOOL_CATALOG.filter((tool) => {
-    if (category && tool.category !== category) return false;
-    if (mode && tool.mode !== mode) return false;
-    return true;
-  });
-  res.json({
-    ok: true,
-    tools,
-    categories: blacklightTools.CATEGORIES,
-    summary: blacklightTools.summarizeCatalog(),
-    policy: {
-      offline_first: true,
-      network_osint_requires_approval: true,
-      blocked_capabilities: ['ddos', 'botnet', 'credential_harvesting', 'reverse_shells', 'active_exploitation'],
-    },
-  });
-});
 
 // GET /api/blacklight/policy (Change 2)
-app.get('/api/blacklight/policy', requireAuth, (req, res) => {
-  res.json(_loadBlPolicy());
-});
 
 // POST /api/blacklight/policy (Change 2)
-app.post('/api/blacklight/policy', requireAuth, (req, res) => {
-  const _bodyBlPolicy = validate(SCHEMAS.blacklistPolicy, req, res);
-  if (!_bodyBlPolicy) return;
-  const current = _loadBlPolicy();
-  const updated = { ...current, ..._bodyBlPolicy };
-  const safe = { network_osint_enabled: !!updated.network_osint_enabled };
-  _saveBlPolicy(safe);
-  res.json({ ok: true, policy: safe });
-});
 
 // POST /api/blacklight/tools/search — local natural-language tool routing.
-app.post('/api/blacklight/tools/search', requireAuth, (req, res) => {
-  const _bodyBlSearch = validate(SCHEMAS.reconToolSearch, req, res);
-  if (!_bodyBlSearch) return;
-  const query = String(_bodyBlSearch.query || '').trim();
-  const matches = blacklightTools.searchTools(query, 12);
-  recordAuditEvent({
-    actor: 'operator',
-    action: 'blacklight_tool_search',
-    inputData: { query: query.slice(0, 200) },
-    outputData: { matches: matches.map(tool => tool.id) },
-    riskScore: 0.15,
-  });
-  res.json({ ok: true, matches });
-});
 
 // POST /api/blacklight/tools/run — safe local analyzers and defensive simulations.
-app.post('/api/blacklight/tools/run', requireAuth, _rl_blacklight, async (req, res) => {
-  const body = validate(SCHEMAS.reconToolRun, req, res);
-  if (!body) return;
-  const toolId = String(body.tool_id || body.toolId || '').trim();
-  const input = String(body.input || '').slice(0, 20000);
-  const tool = blacklightTools.getTool(toolId);
-  if (!tool) return res.status(404).json({ ok: false, error: 'unknown_tool' });
-
-  const _blPolicy = _loadBlPolicy(); // Change 3: policy-driven network flag
-  const result = await Promise.resolve(blacklightTools.runTool(toolId, input, {
-    allowNetwork: _blPolicy.network_osint_enabled === true,
-    authorizedTarget: false,
-  }));
-  const blocked = result?.result?.blocked === true || result.ok === false;
-  const riskScore = tool.mode === 'blocked' ? 0.9 : tool.mode === 'passive_network' ? 0.6 : tool.mode === 'defensive_simulation' ? 0.35 : 0.15;
-  recordAuditEvent({
-    actor: 'operator',
-    action: blocked ? 'blacklight_tool_blocked' : 'blacklight_tool_run',
-    inputData: { tool_id: toolId, mode: tool.mode },
-    outputData: { blocked, result_keys: Object.keys(result.result || {}) },
-    riskScore,
-  });
-  if (blocked) {
-    _blacklightState.alerts.unshift({
-      ts: new Date().toISOString(),
-      type: 'policy_gate',
-      tool_id: toolId,
-      message: result.result?.reason || 'Blocked by Blacklight policy',
-    });
-    if (_blacklightState.alerts.length > 100) _blacklightState.alerts.length = 100;
-  }
-  res.status(blocked ? 403 : 200).json(result);
-  try { _saveBlState(); } catch {} // Change 3: persist state after run
-});
 
 // POST /api/blacklight/toggle
-app.post('/api/blacklight/toggle', requireAuth, (req, res) => {
-  _blacklightState.active = !_blacklightState.active;
-  recordAuditEvent({ actor: 'operator', action: _blacklightState.active ? 'blacklight_activate' : 'blacklight_deactivate', outputData: {}, riskScore: 0.5 });
-  addActivity(`[BLACKLIGHT] ${_blacklightState.active ? 'Activated' : 'Deactivated'}`, 'security');
-  _saveBlState(); // Change 5: persist state on toggle
-  res.json({ success: true, ok: true, active: _blacklightState.active, status: { mode: _blacklightState.active ? 'active' : 'inactive' } });
-});
 
 // POST /api/blacklight/scan
-app.post('/api/blacklight/scan', requireAuth, async (req, res) => {
-  const scan = await runForgePython({ operation: 'security_scan' });
-  const ts = new Date().toISOString();
-  _blacklightState.last_scan = ts;
-  if (scan && scan.findings) {
-    scan.findings.filter((f) => !f.safe).forEach((f) => {
-      _blacklightState.alerts.unshift({ ts, file: f.file, errors: f.errors, type: 'security_violation' });
-    });
-    if (_blacklightState.alerts.length > 100) _blacklightState.alerts.length = 100;
-  }
-  addActivity('[BLACKLIGHT] Security scan completed', 'security');
-  const findings = scan?.findings || [];
-  res.json({ success: true, ok: true, results: findings, scan: scan || { findings: [], summary: 'Python bridge unavailable' } });
-});
 
 // GET /api/blacklight/alerts
-app.get('/api/blacklight/alerts', requireAuth, (req, res) => {
-  const limit = Math.min(100, parseInt((req.query || {}).limit) || 50);
-  res.json({ alerts: _blacklightState.alerts.slice(0, limit), count: _blacklightState.alerts.length });
-});
 
 // ── Fairness & Governance ─────────────────────────────────────────────────────
 
 // GET /api/fairness/report
-app.get('/api/fairness/report', requireAuth, (req, res) => {
-  const agents = Object.keys(runtimeState.objectiveState || {});
-  const total_actions = (_auditLog || []).length;
-  const high_risk = (_auditLog || []).filter((e) => e.risk_score >= 0.7).length;
-  const by_actor = {};
-  (_auditLog || []).forEach((e) => {
-    by_actor[e.actor] = (by_actor[e.actor] || 0) + 1;
-  });
-  res.json({
-    agents_monitored: agents.length,
-    total_actions,
-    high_risk_actions: high_risk,
-    risk_rate: total_actions ? (high_risk / total_actions).toFixed(3) : '0.000',
-    by_actor,
-    demographic_parity: 'N/A — no demographic data collected',
-    disparate_impact: 'N/A — no demographic data collected',
-  });
-});
 
 // GET /api/governance/digest
-app.get('/api/governance/digest', requireAuth, async (req, res) => {
-  const limit = Math.min(50, parseInt((req.query || {}).limit) || 25);
-  const events = (_auditLog || []).slice(0, limit);
-  const result = await runForgePython({ operation: 'governance_digest', events });
-  res.json({ digest: result?.digest || 'Could not generate digest.', generated_at: new Date().toISOString() });
-});
 
 // ── Hermes (task routing) ─────────────────────────────────────────────────────
 
 // GET /api/hermes/status
-app.get('/api/hermes/status', requireAuth, (req, res) => {
-  const agents = Object.entries(runtimeState.objectiveState || {}).map(([name, state]) => ({
-    name,
-    active: state?.active || false,
-    status: state?.status || 'inactive',
-  }));
-  res.json({
-    active_agents: agents.filter((a) => a.active).length,
-    total_agents: agents.length,
-    agents,
-    forge_frozen: reliabilityState?.forgeFrozen || false,
-  });
-});
 
 // POST /api/hermes/task
-app.post('/api/hermes/task', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.hermesTask, req, res);
-  if (!body) return;
-  const message = String(body.message || '').trim();
-  const target_agent = String(body.target_agent || '').trim();
-  const result = handleGoalDrivenCommand(message);
-  addActivity(`[HERMES] Task routed to ${target_agent || 'auto'}: ${message.slice(0, 60)}`, 'automation');
-  res.json({ ok: true, handled: result?.handled || false, response: result?.reply || result?.message || null, agent: target_agent });
-});
 
 // POST /api/hermes/broadcast
-app.post('/api/hermes/broadcast', requireAuth, (req, res) => {
-  const body = validate(SCHEMAS.hermesBroadcast, req, res);
-  if (!body) return;
-  const message = String(body.message || '').trim();
-  broadcaster.broadcast('orchestrator:message', {
-    message,
-    from: 'hermes',
-    agentId: 'hermes',
-    timestamp: new Date().toISOString(),
-    broadcast: true,
-  });
-  addActivity(`[HERMES] Broadcast: ${message.slice(0, 60)}`, 'automation');
-  res.json({ ok: true, message, recipients: 'all_connected_clients' });
-});
 
 // ── Learning Ladder Builder API ───────────────────────────────────────────────
 
@@ -5564,79 +3522,12 @@ const _origChatHandler = null; // hoisted in server.js chat route already — we
 const _forgeTaskState = { last_action: null, active: false, mode: 'active' };
 
 // GET /api/forge/status
-app.get('/api/forge/status', requireAuth, (_req, res) => {
-  res.json({
-    mode: reliabilityState.forgeFrozen ? 'frozen' : _forgeTaskState.mode,
-    active: _forgeTaskState.active,
-    last_action: _forgeTaskState.last_action,
-    frozen: reliabilityState.forgeFrozen,
-    queue_depth: _forgeQueue.length,
-    stability_score: reliabilityState.stabilityScore,
-  });
-});
 
 // POST /api/forge/task  { task, mode }
-app.post('/api/forge/task', requireAuth, (req, res) => {
-  const _bodyForgeTask = validate(SCHEMAS.forgeTask, req, res);
-  if (!_bodyForgeTask) return;
-  const { task = '', mode = 'on' } = _bodyForgeTask;
-  const label = String(task).trim();
-  if (label) _forgeTaskState.last_action = label;
-  _forgeTaskState.active = mode !== 'off';
-  addActivity(`[FORGE] Task: ${label || 'unnamed'}`, 'automation');
-  res.json({ success: true, status: { active: _forgeTaskState.active, task: label, mode: _forgeTaskState.mode }, ok: true });
-});
 
 // GET /api/forge/code-ai/models — list available coding AI models
-app.get('/api/forge/code-ai/models', requireAuth, async (req, res) => {
-  const { provider } = req.query || {};
-  if (provider === 'ollama') {
-    try {
-      const ollama_resp = await new Promise((resolve, reject) => {
-        http.get('http://localhost:11434/api/tags', r => {
-          let body = '';
-          r.on('data', d => body += d);
-          r.on('end', () => {
-            try { resolve(JSON.parse(body)) } catch { resolve({ models: [] }) }
-          });
-        }).on('error', () => resolve({ models: [] }));
-      });
-      return res.json(ollama_resp);
-    } catch { return res.json({ models: [] }); }
-  } else if (provider === 'openrouter') {
-    return res.json({ models: ['deepseek/deepseek-coder-v2', 'anthropic/claude-3.5-sonnet', 'google/gemini-flash-1.5', 'meta-llama/llama-3.1-70b-instruct', 'qwen/qwen-2.5-coder-32b-instruct'] });
-  }
-  res.json({ models: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] });
-});
 
 // POST /api/forge/code-ai — send message to coding AI
-app.post('/api/forge/code-ai', requireAuth, async (req, res) => {
-  const _bodyCodeAi = validate(SCHEMAS.forgeCodeAi, req, res);
-  if (!_bodyCodeAi) return;
-  const { provider, model, messages, systemPrompt } = _bodyCodeAi;
-  const sys = systemPrompt || 'You are a helpful coding assistant. Provide clear, concise code solutions with explanations.';
-  const lastMsg = messages[messages.length - 1];
-  if (!lastMsg || !lastMsg.content) {
-    return res.status(400).json({ ok: false, error: 'last message must have content' });
-  }
-  try {
-    // Route to Python AI backend based on provider
-    const prompt = lastMsg.content;
-    const url = `http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/chat`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: prompt,
-        model: provider === 'openrouter' ? model : provider === 'ollama' ? model : model || 'claude-sonnet-4-6'
-      })
-    });
-    const data = await response.json();
-    res.json({ ok: true, response: data.response || data.reply || data.content || 'No response', tokens: 0 });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // ── AI Middleware Layer ────────────────────────────────────────────────────────
 
@@ -5685,19 +3576,6 @@ function resolveWorkspaceFile(relPath) {
 // GET /api/workspace/files — list files in ~/.ai-employee/workspace/
 
 // DELETE /api/workspace/files/<relative-path> — delete one workspace file.
-app.delete(/^\/api\/workspace\/files\/(.+)$/, requireAuth, (req, res) => {
-  try {
-    const target = resolveWorkspaceFile(req.params[0]);
-    if (!target) return res.status(400).json({ ok: false, error: 'Invalid file path' });
-    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
-      return res.status(404).json({ ok: false, error: 'File not found' });
-    }
-    fs.unlinkSync(target);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: 'Delete failed', details: e.message });
-  }
-});
 
 // GET /api/errors  — error audit log (e2e + external callers)
 
@@ -6534,102 +4412,10 @@ function _notifySSEListeners(taskId, data) {
 
 // GET /api/tasks/:taskId/progress — SSE stream for live task progress.
 // Must be declared before /api/tasks/:taskId (Express matches first-wins).
-app.get('/api/tasks/:taskId/progress', requireAuth, (req, res) => {
-  const { taskId } = req.params;
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if present
-  res.flushHeaders();
 
-  if (!_sseTaskListeners.has(taskId)) _sseTaskListeners.set(taskId, new Set());
-  _sseTaskListeners.get(taskId).add(res);
-
-  // Send current state immediately as snapshot
-  const entry = taskStore.get(taskId);
-  if (entry) {
-    res.write(`data: ${JSON.stringify({ type: 'snapshot', taskId, task: entry.task, steps: entry.steps })}\n\n`);
-  } else {
-    res.write(`data: ${JSON.stringify({ type: 'connected', taskId })}\n\n`);
-  }
-
-  req.on('close', () => {
-    const set = _sseTaskListeners.get(taskId);
-    if (set) { set.delete(res); if (set.size === 0) _sseTaskListeners.delete(taskId); }
-  });
-});
-
-app.get('/api/tasks/:taskId', requireAuth, (req, res) => {
-  const { taskId } = req.params;
-  const entry = taskStore.get(taskId);
-  if (!entry) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
-  const { task, steps } = entry;
-  res.json({ task, steps });
-});
-
-app.post('/api/tasks/:taskId/init', requireAuth, (req, res) => {
-  const { taskId } = req.params;
-  const { title, steps } = req.body || {};
-  const task = initTask(taskId, title || 'Task');
-  if (steps && Array.isArray(steps)) {
-    const entry = taskStore.get(taskId);
-    entry.steps = steps.map(s => ({
-      id: s.id,
-      label: s.label || 'Step',
-      status: 'pending',
-      started_at: null,
-      elapsed_ms: 0,
-    }));
-  }
-  res.json({ ok: true, task });
-});
-
-app.post('/api/tasks/:taskId/steps/:stepId', requireAuth, (req, res) => {
-  const { taskId, stepId } = req.params;
-  const updates = req.body || {};
-  updateTaskStep(taskId, stepId, updates);
-  res.json({ ok: true });
-});
-
-app.post('/api/tasks/:taskId/complete', requireAuth, (req, res) => {
-  const { taskId } = req.params;
-  const { status } = req.body || {};
-  completeTask(taskId, status || 'done');
-  res.json({ ok: true });
-});
 
 // ── Task History API ──────────────────────────────────────────────────────────
 
-app.get('/api/history', requireAuth, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit || 50), 200);
-  const filters = {
-    status: req.query.status,
-    agent: req.query.agent,
-    after: req.query.after,
-  };
-  const tasks = taskHistory.getRecent(limit, filters);
-  res.json({ tasks, total: taskHistory.cache.length });
-});
-
-app.get('/api/history/stats', requireAuth, (req, res) => {
-  res.json(taskHistory.getStats());
-});
-
-app.get('/api/history/agent/:agentId', requireAuth, (req, res) => {
-  const { agentId } = req.params;
-  res.json(taskHistory.getAgentStats(agentId));
-});
-
-app.get('/api/history/:taskId', requireAuth, (req, res) => {
-  const { taskId } = req.params;
-  const task = taskHistory.getTask(taskId);
-  if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
-  res.json(task);
-});
 
 // ── Error Recovery API ────────────────────────────────────────────────────────
 

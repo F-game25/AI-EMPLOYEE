@@ -439,7 +439,7 @@ module.exports = function createHealthRouter(deps) {
   // Locked to loopback so external clients cannot inject dashboard events.
   // Uses req.socket.remoteAddress (not req.ip) — trust proxy: 1 makes req.ip
   // X-Forwarded-For-aware and therefore spoofable by external callers.
-  const _express = express || require('express');
+  const _express = (typeof express === 'object' && express?.json) ? express : require('express');
   router.post('/internal/events', _express.json({ limit: '2mb' }), (req, res) => {
     const rawIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
     const isLocal = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1';
