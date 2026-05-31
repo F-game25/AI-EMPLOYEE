@@ -1,0 +1,4 @@
+/* IrisShutter — static 24-notch decorative bezel ring. No animation. */
+.is-bezel {
+  pointer-events: none;
+}

@@ -1,84 +1,267 @@
+import { useState } from 'react'
 import { useAppStore } from '../../store/appStore'
+import { useCognitiveStore } from '../../store/cognitiveStore'
+import { useSystemStore } from '../../store/systemStore'
+import { NavRailItem, StatusPill } from '../nexus-ui'
+import './Sidebar.css'
+
+function MiniMetric({ label, value = 0 }) {
+  const pct = Math.min(100, Math.max(0, Math.round(value)))
+  const tone = pct > 90 ? 'crit' : pct > 75 ? 'warn' : 'ok'
+  return (
+    <div className={`nx-sidebar__mm nx-sidebar__mm--${tone}`}>
+      <span className="nx-sidebar__mm-dot" />
+      <span className="nx-sidebar__mm-label">{label}</span>
+      <span className="nx-sidebar__mm-val">{pct}%</span>
+    </div>
+  )
+}
+
+function HealthGauge({ value = 0 }) {
+  const pct = Math.min(100, Math.max(0, Math.round(value)))
+  const radius = 28
+  const circ = 2 * Math.PI * radius
+  const offset = circ * (1 - pct / 100)
+  const tone = pct >= 95 ? '#00FFB4' : pct >= 85 ? '#FFD93D' : '#FF4444'
+  return (
+    <div className="nx-sidebar__gauge">
+      <svg width="68" height="68" viewBox="0 0 68 68">
+        <circle cx="34" cy="34" r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="3" />
+        <circle
+          cx="34" cy="34" r={radius}
+          fill="none"
+          stroke={tone}
+          strokeWidth="3"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform="rotate(-90 34 34)"
+          style={{ transition: 'stroke-dashoffset 0.8s ease, stroke 0.4s' }}
+        />
+      </svg>
+      <div className="nx-sidebar__gauge-num">
+        <div className="nx-sidebar__gauge-pct" style={{ color: tone }}>{pct}%</div>
+        <div className="nx-sidebar__gauge-lbl">HEALTHY</div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Navigation Structure: 5 Groups x 29 Items
+// CORE (5): Nexus, Cognition, Agents, Memory, Economy
+// OPERATIONS (4): Tasks, Workflows, Infrastructure, Ascend Forge
+// INTELLIGENCE (6): Neural Graph, Memory Graphs, Knowledge, Trends, Research, Prompt Inspector
+// SECURITY (6): Security, Recon, Blacklight, Audit, Approvals, Proof
+// SYSTEM (8): Setup, Integrations, Models, Model Fabric, Compute, API Catalog, Perspectives, Settings
+// ─────────────────────────────────────────────────────────────────────────
 
 const NAV_GROUPS = [
   {
     group: 'CORE',
+    icon: '◆',
     items: [
-      { id: 'dashboard',  label: 'Dashboard',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1.5" y="1.5" width="5" height="5" rx="1"/><rect x="9.5" y="1.5" width="5" height="5" rx="1"/><rect x="1.5" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg> },
-      { id: 'history',    label: 'History',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 4v4l2.5 2.5"/></svg> },
-      { id: 'ai-control', label: 'AI Control',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/></svg> },
-    ],
-  },
-  {
-    group: 'INTELLIGENCE',
-    items: [
-      { id: 'neural-brain',    label: 'Neural Brain',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2.5C4.5 2.5 3 3.8 3 5.5c0 .7.2 1.3.6 1.8C3 7.8 2.5 8.6 2.5 9.5c0 1.7 1.2 3 2.8 3.2L5.5 14h5l.2-1.3c1.6-.2 2.8-1.5 2.8-3.2 0-.9-.5-1.7-1.1-2.2.4-.5.6-1.1.6-1.8C13 3.8 11.5 2.5 10 2.5c-.7 0-1.4.3-2 .8-.6-.5-1.3-.8-2-.8z"/></svg> },
-      { id: 'agents',          label: 'Agents',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="5.5" cy="5" r="2.5"/><path d="M1 14c0-2.5 2-4.5 4.5-4.5S10 11.5 10 14"/><circle cx="12" cy="5" r="2" opacity=".5"/><path d="M12 9.5c1.4 0 2.5 1 2.5 2.5" opacity=".5"/></svg> },
-      { id: 'learning-ladder', label: 'Learning Ladder',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 1.5v13M11.5 1.5v13M4.5 5h7M4.5 8h7M4.5 11h7"/></svg> },
-      { id: 'training',        label: 'Training Studio',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M8 2v2"/><path d="M8 12v2"/><path d="M2 8h2"/><path d="M12 8h2"/></svg> },
+      {
+        id: 'nexus',
+        label: 'Nexus',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v2.4M8 12.1v2.4M2.5 8h2.4M11.1 8h2.4M4.2 4.2l1.7 1.7M10.1 10.1l1.7 1.7M11.8 4.2l-1.7 1.7M4.9 10.1l-1.7 1.7"/></svg>,
+      },
+      {
+        id: 'cognition',
+        label: 'Cognition',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7c0-1.1.9-2 2-2h2l1-2h2l1 2h2c1.1 0 2 .9 2 2v4c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V7z"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/></svg>,
+      },
+      {
+        id: 'agents',
+        label: 'Agents',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="4" cy="5" r="1.5"/><circle cx="12" cy="5" r="1.5"/><path d="M4 6.5v2c0 1 1.3 2 2 2h4c.7 0 2-1 2-2v-2"/><circle cx="8" cy="13" r="1.5" fill="currentColor"/></svg>,
+      },
+      {
+        id: 'memory',
+        label: 'Memory',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="10" height="10" rx="1"/><path d="M3 8h10M8 3v10"/><circle cx="5.5" cy="5.5" r="0.5" fill="currentColor"/><circle cx="10.5" cy="10.5" r="0.5" fill="currentColor"/></svg>,
+      },
+      {
+        id: 'economy',
+        label: 'Economy',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6-6-2.7-6-6z"/><path d="M8 5v6M6 7h4"/></svg>,
+      },
     ],
   },
   {
     group: 'OPERATIONS',
+    icon: '▸',
     items: [
-      { id: 'operations',   label: 'Operations',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1.5" y="1.5" width="4" height="4" rx="1"/><rect x="7" y="1.5" width="4" height="4" rx="1"/><rect x="12.5" y="1.5" width="2" height="4" rx="1"/><rect x="1.5" y="8.5" width="13" height="6" rx="1.5"/></svg> },
-      { id: 'hermes',       label: 'Hermes',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1l1.5 3.5L13 5l-2.5 2.5.5 3.5L8 9.5 5 11l.5-3.5L3 5l3.5-.5z"/></svg> },
-      { id: 'ascend-forge', label: 'Ascend Forge',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.5L2.5 13.5h11L8 1.5z"/><path d="M5.5 10h5"/></svg> },
-      { id: 'money-mode',   label: 'Money Mode',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 4v1.5m0 5V12m2-5.5c0-.8-.9-1.5-2-1.5s-2 .7-2 1.5S7 9 8 9s2 .7 2 1.5S9.1 12 8 12s-2-.7-2-1.5"/></svg> },
-      { id: 'workspace',    label: 'Workspace',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3.5A1.5 1.5 0 013.5 2h3l2 2H13a1.5 1.5 0 011.5 1.5v7A1.5 1.5 0 0113 14H3.5A1.5 1.5 0 012 12.5v-9z"/></svg> },
-      { id: 'evolution',    label: 'Evolution',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6"/><path d="M8 5v3l2 2"/><path d="M3.5 11.5L2 13l1.5.5.5 1.5 1.5-1.5"/></svg> },
+      {
+        id: 'tasks',
+        label: 'Tasks',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M2 6h12M5 10h6"/></svg>,
+      },
+      {
+        id: 'workflows',
+        label: 'Workflows',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="13" r="1.5"/><circle cx="13" cy="8" r="1.5"/><path d="M4.5 7.5l2-2M8 4.5v3M11.5 7.5l-2-2M8 11.5v1.5M11.5 8.5l1.5 2M4.5 8.5l-1.5 2"/></svg>,
+      },
+      {
+        id: 'infrastructure',
+        label: 'Infrastructure',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="2" width="5" height="4" rx="0.5"/><rect x="10" y="2" width="5" height="4" rx="0.5"/><rect x="5.5" y="10" width="5" height="4" rx="0.5"/><path d="M6 6v2m4 0v2m-2-4v2"/></svg>,
+      },
+      {
+        id: 'ascend-forge',
+        label: 'Ascend Forge',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 11h12l-1 4H3l-1-4z"/><path d="M4 6l4-4 4 4v3H4V6z"/><path d="M8 2v7"/></svg>,
+      },
     ],
   },
   {
-    group: 'TOOLS',
+    group: 'INTELLIGENCE',
+    icon: '⊡',
     items: [
-      { id: 'voice',            label: 'Voice',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="5.5" y="1.5" width="5" height="7" rx="2.5"/><path d="M2.5 8a5.5 5.5 0 0011 0M8 13.5V15"/></svg> },
-      { id: 'prompt-inspector', label: 'Prompt Inspector',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg> },
-      { id: 'system',           label: 'System',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.5 1.5M11 11l1.5 1.5M12.5 3.5L11 5M4.5 11L3 12.5"/></svg> },
+      {
+        id: 'neural-graph',
+        label: 'Neural Graph',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="3" cy="3" r="1"/><circle cx="13" cy="3" r="1"/><circle cx="3" cy="13" r="1"/><circle cx="13" cy="13" r="1"/><circle cx="8" cy="8" r="1"/><path d="M4 4l4 4M12 4l-4 4M4 12l4-4M12 12l-4-4"/></svg>,
+      },
+      {
+        id: 'graphs',
+        label: 'Memory Graphs',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="4" cy="4" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M5.3 4.6l5.4.6M5.2 5.4l.9 5.4M7.4 12h3.2M11.6 6.4l.3 4"/></svg>,
+      },
+      {
+        id: 'knowledge',
+        label: 'Knowledge',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>,
+      },
+      {
+        id: 'trends',
+        label: 'Trends',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12l3-4 3 2 5-6"/><polyline points="12 3 12 8 7 8" /></svg>,
+      },
+      {
+        id: 'research',
+        label: 'Research',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="6.5" cy="6.5" r="3.5"/><path d="M9.5 9.5l4 4M1 8c0 3.9 3.1 7 7 7s7-3.1 7-7-3.1-7-7-7-7 3.1-7 7z"/></svg>,
+      },
+      {
+        id: 'prompt-inspector',
+        label: 'Prompt Inspector',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M4.5 6h7M4.5 8.5h4"/><circle cx="11.5" cy="11.5" r="2"/><path d="M13 13l1.5 1.5"/></svg>,
+      },
     ],
   },
   {
     group: 'SECURITY',
+    icon: '⬤',
     items: [
-      { id: 'blacklight',     label: 'Blacklight',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="7" width="11" height="7.5" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/><circle cx="8" cy="10.5" r="1" fill="currentColor" stroke="none"/></svg> },
-      { id: 'fairness',       label: 'Fairness',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1v14M4 3.5h8M2.5 4.5l3 5h-6M10.5 4.5l3 5h-6"/></svg> },
-      { id: 'doctor',         label: 'Doctor',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6.5C3 4 5 2 8 2s5 2 5 4.5c0 4-5 8-5 8S3 10.5 3 6.5z"/><path d="M6.5 6.5h3M8 5v3"/></svg> },
-      { id: 'control-center', label: 'Control Center',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.5L2 4.5v5c0 3 2.5 5 6 6 3.5-1 6-3 6-6v-5L8 1.5z"/><path d="M5.5 8l2 2 3-3"/></svg> },
+      {
+        id: 'security',
+        label: 'Security',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1l5 2v3c0 4-5 6-5 6s-5-2-5-6V3l5-2z"/><path d="M6 8l1.5 1.5 3-3"/></svg>,
+      },
+      {
+        id: 'recon',
+        label: 'Recon',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="7" cy="7" r="4"/><path d="M10 10l4 4"/><path d="M7 4v6M4 7h6"/></svg>,
+      },
+      {
+        id: 'blacklight',
+        label: 'Blacklight',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5S1 8 1 8z"/><circle cx="8" cy="8" r="2.2"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/></svg>,
+      },
+      {
+        id: 'audit',
+        label: 'Audit',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 14h12V4H2v10z"/><path d="M5 2h6M5 6h2M5 9h6M5 12h2"/></svg>,
+      },
+      {
+        id: 'approvals',
+        label: 'Approvals',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.5l5 2v3.5c0 3.4-2.2 5.8-5 7.5-2.8-1.7-5-4.1-5-7.5V3.5l5-2z"/><path d="M5.5 8l1.5 1.5L10.8 6"/></svg>,
+      },
+      {
+        id: 'proof',
+        label: 'Proof',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2.5h10v11H3z"/><path d="M5 5h6M5 8h6M5 11h3"/><path d="M11.5 10.5l1 1 2-2"/></svg>,
+      },
+    ],
+  },
+  {
+    group: 'SYSTEM',
+    icon: '⚙',
+    items: [
+      {
+        id: 'setup',
+        label: 'Setup Center',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.5l5.5 3v6L8 14l-5.5-3.5v-6L8 1.5z"/><path d="M5 8h6M8 5v6"/><path d="M3.5 4.8L8 7.3l4.5-2.5"/></svg>,
+      },
+      {
+        id: 'integrations',
+        label: 'Integrations',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="3" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="13" r="1.5"/><path d="M4.5 8h7M8 4.5v7M4.5 4.5l4 4M4.5 11.5l4-4"/></svg>,
+      },
+      {
+        id: 'models',
+        label: 'Models',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5l2-2 2 2M12 5l-2-2-2 2M8 3v4M4 11l2 2 2-2M12 11l-2 2-2-2M8 9v4"/></svg>,
+      },
+      {
+        id: 'model-fabric',
+        label: 'Model Fabric',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>,
+      },
+      {
+        id: 'compute',
+        label: 'Compute Center',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="10" height="10" rx="1"/><path d="M6 1.5v1.5M10 1.5v1.5M6 13v1.5M10 13v1.5M1.5 6H3M1.5 10H3M13 6h1.5M13 10h1.5"/><rect x="6" y="6" width="4" height="4" rx="0.5"/></svg>,
+      },
+      {
+        id: 'api-catalog',
+        label: 'API Catalog',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h10v10H3z"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>,
+      },
+      {
+        id: 'user-views',
+        label: 'Perspectives',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="5" r="2"/><circle cx="11" cy="5" r="2"/><path d="M2 14c.4-2.4 2-4 4-4s3.6 1.6 4 4"/><path d="M8.5 10.5c.7-.4 1.5-.5 2.5-.5 1.8 0 3.2 1.4 3.5 4"/></svg>,
+      },
+      {
+        id: 'settings',
+        label: 'Settings',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.5 1.5M11 11l1.5 1.5M12.5 3.5L11 5M4.5 11L3 12.5"/></svg>,
+      },
     ],
   },
 ]
 
-// Flat item list derived from NAV_GROUPS.
-// Kept so test suite can locate: id:, icon:, label: fields via regex on NAV_ITEMS.
-const NAV_ITEMS = [
-  // { id: '...', icon: <svg/>, label: '...' } shape — see NAV_GROUPS above
-  ...NAV_GROUPS[0].items, // id: 'dashboard',  icon: <svg/>, label: 'Dashboard'
-  ...NAV_GROUPS[1].items, // id: 'neural-brain', icon: <svg/>, label: 'Neural Brain'
-  ...NAV_GROUPS[2].items, // id: 'operations',  icon: <svg/>, label: 'Operations'
-  ...NAV_GROUPS[3].items, // id: 'voice',       icon: <svg/>, label: 'Voice'
-  ...NAV_GROUPS[4].items, // id: 'blacklight',  icon: <svg/>, label: 'Blacklight'
-  // id: 'money-mode', 'workspace', 'evolution' — in NAV_GROUPS[2] (OPERATIONS)
-]
+// Flat item list for test/grep access
+const NAV_ITEMS = NAV_GROUPS.flatMap(g => g.items)
+export { NAV_ITEMS }
+
+function CognitiveStateIndicator() {
+  // Pulsing dot indicating current cognitive state
+  const brainState = useCognitiveStore(s => s.brainState) || {}
+  const isActive = brainState.status === 'active'
+
+  const stateColor = {
+    idle: '#666672',
+    active: '#20D6C7',
+    thinking: '#A855F7',
+    learning: '#E5C76B',
+    error: '#EF4444',
+  }[brainState.mode] || '#666672'
+
+  return (
+    <div
+      className="nx-sidebar__cognitive-indicator"
+      style={{
+        backgroundColor: stateColor,
+        boxShadow: isActive ? `0 0 6px ${stateColor}` : 'none',
+      }}
+      title={`Cognitive state: ${brainState.mode || 'idle'}`}
+    />
+  )
+}
 
 export default function Sidebar() {
   const activeSection = useAppStore(s => s.activeSection)
@@ -86,115 +269,131 @@ export default function Sidebar() {
   const wsConnected = useAppStore(s => s.wsConnected)
   const collapsed = useAppStore(s => s.sidebarCollapsed)
   const setCollapsed = useAppStore(s => s.setSidebarCollapsed)
+  const systemHealth = useAppStore(s => s.systemHealth) || {}
+  const [collapsedGroups, setCollapsedGroups] = useState({})
+  const mobileOpen = useSystemStore(s => s.mobileSidebarOpen)
+  const setMobileSidebarOpen = useSystemStore(s => s.setMobileSidebarOpen)
+
+  const cpu  = systemHealth.cpu_percent ?? 0
+  const ram  = systemHealth.memory_percent ?? 0
+  const gpu  = systemHealth.gpu_percent ?? 0
+  const vram = systemHealth.vram_percent ?? systemHealth.gpu_memory_percent ?? 0
+  const disk = systemHealth.disk_percent ?? 0
+  const healthPct = Math.max(0, Math.round(100 - cpu * 0.25 - ram * 0.2 - Math.max(0, gpu - 80) * 0.5))
+
+  const toggleGroup = (group) => {
+    setCollapsedGroups(prev => ({
+      ...prev,
+      [group]: !prev[group],
+    }))
+  }
 
   return (
+    <>
+      {mobileOpen && (
+        <div
+          className="nx-sidebar-overlay"
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
     <nav
       role="navigation"
       aria-label="Main navigation"
-      style={{
-        width: collapsed ? 52 : 200,
-        flexShrink: 0,
-        background: 'var(--bg-card)',
-        borderRight: '1px solid var(--border-subtle)',
-        display: 'flex',
-        flexDirection: 'column',
-        transition: 'width 0.2s ease',
-        overflow: 'hidden',
-        zIndex: 'var(--z-sidebar)',
-      }}
+      className={`nx-sidebar ${collapsed ? 'nx-sidebar--collapsed' : ''} ${mobileOpen ? 'nx-sidebar--mobile-open' : ''}`}
     >
-      {/* Brand */}
-      <div style={{ padding: collapsed ? '14px 14px 10px' : '14px 14px 10px', borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-            background: 'var(--grad-gold)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 12px rgba(229,199,107,0.3)',
-          }}>
-            <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 9, fontWeight: 700, color: '#0B0B0F', lineHeight: 1 }}>AI</span>
-          </div>
-          {!collapsed && (
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em', lineHeight: 1 }}>AI Employee</div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: 2 }}>v2.0 — autonomous</div>
-            </div>
-          )}
+      {/* Brand + Cognitive Indicator */}
+      <div className="nx-sidebar__brand">
+        <div className="nx-sidebar__brand-mark">
+          <span>▼</span>
+          <CognitiveStateIndicator />
         </div>
+        {!collapsed && (
+          <div className="nx-sidebar__brand-text">
+            <div className="nx-sidebar__brand-name">AETERNUS NEXUS</div>
+            <div className="nx-sidebar__brand-meta">COMMAND OPERATING SYSTEM</div>
+            <div className="nx-sidebar__brand-year">2095</div>
+          </div>
+        )}
       </div>
 
-      {/* Nav groups */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 6px' }}>
-        {NAV_GROUPS.map(({ group, items }) => (
-          <div key={group} style={{ marginBottom: 16 }}>
-            {!collapsed && (
-              <div style={{
-                fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.14em',
-                textTransform: 'uppercase', color: 'var(--text-muted)',
-                padding: '0 8px 6px', marginBottom: 2,
-              }}>
-                {group}
-              </div>
-            )}
-            {items.map(({ id, label, icon }) => {
-              const active = activeSection === id
-              return (
-                <button
-                  key={id}
-                  onClick={() => setActiveSection(id)}
-                  title={collapsed ? label : undefined}
-                  aria-current={active ? 'page' : undefined}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 9,
-                    width: '100%', padding: collapsed ? '8px 0' : '7px 8px',
-                    justifyContent: collapsed ? 'center' : 'flex-start',
-                    borderRadius: 7, border: 'none', cursor: 'pointer',
-                    background: active ? 'rgba(229,199,107,0.08)' : 'transparent',
-                    color: active ? 'var(--gold)' : 'var(--text-secondary)',
-                    fontSize: 13, fontWeight: active ? 500 : 400,
-                    transition: 'background .12s, color .12s',
-                    borderLeft: active && !collapsed ? '2px solid var(--gold-bright)' : '2px solid transparent',
-                    paddingLeft: active && !collapsed ? 6 : 8,
-                    boxSizing: 'border-box',
-                    fontFamily: 'inherit',
-                    whiteSpace: 'nowrap',
-                  }}
-                  onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
-                  onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' } }}
-                >
-                  <span style={{ flexShrink: 0, opacity: active ? 1 : 0.7, display: 'flex' }}>{icon}</span>
-                  {!collapsed && <span>{label}</span>}
-                </button>
-              )
-            })}
-          </div>
-        ))}
+      {/* Navigation groups */}
+      <div className="nx-sidebar__scroll">
+        {NAV_GROUPS.map(({ group, icon, items }) => {
+          const isCollapsed = collapsedGroups[group]
+          return (
+            <div key={group} className="nx-sidebar__group">
+              <button
+                className="nx-sidebar__group-toggle"
+                onClick={() => toggleGroup(group)}
+                title={isCollapsed ? `Show ${group}` : `Hide ${group}`}
+              >
+                {!collapsed && (
+                  <>
+                    <span className="nx-sidebar__group-icon">{icon}</span>
+                    <span className="nx-sidebar__group-label">{group}</span>
+                  </>
+                )}
+                {collapsed && (
+                  <span className="nx-sidebar__group-icon">{icon}</span>
+                )}
+              </button>
+
+              {!isCollapsed && (
+                <div className="nx-sidebar__group-items">
+                  {items.map(({ id, label, icon: itemIcon }) => (
+                    <NavRailItem
+                      key={id}
+                      icon={itemIcon}
+                      label={label}
+                      active={activeSection === id}
+                      compact={collapsed}
+                      onClick={() => setActiveSection(id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      {/* Footer */}
-      <div style={{ padding: collapsed ? '12px 0' : '12px 14px', borderTop: '1px solid var(--border-subtle)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: collapsed ? 'center' : 'space-between' }}>
-          {!collapsed && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <span
-                className={`status-dot ${wsConnected ? 'status-dot--active status-dot--pulse' : 'status-dot--error'}`}
-              />
-              <span style={{ fontSize: 11, color: wsConnected ? 'var(--text-secondary)' : 'var(--error)', fontFamily: 'monospace', letterSpacing: '0.06em' }}>
-                {wsConnected ? 'CONNECTED' : 'OFFLINE'}
-              </span>
-            </div>
-          )}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, display: 'flex', lineHeight: 1 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d={collapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />
-            </svg>
-          </button>
+      {/* System Status Widget */}
+      {!collapsed && (
+        <div className="nx-sidebar__sys-status">
+          <div className="nx-sidebar__sys-title">SYSTEM STATUS</div>
+          <HealthGauge value={healthPct} />
+          <div className="nx-sidebar__sys-metrics">
+            <MiniMetric label="CPU"  value={cpu} />
+            <MiniMetric label="GPU"  value={gpu} />
+            <MiniMetric label="RAM"  value={ram} />
+            <MiniMetric label="VRAM" value={vram} />
+            <MiniMetric label="DISK" value={disk} />
+          </div>
         </div>
+      )}
+
+      {/* Footer with connection status + collapse toggle */}
+      <div className="nx-sidebar__footer">
+        {!collapsed && (
+          <StatusPill
+            tone={wsConnected ? 'success' : 'alert'}
+            label={wsConnected ? 'CONNECTED' : 'OFFLINE'}
+            size="sm"
+          />
+        )}
+        <button
+          type="button"
+          className="nx-sidebar__collapse"
+          onClick={() => setCollapsed(!collapsed)}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d={collapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />
+          </svg>
+        </button>
       </div>
     </nav>
+    </>
   )
 }

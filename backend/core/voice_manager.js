@@ -69,6 +69,7 @@ const DEFAULT_CUSTOMER_CONFIG = {
 
 const DEFAULT_CONFIG = {
   enabled: true,
+  provider: 'fish_speech',
   profile: 'default_futuristic',
   verbosity: VERBOSITY.NORMAL,
   volume: 0.9,
@@ -77,6 +78,25 @@ const DEFAULT_CONFIG = {
   tone: 'futuristic',
   voiceStyle: 'default',
   bootGreeting: true,
+  fishSpeech: {
+    enabled: true,
+    baseUrl: process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL || 'http://127.0.0.1:8080',
+    apiKeyEnv: 'FISH_SPEECH_API_KEY',
+    referenceId: '',
+    format: 'wav',
+    latency: 'normal',
+    maxNewTokens: 1024,
+    chunkLength: 200,
+    topP: 0.8,
+    repetitionPenalty: 1.1,
+    temperature: 0.8,
+    normalize: true,
+    useMemoryCache: 'off',
+    seed: null,
+    timeoutMs: 45000,
+    healthTimeoutMs: 1500,
+    localFallback: true,
+  },
   events: {
     system_boot:         true,
     task_created:        true,
@@ -114,6 +134,8 @@ function loadConfig() {
       config = {
         ...DEFAULT_CONFIG,
         ...parsed,
+        provider: parsed.provider || DEFAULT_CONFIG.provider,
+        fishSpeech: { ...DEFAULT_CONFIG.fishSpeech, ...(parsed.fishSpeech || {}) },
         events: { ...DEFAULT_CONFIG.events, ...(parsed.events || {}) },
         customer: {
           ...DEFAULT_CUSTOMER_CONFIG,
@@ -123,7 +145,11 @@ function loadConfig() {
       };
     }
   } catch (_err) {
-    config = { ...DEFAULT_CONFIG, customer: { ...DEFAULT_CUSTOMER_CONFIG } };
+    config = {
+      ...DEFAULT_CONFIG,
+      fishSpeech: { ...DEFAULT_CONFIG.fishSpeech },
+      customer: { ...DEFAULT_CUSTOMER_CONFIG },
+    };
   }
 }
 
@@ -143,6 +169,7 @@ function applyConfig(patch) {
   config = {
     ...config,
     ...patch,
+    fishSpeech: { ...config.fishSpeech, ...(patch.fishSpeech || {}) },
     events: { ...config.events, ...(patch.events || {}) },
     customer: {
       ...config.customer,
@@ -152,12 +179,14 @@ function applyConfig(patch) {
   };
   saveConfig();
   void ttsEngine.reconfigure({
+    provider: config.provider,
     profile: config.profile,
     volume: config.volume,
     pitch: config.pitch,
     speed: config.speed,
     tone: config.tone,
     voiceStyle: config.voiceStyle,
+    fishSpeech: config.fishSpeech,
   });
 }
 
@@ -251,6 +280,7 @@ async function init() {
   if (initialized) return;
   loadConfig();
   await ttsEngine.init({
+    provider: config.provider,
     profile: config.profile,
     volume: config.volume,
     pitch: config.pitch,
@@ -258,6 +288,7 @@ async function init() {
     tone: config.tone,
     voiceStyle: config.voiceStyle,
     channel: 'system',
+    fishSpeech: config.fishSpeech,
   });
   // Warm the pipeline phrase cache with all known pre-roll phrases
   const allPhrases = [
@@ -415,6 +446,10 @@ function getPipeline() {
   return sharedPipeline;
 }
 
+function getEngineStatus() {
+  return ttsEngine.getStatus();
+}
+
 function isBootGreetingEnabled() {
   return Boolean(config.bootGreeting);
 }
@@ -436,6 +471,7 @@ module.exports = {
   triggerCall,
   stopCall,
   getPipeline,
+  getEngineStatus,
   VERBOSITY,
   EVENT_VERBOSITY,
   SYSTEM_EVENT_PHRASES,

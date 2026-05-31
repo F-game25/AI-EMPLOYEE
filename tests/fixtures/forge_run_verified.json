@@ -1,0 +1,82 @@
+{
+  "id": "run-fixture-verified",
+  "run_id": "run-fixture-verified",
+  "project_id": "project-test",
+  "goal": "Add input validation to the signup form",
+  "status": "verified",
+  "mode": "supervised",
+  "provider": "anthropic",
+  "max_iterations": 3,
+  "context_pack": {
+    "goal": "Add input validation to the signup form",
+    "project": { "id": "project-test", "name": "Test Project", "target_type": "internal_repo", "write_access": true },
+    "constraints": { "approval_required_for_writes": true, "staged_apply_required": true },
+    "verification_commands": ["node --check src/app.js"]
+  },
+  "plan": { "id": "plan-fixture-verified", "goal": "Add input validation to the signup form", "verification_commands": ["node --check src/app.js"] },
+  "actions": [
+    {
+      "id": "action-fixture-verified-1",
+      "type": "write_file",
+      "label": "Write src/utils/validate.js",
+      "file_path": "src/utils/validate.js",
+      "status": "verified",
+      "risk": "low",
+      "risk_level": "low",
+      "run_id": "run-fixture-verified",
+      "approved_by": "operator",
+      "workspace_meta": { "workspace_mode": "git_worktree", "git_head": "abc123" },
+      "created_at": "2026-05-27T12:00:00.000Z",
+      "updated_at": "2026-05-27T12:02:00.000Z"
+    }
+  ],
+  "patches": [
+    {
+      "action_id": "action-fixture-verified-1",
+      "files": ["src/utils/validate.js"],
+      "policy": { "allowed": true, "risk_level": "low", "violations": [] },
+      "status": "verified",
+      "workspace_meta": { "workspace_mode": "git_worktree" }
+    }
+  ],
+  "approvals": [
+    {
+      "action_id": "action-fixture-verified-1",
+      "approved_by": "operator",
+      "approved_at": "2026-05-27T12:01:00.000Z",
+      "workspace_meta": { "workspace_mode": "git_worktree" }
+    }
+  ],
+  "test_results": [
+    {
+      "id": "verify-fixture-1",
+      "all_passed": true,
+      "results": [
+        {
+          "command": "node --check src/app.js",
+          "pass": true,
+          "code": 0,
+          "output": "",
+          "duration_ms": 142,
+          "sandbox_type": "process",
+          "sandbox_profile": "code",
+          "sandbox_audit": { "profile": "code", "allowlist_enforced": true }
+        }
+      ],
+      "workspace_meta": { "workspace_mode": "git_worktree", "git_head": "abc123" },
+      "commands": ["node --check src/app.js"],
+      "verified_at": "2026-05-27T12:02:00.000Z",
+      "verified_by": "operator"
+    }
+  ],
+  "review": {
+    "status": "verification_passed",
+    "summary": "Verification passed. Apply still requires owner approval.",
+    "blocked": 0
+  },
+  "final_report": null,
+  "audit_ids": [],
+  "workspace_path": "/tmp/forge/runs/run-fixture-verified/workspace",
+  "created_at": "2026-05-27T12:00:00.000Z",
+  "updated_at": "2026-05-27T12:02:00.000Z"
+}

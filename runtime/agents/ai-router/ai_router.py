@@ -115,6 +115,23 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+# ── llm_router: read model-routing.json at request time ──────────────────────
+# Loaded lazily so import failures don't break the module.
+_llm_router = None
+
+def _get_llm_router():
+    global _llm_router
+    if _llm_router is None:
+        try:
+            _runtime = Path(__file__).parent.parent.parent  # runtime/
+            if str(_runtime) not in sys.path:
+                sys.path.insert(0, str(_runtime))
+            from core.llm_router import get_router
+            _llm_router = get_router()
+        except Exception as exc:
+            logger.debug("ai_router: llm_router unavailable — %s", exc)
+    return _llm_router
+
 logger = logging.getLogger("ai_router")
 
 # ── Hybrid Mode integration (optional — graceful fallback if not present) ────
@@ -353,6 +370,8 @@ def _route_for_agent(agent_id: Optional[str], category: Optional[str]) -> dict:
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 SERP_API_KEY = os.environ.get("SERP_API_KEY", "")
 NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")
+BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
+BING_API_KEY = os.environ.get("BING_API_KEY", "")
 WEB_SEARCH_TIMEOUT = int(os.environ.get("WEB_SEARCH_TIMEOUT", "15"))
 
 
@@ -1067,9 +1086,38 @@ def query_ai_for_agent(
         _turbo_log(result, _tq_cfg, prompt)
         return result
 
+    # ── Consult llm_router (model-routing.json) first — UI writes here ────────
+    _router = _get_llm_router()
+    if _router is not None:
+        try:
+            _json_route = _router.get_model_for_agent(agent_key) if agent_key else None
+            # Only use json route if it has a meaningful override (not just the default)
+            # Check agent-specific entry: get_model_for_agent returns agents[id] or _default
+            _agent_specific = (_router._load().get('agents') or {}).get(agent_key)
+            if not _agent_specific:
+                # No per-agent override; check task-level (task == agent category here)
+                _task_route = _router.get_model_for_task(agent_key)
+                _preferred_provider = _task_route.get('provider')
+                _preferred_model = _task_route.get('model')
+            else:
+                _preferred_provider = _agent_specific.get('provider')
+                _preferred_model = _agent_specific.get('model')
+        except Exception as exc:
+            logger.debug("ai_router: llm_router lookup failed — %s", exc)
+            _preferred_provider = None
+            _preferred_model = None
+    else:
+        _preferred_provider = None
+        _preferred_model = None
+
+    # Fall back to static _AGENT_ROUTING when llm_router has no result
     routing = _route_for_agent(None, agent_key)
-    preferred_provider = routing["provider"]
-    preferred_model = os.environ.get(routing["model_env"], routing["default_model"])
+    if _preferred_provider and _preferred_model:
+        preferred_provider = _preferred_provider
+        preferred_model = _preferred_model
+    else:
+        preferred_provider = routing["provider"]
+        preferred_model = os.environ.get(routing["model_env"], routing["default_model"])
 
     # ── Turbo Mode override ───────────────────────────────────────────────────
     turbo_mode = _turbo_mode()
@@ -1253,7 +1301,9 @@ def _http_get_json(url: str, headers: Optional[dict] = None, timeout: int = WEB_
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
     except Exception as exc:
-        logger.debug("_http_get_json error for %s: %s", url, exc)
+        parsed = urllib.parse.urlparse(url)
+        safe_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        logger.debug("_http_get_json error for %s (%s)", safe_url, type(exc).__name__)
         return None
 
 
@@ -1406,13 +1456,80 @@ def _serp_search(query: str, max_results: int = 5) -> list:
     return results
 
 
+def _brave_search(query: str, max_results: int = 5) -> list:
+    """Brave Search API — free tier 2000 q/mo, requires BRAVE_API_KEY."""
+    if not BRAVE_API_KEY:
+        return []
+    try:
+        import requests as _requests
+        resp = _requests.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "count": max_results},
+            headers={"Accept": "application/json", "X-Subscription-Token": BRAVE_API_KEY},
+            timeout=WEB_SEARCH_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json() or {}
+        out = []
+        for r in (data.get("web", {}) or {}).get("results", [])[:max_results]:
+            out.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "snippet": (r.get("description") or "")[:400],
+                "source": "Brave",
+            })
+        return out
+    except Exception as exc:
+        logger.debug("Brave search error: %s", exc)
+        return []
+
+
+def _bing_search(query: str, max_results: int = 5) -> list:
+    """Bing Web Search API — requires BING_API_KEY (Azure free tier)."""
+    if not BING_API_KEY:
+        return []
+    try:
+        import requests as _requests
+        resp = _requests.get(
+            "https://api.bing.microsoft.com/v7.0/search",
+            params={"q": query, "count": max_results, "responseFilter": "Webpages"},
+            headers={"Ocp-Apim-Subscription-Key": BING_API_KEY},
+            timeout=WEB_SEARCH_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json() or {}
+        out = []
+        for r in (data.get("webPages", {}) or {}).get("value", [])[:max_results]:
+            out.append({
+                "title": r.get("name", ""),
+                "url": r.get("url", ""),
+                "snippet": (r.get("snippet") or "")[:400],
+                "source": "Bing",
+            })
+        return out
+    except Exception as exc:
+        logger.debug("Bing search error: %s", exc)
+        return []
+
+
+def _detect_lang(query: str) -> str:
+    """Best-effort language code; defaults to 'en' if langdetect unavailable."""
+    try:
+        from langdetect import detect  # type: ignore
+        return detect(query) or "en"
+    except Exception:
+        return "en"
+
+
 def search_web(query: str, max_results: int = 5, include_news: bool = False) -> list:
     """Search the web using the best available provider.
 
     Priority:
         1. Tavily AI Search (if TAVILY_API_KEY set — best quality for AI use)
+        1.5 Brave Search (if BRAVE_API_KEY set — independent index, free tier)
         2. SerpAPI (if SERP_API_KEY set — comprehensive Google results)
         3. DuckDuckGo Instant Answers + Wikipedia (always available, no key needed)
+        3.5 Bing (if BING_API_KEY set — Azure free tier)
         4. NewsAPI (if NEWS_API_KEY set and include_news=True or query is news-like)
 
     When the system is in offline mode, all providers are skipped and an
@@ -1448,8 +1565,17 @@ def search_web(query: str, max_results: int = 5, include_news: bool = False) -> 
             }
         ]
 
+    lang = _detect_lang(query)
+    logger.debug("ai_router.search_web lang=%s query=%r", lang, query[:80])
+
     # Try best-quality providers first
     results = _tavily_search(query, max_results)
+    if results:
+        if include_news and NEWS_API_KEY:
+            results += _news_api_search(query, 3)
+        return results[:max_results + 3]
+
+    results = _brave_search(query, max_results)
     if results:
         if include_news and NEWS_API_KEY:
             results += _news_api_search(query, 3)
@@ -1465,6 +1591,10 @@ def search_web(query: str, max_results: int = 5, include_news: bool = False) -> 
     ddg = _ddg_instant(query)
     wiki = _wiki_search(query, max_results=2)
     results = ddg + wiki
+
+    # Bing as supplement when free-tier results are thin
+    if len(results) < max_results:
+        results += _bing_search(query, max_results - len(results))
 
     # Add news for news-like queries or if explicitly requested
     news_keywords = ("news", "latest", "recent", "today", "2024", "2025", "2026")

@@ -1,5 +1,6 @@
 {
   "enabled": true,
+  "provider": "fish_speech",
   "profile": "default_futuristic",
   "verbosity": 3,
   "volume": 0.9,
@@ -8,6 +9,25 @@
   "tone": "futuristic",
   "voiceStyle": "default",
   "bootGreeting": true,
+  "fishSpeech": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:8080",
+    "apiKeyEnv": "FISH_SPEECH_API_KEY",
+    "referenceId": "",
+    "format": "wav",
+    "latency": "normal",
+    "maxNewTokens": 1024,
+    "chunkLength": 200,
+    "topP": 0.8,
+    "repetitionPenalty": 1.1,
+    "temperature": 0.8,
+    "normalize": true,
+    "useMemoryCache": "off",
+    "seed": null,
+    "timeoutMs": 45000,
+    "healthTimeoutMs": 1500,
+    "localFallback": true
+  },
   "events": {
     "system_boot": true,
     "task_created": true,

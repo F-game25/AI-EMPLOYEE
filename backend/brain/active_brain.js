@@ -1,9 +1,79 @@
 'use strict';
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
 const MAX_RECENT = 40;
 const MAX_FAILURES = 50;
 const MIN_CONFIDENCE = 0.35;
 const MAX_CONFIDENCE = 0.97;
+
+// ── Persistence setup ─────────────────────────────────────────────────────────
+const _STATE_DIR = path.resolve(
+  process.env.STATE_DIR
+    || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'),
+);
+const _BRAIN_FILE = path.join(_STATE_DIR, 'brain_state.json');
+
+let _saveDebounceTimer = null;
+
+function _ensureStateDir() {
+  try { fs.mkdirSync(_STATE_DIR, { recursive: true }); } catch {}
+}
+
+function _flushSave() {
+  if (_saveDebounceTimer) { clearTimeout(_saveDebounceTimer); _saveDebounceTimer = null; }
+  _persistNow();
+}
+
+function _persistNow() {
+  try {
+    _ensureStateDir();
+    const data = JSON.stringify({ ...exportState(), savedAt: new Date().toISOString() }, null, 2);
+    const tmp = _BRAIN_FILE + '.tmp';
+    fs.writeFileSync(tmp, data, 'utf8');
+    fs.renameSync(tmp, _BRAIN_FILE);
+  } catch {
+    // Best-effort — never crash the brain module
+  }
+}
+
+function _scheduleSave() {
+  if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+  _saveDebounceTimer = setTimeout(_persistNow, 5000);
+  if (_saveDebounceTimer.unref) _saveDebounceTimer.unref();
+}
+
+// Lazy broadcaster reference — resolved on first use to avoid circular deps
+let _broadcaster = null;
+function _getBroadcaster() {
+  if (!_broadcaster) {
+    try { _broadcaster = require('../events/broadcaster'); } catch {}
+  }
+  return _broadcaster;
+}
+
+// ── Init: restore persisted state ─────────────────────────────────────────────
+function init() {
+  try {
+    if (fs.existsSync(_BRAIN_FILE)) {
+      const raw = fs.readFileSync(_BRAIN_FILE, 'utf8');
+      const saved = JSON.parse(raw);
+      restoreState(saved);
+      console.log('[brain] Restored brain state');
+    }
+  } catch (err) {
+    console.warn('[brain] Could not restore brain state:', err && err.message ? err.message : err);
+  }
+}
+
+// Graceful shutdown — flush pending save immediately
+process.on('SIGTERM', _flushSave);
+process.on('SIGINT', _flushSave);
+
+// Run init at module load time
+init();
 
 function nowIso() {
   return new Date().toISOString();
@@ -295,6 +365,26 @@ function feedback({
   updatePreference(userId, notes || '', strategy);
   state.planIndex.delete(taskId);
   state.lastUpdatedAt = nowIso();
+
+  // Persist state (debounced 5 s) and broadcast live updates
+  _scheduleSave();
+  try {
+    const bc = _getBroadcaster();
+    if (bc) {
+      bc.broadcast('brain:insights', insights());
+      const total = state.performance.total || 0;
+      const updated = (status === 'success' ? state.recentImprovements.length : 0)
+        + (status !== 'success' ? state.failedAttempts.length : 0);
+      bc.broadcast('brain:graph-update', {
+        added_nodes: state.taskPatterns.size + state.strategies.size,
+        updated_nodes: updated,
+        timestamp: nowIso(),
+      });
+    }
+  } catch {
+    // Non-fatal — broadcast failure must never break task execution
+  }
+
   return plan;
 }
 

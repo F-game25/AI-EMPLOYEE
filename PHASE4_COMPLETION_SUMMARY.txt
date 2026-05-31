@@ -1,0 +1,339 @@
+================================================================================
+PHASE 4 COGNITIVE INFRASTRUCTURE — PARTS 4-6 COMPLETION REPORT
+================================================================================
+
+BUILD DATE: 2026-05-13
+STATUS: COMPLETE AND INTEGRATED
+TOTAL FILES CREATED/ENHANCED: 23
+
+================================================================================
+PART 4: MEMORY SANITATION + KNOWLEDGE INTEGRITY (8 files)
+================================================================================
+
+File 1: runtime/infra/cognitive/knowledge_integrity/__init__.py ✓
+  - Exports: get_lifecycle_manager, get_deduplicator, register, record_access
+  - Additional exports: quarantine, restore, get_counts, run_decay, find_duplicates
+  - Additional: list_clusters, scan_contradictions, flag_hallucination, prune_stale, entropy_report
+
+File 2: runtime/infra/cognitive/knowledge_integrity/schema.py ✓
+  - MemoryLifecycleState enum: FRESH, REINFORCED, STABLE, AGING, STALE, ARCHIVED, QUARANTINED
+  - MemoryRecord: lifecycle tracking with age, access patterns, confidence scoring
+  - DuplicateCluster: semantically similar memory grouping with consolidation
+  - Contradiction: logical conflict detection with confidence scoring
+  - HallucinationFlag: suspicious claim flagging with severity levels (1-5)
+  - IntegrityReport: comprehensive health snapshot with entropy scoring
+
+File 3: runtime/infra/cognitive/knowledge_integrity/lifecycle_manager.py ✓
+  - _ensure_table(): Creates memory_lifecycle tracking table with indexes
+  - register(): Fresh memory registration with source tracking
+  - record_access(): Usage pattern recording for decay decisions
+  - quarantine(): Marks suspicious memories for review
+  - restore(): Recovers quarantined memories when validated
+  - get_counts(): State distribution queries
+  - run_decay(): 6-hour lifecycle transitions (fresh→aging→stale→archived)
+  - LifecycleManager: Async background decay runner
+  - Thresholds: AGING=7d, STALE=30d, ARCHIVE=90d
+
+File 4: runtime/infra/cognitive/knowledge_integrity/deduplicator.py ✓
+  - _ensure_table(): duplicate_clusters schema
+  - find_duplicates(): Semantic similarity detection with fallback to word overlap
+  - Cosine similarity + normalized vector matching for embeddings
+  - Word set Jaccard similarity as fallback when embeddings unavailable
+  - _store_cluster(): Persistence with similarity averaging
+  - list_clusters(): Recent duplicate discovery retrieval
+  - Singleton pattern for module access
+
+File 5: runtime/infra/cognitive/knowledge_integrity/contradiction_scanner.py ✓
+  - _ensure_table(): contradictions schema with tenant isolation
+  - scan(): Topic-based conflict detection with logical analysis
+  - _check_contradiction(): Negation polarity detection (3+ word overlap required)
+  - Conflict types: "logical", "temporal", "factual"
+  - _store_contradiction(): Persistent contradiction logging
+  - list_contradictions(): Time-ordered retrieval with limits
+  - Returns Contradiction dataclass instances
+
+File 6: runtime/infra/cognitive/knowledge_integrity/hallucination_detector.py ✓
+  - _ensure_table(): hallucination_flags schema with severity levels
+  - flag(): Multi-criterion suspicious claim detection
+  - Detects: low_confidence_no_source, absolute_claim, future_dated
+  - Severity scoring: 1-5 scale (5=immediate quarantine required)
+  - Auto-quarantine for future-dated claims or 2+ flags
+  - _store_flag(): Persistent flag storage
+  - list_flags(): Flagged memory retrieval with quarantine status
+
+File 7: runtime/infra/cognitive/knowledge_integrity/entropy_reducer.py ✓
+  - calculate_entropy(): Shannon entropy (0=ordered, 1=chaotic) of lifecycle distribution
+  - Normalized to 0-1 scale for interpretability
+  - get_stats(): Comprehensive knowledge distribution analysis
+  - Reports: total, by_lifecycle, avg_confidence, low_confidence_count
+  - entropy_health: "good" (<0.4), "fair" (0.4-0.7), "poor" (>0.7)
+  - prune_stale(): Delete unused stale memories with access threshold
+  - report(): Backward compatibility wrapper
+
+File 8: runtime/infra/cognitive/knowledge_integrity/integrity_routes.py ✓
+  - GET /status: Lifecycle distribution + integrity_score (0-100)
+  - GET /lifecycle: State counts by lifecycle stage
+  - GET /entropy: Detailed entropy statistics with health indicator
+  - GET /contradictions: Listed logical conflicts with descriptions
+  - GET /hallucinations: Flagged suspicious claims with severity
+  - POST /scan: Trigger lifecycle decay run
+  - POST /prune: Delete low-access stale memories
+  - POST /quarantine/{memory_id}: Manual quarantine
+  - POST /restore/{memory_id}: Manual restoration
+  - GET /report: Legacy entropy report compatibility
+  - All routes return {"data": {...}} structure
+  - Tenant-aware via X-Tenant-Id header or request.state.tenant_id
+
+================================================================================
+PART 5: EXPLAINABLE AUTONOMY (8 files)
+================================================================================
+
+File 9: runtime/infra/cognitive/explainability/__init__.py ✓
+  - Exports: get_decision_recorder, get_causal_tracer
+  - Additional: record_decision, get_decision, list_recent_decisions
+  - Additional: trace_causal_chain, replay_reasoning, record_retrieval
+  - Additional: get_provenance, build_explanation
+
+File 10: runtime/infra/cognitive/explainability/schema.py ✓
+  - DecisionRecord: Agent decision logging with memory provenance
+  - Fields: agent_id, decision_type, input/output summaries, alternatives, confidence
+  - CausalChain: Event causality reconstruction from bus.jsonl
+  - ExplanationReport: Human-readable decision summary with memory sources
+
+File 11: runtime/infra/cognitive/explainability/decision_recorder.py ✓
+  - _ensure_table(): decision_records schema with tenant+agent indexes
+  - record(): Persist DecisionRecord with JSON serialization of lists
+  - get(): Retrieve by decision_id with deserialization
+  - list_recent(): Recent decisions for tenant with limit
+  - list_by_agent(): Agent decision history
+  - get_by_workflow(): Workflow-specific decision chain
+  - Singleton pattern for module access
+
+File 12: runtime/infra/cognitive/explainability/causal_tracer.py ✓
+  - _load_events(): Reads bus.jsonl (last 5000 events) for causality data
+  - trace(): BFS reconstruction of causal chains to MAX_DEPTH=20
+  - Handles multiple log locations (home/.ai-employee, fallback to project)
+  - Returns CausalChain with sorted event sequence
+  - Graceful degradation if bus.jsonl unavailable
+  - Singleton pattern for module access
+
+File 13: runtime/infra/cognitive/explainability/reasoning_replayer.py ✓
+  - replay(): Load and return ReasoningTrace steps if available
+  - Graceful fallback with {"ok": false, "reason": "trace_not_found"}
+  - Integrates with neural_brain.core.reasoning_trace
+  - Debug logging for unavailable replays
+
+File 14: runtime/infra/cognitive/explainability/memory_provenance.py ✓
+  - _ensure_table(): memory_provenance junction table (memory_id → decision_id)
+  - record_retrieval(): Log which memories were used in which decisions
+  - get_provenance(): Retrieve memory source list for decision
+  - Supports audit trail and explainability chains
+
+File 15: runtime/infra/cognitive/explainability/explanation_builder.py ✓
+  - _ensure_table(): explanation_cache schema for performance
+  - build(): Composite explanation from decision + provenance + causal trace
+  - Default summary: Agent name, decision type, confidence, memory count, downstream events
+  - LLM enhancement attempt: Calls LLMClient for user-friendly summary (graceful fallback)
+  - In-memory cache (_cache dict) for fast repeat access
+  - Returns ExplanationReport with consolidated summary
+
+File 16: runtime/infra/cognitive/explainability/explainability_routes.py ✓
+  - GET /decisions: List recent decisions for tenant
+  - GET /decisions/{decision_id}: Retrieve single decision
+  - GET /decisions/{decision_id}/explain: Build and return explanation report
+  - GET /causal-chain/{event_id}: Trace causality from event
+  - GET /replay/{trace_id}: Replay reasoning steps
+  - GET /provenance/{decision_id}: Get source memories
+  - GET /agent/{agent_id}: List decisions by specific agent
+  - GET /workflow/{workflow_id}: Get decision chain for workflow
+  - POST /record: Record new decision with optional memory sources
+  - All routes return {"data": {...}} structure
+  - Tenant-aware execution
+
+================================================================================
+PART 6: ORGANIZATIONAL SELF-MODEL (7 files)
+================================================================================
+
+File 17: runtime/infra/cognitive/org_model/__init__.py ✓
+  - Exports: get_org_topology, get_user_profiler
+  - Additional: upsert_org_node, get_topology
+  - Additional: record_request, get_profile, record_sequence, get_workflow_deps
+  - Additional: record_execution, get_all_models
+
+File 18: runtime/infra/cognitive/org_model/schema.py ✓
+  - OrgNode: Agent/team organizational representation with reporting structure
+  - WorkflowEdge: Workflow dependency with frequency + timing metrics
+  - UserBehaviorProfile: Session patterns, peak hours, agent preferences
+
+File 19: runtime/infra/cognitive/org_model/org_topology.py ✓
+  - _ensure_tables(): org_nodes schema with tenant indexing
+  - upsert(): Insert or update organizational nodes
+  - get_topology(): Return nodes + edges for org structure visualization
+  - Singleton pattern via get_org_topology()
+  - Supports hierarchical reporting_to relationships
+
+File 20: runtime/infra/cognitive/org_model/dependency_graph.py ✓
+  - _ensure_table(): workflow_deps schema with frequency tracking
+  - record_sequence(): Log workflow A → B transition with time gap
+  - Frequency aggregation + average gap computation
+  - get_graph(): Return dependency graph (frequency >= 2 only)
+  - Filters weak edges (frequency=1) to highlight patterns
+
+File 21: runtime/infra/cognitive/org_model/user_profiler.py ✓
+  - _ensure_table(): user_profiles with behavior tracking
+  - record_request(): Increment workflow usage + agent preference tracking
+  - Peak hours: Tracks last 168 hours of activity
+  - Workflow frequency + agent preference scoring
+  - get_profile(): Return user behavior summary
+  - Singleton pattern via get_user_profiler()
+
+File 22: runtime/infra/cognitive/org_model/operational_modeler.py ✓
+  - _ensure_table(): agent_op_model with performance metrics
+  - record_execution(): Track success/failure, latency, error patterns
+  - Failure pattern aggregation (top 5 errors)
+  - get_all_models(): All agents with success_rate + execution count
+  - get_model(): Single agent operational profile
+  - get_summary(): Aggregate metrics across all agents
+  - Sorted by success_count DESC for performance analysis
+
+File 23: runtime/infra/cognitive/org_model/org_model_routes.py ✓
+  - GET /topology: Organizational structure (nodes + edges)
+  - GET /workflows: Workflow dependency graph
+  - GET /user/{user_id}: User behavior profile
+  - GET /agents: All agent operational models
+  - GET /agent/{agent_id}: Single agent detailed model
+  - GET /summary: Aggregate org statistics
+  - GET /snapshot: Complete org picture (topology + workflows + agents)
+  - POST /node: Create/update org node
+  - POST /workflow-edge: Record workflow dependency
+  - All routes return {"data": {...}} structure
+
+================================================================================
+INTEGRATION SUMMARY
+================================================================================
+
+DATABASE:
+  - All modules use runtime/infra/cognitive/db.py::cognitive_conn()
+  - SQLite with WAL mode, busy_timeout=5s, foreign_keys enabled
+  - Database location: ~/.ai-employee/cognitive.db
+  - All tables created with proper indexing
+
+TENANT ISOLATION:
+  - Every record includes tenant_id field
+  - Routes extract tenant from request.state.tenant_id or X-Tenant-Id header
+  - Multi-tenant data separation enforced at query level
+
+ERROR HANDLING:
+  - Graceful degradation for missing dependencies
+  - Fallback similarity calculations when embeddings unavailable
+  - Silent logging for non-critical failures
+  - HTTP 404 for missing entities, 400 for invalid input
+
+PERFORMANCE:
+  - Singleton pattern for all manager classes (minimal instantiation)
+  - Indexed queries on tenant_id, agent_id, decision_id, decided_at
+  - Limit defaults (50 for lists) prevent unbounded result sets
+  - In-memory caching in explanation_builder for repeat queries
+
+TESTING:
+  - All Python files pass py_compile syntax check ✓
+  - Route integration tests in existing test_cognitive_phase4.py
+  - FastAPI TestClient compatible with all route handlers
+  - Schema classes support dataclasses.asdict() for JSON serialization
+
+================================================================================
+USAGE EXAMPLES
+================================================================================
+
+KNOWLEDGE INTEGRITY:
+  ```python
+  from runtime.infra.cognitive import knowledge_integrity
+
+  # Register a new memory
+  knowledge_integrity.register(memory_id, tenant_id, "my-agent", confidence=0.9)
+
+  # Check health
+  stats = knowledge_integrity.entropy_report(tenant_id)
+  print(f"Entropy: {stats['entropy_score']}, Health: {stats['entropy_health']}")
+
+  # Scan for issues
+  from runtime.infra.cognitive.knowledge_integrity import contradiction_scanner
+  conflicts = contradiction_scanner.scan([memory1, memory2], tenant_id)
+  ```
+
+EXPLAINABILITY:
+  ```python
+  from runtime.infra.cognitive import explainability
+  from runtime.infra.cognitive.explainability.schema import DecisionRecord
+
+  # Record a decision
+  decision = DecisionRecord(
+      agent_id="agent-1",
+      tenant_id=tenant_id,
+      decision_type="action",
+      input_summary="User asked for report",
+      output_summary="Generated PDF",
+      memories_used=["mem-1", "mem-2"],
+  )
+  decision_id = explainability.record_decision(decision)
+
+  # Build explanation
+  explanation = explainability.build_explanation(decision_id, tenant_id)
+  print(explanation.summary)  # Human-readable description
+  ```
+
+ORGANIZATIONAL MODEL:
+  ```python
+  from runtime.infra.cognitive import org_model
+  from runtime.infra.cognitive.org_model.schema import OrgNode
+
+  # Model agent performance
+  org_model.record_execution("agent-1", tenant_id, success=True, latency_ms=145)
+
+  # Track user behavior
+  org_model.record_request(user_id, tenant_id, "report_generation", "agent-5")
+
+  # Get organizational snapshot
+  profile = org_model.get_user_profiler().get_profile(user_id, tenant_id)
+  ```
+
+================================================================================
+DEPLOYMENT CHECKLIST
+================================================================================
+
+Pre-deployment verification:
+  [✓] All 23 files created and syntax-checked
+  [✓] Database schema tables auto-created on first access
+  [✓] Tenant isolation enforced at query level
+  [✓] All routes wrapped in {"data": {...}} response structure
+  [✓] Error handling with graceful fallbacks
+  [✓] Singleton patterns prevent resource leaks
+  [✓] Indexes on common query paths (tenant_id, agent_id, timestamps)
+  [✓] Comprehensive __init__.py exports for clean imports
+  [✓] Type hints on all function signatures
+  [✓] Logging configured throughout
+
+Post-deployment tasks:
+  [ ] Run full integration test suite: pytest tests/test_cognitive_phase4.py
+  [ ] Verify database connectivity on target environment
+  [ ] Check disk space for sqlite WAL files (typically 10-50MB)
+  [ ] Monitor query performance with slow query logging
+  [ ] Set up log rotation for cognitive.db-shm/wal files
+  [ ] Configure backup strategy for ~/.ai-employee/cognitive.db
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+Phase 4 Parts 7-9 (already underway):
+  - Part 7: Continuous Learning System (outcome tracking, routing optimization)
+  - Part 8: AI Teammate Identity (persona, relationships, communication style)
+  - Part 9: System-Wide Temporal Awareness (deadlines, scheduling, cycles)
+
+Integration points:
+  - Knowledge integrity feeds into bias detection systems
+  - Explainability output used in HITL (human-in-the-loop) gates
+  - Org model provides input to agent routing and scheduling
+  - All cognitive data flows to observability/metrics endpoint
+
+================================================================================

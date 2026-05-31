@@ -1,0 +1,24 @@
+scenario_id: sales_pipeline_automation
+name: Sales Pipeline Automation
+description: Automated lead scoring, qualification, and CRM update flow.
+risk_threshold: 0.25
+max_steps: 8
+timeout_s: 90
+
+synthetic_users:
+  - persona: sales_rep
+    name: Jordan Rivera
+
+mock_systems:
+  - hubspot
+  - salesforce
+
+inject_failures: []
+
+success_criteria:
+  - metric: task_completion_rate
+    threshold: 0.90
+    weight: 2.0
+  - metric: max_latency_ms
+    threshold: 3000
+    weight: 1.0

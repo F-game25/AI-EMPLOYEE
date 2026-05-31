@@ -1,0 +1,18 @@
+/* Ambient spill — applied to surrounding panels based on reactor state */
+:root {
+  --spill-color: #22d3ee;
+  --spill-intensity: 0.05;
+  --spill-transition: 600ms ease-out;
+}
+
+/* Apply spill to corner panels and sidebar widgets */
+.snode,
+.nxd__sidebar > * {
+  transition: box-shadow var(--spill-transition), border-color var(--spill-transition);
+}
+
+.snode {
+  box-shadow:
+    inset 0 0 24px color-mix(in srgb, var(--spill-color) calc(var(--spill-intensity) * 80%), transparent),
+    0 0 18px color-mix(in srgb, var(--spill-color) calc(var(--spill-intensity) * 50%), transparent);
+}

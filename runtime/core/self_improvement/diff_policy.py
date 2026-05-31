@@ -7,6 +7,7 @@ Enforces:
   - Only whitelisted directories for self-improvement.
   - No binary file changes.
   - No config/secret file changes without override.
+  - No dangerous code injection patterns in added lines.
 """
 from __future__ import annotations
 
@@ -16,6 +17,33 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from core.self_improvement.contracts import PatchArtifact, RiskLevel
+
+# ── Dangerous code patterns — block if any added line matches ─────────────────
+# Scan only lines starting with "+" (added by the patch, excluding "+++ header").
+# These regex patterns detect common code injection / supply-chain attack vectors.
+_DANGEROUS_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Direct shell execution
+    re.compile(r"\bos\.system\s*\("),
+    re.compile(r"\bsubprocess\.(run|Popen|call|check_output|check_call)\s*\("),
+    re.compile(r"\bcommands\.getoutput\s*\("),
+    # Dynamic code execution
+    re.compile(r"\beval\s*\("),
+    re.compile(r"\bexec\s*\("),
+    re.compile(r"\bcompile\s*\(.*exec"),
+    re.compile(r"\b__import__\s*\("),
+    re.compile(r"\bimportlib\.import_module\s*\("),
+    # Arbitrary network sockets
+    re.compile(r"\bsocket\.socket\s*\("),
+    # Outbound HTTP in added code (crude but effective)
+    re.compile(r"\brequests\.(get|post|put|delete|patch|head)\s*\(\s*['\"]https?://(?!127\.0\.0\.1|localhost)"),
+    # Path traversal / reading secrets
+    re.compile(r"""open\s*\(\s*['"](?:/etc/|/proc/|~?/\.ssh/|~?/\.aws/)"""),
+    re.compile(r"\bpathlib\.Path\s*\(\s*['\"](?:/etc/|/proc/)"),
+    # Base64-encoded payloads (common obfuscation)
+    re.compile(r"\bbase64\.b64decode\s*\(.*exec"),
+    # ctypes / cffi (native code execution)
+    re.compile(r"\bctypes\.(CDLL|WinDLL|cdll\.LoadLibrary)\s*\("),
+)
 
 # ── Protected paths — never auto-apply ────────────────────────────────────────
 PROTECTED_PATHS: frozenset[str] = frozenset({
@@ -204,7 +232,11 @@ class DiffPolicy:
         if patch.diff:
             self._check_rewrite_ratio(patch.diff, violations)
 
-        # ── Rule 7: Critical risk = never auto ───────────────────────────
+        # ── Rule 7: No dangerous code injection in added lines ────────────
+        if patch.diff:
+            self._check_code_injection(patch.diff, violations)
+
+        # ── Rule 8: Critical risk = never auto ───────────────────────────
         if risk == "critical":
             violations.append(PolicyViolation(
                 rule="critical_risk",
@@ -270,3 +302,37 @@ class DiffPolicy:
                     ),
                     file=current_file,
                 ))
+
+    def _check_code_injection(
+        self,
+        diff_text: str,
+        violations: list[PolicyViolation],
+    ) -> None:
+        """Scan added lines for dangerous code execution patterns.
+
+        Only examines lines that start with '+' (new content) and skips
+        the '+++' file header lines so we don't flag the diff metadata.
+        """
+        current_file = ""
+        for line in diff_text.splitlines():
+            if line.startswith("+++ b/"):
+                current_file = line[6:]
+                continue
+            if line.startswith("---") or line.startswith("@@"):
+                continue
+            if not line.startswith("+"):
+                continue
+            content = line[1:]  # strip leading '+'
+            for pattern in _DANGEROUS_PATTERNS:
+                if pattern.search(content):
+                    violations.append(PolicyViolation(
+                        rule="dangerous_code_injection",
+                        message=(
+                            f"Added line contains a dangerous pattern "
+                            f"({pattern.pattern!r}) in {current_file or '?'}: "
+                            f"{content.strip()[:120]}"
+                        ),
+                        file=current_file,
+                        severity="error",
+                    ))
+                    break  # one violation per line is enough

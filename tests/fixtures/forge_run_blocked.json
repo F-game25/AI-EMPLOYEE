@@ -1,0 +1,65 @@
+{
+  "id": "run-fixture-blocked",
+  "run_id": "run-fixture-blocked",
+  "project_id": "project-test",
+  "goal": "Update authentication config",
+  "status": "blocked",
+  "mode": "supervised",
+  "provider": "anthropic",
+  "max_iterations": 3,
+  "context_pack": {
+    "goal": "Update authentication config",
+    "project": { "id": "project-test", "name": "Test Project", "target_type": "internal_repo", "write_access": true },
+    "constraints": { "approval_required_for_writes": true, "staged_apply_required": true }
+  },
+  "plan": { "id": "plan-fixture-blocked", "goal": "Update authentication config" },
+  "actions": [
+    {
+      "id": "action-fixture-blocked-1",
+      "type": "write_file",
+      "label": "Write backend/routes/auth.js",
+      "file_path": "backend/routes/auth.js",
+      "status": "blocked",
+      "approval_required": true,
+      "risk": "dangerous",
+      "risk_level": "high",
+      "run_id": "run-fixture-blocked",
+      "policy_decision": {
+        "allowed": false,
+        "risk_level": "high",
+        "violations": [
+          { "rule": "protected_path", "message": "Path 'backend/routes/auth.js' matches protected pattern ^backend/routes/auth — modifications require explicit owner override." }
+        ],
+        "files": ["backend/routes/auth.js"]
+      },
+      "created_at": "2026-05-27T12:00:00.000Z",
+      "updated_at": "2026-05-27T12:00:00.000Z"
+    }
+  ],
+  "patches": [
+    {
+      "action_id": "action-fixture-blocked-1",
+      "files": ["backend/routes/auth.js"],
+      "policy": {
+        "allowed": false,
+        "risk_level": "high",
+        "violations": [
+          { "rule": "protected_path", "message": "Path 'backend/routes/auth.js' matches protected pattern" }
+        ]
+      },
+      "status": "blocked"
+    }
+  ],
+  "approvals": [],
+  "test_results": [],
+  "review": {
+    "status": "policy_checked",
+    "summary": "1 patch action(s) generated and policy checked.",
+    "blocked": 1
+  },
+  "final_report": null,
+  "audit_ids": [],
+  "workspace_path": "/tmp/forge/runs/run-fixture-blocked/workspace",
+  "created_at": "2026-05-27T12:00:00.000Z",
+  "updated_at": "2026-05-27T12:00:00.000Z"
+}

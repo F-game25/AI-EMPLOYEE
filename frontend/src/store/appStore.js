@@ -1,344 +1,363 @@
+/**
+ * BACKWARD COMPATIBILITY FACADE
+ *
+ * Re-exports all domain stores under the useAppStore interface.
+ * Existing code importing from appStore continues to work without changes.
+ *
+ * NEW CODE should import domain stores directly:
+ * - useSystemStore: appState, ws, systemStatus, debugMode, errors
+ * - useCognitiveStore: brainState, avatarState, reasoningSteps, modelCalls
+ * - useAgentStore: agents list + per-agent state
+ * - useTaskStore: chatMessages, executionSteps, workflowState
+ * - useEconomyStore: revenue, monetization pipelines, activityFeed
+ * - useSecurityStore: threat_score, autonomyStatus, mode
+ * - useEventFeedStore: universal event stream
+ * - useBrainStore: graph data, nodes, links (unchanged)
+ */
+
+import { useMemo } from 'react'
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
+import { useSystemStore } from './systemStore'
+import { useCognitiveStore } from './cognitiveStore'
+import { useAgentStore } from './agentStore'
+import { useTaskStore } from './taskStore'
+import { useEconomyStore } from './economyStore'
+import { useSecurityStore } from './securityStore'
+import { useEventFeedStore } from './eventFeedStore'
+import { useBrainStore } from './brainStore'
 
-const MAX_ACTIVITY_ITEMS = 50
-const MAX_EXECUTION_LOGS = 100
+const NOOP = () => {}
+const NOOP_MEMORY_TREE = { total_entities: 0, nodes: [], recent_updates: [] }
+// Identity selector used with useShallow so whole-store subscriptions only
+// re-render when any top-level field reference changes (not on every write).
+const identity = s => s
 
-export const useAppStore = create((set) => ({
-  // State machine
-  appState: 'boot', // boot | connecting | login | dashboard | error
-  setAppState: (s) => set({ appState: s }),
-
-  // Navigation — 5 core sections
-  activeSection: 'dashboard', // dashboard | ai-control | operations | agents | system
-  setActiveSection: (s) => set({ activeSection: s }),
-
-  // Sidebar collapse state
-  sidebarCollapsed: false,
-  setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
-
-  // Shared goal for Hermes ↔ Blacklight pipeline
-  hermesGoal: '',
-  setHermesGoal: (g) => set({ hermesGoal: g }),
-
-  // Alpha archive for Blacklight (persisted to localStorage)
-  alphaArchive: (() => { try { return JSON.parse(localStorage.getItem('alphaArchive') || '[]') } catch { return [] } })(),
-  addAlphaEntry: (entry) => set((state) => {
-    const next = [entry, ...state.alphaArchive].slice(0, 100)
-    try { localStorage.setItem('alphaArchive', JSON.stringify(next)) } catch (_e) { /* ignore */ }
-    return { alphaArchive: next }
-  }),
-
-  // Automation rules (persisted to localStorage)
-  automationRules: (() => { try { return JSON.parse(localStorage.getItem('automationRules') || '[]') } catch { return [] } })(),
-  addAutomationRule: (rule) => set((state) => {
-    const next = [...state.automationRules, rule]
-    try { localStorage.setItem('automationRules', JSON.stringify(next)) } catch (_e) { /* ignore */ }
-    return { automationRules: next }
-  }),
-  removeAutomationRule: (id) => set((state) => {
-    const next = state.automationRules.filter(r => r.id !== id)
-    try { localStorage.setItem('automationRules', JSON.stringify(next)) } catch (_e) { /* ignore */ }
-    return { automationRules: next }
-  }),
-
-  // Context panel (slides in from right)
-  contextPanel: null, // null or { type, data }
-  setContextPanel: (panel) => set({ contextPanel: panel }),
-  closeContextPanel: () => set({ contextPanel: null }),
-
-  // Auth
+const useLegacyAppStore = create((set, get) => ({
   user: null,
-  login: (username) => set({ user: { username }, appState: 'dashboard' }),
-  logout: () => set({ user: null, appState: 'login' }),
-
-  // Machine identity
   identity: null,
-  setIdentity: (id) => set({ identity: id }),
-
-  // WebSocket
-  ws: null,
-  wsConnected: false,
-  setWs: (ws) => set({ ws }),
-  setWsConnected: (v) => set({ wsConnected: v }),
-
-  // Heartbeat logs
-  heartbeatLogs: [],
-  addHeartbeatLog: (log) => set((state) => ({
-    heartbeatLogs: [...state.heartbeatLogs.slice(-199), log],
-  })),
-
-  // Agents
-  agents: [],
-  setAgents: (agents) => set({ agents }),
-
-  // Chat
-  chatMessages: [],
-  addChatMessage: (msg) => set((state) => ({
-    chatMessages: [...state.chatMessages, msg],
-  })),
-  updateLastAiMessage: (text) => set((state) => {
-    const msgs = [...state.chatMessages]
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === 'ai') {
-        msgs[i] = { ...msgs[i], content: text }
-        break
-      }
-    }
-    return { chatMessages: msgs }
-  }),
-
-  // Typing indicator — true while waiting for AI response
-  isTyping: false,
-  setTyping: (v) => set({ isTyping: v }),
-
-  // System status
-  systemStatus: {
-    cpu: 0,
-    memory: 0,
-    uptime: 0,
-    connections: 0,
-    cpu_usage: 0,
-    gpu_usage: 0,
-    cpu_temperature: 0,
-    gpu_temperature: 0,
-    heartbeat: 0,
-    running_agents: 0,
-    total_agents: 0,
-    mode: 'MANUAL',
-    robot_location: 'idle',
-    active_robot: 'none',
-    active_subsystem: 'general',
-    thinking_mode: '',
-    money_template: null,
-  },
-  setSystemStatus: (s) => set({ systemStatus: s }),
-
-  objectivePanels: {
-    money_mode: {
-      active: false,
-      status: 'inactive',
-      current_objective: null,
-      active_tasks: [],
-      progress: 0,
-      agents_used: [],
-      performance: {},
-      result: null,
-    },
-    ascend_forge: {
-      active: false,
-      status: 'inactive',
-      current_objective: null,
-      plan: [],
-      active_tasks: [],
-      progress: 0,
-      agents_used: [],
-      results: [],
-      result: null,
-    },
-  },
-  setObjectivePanel: (system, payload) => set((state) => ({
-    objectivePanels: {
-      ...state.objectivePanels,
-      [system]: {
-        ...(state.objectivePanels?.[system] || {}),
-        ...(payload || {}),
-      },
-    },
-  })),
-
-  // Neural Network status
-  nnStatus: {
-    available: true,
-    active: true,
-    mode: 'INITIALIZING',
-    learn_step: 0,
-    buffer_size: 0,
-    max_buffer_size: 10000,
-    last_loss: null,
-    confidence: 0,
-    device: 'cpu',
-    total_actions: 8,
-    experiences: 0,
-    memory_size: 0,
-    bg_running: false,
-    recent_outputs: [],
-    recent_learning_events: [],
-    updated_at: null,
-  },
-  setNnStatus: (s) => set({ nnStatus: s }),
-
-  // Memory Tree
-  memoryTree: {
-    total_entities: 0,
-    nodes: [],
-    recent_updates: [],
-    updated_at: null,
-  },
-  setMemoryTree: (t) => set({ memoryTree: t }),
-
-  // Doctor / System Health
-  doctorStatus: {
-    available: false,
-    grade: null,
-    overall_score: 0,
-    scores: {},
-    issues: [],
-    strengths: [],
-    last_run: null,
-    updated_at: null,
-  },
-  setDoctorStatus: (d) => set({ doctorStatus: d }),
-
-  brainInsights: {
-    active: true,
-    learned_strategies: [],
-    task_patterns: [],
-    recent_improvements: [],
-    performance_metrics: {},
-    decisions: [],
-    updated_at: null,
-  },
-  setBrainInsights: (insights) => set({ brainInsights: insights }),
-
-  brainStatus: {
-    status: 'active',
-    active: true,
-    available: true,
-    memory_size: 0,
-    last_update: null,
-    recent_decisions: [],
-  },
-  setBrainStatus: (status) => set({ brainStatus: status }),
-
-  brainActivity: {
-    status: 'active',
-    memory_size: 0,
-    last_update: null,
-    recent_decisions: [],
-    items: [],
-  },
-  setBrainActivity: (activity) => set({ brainActivity: activity }),
-
-  // Self-improvement pipeline (HTTP-polled from Python runtime)
-  selfImprovement: {
-    active: false,
-    total_tasks_processed: 0,
-    queue_depth: 0,
-    pass_rate: 0,
-    fail_rate: 0,
-    approval_ratio: 0,
-    rejection_ratio: 0,
-    rollback_ratio: 0,
-    deployed: 0,
-    rolled_back: 0,
-    rejected: 0,
-    test_failures: 0,
-    policy_violations: 0,
-    errors: 0,
-    top_failure_causes: [],
-    recent_events: [],
-  },
-  setSelfImprovement: (si) => set({ selfImprovement: si }),
-
-  // Autonomy daemon state (WebSocket-driven)
-  autonomyStatus: {
-    mode: { mode: 'OFF', active: false, auto: false, limited: false, paused: true, emergency_stopped: false, changed_at: null },
-    daemon: { running: false, started_at: null, cycles: 0, tasks_processed: 0, tasks_succeeded: 0, tasks_failed: 0, consecutive_errors: 0, last_cycle_at: null, last_task_id: null, current_task_id: null, cycle_interval_s: 2 },
-    queue: { total: 0, active: 0, by_status: {} },
-    data_source: 'initializing',
-    updated_at: null,
-  },
-  setAutonomyStatus: (a) => set({ autonomyStatus: a }),
-
-  // Debug mode — when true shows internal logs, subsystem tags, and technical info
-  debugMode: false,
-  setDebugMode: (v) => set({ debugMode: v }),
-  toggleDebugMode: () => set((state) => ({ debugMode: !state.debugMode })),
-
-  // Error
-  errorMessage: null,
-  setError: (msg) => set({ errorMessage: msg, appState: 'error' }),
-
-  // Product dashboard (HTTP-polled snapshot for KPIs)
-  productMetrics: {
-    mode: {},
-    tasks: {},
-    revenue: {},
-    value: {},
-    top_strategies: [],
-    activity_feed: [],
-    execution_logs: [],
-    pipelines: {},
-    pipeline_runs: [],
-    pending_actions: [],
-    learning: {},
-  },
-  setProductMetrics: (m) => set({ productMetrics: m }),
-
-  automationStatus: '',
-  setAutomationStatus: (v) => set({ automationStatus: v }),
-
-  // Real-time activity feed — driven by WebSocket events
-  activityFeed: [],
-  addActivityItem: (item) => set((state) => ({
-    activityFeed: [item, ...state.activityFeed].slice(0, MAX_ACTIVITY_ITEMS),
-  })),
-  setActivitySnapshot: (items) => set({ activityFeed: items.slice(0, MAX_ACTIVITY_ITEMS) }),
-
-  // Real-time execution log — driven by WebSocket events
-  executionLogs: [],
-  addExecutionLog: (log) => set((state) => ({
-    executionLogs: [log, ...state.executionLogs].slice(0, MAX_EXECUTION_LOGS),
-  })),
-  setExecutionSnapshot: (logs) => set({ executionLogs: logs.slice(0, MAX_EXECUTION_LOGS) }),
-
-  // AI pipeline step progress — shown as thinking progress bar in chat
-  executionSteps: [],
-  addExecutionStep: (step) => set((state) => ({
-    executionSteps: [...state.executionSteps.slice(-8), step],
-  })),
-  clearExecutionSteps: () => set({ executionSteps: [] }),
-
-  workflowState: {
-    active_run: null,
-    runs: [],
-  },
-  setWorkflowSnapshot: (payload) => set({
-    workflowState: {
-      active_run: payload?.active_run ?? null,
-      runs: Array.isArray(payload?.runs) ? payload.runs : [],
-    },
-  }),
-  upsertWorkflowRun: (run) => set((state) => {
-    const prevRuns = state.workflowState?.runs || []
-    const nextRuns = [run, ...prevRuns.filter((r) => r.run_id !== run.run_id)].slice(0, 50)
-    return {
-      workflowState: {
-        active_run: run?.run_id || state.workflowState?.active_run || null,
-        runs: nextRuns,
-      },
-    }
-  }),
-
-  observability: {
-    system_health: { uptime: 0, errors_per_minute: 0, status: 'unknown' },
-    metrics: {},
-    activity_feed: [],
-    agent_grid: [],
-    queue_visualizer: { pending: 0, processing: 0 },
-    auto_fix_log: [],
-    events: [],
-    traces: {},
-    updated_at: null,
-  },
-  setObservability: (payload) => set({ observability: payload || {} }),
-
-  // Prompt Inspector — real-time trace stream
-  promptTraces: [],
+  hermesGoal: '',
+  alphaArchive: [],
+  automationRules: [],
+  contextPanel: null,
   inspectorEnabled: true,
-  addPromptTrace: (trace) => set((state) => ({
-    promptTraces: [trace, ...state.promptTraces].slice(0, 200),
+  promptTraces: [],
+  forgeQueue: [],
+  observability: { system_health: {}, metrics: {}, events: [] },
+
+  login: (user) => {
+    useSystemStore.getState().setAppState('dashboard')
+    set({ user, identity: user })
+  },
+  logout: () => {
+    useSystemStore.getState().setAppState('login')
+    set({ user: null, identity: null })
+  },
+  setIdentity: (identity) => set({ identity }),
+  setHermesGoal: (hermesGoal) => set({ hermesGoal }),
+  addAlphaEntry: (entry) => set((state) => ({
+    alphaArchive: [...state.alphaArchive, entry].slice(-100),
   })),
-  setPromptTraces: (traces) => set({ promptTraces: Array.isArray(traces) ? traces : [] }),
-  setInspectorEnabled: (v) => set({ inspectorEnabled: Boolean(v) }),
+  addAutomationRule: (rule) => set((state) => ({
+    automationRules: [...state.automationRules, rule],
+  })),
+  removeAutomationRule: (id) => set((state) => ({
+    automationRules: state.automationRules.filter(rule => rule.id !== id),
+  })),
+  addPromptTrace: (trace) => set((state) => ({
+    promptTraces: [...state.promptTraces, trace].slice(-100),
+  })),
+  setPromptTraces: (promptTraces) => set({
+    promptTraces: Array.isArray(promptTraces) ? promptTraces.slice(-100) : [],
+  }),
+  setInspectorEnabled: (inspectorEnabled) => set({ inspectorEnabled }),
+  setForgeQueue: (forgeQueue) => set({
+    forgeQueue: Array.isArray(forgeQueue) ? forgeQueue : [],
+  }),
+  upsertForgeItem: (item) => set((state) => {
+    const id = item?.id || item?.name
+    if (!id) return state
+    const idx = state.forgeQueue.findIndex(existing => (existing.id || existing.name) === id)
+    if (idx < 0) return { forgeQueue: [...state.forgeQueue, item] }
+    const next = [...state.forgeQueue]
+    next[idx] = { ...next[idx], ...item }
+    return { forgeQueue: next }
+  }),
+  setObservability: (observability) => set({ observability }),
+  setContextPanel: (contextPanel) => set({ contextPanel }),
+  closeContextPanel: () => set({ contextPanel: null }),
 }))
+
+export const useAppStore = (selector) => {
+  const sys = useSystemStore(useShallow(identity))
+  const cog = useCognitiveStore(useShallow(identity))
+  const agent = useAgentStore(useShallow(identity))
+  const task = useTaskStore(useShallow(identity))
+  const econ = useEconomyStore(useShallow(identity))
+  const sec = useSecurityStore(useShallow(identity))
+  const evt = useEventFeedStore(useShallow(identity))
+  const brain = useBrainStore(useShallow(identity))
+  const legacy = useLegacyAppStore(useShallow(identity))
+
+  const composite = useMemo(
+    () => buildCompositeState(sys, cog, agent, task, econ, sec, evt, brain, legacy),
+    [sys, cog, agent, task, econ, sec, evt, brain, legacy]
+  )
+
+  if (selector) return selector(composite)
+  return composite
+}
+
+// Merge all domain stores into single object
+function buildCompositeState(sys, cog, agent, task, econ, sec, evt, brain, legacy) {
+  return {
+    // ── System Store ──────────────────────────────────
+    appState: sys?.appState,
+    setAppState: sys?.setAppState,
+    pythonBackendReady: sys?.pythonBackendReady,
+    setPythonBackendReady: sys?.setPythonBackendReady,
+    readiness: sys?.readiness,
+    setReadiness: sys?.setReadiness,
+    backendStatus: sys?.backendStatus,
+    setBackendStatus: sys?.setBackendStatus,
+    activeSection: sys?.activeSection,
+    setActiveSection: sys?.setActiveSection,
+    sidebarCollapsed: sys?.sidebarCollapsed,
+    setSidebarCollapsed: sys?.setSidebarCollapsed,
+    ws: sys?.ws,
+    wsConnected: sys?.wsConnected,
+    setWs: sys?.setWs,
+    setWsConnected: sys?.setWsConnected,
+    heartbeatLogs: sys?.heartbeatLogs,
+    addHeartbeatLog: sys?.addHeartbeatLog,
+    systemStatus: sys?.systemStatus,
+    setSystemStatus: sys?.setSystemStatus,
+    systemHealth: sys?.systemHealth,
+    setSystemHealth: sys?.setSystemHealth,
+    errorMessage: sys?.errorMessage,
+    setError: sys?.setError,
+    debugMode: sys?.debugMode,
+    setDebugMode: sys?.setDebugMode,
+    toggleDebugMode: sys?.toggleDebugMode,
+    selectedEventId: sys?.selectedEventId,
+    setSelectedEventId: sys?.setSelectedEventId,
+
+    // ── Cognitive Store ───────────────────────────────
+    brainState: cog?.brainState,
+    setBrainState: cog?.setBrainState,
+    reasoningSteps: cog?.reasoningSteps,
+    appendReasoningStep: cog?.appendReasoningStep,
+    clearReasoningSteps: cog?.clearReasoningSteps,
+    modelCalls: cog?.modelCalls,
+    recordModelCall: cog?.recordModelCall,
+    clearModelCalls: cog?.clearModelCalls,
+    avatarState: cog?.avatarState,
+    setAvatarState: cog?.setAvatarState,
+    isAvatarActive: cog?.isAvatarActive,
+    brainInsights: cog?.brainInsights,
+    setBrainInsights: cog?.setBrainInsights,
+    brainActivity: cog?.brainActivity,
+    setBrainActivity: cog?.setBrainActivity,
+    memoryWrites: cog?.memoryWrites,
+    flashMemoryWrite: cog?.flashMemoryWrite,
+    pulseMemory: cog?.pulseMemory,
+
+    // ── Agent Store ───────────────────────────────────
+    agents: agent?.agents ?? [],
+    setAgents: agent?.setAgents,
+    upsertAgent: agent?.upsertAgent,
+    getAgent: agent?.getAgent,
+    getActiveAgents: agent?.getActiveAgents,
+
+    // ── Task Store ────────────────────────────────────
+    chatMessages: task?.chatMessages,
+    addChatMessage: task?.addChatMessage,
+    updateLastAiMessage: task?.updateLastAiMessage,
+    upsertTaskProgress: task?.upsertTaskProgress,
+    isTyping: task?.isTyping,
+    setTyping: task?.setTyping,
+    executionSteps: task?.executionSteps,
+    addExecutionStep: task?.addExecutionStep,
+    clearExecutionSteps: task?.clearExecutionSteps,
+    executionLogs: task?.executionLogs,
+    addExecutionLog: task?.addExecutionLog,
+    setExecutionSnapshot: task?.setExecutionSnapshot,
+    workflowState: task?.workflowState,
+    setWorkflowSnapshot: task?.setWorkflowSnapshot,
+    upsertWorkflowRun: task?.upsertWorkflowRun,
+
+    // ── Economy Store ─────────────────────────────────
+    revenue: econ?.revenue,
+    setRevenue: econ?.setRevenue,
+    monetizationPipelines: econ?.monetizationPipelines,
+    setPipeline: econ?.setPipeline,
+    activityFeed: econ?.activityFeed,
+    addActivityItem: econ?.addActivityItem,
+    setActivitySnapshot: econ?.setActivitySnapshot,
+
+    // ── Security Store ────────────────────────────────
+    securityStatus: sec?.securityStatus,
+    setSecurityStatus: sec?.setSecurityStatus,
+    threatHistory: sec?.threatHistory,
+    addThreat: sec?.addThreat,
+    autonomyStatus: sec?.autonomyStatus,
+    setAutonomyStatus: sec?.setAutonomyStatus,
+    getThreatColor: sec?.getThreatColor,
+    isCritical: sec?.isCritical,
+
+    // ── Event Feed Store ──────────────────────────────
+    events: evt?.events,
+    addEvent: evt?.addEvent,
+    setEventSnapshot: evt?.setEventSnapshot,
+    getEventsByCategory: evt?.getEventsByCategory,
+    getRecentEvents: evt?.getRecentEvents,
+
+    // ── Brain Store (unchanged) ───────────────────────
+    nodes: brain?.nodes,
+    links: brain?.links,
+    stats: brain?.stats,
+    updatedAt: brain?.updatedAt,
+    selectedNodeId: brain?.selectedNodeId,
+    setSelectedNodeId: brain?.setSelectedNodeId,
+    setGraph: brain?.setGraph,
+    addNode: brain?.addNode,
+    addLink: brain?.addLink,
+    addNodesAndLinks: brain?.addNodesAndLinks,
+    addFromPrompt: brain?.addFromPrompt,
+
+    // ── Legacy/Composite properties ───────────────────
+    objectivePanels: {
+      money_mode: econ?.monetizationPipelines?.content_publish_track || {},
+      ascend_forge: { active: false, status: 'inactive', plan: [], results: [] },
+    },
+    setObjectivePanel: (system, payload) => econ?.setPipeline(system, payload),
+    nnStatus: {
+      available: true,
+      active: true,
+      mode: 'INITIALIZING',
+      confidence: 0,
+      device: 'cpu',
+    },
+    setNnStatus: NOOP,
+    memoryTree: NOOP_MEMORY_TREE,
+    setMemoryTree: NOOP,
+    doctorStatus: { available: false, grade: null, overall_score: 0 },
+    setDoctorStatus: NOOP,
+    selfImprovement: { active: false, queue_depth: 0, pass_rate: 0 },
+    setSelfImprovement: NOOP,
+    productMetrics: { mode: {}, tasks: {}, revenue: {}, value: {} },
+    setProductMetrics: NOOP,
+    automationStatus: '',
+    setAutomationStatus: NOOP,
+    promptTraces: legacy?.promptTraces || [],
+    inspectorEnabled: legacy?.inspectorEnabled ?? true,
+    addPromptTrace: legacy?.addPromptTrace || NOOP,
+    setPromptTraces: legacy?.setPromptTraces || NOOP,
+    setInspectorEnabled: legacy?.setInspectorEnabled || NOOP,
+    forgeQueue: legacy?.forgeQueue || [],
+    setForgeQueue: legacy?.setForgeQueue || NOOP,
+    upsertForgeItem: legacy?.upsertForgeItem || NOOP,
+    observability: legacy?.observability || { system_health: {}, metrics: {}, events: [] },
+    setObservability: legacy?.setObservability || NOOP,
+
+    // Legacy auth + identity
+    user: legacy?.user ?? null,
+    login: legacy?.login || NOOP,
+    logout: legacy?.logout || NOOP,
+    identity: legacy?.identity ?? null,
+    setIdentity: legacy?.setIdentity || NOOP,
+    hermesGoal: legacy?.hermesGoal || '',
+    setHermesGoal: legacy?.setHermesGoal || NOOP,
+    alphaArchive: legacy?.alphaArchive || [],
+    addAlphaEntry: legacy?.addAlphaEntry || NOOP,
+    automationRules: legacy?.automationRules || [],
+    addAutomationRule: legacy?.addAutomationRule || NOOP,
+    removeAutomationRule: legacy?.removeAutomationRule || NOOP,
+    contextPanel: legacy?.contextPanel ?? null,
+    setContextPanel: legacy?.setContextPanel || NOOP,
+    closeContextPanel: legacy?.closeContextPanel || NOOP,
+  }
+}
+
+function getCompositeState() {
+  return buildCompositeState(
+    useSystemStore.getState(),
+    useCognitiveStore.getState(),
+    useAgentStore.getState(),
+    useTaskStore.getState(),
+    useEconomyStore.getState(),
+    useSecurityStore.getState(),
+    useEventFeedStore.getState(),
+    useBrainStore.getState(),
+    useLegacyAppStore.getState(),
+  )
+}
+
+const DOMAIN_KEY_TARGETS = new Map()
+for (const key of [
+  'appState', 'pythonBackendReady', 'activeSection', 'sidebarCollapsed', 'ws',
+  'wsConnected', 'heartbeatLogs', 'systemStatus', 'systemHealth', 'errorMessage',
+  'debugMode', 'selectedEventId', 'updateStatus', 'backendStatus',
+]) DOMAIN_KEY_TARGETS.set(key, useSystemStore)
+for (const key of [
+  'brainState', 'reasoningSteps', 'modelCalls', 'avatarState', 'brainInsights',
+  'brainActivity', 'memoryWrites', 'freshness_ms',
+]) DOMAIN_KEY_TARGETS.set(key, useCognitiveStore)
+for (const key of ['agents']) DOMAIN_KEY_TARGETS.set(key, useAgentStore)
+for (const key of [
+  'chatMessages', 'isTyping', 'executionSteps', 'executionLogs', 'workflowState',
+]) DOMAIN_KEY_TARGETS.set(key, useTaskStore)
+for (const key of ['revenue', 'monetizationPipelines', 'activityFeed']) DOMAIN_KEY_TARGETS.set(key, useEconomyStore)
+for (const key of ['securityStatus', 'threatHistory', 'autonomyStatus']) DOMAIN_KEY_TARGETS.set(key, useSecurityStore)
+for (const key of ['events']) DOMAIN_KEY_TARGETS.set(key, useEventFeedStore)
+for (const key of ['nodes', 'links', 'stats', 'updatedAt', 'selectedNodeId']) DOMAIN_KEY_TARGETS.set(key, useBrainStore)
+
+useAppStore.getState = getCompositeState
+useAppStore.setState = (partial, replace = false) => {
+  const patch = typeof partial === 'function' ? partial(getCompositeState()) : partial
+  if (!patch || typeof patch !== 'object') return
+
+  const grouped = new Map()
+  const legacyPatch = {}
+  for (const [key, value] of Object.entries(patch)) {
+    const store = DOMAIN_KEY_TARGETS.get(key)
+    if (!store) {
+      legacyPatch[key] = value
+      continue
+    }
+    const next = grouped.get(store) || {}
+    next[key] = value
+    grouped.set(store, next)
+  }
+  for (const [store, values] of grouped.entries()) store.setState(values, replace)
+  if (Object.keys(legacyPatch).length) useLegacyAppStore.setState(legacyPatch, replace)
+}
+useAppStore.subscribe = (selector, listener, options = {}) => {
+  const hasSelector = typeof listener === 'function'
+  const select = hasSelector ? selector : identity
+  const cb = hasSelector ? listener : selector
+  let current = select(getCompositeState())
+
+  if (options?.fireImmediately && hasSelector) cb(current, current)
+
+  const emit = () => {
+    const next = select(getCompositeState())
+    if (Object.is(next, current)) return
+    const prev = current
+    current = next
+    cb(next, prev)
+  }
+
+  const unsubs = [
+    useSystemStore.subscribe(emit),
+    useCognitiveStore.subscribe(emit),
+    useAgentStore.subscribe(emit),
+    useTaskStore.subscribe(emit),
+    useEconomyStore.subscribe(emit),
+    useSecurityStore.subscribe(emit),
+    useEventFeedStore.subscribe(emit),
+    useBrainStore.subscribe(emit),
+    useLegacyAppStore.subscribe(emit),
+  ]
+  return () => unsubs.forEach(unsub => unsub())
+}

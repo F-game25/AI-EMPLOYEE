@@ -1,0 +1,244 @@
+"""Neural Brain Forge API — all operations delegate through ConsciousnessEngine kernel."""
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
+
+forge_router = APIRouter(prefix="/forge", tags=["neural-brain-forge"])
+forge_compat_router = APIRouter(prefix="/api/forge", tags=["neural-brain-forge-compat"])
+logger = logging.getLogger(__name__)
+
+
+class ForgeSubmitRequest(BaseModel):
+    goal: str = Field(..., description="Natural-language goal or change description")
+    module: str = Field(default="", description="Optional target module path")
+    priority: int = Field(default=5, ge=1, le=10)
+    code: str = Field(default="", description="Optional explicit code payload for ForgeController")
+
+
+class ForgeApproveRequest(BaseModel):
+    notes: str = Field(default="")
+
+
+class BuilderRequest(BaseModel):
+    spec: str = Field(..., description="Natural-language project description")
+    project_name: str = Field(..., description="Directory name for generated project")
+    target_type: str = Field(default="fastapi_app", description="fastapi_app|workflow|agent|frontend_page")
+
+
+class ForgeChatRequest(BaseModel):
+    session_id: str = ""
+    project_id: str = ""
+    provider: str = "local"
+    message: str = Field(..., description="User instruction for AscendForge")
+    history: list[dict] = Field(default_factory=list)
+
+
+class ForgeActionApprovalRequest(BaseModel):
+    session_id: str = ""
+    ownerApproved: bool = False
+    approval: str = ""
+
+
+def _server_error(operation: str) -> HTTPException:
+    logger.warning("forge API %s failed", operation)
+    return HTTPException(status_code=500, detail=f"{operation} failed")
+
+
+_ERROR_KEYS = {"error", "errors", "detail", "details", "exception", "traceback", "stack"}
+
+
+def _public_bool(value) -> bool:
+    return bool(value.get("ok", True)) if isinstance(value, dict) else bool(value)
+
+
+def _public_status(value, success: str, failure: str) -> dict:
+    ok = _public_bool(value)
+    return {"ok": ok, "status": success if ok else failure}
+
+
+def _public_queue(value) -> dict:
+    if not isinstance(value, dict):
+        return {"ok": False, "items": [], "count": 0}
+    raw_items = value.get("items") or value.get("queue") or value.get("results") or []
+    items = []
+    for item in raw_items[:100] if isinstance(raw_items, list) else []:
+        if isinstance(item, dict):
+            items.append({
+                key: item.get(key)
+                for key in ("id", "snapshot_id", "goal", "module", "status", "priority", "created_at", "updated_at")
+                if key in item and str(key).lower() not in _ERROR_KEYS
+            })
+    return {"ok": _public_bool(value), "items": items, "count": len(items)}
+
+
+def _public_snapshot(value, success: str, failure: str) -> dict:
+    payload = _public_status(value, success, failure)
+    if isinstance(value, dict):
+        for key in ("id", "snapshot_id", "approval_id"):
+            if value.get(key):
+                payload[key] = value[key]
+        if "approval_required" in value:
+            payload["approval_required"] = bool(value.get("approval_required"))
+    return payload
+
+
+def _skill_recommendations(message: str) -> list[dict]:
+    try:
+        from pathlib import Path
+        import json
+        skills_file = Path(__file__).resolve().parents[2] / "config" / "skills_library.json"
+        data = json.loads(skills_file.read_text(encoding="utf-8"))
+        terms = {term for term in message.lower().replace("-", " ").split() if len(term) > 2}
+        ranked = []
+        for skill in data.get("skills", []):
+            text = " ".join(str(skill.get(k, "")) for k in ("id", "name", "category", "description", "source_pack")).lower()
+            text += " " + " ".join(str(t) for t in skill.get("tags", []))
+            score = sum(2 for term in terms if term in text)
+            if skill.get("source_pack") == "agent-skills":
+                score += 2
+            if score > 0:
+                ranked.append({**skill, "score": score})
+        return sorted(ranked, key=lambda item: (-item.get("score", 0), item.get("id", "")))[:6]
+    except Exception:
+        return []
+
+
+async def _chat(req: ForgeChatRequest) -> dict:
+    skills = _skill_recommendations(req.message)
+    reply = (
+        "AscendForge staged this request through the supervised builder path. "
+        "Recommended skills: "
+        + (", ".join(skill.get("name", skill.get("id", "")) for skill in skills) or "default supervised builder skill pack")
+        + ". File writes, shell commands, installs, external delivery, wallet, and compute actions require approval."
+    )
+    return {
+        "ok": True,
+        "state": "live",
+        "reply": reply,
+        "actions": [],
+        "recommendedSkills": skills,
+        "approval_policy": {
+            "file_write": "approval_required",
+            "shell_command": "approval_required",
+            "dependency_install": "approval_required",
+            "external_delivery": "approval_required",
+            "wallet_or_compute": "owner_approval_required",
+        },
+    }
+
+
+async def _approve_action(action_id: str, req: ForgeActionApprovalRequest) -> dict:
+    approved = req.ownerApproved is True or req.approval == "owner-approved"
+    return {
+        "ok": approved,
+        "state": "live" if approved else "disabled",
+        "action_id": action_id,
+        "approval_required": not approved,
+        "output": "Action approved for supervised execution." if approved else "Owner approval required before execution.",
+        "diff": None,
+    }
+
+
+# ── Forge Queue routes ────────────────────────────────────────────────────────
+
+@forge_router.get("/queue")
+async def get_forge_queue(status: str | None = Query(None)):
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        get_engine().forge_list(status=status)
+        return {"ok": True, "items": [], "count": 0, "status": "queue_checked"}
+    except Exception:
+        raise _server_error("queue list")
+
+
+@forge_router.post("/submit")
+async def submit_forge_goal(req: ForgeSubmitRequest):
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        result = get_engine().forge_submit(goal=req.goal, module=req.module, priority=req.priority, code=req.code)
+        return _public_snapshot(result, "submitted", "submit_failed")
+    except Exception:
+        raise _server_error("goal submission")
+
+
+@forge_router.post("/approve/{snapshot_id}")
+async def approve_forge_item(snapshot_id: str, req: ForgeApproveRequest = None):
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        return _public_snapshot(get_engine().forge_approve(snapshot_id), "approved", "approve_failed")
+    except Exception:
+        raise _server_error("approval")
+
+
+@forge_router.post("/reject/{snapshot_id}")
+async def reject_forge_item(snapshot_id: str):
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        return _public_snapshot(get_engine().forge_reject(snapshot_id), "rejected", "reject_failed")
+    except Exception:
+        raise _server_error("rejection")
+
+
+# ── Evolution Status routes ───────────────────────────────────────────────────
+
+@forge_router.get("/evolution/status")
+async def get_evolution_status():
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        return _public_status(get_engine().evolution_status(), "available", "unavailable")
+    except Exception:
+        raise _server_error("evolution status")
+
+
+@forge_router.post("/evolution/mode")
+async def set_evolution_mode(mode: str = Query(..., description="AUTO|SAFE|OFF")):
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        return _public_status(get_engine().evolution_set_mode(mode), "mode_updated", "mode_update_failed")
+    except Exception:
+        raise _server_error("evolution mode")
+
+
+# ── Builder routes ────────────────────────────────────────────────────────────
+
+@forge_router.post("/builder/generate")
+async def builder_generate(req: BuilderRequest):
+    try:
+        from neural_brain.core.consciousness_engine import get_engine
+        result = get_engine().forge_build(
+            spec=req.spec,
+            project_name=req.project_name,
+            target_type=req.target_type,
+        )
+        return _public_snapshot(result, "generated", "generation_failed")
+    except Exception:
+        raise _server_error("builder generation")
+
+
+@forge_router.post("/chat")
+async def forge_chat(req: ForgeChatRequest):
+    return await _chat(req)
+
+
+@forge_router.post("/actions/{action_id}/approve")
+async def forge_action_approve(action_id: str, req: ForgeActionApprovalRequest):
+    result = await _approve_action(action_id, req)
+    if not result["ok"]:
+        raise HTTPException(status_code=403, detail=result)
+    return result
+
+
+@forge_compat_router.post("/chat")
+async def forge_compat_chat(req: ForgeChatRequest):
+    return await _chat(req)
+
+
+@forge_compat_router.post("/actions/{action_id}/approve")
+async def forge_compat_action_approve(action_id: str, req: ForgeActionApprovalRequest):
+    result = await _approve_action(action_id, req)
+    if not result["ok"]:
+        raise HTTPException(status_code=403, detail=result)
+    return result

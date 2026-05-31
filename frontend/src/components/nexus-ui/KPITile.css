@@ -1,0 +1,165 @@
+/* ════════════════════════════════════════════════════════════════════
+   <KPITile> — Compact metric tile
+   Layout:
+     ┌─ chamfered frame ─────────────────────────────┐
+     │ [hex icon] LABEL                  [delta pct] │
+     │            VALUE                              │
+     │ [sparkline                                  ] │
+     └───────────────────────────────────────────────┘
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 10px;
+  background: var(--nx-panel-bg);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-r-lg);
+  box-shadow: var(--nx-shadow-panel);
+  transition: border-color var(--nx-dur) var(--nx-ease),
+              box-shadow var(--nx-dur) var(--nx-ease),
+              background var(--nx-dur) var(--nx-ease);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.nx-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--nx-chamfer-sm);
+  right: var(--nx-chamfer-sm);
+  height: 1px;
+  background: var(--nx-hairline);
+  pointer-events: none;
+}
+
+.nx-kpi--hover:hover {
+  background: var(--nx-panel-bg-hover);
+  border-color: var(--nx-border-strong);
+  box-shadow: var(--nx-shadow-panel-hover);
+}
+
+.nx-kpi--accent {
+  border-color: var(--nx-border-strong);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.06) inset,
+    0 0 0 1px rgba(229,199,107,0.20) inset,
+    0 18px 48px rgba(0,0,0,0.55),
+    0 0 28px rgba(229,199,107,0.15);
+}
+
+/* ── Header row: icon + label + delta ──────────────────────────────── */
+.nx-kpi__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nx-kpi__label {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--nx-font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: var(--nx-tracking-cap);
+  text-transform: uppercase;
+  color: var(--nx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-kpi__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.4;
+}
+
+.nx-kpi__delta--up {
+  color: var(--nx-success);
+  background: rgba(34,197,94,0.08);
+  border-color: rgba(34,197,94,0.20);
+}
+.nx-kpi__delta--down {
+  color: var(--nx-danger);
+  background: rgba(239,68,68,0.08);
+  border-color: rgba(239,68,68,0.20);
+}
+.nx-kpi__delta--flat {
+  color: var(--nx-text-dim);
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(255,255,255,0.06);
+}
+
+.nx-kpi__delta-arrow {
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* ── Value (big number) ────────────────────────────────────────────── */
+.nx-kpi__value {
+  font-family: var(--nx-font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: var(--nx-tracking-tight);
+  color: var(--nx-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-kpi--accent .nx-kpi__value {
+  background: var(--nx-gold-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 14px rgba(229,199,107,0.25);
+}
+
+.nx-kpi__sub {
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  letter-spacing: var(--nx-tracking-mid);
+  color: var(--nx-text-dim);
+  margin-top: -2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Sparkline footer row ──────────────────────────────────────────── */
+.nx-kpi__spark {
+  margin-top: 4px;
+  height: 24px;
+  display: flex;
+  align-items: stretch;
+}
+
+.nx-kpi__spark canvas {
+  display: block;
+  width: 100% !important;
+}
+
+/* ── Sizes ─────────────────────────────────────────────────────────── */
+.nx-kpi--sm { padding: 8px 10px 6px; }
+.nx-kpi--sm .nx-kpi__value { font-size: 16px; }
+.nx-kpi--sm .nx-kpi__spark { height: 16px; }
+
+.nx-kpi--lg { padding: 16px 18px 12px; }
+.nx-kpi--lg .nx-kpi__value { font-size: 28px; }
+.nx-kpi--lg .nx-kpi__spark { height: 32px; }

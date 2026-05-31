@@ -1,0 +1,43 @@
+# AI-Employee Connector/Advanced Requirements
+# Core runtime dependencies live in runtime/requirements-core.txt and must be
+# bundled offline. This file is only for non-boot external connectors or heavy
+# model add-ons that are policy-gated.
+
+# Large embedding model add-on
+sentence-transformers>=2.7.0
+
+# Secondary vector backend (paired with chromadb in runtime/requirements-core.txt)
+qdrant-client>=1.7.0
+
+opentelemetry-exporter-jaeger>=1.25.0
+sentry-sdk>=1.40.0
+
+# Database & ORM
+psycopg[binary]>=3.1.0
+alembic>=1.13.0
+sqlalchemy>=2.0.0
+
+# Integrations
+stripe>=7.0.0
+mailchimp-marketing>=3.0.80
+lxml==4.9.1
+beautifulsoup4==4.12.0
+
+# Testing & CI
+pytest>=8.0.0
+pytest-cov>=4.0.0
+
+# Neural Brain add-ons beyond core graph runtime
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-neo4j>=0.3.0
+mem0ai>=0.1.40
+httpx>=0.27.0
+pydantic-settings>=2.4.0
+
+# Phase 3 — Advanced Autonomous Workforce add-ons
+pytesseract>=0.3.10
+pyautogui>=0.9.54; sys_platform != 'linux'
+PyYAML>=6.0.0
+jsonschema>=4.23.0
+psutil>=6.0.0

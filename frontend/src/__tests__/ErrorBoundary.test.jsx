@@ -48,4 +48,40 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('All good')).toBeInTheDocument()
     spy.mockRestore()
   })
+
+  it('shows Electron launcher recovery action when available', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const returnToLauncher = vi.fn()
+    const notifyUiFailed = vi.fn()
+    window.ai = { returnToLauncher, notifyUiFailed }
+    render(
+      <ErrorBoundary label="Application">
+        <Bomb explode={true} />
+      </ErrorBoundary>
+    )
+    expect(notifyUiFailed).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('Application failed to render'),
+    }))
+    fireEvent.click(screen.getByText('Return to Launcher'))
+    expect(returnToLauncher).toHaveBeenCalled()
+    delete window.ai
+    spy.mockRestore()
+  })
+
+  it('sends configured severity to the launcher', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const notifyUiFailed = vi.fn()
+    window.ai = { notifyUiFailed }
+    render(
+      <ErrorBoundary label="neural-graph" severity="widget">
+        <Bomb explode={true} />
+      </ErrorBoundary>
+    )
+    expect(notifyUiFailed).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'widget',
+      message: expect.stringContaining('neural-graph failed to render'),
+    }))
+    delete window.ai
+    spy.mockRestore()
+  })
 })

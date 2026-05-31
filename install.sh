@@ -623,6 +623,10 @@ install_runtime() {
     if [[ ! -d "$src" ]]; then
 
         dl "bin/ai-employee"
+        dl "requirements-core.txt"
+        dl "requirements-extras.txt"
+        dl "config/core_dependency_manifest.json"
+        dl "core/startup.py"
         # Core agents
         dl "agents/problem-solver/run.sh"
         dl "agents/problem-solver/problem_solver.py"
@@ -945,24 +949,39 @@ install_runtime() {
         _copy_template_checked "$f" "$AI_HOME/config/$fname"
     done
 
-    # Python deps for UI helper agents (non-critical — UI now uses Node.js backend)
-    local req="$AI_HOME/agents/problem-solver-ui/requirements.txt"
+    # Enterprise core Python runtime. These are part of the app, not optional
+    # extensions; packaged builds should ship them through an offline wheelhouse.
+    local req="$src/requirements-core.txt"
+    local wheelhouse=""
+    if [[ -n "${AI_EMPLOYEE_WHEELHOUSE_DIR:-}" && -d "$AI_EMPLOYEE_WHEELHOUSE_DIR" ]]; then
+        wheelhouse="$AI_EMPLOYEE_WHEELHOUSE_DIR"
+    elif [[ -d "$src/wheelhouse" ]]; then
+        wheelhouse="$(find "$src/wheelhouse" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)"
+    fi
+    local pip_args=()
+    if [[ -n "$wheelhouse" && -d "$wheelhouse" ]]; then
+        pip_args=(--no-index --find-links "$wheelhouse")
+    elif [[ "${AI_EMPLOYEE_OFFLINE:-1}" == "1" ]]; then
+        err "Missing offline Python wheelhouse under $src/wheelhouse; run npm run build:python-core first"
+    fi
     if [[ -f "$req" ]]; then
         if command -v pip3 >/dev/null 2>&1; then
-            pip3 install --user -q -r "$req" \
-                && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip3 install failed for UI helper — non-critical (UI runs via Node.js)"
+            pip3 install --user -q "${pip_args[@]}" -r "$req" \
+                && ok "Enterprise core Python deps installed" \
+                || err "pip3 install failed for enterprise core runtime dependencies"
         elif command -v pip >/dev/null 2>&1; then
-            pip install --user -q -r "$req" \
-                && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip install failed for UI helper — non-critical (UI runs via Node.js)"
+            pip install --user -q "${pip_args[@]}" -r "$req" \
+                && ok "Enterprise core Python deps installed" \
+                || err "pip install failed for enterprise core runtime dependencies"
         elif command -v python3 >/dev/null 2>&1; then
-            python3 -m pip install --user -q -r "$req" \
-                && ok "Python deps (fastapi/uvicorn) installed" \
-                || warn "pip install failed for UI helper — non-critical (UI runs via Node.js)"
+            python3 -m pip install --user -q "${pip_args[@]}" -r "$req" \
+                && ok "Enterprise core Python deps installed" \
+                || err "python3 -m pip install failed for enterprise core runtime dependencies"
         else
-            warn "pip not found — install manually: pip3 install fastapi uvicorn"
+            err "pip not found — enterprise core runtime dependencies cannot be installed"
         fi
+    else
+        err "Missing enterprise core requirements file: $req"
     fi
 
     # Node.js backend + React frontend (required for unified UI on port 8787)

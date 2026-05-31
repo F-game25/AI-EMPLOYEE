@@ -1,0 +1,326 @@
+.proof-center {
+  min-height: 100%;
+  padding: 18px;
+  color: #d7dfef;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(229, 199, 107, 0.1), transparent 32%),
+    linear-gradient(180deg, rgba(7, 8, 12, 0.98), rgba(3, 4, 8, 0.99));
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+.proof-hero,
+.proof-metrics,
+.proof-tools,
+.proof-panel,
+.proof-alert {
+  border: 1px solid rgba(229, 199, 107, 0.18);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(18, 19, 25, 0.88), rgba(8, 9, 14, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 230, 170, 0.055), 0 16px 36px rgba(0, 0, 0, 0.3);
+}
+
+.proof-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+}
+
+.proof-kicker {
+  margin: 0 0 7px;
+  color: rgba(255, 219, 145, 0.62);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.proof-hero h1 {
+  margin: 0;
+  color: #ffe5ac;
+  font-size: clamp(26px, 4vw, 44px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.proof-hero p {
+  max-width: 800px;
+  margin: 12px 0 0;
+  color: rgba(215, 223, 239, 0.68);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.proof-btn,
+.proof-filter {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 184, 0, 0.36);
+  border-radius: 4px;
+  background: rgba(255, 184, 0, 0.08);
+  color: #ffd77a;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.proof-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 1px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.proof-metrics div {
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.proof-metrics span {
+  display: block;
+  color: rgba(215, 223, 239, 0.44);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.proof-metrics b {
+  display: block;
+  margin-top: 6px;
+  color: #f7d184;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.proof-alert {
+  margin-top: 12px;
+  padding: 11px 13px;
+  color: #ffb8b8;
+  border-color: rgba(255, 85, 85, 0.45);
+}
+
+.proof-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.proof-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.proof-filter {
+  min-height: 28px;
+  border-color: rgba(215, 223, 239, 0.13);
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(215, 223, 239, 0.72);
+}
+
+.proof-filter--active {
+  border-color: rgba(255, 184, 0, 0.48);
+  color: #ffe1a1;
+  background: rgba(255, 184, 0, 0.11);
+}
+
+.proof-search {
+  min-width: 280px;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 184, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.26);
+  color: #f2f6ff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.proof-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.proof-panel {
+  min-width: 0;
+  padding: 14px;
+}
+
+.proof-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.proof-panel__head span {
+  color: rgba(215, 223, 239, 0.52);
+  font-size: 11px;
+}
+
+.proof-list,
+.proof-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proof-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(215, 223, 239, 0.09);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.proof-item__main {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.proof-item__dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #858c99;
+  color: #858c99;
+  box-shadow: 0 0 10px currentColor;
+  flex-shrink: 0;
+}
+
+.proof-item--live .proof-item__dot { background: #00ff99; color: #00ff99; }
+.proof-item--degraded .proof-item__dot { background: #ffb800; color: #ffb800; }
+.proof-item--failed .proof-item__dot { background: #ff5555; color: #ff5555; }
+
+.proof-item h2 {
+  margin: 0;
+  color: rgba(242, 246, 255, 0.92);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.proof-item p {
+  margin: 5px 0 0;
+  color: rgba(215, 223, 239, 0.55);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.proof-item code {
+  display: inline-block;
+  margin-top: 7px;
+  color: rgba(255, 212, 119, 0.82);
+  font-size: 10px;
+  white-space: normal;
+}
+
+.proof-item__side {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proof-item__side span {
+  color: rgba(215, 223, 239, 0.62);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.proof-item__side a {
+  color: #ffe1a1;
+  font-size: 11px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.proof-turn {
+  padding: 10px;
+  border: 1px solid rgba(215, 223, 239, 0.09);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.proof-turn b,
+.proof-turn span,
+.proof-turn small {
+  display: block;
+}
+
+.proof-turn b {
+  color: #f3db9b;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.proof-turn span,
+.proof-turn small {
+  margin-top: 4px;
+  color: rgba(215, 223, 239, 0.58);
+  font-size: 10px;
+}
+
+.proof-empty {
+  padding: 18px;
+  border: 1px dashed rgba(215, 223, 239, 0.18);
+  border-radius: 4px;
+  color: rgba(215, 223, 239, 0.64);
+}
+
+.proof-empty b,
+.proof-empty span {
+  display: block;
+}
+
+.proof-empty b {
+  color: #f3db9b;
+  margin-bottom: 6px;
+}
+
+@media (max-width: 1050px) {
+  .proof-layout,
+  .proof-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .proof-center {
+    padding: 10px;
+  }
+
+  .proof-hero,
+  .proof-tools,
+  .proof-item {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .proof-search {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .proof-item__side {
+    align-items: flex-start;
+  }
+}

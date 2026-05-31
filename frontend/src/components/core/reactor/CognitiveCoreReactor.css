@@ -1,0 +1,297 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * CognitiveCoreReactor.css
+ * ------------------------
+ * Shared styles for the entire reactor stack:
+ *   - Reactor container + layer z-index map (0–11)
+ *   - MechanicalIris classes + keyframes
+ *   - CoreOverlay (state badge, focus caption) positioning + colors
+ *   - Eyelid blink transform
+ *   - prefers-reduced-motion overrides
+ *
+ * Sibling layer components (EnergyField, ParticleStarfield, etc.) own their
+ * own internal styling; this file only handles the shared frame + iris/overlay.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Reactor container & layer z-stack
+ * ────────────────────────────────────────────────────────────────────────── */
+.ccr-reactor {
+  position: relative;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  contain: layout style;
+  --reactor-size: 870px;
+  --iris-size: 580px;
+  --iris-color: var(--eye-iris-color, #fbbf24);
+  --halo-color: var(--eye-halo-color, #ffd27a);
+}
+
+.ccr-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.ccr-layer--0  { z-index: 0; }
+.ccr-layer--1  { z-index: 1; }
+.ccr-layer--2  { z-index: 2; }
+.ccr-layer--3  { z-index: 3; }
+.ccr-layer--4  { z-index: 4; }
+.ccr-layer--5  { z-index: 5; }
+.ccr-layer--6  { z-index: 6; }
+.ccr-layer--7  { z-index: 7; }
+.ccr-layer--8  { z-index: 8; pointer-events: auto; }
+.ccr-layer--9  { z-index: 9; }
+.ccr-layer--10 { z-index: 10; }
+.ccr-layer--11 { z-index: 11; pointer-events: auto; }
+
+/* Iris layer sized via --iris-size from inline style */
+.ccr-layer--9 > svg,
+.ccr-layer--9 > .mi-root {
+  width: var(--iris-size, 520px);
+  height: var(--iris-size, 520px);
+}
+
+/* Eyelid sized to match iris exactly so blink visually closes over it */
+.ccr-layer--10 > svg,
+.ccr-layer--10 > .el-svg {
+  width: var(--iris-size, 520px);
+  height: var(--iris-size, 520px);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Reactor state class tints (subtle backdrop hue per state)
+ * ────────────────────────────────────────────────────────────────────────── */
+.ccr-reactor--listening { --iris-color: #22d3ee; }
+.ccr-reactor--thinking  { --iris-color: #a855f7; }
+.ccr-reactor--executing { --iris-color: #fbbf24; }
+.ccr-reactor--error     { --iris-color: #ef4444; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * MechanicalIris
+ * ────────────────────────────────────────────────────────────────────────── */
+.mi-root {
+  display: block;
+  overflow: visible;
+  transform-origin: center;
+}
+
+/* Inner ring rotates counter-clockwise (90s loop) */
+.mi-segring {
+  transform-origin: center;
+  animation: mi-segring-rotate 90s linear infinite;
+}
+
+/* Aperture blades — subtle breathing rotation on top of pupilScale transform */
+.mi-blades {
+  transform-origin: center;
+  animation: mi-blades-breath 6s ease-in-out infinite;
+}
+
+/* Plasma pulse — overridden inline by SMIL but CSS adds gentle scale */
+.mi-plasma {
+  transform-origin: center;
+  animation: mi-plasma-scale 3.2s ease-in-out infinite;
+}
+
+.mi-plasma--executing { animation-duration: 1.6s; }
+.mi-plasma--error     { animation-duration: 0.3s; }
+
+/* Fibers don't animate at element level — but the parent group has the
+   hue-rotate + saturate filter applied inline for GPU-temp tinting */
+.mi-fibers {
+  transform-origin: center;
+}
+
+/* Cornea — extremely subtle parallax shimmer on hover (optional polish) */
+.mi-cornea {
+  transform-origin: center;
+  animation: mi-cornea-shimmer 8s ease-in-out infinite;
+}
+
+/* Pupil idle breathing — wrapped scale defines pupil dilation, this adds the
+   slow heartbeat on top via opacity only (does not fight the scale transform) */
+.mi-pupil {
+  transform-origin: center;
+}
+
+.mi-pupil .mi-tri {
+  transform-origin: center;
+  animation: mi-tri-pulse 3.5s ease-in-out infinite;
+}
+
+.mi-pupil--executing .mi-tri { animation-duration: 1.4s; }
+.mi-pupil--error .mi-tri     { animation-duration: 0.2s; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * MechanicalIris keyframes
+ * ────────────────────────────────────────────────────────────────────────── */
+@keyframes mi-segring-rotate {
+  from { transform: rotate(360deg); }
+  to   { transform: rotate(0deg); }
+}
+
+@keyframes mi-plasma-scale {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+
+@keyframes mi-blades-breath {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  50%      { transform: rotate(0.6deg) scale(1.01); }
+}
+
+@keyframes mi-tri-pulse {
+  0%, 100% { opacity: 0.88; }
+  50%      { opacity: 1; }
+}
+
+@keyframes mi-cornea-shimmer {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.92; }
+}
+
+/* Energy ripples — primary animation lives in SMIL but a CSS fallback
+   pulse-glow gives the group as a whole a soft heartbeat shimmer. */
+@keyframes mi-ripple-glow {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.15); }
+}
+.mi-ripples { animation: mi-ripple-glow 2s ease-in-out infinite; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Eyelid
+ * ────────────────────────────────────────────────────────────────────────── */
+.el-svg {
+  display: block;
+  overflow: visible;
+}
+.el-root {
+  --eyelid-close: 0;
+  transform-origin: center;
+}
+.el-upper {
+  transform-origin: center -55px;
+  transform: scaleY(calc(var(--eyelid-close, 0) * 1.0));
+  transition: transform 90ms ease-in;
+}
+.el-lower {
+  transform-origin: center -5px;
+  transform: scaleY(calc(var(--eyelid-close, 0) * 1.0));
+  transition: transform 90ms ease-in;
+}
+.el-upper-edge,
+.el-lower-edge {
+  opacity: calc(var(--eyelid-close, 0) * 0.8);
+  transition: opacity 90ms ease-in;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * CoreOverlay — title, state badge, focus caption
+ * ────────────────────────────────────────────────────────────────────────── */
+.co-overlay {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  z-index: 12;
+  user-select: none;
+}
+
+.co-title {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 4px;
+  color: #e5c76b;
+  text-shadow: 0 0 6px rgba(229, 199, 107, 0.5);
+  font-weight: 600;
+}
+
+.co-sub {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 2px;
+}
+
+.co-state {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid currentColor;
+  border-radius: 12px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.co-state--idle      { color: #6b7280; }
+.co-state--listening { color: #22d3ee; }
+.co-state--thinking  { color: #a855f7; }
+.co-state--executing { color: #fbbf24; }
+.co-state--error     {
+  color: #ef4444;
+  animation: co-state-pulse 0.83s ease-in-out infinite;
+}
+
+.co-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  flex-shrink: 0;
+}
+
+.co-focus {
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+  letter-spacing: 1.5px;
+  color: rgba(229, 199, 107, 0.65);
+}
+
+.particle-starfield-fallback {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(229, 199, 107, 0.12), transparent 30%),
+    radial-gradient(circle at 35% 60%, rgba(34, 211, 238, 0.06), transparent 28%);
+  opacity: 0.7;
+}
+
+@keyframes co-state-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Reduced motion — kill non-essential animations
+ * ────────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .mi-plasma,
+  .mi-ripples,
+  .mi-tri,
+  .mi-segring,
+  .mi-blades,
+  .mi-cornea,
+  .co-state--error {
+    animation: none !important;
+  }
+  .el-upper,
+  .el-lower {
+    transition: none !important;
+  }
+}

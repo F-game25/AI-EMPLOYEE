@@ -1,0 +1,78 @@
+/* ════════════════════════════════════════════════════════════════════
+   NEXUS DESIGN TOKENS — LAUNCHER COPY
+   Mirrors frontend/src/components/nexus-ui/tokens.css and
+   frontend/src/index.css so the launcher and dashboard share the
+   same visual language. Do not edit individual values — re-copy
+   from the frontend source when tokens are updated there.
+   ════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surface palette ─────────────────────────────────────────────── */
+  --nx-bg:            #07080f;
+  --nx-bg-deep:       #04050a;
+  --nx-bg-base:       #070810;
+  --nx-surface:       #0b0d18;
+  --nx-surface-2:     #10131f;
+  --nx-surface-3:     #161a28;
+  --nx-bg-panel:      #0E1020;
+
+  /* ── Gold spectrum ───────────────────────────────────────────────── */
+  --nx-gold:          #e5c76b;
+  --nx-gold-bright:   #ffd97a;
+  --nx-gold-warm:     #d4a82e;
+  --nx-gold-deep:     #8b6914;
+  --nx-amber:         #f5b94a;
+  --nx-bronze:        #a87432;
+  --nx-gold-grad:     linear-gradient(135deg, #ffe089 0%, #e5c76b 45%, #c79a3e 100%);
+
+  /* ── Cool accents ────────────────────────────────────────────────── */
+  --nx-cyan:          #00cfff;
+  --nx-cyan-dim:      #0a99c0;
+  --nx-success:       #22c55e;
+  --nx-warning:       #f59e0b;
+  --nx-danger:        #ef4444;
+  --nx-purple:        #a855f7;
+
+  /* ── Text ────────────────────────────────────────────────────────── */
+  --nx-text:          #F4F4F8;
+  --nx-text-muted:    #8A8A96;
+  --nx-text-dim:      #5a5a66;
+
+  /* ── Borders ─────────────────────────────────────────────────────── */
+  --nx-border:        rgba(229,199,107,0.14);
+  --nx-border-strong: rgba(229,199,107,0.35);
+  --nx-border-faint:  rgba(229,199,107,0.06);
+  --nx-border-bright: rgba(255,255,255,0.08);
+
+  /* ── Glows ───────────────────────────────────────────────────────── */
+  --nx-glow-gold-sm:  0 0 12px rgba(229,199,107,0.25);
+  --nx-glow-gold:     0 0 24px rgba(229,199,107,0.35), 0 0 60px rgba(229,199,107,0.12);
+  --nx-glow-cyan:     0 0 16px rgba(0,207,255,0.35);
+  --nx-glow-danger:   0 0 16px rgba(239,68,68,0.40);
+  --nx-glow-success:  0 0 16px rgba(34,197,94,0.35);
+
+  /* ── Spacing ─────────────────────────────────────────────────────── */
+  --nx-s1: 4px;
+  --nx-s2: 8px;
+  --nx-s3: 12px;
+  --nx-s4: 16px;
+  --nx-s5: 24px;
+  --nx-s6: 32px;
+
+  /* ── Radius ──────────────────────────────────────────────────────── */
+  --nx-r-sm: 4px;
+  --nx-r-md: 8px;
+  --nx-r-lg: 14px;
+  --nx-r-pill: 999px;
+
+  /* ── Motion ──────────────────────────────────────────────────────── */
+  --nx-dur-fast: 120ms;
+  --nx-dur-base: 250ms;
+  --nx-dur-slow: 450ms;
+  --nx-ease:     cubic-bezier(0.4, 0, 0.2, 1);
+  --nx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Font stack ──────────────────────────────────────────────────── */
+  --nx-font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  --nx-font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}

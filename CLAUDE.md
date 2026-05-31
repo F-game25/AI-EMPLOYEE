@@ -87,6 +87,133 @@ Operating modes activate different agent counts: Starter (3), Business (15), Pow
 
 Python's `runtime/` directory is inserted into `sys.path` by `main.py`, so imports like `from core.agent_controller import AgentController` work without package installation.
 
+### Data Persistence & Concurrency
+
+**JSON State Files** — Shared state (deals, tasks, leads, revenue) persists as JSON in `state/` directory. Access is protected by `runtime/core/file_lock.py` (fcntl-based exclusive locks) to prevent concurrent write corruption.
+
+Key state files:
+- `state/deals.json` — CRM pipeline deals (read/write by crm-pipeline, sales-closer-pro agents)
+- `state/tasks.json` — Task tracking (read/write by task-orchestrator, team-management)
+- `state/team-roster.json` — Team roster (read/write by team-management)
+- `state/knowledge_store.json` — Bootstrapped knowledge base (read/write by memory system)
+- `state/bus.jsonl` — Message bus event log (append-only, pub/sub metadata)
+
+**SQLite Databases** — Two WAL-mode SQLite databases:
+- `state/audit.db` — Audit trail for GDPR/compliance (immutable records)
+- `state/forge_queue.db` — Task queue (currently placeholder, not actively used in production)
+
+Future: Postgres migration recommended for horizontal scaling (see Week 4 plan).
+
+### Active Agent Architecture
+
+**Directory-Based Agents** (80+ agents in `runtime/agents/<name>/`) are the active architecture:
+- Each agent is a directory with `<name>.py` (BaseAgent subclass), `run.sh`, `requirements.txt`
+- Registered in `runtime/config/agent_capabilities.json`
+- Discovered and loaded by `backend/agents/index.js` on startup
+- Modes: Starter (3 agents), Business (15), Power (56+)
+
+**Ghost Agents** (config entries with no directory) have been eliminated as of Week 1.
+
+**Flat Legacy Files** (old .py files in `runtime/agents/`) have been removed; directory structure is the single active pattern.
+
+### Security & Authentication
+
+- **JWT Auth**: `runtime/agents/problem-solver-ui/server.py` issues signed tokens (`/auth/register`, `/auth/login`)
+- **Token Refresh**: Automatic token rotation via `/auth/refresh` with refresh token rotation
+- **Rate Limiting**: `@_auth_rate_limit` decorator on auth routes (5 req/min per IP)
+- **Password Policy**: 12+ chars, special chars, numbers, uppercase enforced at registration
+- **Route Coverage**: 44 of 119 Node routes protected via `requireAuth` middleware (up from 4 in Week 1)
+- **HITL Gates**: High-risk agents (lead-hunter-elite, qualification-agent, data-analyst) require human approval before sensitive operations
+
+### Multi-Tenancy
+
+The system is now fully multi-tenant, allowing complete isolation between organizations/users.
+
+**Architecture:**
+- **Tenant Manager** (`runtime/core/tenancy.py`): Lifecycle, directory structure, request-scoped context
+- **FastAPI Middleware** (`runtime/core/tenant_middleware.py`): Automatic tenant extraction from JWT
+- **Node.js Middleware** (`backend/tenancy.js`): Automatic tenant extraction for Express routes
+- **File Locking** (`runtime/core/file_lock.py`): Tenant-aware reads/writes with _tenant_data structure
+
+**Tenant Isolation:**
+- Each tenant lives in `~/.ai-employee/tenants/{tenant_id}/`
+- JWT tokens include `tenant_id` claim (checked by middleware)
+- All state files segregated by tenant via `_tenant_data[tenant_id]` structure
+- Route middleware automatically extracts tenant from JWT and validates access
+
+**Data Storage:**
+```
+~/.ai-employee/
+├── tenants/
+│   ├── {tenant_id_1}/
+│   │   ├── state/       (deals.json, tasks.json, etc.)
+│   │   └── config/      (settings, preferences)
+│   ├── {tenant_id_2}/
+│   └── ...
+```
+
+**Register & Auth Flow:**
+1. POST `/auth/register` with credentials
+2. Server creates new tenant (with directory structure)
+3. User entry stored with tenant_id
+4. JWT issued with `tenant_id` claim
+5. All subsequent requests: middleware extracts tenant_id from JWT
+6. Routes access tenant-specific data via TenantContext
+
+**Migration:**
+```bash
+# Convert existing single-tenant data to multi-tenant format
+python3 scripts/migrate_to_multitenant.py
+# Creates default tenant, backs up original files, segregates state
+```
+
+**Testing:**
+- 10 comprehensive multi-tenancy tests in `tests/test_multitenant.py` (all passing)
+- Tests cover: tenant creation, context management, data isolation, migration scenarios
+
+### Autonomous Research Loop
+
+The system learns online when a task lacks context. Before executing any goal,
+`AgentController.run_goal()` scores context sufficiency via `ContextSufficiencyEvaluator`
+(`runtime/core/context_evaluator.py`). If the score is below 0.6 the user is asked
+"Task — enough context? Yes / No" via a WebSocket `task:context_check` event that
+renders `ContextCheckModal.jsx`. On "No" (or when `AUTO_RESEARCH_MODE=auto`),
+`AutoResearchAgent` (`runtime/core/auto_research_agent.py`) runs adaptive-depth
+research (3→6→10 sources per hop, up to 3 hops): `search_web` → stealth
+`CloakBrowser.fetch_url` → LLM summarize → 3-layer persist
+(vector store + Neo4j brain graph + `state/knowledge_store.json`).
+
+**Env vars:**
+- `AUTO_RESEARCH_MODE` — `ask` (default) / `auto` / `off`
+- `RESEARCH_MAX_HOPS` — default 3
+- `RESEARCH_MAX_PAGES_PER_DAY` — daily budget, default 200
+- `CONTEXT_CHECK_TIMEOUT_S` — default 60 (modal auto-resolves to "continue")
+- `KNOWLEDGE_ACQUISITION_INTERVAL_S` — passive idle-research cadence, default 3600
+- `BRAVE_API_KEY` / `BING_API_KEY` — optional additional search providers
+
+**Integration surfaces:**
+- `runtime/skills/context_research.py` — `ContextResearchSkill` callable by the planner
+- `runtime/tools/web_research_tool.py`, `context_score_tool.py` — atomic tools
+- Pipeline phase 2.5 `rate_context_sufficiency` in `unified_pipeline.py`
+- `runtime/core/money_mode.py` outreach pipeline takes `research_first=True`
+- `runtime/core/hitl_gate.py` `require_approval` accepts `research_findings` for the approval card
+- `EvolutionController` schedules passive knowledge acquisition on idle cycles
+- Per-source trust via `runtime/core/source_trust.py` + `runtime/config/source_trust.json`
+
+**Frontend surfaces:**
+- `ContextCheckModal.jsx` — mounted globally in `App.jsx`
+- `ResearchActivityPanel.jsx` — live + historical sessions, on the Research page
+- WS events: `task:context_check`, `task:research_started`, `task:research_completed`,
+  `task:research_budget_exhausted` — dispatched in `useWebSocket.js`
+
+### Observability
+
+- **Prometheus Metrics** (`/metrics` endpoint, port 8787): Exposes `ai_employee_*` metrics in text format
+  - `uptime_ms`, `agents_active`, `tasks_total`, `tasks_completed`, `tasks_failed`, `errors_total`, `api_calls_total`
+- **Metrics Collector** (`runtime/core/observability/metrics_collector.py`): 1-second tick, rolling window of 3600 snapshots
+- **Event Stream** (`runtime/core/observability/event_stream.py`): In-process pub/sub with JSONL persistence
+- **Audit Logger**: Logs to `state/audit.db` for compliance + `python-backend.log` (rotated, capped at 10MB)
+
 
 
 
@@ -584,3 +711,382 @@ Version: 1.0.0
 Created: 2026-04-05
 Companion: PULSE-FULL-AUTONOMY-24-7.md
 Purpose: Reduce token burn 60-70% while maintaining output quality
+
+AI OPERATING SYSTEM ARCHITECTURE SPEC
+
+## SYSTEM INTENT
+
+This repository is not a collection of scripts or AI utilities.
+
+It is an **AI Operating System** designed to produce real-world outcomes through orchestrated automation, skills, and tools.
+
+The system must be:
+
+- Production-grade
+- Observable
+- Scalable
+- Secure
+- Testable
+- Maintainable
+- Business outcome driven
+
+All design decisions must prioritize **real-world value delivery**, not technical novelty.
+
+---
+
+# CORE ARCHITECTURE (NON-NEGOTIABLE)
+
+The system is built on a strict 3-layer execution model:
+
+## 1. ORCHESTRATOR (GLOBAL BRAIN)
+
+The orchestrator is responsible for:
+
+- Understanding user intent
+- Translating intent into structured plans
+- Selecting the correct skill(s)
+- Coordinating multi-skill workflows
+- Managing execution order
+- Handling failures at workflow level
+- Ensuring global system consistency
+
+The orchestrator NEVER executes tools directly.
+
+It only:
+- selects skills
+- coordinates workflows
+- manages execution flow
+- monitors outcomes
+
+---
+
+## 2. SKILLS (CAPABILITY MODULES)
+
+Skills are the **primary execution units of the system**.
+
+A skill is:
+
+> A reusable, versioned, domain-specific workflow that combines multiple tools to achieve a real-world outcome.
+
+Skills define HOW work is done.
+
+### Skill responsibilities:
+
+Each skill must:
+
+- Encapsulate a complete business capability
+- Define a deterministic or semi-deterministic workflow
+- Use a predefined set of tools
+- Handle internal logic, retries, and branching
+- Validate outputs before returning results
+- Produce structured artifacts
+- Be independently testable
+
+### Examples of skills:
+
+- Lead Generation Skill
+- Contract Analysis Skill
+- Market Research Skill
+- Appointment Scheduling Skill
+- Document Intelligence Skill
+- Customer Support Automation Skill
+
+Skills are **products**, not utilities.
+
+---
+
+## 3. TOOLS (ATOMIC EXECUTION LAYER)
+
+Tools are the lowest-level primitives.
+
+A tool:
+
+- Performs a single atomic action
+- Is deterministic where possible
+- Has strict input/output schemas
+- Does not contain business logic
+- Does not orchestrate workflows
+
+### Examples of tools:
+
+- Web search tool
+- Browser automation tool
+- Database query tool
+- Email sending tool
+- File processing tool
+- LLM inference tool
+- API request tool
+
+Tools are **not aware of skills or orchestration logic**.
+
+They only execute instructions.
+
+---
+
+# EXECUTION FLOW (CRITICAL PATH)
+
+All user requests must follow:
+
+1. User input received
+2. Orchestrator interprets intent
+3. Orchestrator selects optimal skill(s)
+4. Skill constructs execution plan
+5. Skill invokes required tools
+6. Tools execute atomic actions
+7. Skill validates outputs
+8. Skill generates structured result
+9. Orchestrator composes final response
+10. System streams result to UI
+
+At no point does the orchestrator directly execute tools.
+
+---
+
+# SKILL DESIGN RULES
+
+Every skill must follow these principles:
+
+### 1. Single Responsibility
+Each skill must solve one category of problem end-to-end.
+
+### 2. Tool Composition
+Skills may use multiple tools but must abstract them internally.
+
+### 3. Deterministic Structure
+Skill workflows must be predictable and testable.
+
+### 4. Output Guarantee
+Every skill must return:
+
+- Structured result
+- Confidence score
+- Execution metadata
+- Artifacts (if applicable)
+
+### 5. Failure Handling
+Skills must handle:
+
+- retries
+- tool fallback
+- partial failure recovery
+- graceful degradation
+
+---
+
+# TOOL DESIGN RULES
+
+All tools must:
+
+- Be stateless where possible
+- Have strict schemas
+- Return structured outputs only
+- Never contain business logic
+- Be reusable across skills
+- Log execution metadata
+- Be observable
+
+Tools are infrastructure primitives only.
+
+---
+
+# ORCHESTRATOR RULES
+
+The orchestrator must:
+
+- Never hardcode workflows
+- Never execute tools directly
+- Never bypass skills
+- Always select highest-fit skill
+- Optimize for outcome success probability
+- Minimize cost and latency
+- Maintain global context memory
+
+The orchestrator is a **routing + planning system**, not an executor.
+
+---
+
+# SKILL REGISTRY (MANDATORY)
+
+All skills must be:
+
+- Versioned
+- Discoverable
+- Categorized
+- Observable
+- Testable
+- Replaceable
+
+The orchestrator selects skills from this registry dynamically.
+
+Skills may be:
+- Added
+- Deprecated
+- Replaced
+- Optimized
+
+without breaking system integrity.
+
+---
+
+# REAL-WORLD OUTPUT REQUIREMENT
+
+This system exists only to produce real-world outcomes.
+
+Valid outputs include:
+
+- Completed workflows
+- Generated documents
+- Sent emails
+- Updated databases
+- Executed business actions
+- Delivered reports
+- Triggered external systems
+
+Invalid outputs:
+
+- Pure explanations
+- Theoretical responses without execution
+- Unactionable suggestions
+
+---
+
+# OBSERVABILITY REQUIREMENTS
+
+Everything must be observable:
+
+- Skill execution time
+- Tool latency
+- Success/failure rates
+- Cost per workflow
+- User outcome success rate
+- Retry patterns
+- System bottlenecks
+
+If it is not measurable, it does not exist.
+
+---
+
+# MEMORY MODEL
+
+System memory is divided into:
+
+- Working Memory (active task context)
+- User Memory (preferences, history)
+- Operational Memory (system performance)
+- Skill Memory (execution patterns)
+
+Memory must continuously improve system performance.
+
+---
+
+# RELIABILITY ENGINE
+
+Mandatory system safeguards:
+
+- Schema validation at every layer
+- Skill-level validation
+- Tool-level validation
+- Retry policies
+- Fallback mechanisms
+- Circuit breakers
+- Failure logging
+- Safe degradation modes
+
+The system must never fail silently.
+
+---
+
+# SECURITY MODEL
+
+Enterprise-grade security required:
+
+- Role-based access control
+- Tenant isolation
+- Encrypted storage
+- Secure tool execution sandboxing
+- Audit logs for all actions
+- Permission validation per skill/tool
+
+---
+
+# WORKFLOW PRINCIPLES
+
+All workflows must:
+
+- Be reproducible
+- Be testable
+- Be observable
+- Be debuggable
+- Be modular
+- Be replaceable
+
+No hidden logic allowed.
+
+---
+
+# PERFORMANCE PRINCIPLES
+
+Optimize for:
+
+- Minimal latency
+- Minimal token usage
+- Maximum success rate
+- Maximum automation coverage
+- Maximum user value per execution
+
+---
+
+# PRODUCT PRINCIPLE
+
+This system is not a model wrapper.
+
+It is a **real-world execution engine**.
+
+The goal is:
+
+> Convert intent → structured workflow → real-world outcome
+
+---
+
+# FINAL ARCHITECTURAL TRUTH
+
+- Tools = atomic actions
+- Skills = structured capabilities (tool chains)
+- Orchestrator = intelligent routing + planning system
+- System = real-world automation engine
+
+---
+
+# NORTH STAR
+
+The system should behave like:
+
+- A fully autonomous operations team
+- A scalable AI workforce
+- A business execution engine
+
+One interface.
+Infinite real-world leverage.
+
+---
+
+# FINAL DIRECTIVE
+
+Never degrade skills into tool selection logic.
+
+Never bypass the orchestrator.
+
+Never expose tools as primary interfaces.
+
+Always prioritize:
+
+- real-world outcomes
+- system reliability
+- skill-based execution
+- observable workflows
+
+This is a production AI operating system, not an assistant.
+ work structured so system doesnt become mess
+
+
+

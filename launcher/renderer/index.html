@@ -1,82 +1,165 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ultron</title>
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;">
+  <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="styles.css">
+  <title>AETERNUS NEXUS</title>
 </head>
-<body class="idle">
-  <canvas id="particles"></canvas>
+<body data-screen="boot">
 
-  <div class="card">
-    <div class="card-header">
-      <h1 class="logo">ULTRON</h1>
-      <span class="version-badge" id="version">v1.0.0</span>
+  <!-- ── Title bar (draggable, frameless window) ─────────────────────────── -->
+  <header class="titlebar">
+    <div class="titlebar__brand">
+      <span class="titlebar__mark">◈</span>
+      <span class="titlebar__name">AETERNUS NEXUS</span>
+      <span class="titlebar__version" id="versionLabel">v—.—.—</span>
     </div>
+    <div class="titlebar__controls">
+      <button class="titlebar__btn" id="sysmenuBtn" aria-label="System actions" title="System actions" tabindex="-1">⋯</button>
+      <button class="titlebar__btn" id="minimizeBtn" aria-label="Minimize" tabindex="-1">─</button>
+      <button class="titlebar__btn titlebar__btn--close" id="closeBtn" aria-label="Close" tabindex="-1">×</button>
+    </div>
+  </header>
 
-    <div class="card-content">
-      <!-- IDLE STATE -->
-      <div class="state idle-state">
-        <div class="idle-message">
-          <p>Control Center</p>
-          <p class="sub">Start, stop, or connect to Ultron</p>
-        </div>
+  <!-- ── Screen: BOOT ────────────────────────────────────────────────────── -->
+  <main class="screen screen--boot" data-screen-id="boot">
+    <div class="boot__hero">
+      <div class="boot__eye" id="bootEye" aria-hidden="true">
+        <div class="boot__eye-halo"></div>
+        <div class="boot__eye-iris"></div>
+        <div class="boot__eye-pupil"></div>
       </div>
+      <h1 class="boot__title">COMMAND OPERATING SYSTEM</h1>
+      <p class="boot__sub" id="bootSub">Press START to bring the AI workforce online.</p>
+    </div>
 
-      <!-- STARTING STATE -->
-      <div class="state starting-state" style="display: none;">
-        <div class="starting-header">
-          <p>STARTING SYSTEM<span class="ellipsis">...</span></p>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill"></div>
-        </div>
-        <div class="log-area" id="logArea"></div>
-        <button class="cancel-btn" id="cancelBtn">Cancel</button>
+    <section class="launch-grid" aria-label="Runtime status">
+      <div class="launch-card" data-kind="idle" id="cardGateway">
+        <span class="launch-card__label">Gateway</span>
+        <strong class="launch-card__value" id="statusGateway">standby</strong>
+        <small class="launch-card__meta" id="statusGatewayMeta">Node route pending</small>
       </div>
-
-      <!-- READY STATE -->
-      <div class="state ready-state" style="display: none;">
-        <div class="system-online">
-          <div class="checkmark">✓</div>
-          <p>SYSTEM ONLINE</p>
-        </div>
-        <p class="ready-sub">All systems operational</p>
+      <div class="launch-card" data-kind="idle" id="cardPython">
+        <span class="launch-card__label">Python</span>
+        <strong class="launch-card__value" id="statusPython">standby</strong>
+        <small class="launch-card__meta" id="statusPythonMeta">AI backend pending</small>
       </div>
-
-      <!-- SETUP STATE -->
-      <div class="state setup-state" style="display: none;">
-        <div class="setup-header">
-          <p class="setup-title">FIRST TIME SETUP</p>
-          <p class="setup-sub">Required dependencies detected missing</p>
-        </div>
-        <div class="dep-list" id="depList"></div>
-        <div class="log-area setup-log" id="setupLog" style="display: none;"></div>
-        <div class="setup-actions" id="setupActions">
-          <button class="btn btn-primary" id="installDepsBtn">INSTALL DEPENDENCIES</button>
-        </div>
-        <div class="platform-links" id="platformLinks"></div>
+      <div class="launch-card" data-kind="idle" id="cardDashboard">
+        <span class="launch-card__label">Dashboard</span>
+        <strong class="launch-card__value" id="statusDashboard">checking</strong>
+        <small class="launch-card__meta" id="statusDashboardMeta">Bundle not checked</small>
       </div>
+      <div class="launch-card" data-kind="idle" id="cardPolicy">
+        <span class="launch-card__label">Policy</span>
+        <strong class="launch-card__value" id="statusPolicy">local</strong>
+        <small class="launch-card__meta" id="statusPolicyMeta">Offline-first</small>
+      </div>
+      <div class="launch-card" data-kind="idle" id="cardRoute">
+        <span class="launch-card__label">Route</span>
+        <strong class="launch-card__value" id="statusRoute">127.0.0.1</strong>
+        <small class="launch-card__meta" id="statusRouteMeta">Ports pending</small>
+      </div>
+    </section>
+
+    <!-- Cyberpunk terminal boot console -->
+    <section class="console" aria-label="Boot progress">
+      <header class="console__head">
+        <span class="console__dot console__dot--r"></span>
+        <span class="console__dot console__dot--y"></span>
+        <span class="console__dot console__dot--g"></span>
+        <span class="console__title">/boot/aeternus-nexus</span>
+        <span class="console__time" id="consoleClock">t+0.0s</span>
+      </header>
+      <div class="console__body">
+        <!-- Tier 1: ASCII progress bar -->
+        <pre class="console__bar" id="bootBar">SYSTEM BOOT  [<span class="console__bar-fill"></span><span class="console__bar-empty"></span>] <span class="console__bar-pct">0%</span></pre>
+        <!-- Tier 3: Live sub-step ticker -->
+        <div class="console__ticker" id="bootTicker"><span class="console__chevron">▸</span> standing by</div>
+        <!-- Tier 2: Phase log stream -->
+        <pre class="console__stream" id="bootStream"></pre>
+      </div>
+    </section>
+
+    <details class="boot__logs" id="bootLogs">
+      <summary>Backend logs</summary>
+      <pre class="boot__log-area" id="logArea"></pre>
+    </details>
+
+    <!-- Live status bar — shown only when system is running -->
+    <div class="status-bar" id="statusBar" hidden>
+      <span class="status-bar__dot" id="statusDot"></span>
+      <span class="status-bar__text" id="statusText">ONLINE</span>
+      <span class="status-bar__sep">·</span>
+      <span class="status-bar__uptime" id="statusUptime"></span>
     </div>
 
-    <div class="card-footer">
-      <button class="btn btn-primary" id="startBtn">START SYSTEM</button>
-      <button class="btn btn-secondary" id="openBtn" disabled>OPEN INTERFACE</button>
-      <button class="btn btn-tertiary" id="stopBtn">Stop</button>
+    <div class="boot__actions" id="bootActions">
+      <!-- Dynamic — rendered by app.js based on system state. Buttons:
+           idle/stopped:  [START SYSTEM]
+           starting:      [CANCEL]
+           running:       [STOP SYSTEM] [OPEN INTERFACE]  (primary = OPEN)
+           failed:        [RESTART] [VIEW DIAGNOSTICS]
+      -->
     </div>
 
-    <div class="corner-marks">
-      <div class="mark tl"></div>
-      <div class="mark tr"></div>
-      <div class="mark bl"></div>
-      <div class="mark br"></div>
+    <!-- Overflow menu: rebuild, check updates, view logs, restart verbose -->
+    <div class="sysmenu" id="sysmenu" hidden>
+      <button class="sysmenu__item" data-action="check-updates">⟳ CHECK FOR UPDATES</button>
+      <button class="sysmenu__item" data-action="rebuild">⚒ REBUILD DASHBOARD</button>
+      <button class="sysmenu__item" data-action="restart-verbose">↻ RESTART (VERBOSE)</button>
+      <button class="sysmenu__item" data-action="open-logs">▤ OPEN LOGS FOLDER</button>
+      <button class="sysmenu__item" data-action="copy-diag">⎘ COPY DIAGNOSTICS</button>
+      <button class="sysmenu__item" data-action="export-diag">⇩ EXPORT DIAGNOSTICS</button>
+    </div>
+  </main>
+
+  <!-- ── Screen: SETUP ───────────────────────────────────────────────────── -->
+  <main class="screen screen--setup" data-screen-id="setup" hidden>
+    <h1 class="screen__title">FIRST-TIME SETUP</h1>
+    <p class="screen__sub">Install missing dependencies before launching the system.</p>
+    <ul class="checklist" id="depsList"></ul>
+    <button class="btn btn--primary" id="installBtn">INSTALL DEPENDENCIES</button>
+  </main>
+
+  <!-- ── Screen: UPDATE ──────────────────────────────────────────────────── -->
+  <main class="screen screen--update" data-screen-id="update" hidden>
+    <h1 class="screen__title">SYSTEM UPDATE</h1>
+    <p class="screen__sub" id="updateStage">Checking for updates…</p>
+    <div class="progress"><div class="progress__bar" id="updateProgress" style="width:0%"></div></div>
+    <pre class="boot__log-area" id="updateLogs"></pre>
+    <div class="boot__actions">
+      <button class="btn btn--ghost" id="updateSkipBtn">SKIP</button>
+      <button class="btn btn--primary" id="updateReloadBtn" disabled>APPLY &amp; RESTART</button>
+    </div>
+  </main>
+
+  <!-- ── Screen: DIAGNOSTICS ─────────────────────────────────────────────── -->
+  <main class="screen screen--diag" data-screen-id="diagnostics" hidden>
+    <h1 class="screen__title screen__title--alert">DASHBOARD DID NOT START</h1>
+    <p class="screen__sub" id="diagSummary">—</p>
+
+    <ol class="phase-rail phase-rail--diag" id="diagRail" aria-label="Phase status"></ol>
+
+    <div class="diag__panel">
+      <div class="diag__label">FAILING PHASE</div>
+      <div class="diag__failure" id="diagFailure">—</div>
     </div>
 
-    <div class="update-badge" id="updateBadge" style="display: none;">
-      <span class="pulse-dot"></span> Update Available
+    <div class="diag__panel">
+      <div class="diag__label">LAST 20 LOG LINES</div>
+      <pre class="boot__log-area boot__log-area--diag" id="diagLogs"></pre>
     </div>
-  </div>
+
+    <div class="boot__actions boot__actions--diag">
+      <button class="btn btn--ghost" id="diagOpenLogsBtn">OPEN LOGS FOLDER</button>
+      <button class="btn btn--ghost" id="diagCopyBtn">COPY DIAGNOSTICS</button>
+      <button class="btn btn--ghost" id="diagExportBtn">EXPORT DIAGNOSTICS</button>
+      <button class="btn btn--primary" id="diagVerboseBtn">RESTART WITH VERBOSE</button>
+    </div>
+  </main>
 
   <script src="app.js"></script>
 </body>

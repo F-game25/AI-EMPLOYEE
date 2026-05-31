@@ -1,10 +1,20 @@
-"""Skill catalog with class-based stateless skill modules."""
+"""Skill catalog with class-based stateless skill modules.
+
+``SkillCatalog`` manages ``SkillBase`` instances for the orchestrator.
+``ExecutableSkillRegistry`` (also a singleton, exposed via
+``get_skill_catalog()``) extends it with ``register_skill()``,
+``execute_skill()``, and ``find_for_goal()`` for use by API routes and
+direct skill execution.
+"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import threading
 from typing import Any, Callable
 
 from skills.base import SkillBase
+from skills.context_research import ContextResearchSkill
 
 # Capability tags per skill name
 _SKILL_TAGS: dict[str, list[str]] = {
@@ -15,6 +25,7 @@ _SKILL_TAGS: dict[str, list[str]] = {
     "email-marketing": ["marketing", "email", "campaigns"],
     "ceo-briefing": ["analytics", "reporting", "business_intelligence"],
     "problem-solver": ["general", "fallback"],
+    "context-research": ["research", "learning", "context"],
 }
 
 
@@ -55,7 +66,17 @@ class AgentDispatchSkill(SkillBase):
     ) -> dict[str, Any]:
         payload = {"skill": self.name, "input": input_data}
         action_result = action_runner("skill_dispatch", payload)
-        return {"status": "success", "action_result": action_result}
+        # Honest status: only "executed"/"success" count as success. unknown_action
+        # or error must surface as a real failure — never a fake success.
+        bus_status = (action_result or {}).get("status")
+        ok = bus_status in ("executed", "success")
+        result_obj = (action_result or {}).get("result") or {}
+        return {
+            "status": "success" if ok else "failed",
+            "action_result": action_result,
+            "output": result_obj.get("output") if ok else None,
+            "error": "" if ok else ((action_result or {}).get("error") or f"action not executed (status={bus_status})"),
+        }
 
 
 class SkillCatalog:
@@ -74,7 +95,7 @@ class SkillCatalog:
             ("ceo-briefing", "Creates analytical business briefing outputs."),
             ("problem-solver", "General-purpose fallback execution skill."),
         ]
-        return {
+        skills: dict[str, SkillBase] = {
             skill_name: AgentDispatchSkill(
                 skill_name=skill_name,
                 description=desc,
@@ -82,6 +103,43 @@ class SkillCatalog:
             )
             for skill_name, desc in configured
         }
+        # First-class skill: context research (executable directly, no dispatch indirection)
+        skills["context-research"] = ContextResearchSkill()
+        skills.update(self._load_configured_skills(existing=set(skills)))
+        return skills
+
+    def _load_configured_skills(self, *, existing: set[str]) -> dict[str, SkillBase]:
+        config_path = Path(__file__).resolve().parents[1] / "config" / "skills_library.json"
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+        entries = raw if isinstance(raw, list) else raw.get("skills", [])
+        if not isinstance(entries, list):
+            return {}
+
+        loaded: dict[str, SkillBase] = {}
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            skill_id = str(item.get("id") or item.get("skill_id") or "").strip()
+            if not skill_id or skill_id in existing:
+                continue
+            tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+            category = str(item.get("category") or "").strip().lower().replace(" ", "_")
+            capability_tags = [str(tag) for tag in tags if str(tag).strip()]
+            if category:
+                capability_tags.append(category)
+            if not capability_tags:
+                capability_tags = ["configured"]
+            loaded[skill_id] = AgentDispatchSkill(
+                skill_name=skill_id,
+                description=str(item.get("description") or item.get("name") or "Configured skill."),
+                version=str(item.get("version") or "1.0"),
+                capability_tags=capability_tags,
+            )
+        return loaded
 
     def get(self, name: str) -> SkillBase | None:
         return self._skills.get(name)
@@ -92,14 +150,128 @@ class SkillCatalog:
     def all(self) -> dict[str, SkillBase]:
         return dict(self._skills)
 
+    def list_skills(self) -> list[str]:
+        return sorted(self._skills)
+
 
 _instance: SkillCatalog | None = None
 _instance_lock = threading.Lock()
 
 
-def get_skill_catalog() -> SkillCatalog:
+def get_skill_catalog() -> "ExecutableSkillCatalog":
+    """Return the ExecutableSkillCatalog singleton."""
     global _instance
     with _instance_lock:
         if _instance is None:
-            _instance = SkillCatalog()
-    return _instance
+            _instance = ExecutableSkillCatalog()
+    return _instance  # type: ignore[return-value]
+
+
+# ── Executable skill registry ─────────────────────────────────────────────────
+
+class ExecutableSkillCatalog(SkillCatalog):
+    """SkillCatalog extended with register/execute/find_for_goal for API use."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._exec_skills: dict[str, dict[str, Any]] = {}
+        self._register_exec_defaults()
+
+    # ── Registration ──────────────────────────────────────────────────────────
+
+    def register_skill(self, name: str, version: str, fn: Callable,
+                       tools_required: list[str], description: str,
+                       risk_level: int = 1) -> None:
+        self._exec_skills[name] = {
+            "name": name, "version": version, "fn": fn,
+            "tools": tools_required, "description": description,
+            "risk_level": risk_level,
+        }
+
+    # ── Lookup ────────────────────────────────────────────────────────────────
+
+    def get_skill(self, name: str) -> dict | None:
+        return self._exec_skills.get(name)
+
+    def list_skills(self) -> list[dict]:  # type: ignore[override]
+        return [
+            {
+                "name": k, "version": v["version"],
+                "description": v["description"],
+                "tools": v["tools"], "risk_level": v["risk_level"],
+            }
+            for k, v in self._exec_skills.items()
+        ]
+
+    def find_for_goal(self, goal: str) -> list[dict]:
+        gl = goal.lower()
+        return [s for s in self.list_skills()
+                if any(w in gl for w in s["description"].lower().split())]
+
+    # ── Execution ─────────────────────────────────────────────────────────────
+
+    def execute_skill(self, name: str, params: dict,
+                      agent_id: str = "system") -> dict:
+        skill = self._exec_skills.get(name)
+        if not skill:
+            return {"ok": False, "error": f"Skill '{name}' not found"}
+        try:
+            return {"ok": True, "skill": name, "result": skill["fn"](**params)}
+        except Exception as e:
+            return {"ok": False, "skill": name, "error": str(e)}
+
+    # ── Default skills ────────────────────────────────────────────────────────
+
+    def _register_exec_defaults(self) -> None:
+        self.register_skill("market_research", "1.0", self._market_research,
+                            ["web_search", "llm_infer"],
+                            "Research a market or topic", 0)
+        self.register_skill("content_creation", "1.0", self._content_creation,
+                            ["llm_infer", "write_file"],
+                            "Create written content", 1)
+        self.register_skill("document_intelligence", "1.0", self._doc_intelligence,
+                            ["read_file", "llm_infer", "embed_text"],
+                            "Analyze documents", 0)
+        self.register_skill("lead_generation", "1.0", self._lead_gen,
+                            ["web_search", "call_api"],
+                            "Find potential leads", 2)
+        self.register_skill("customer_support", "1.0", self._support,
+                            ["llm_infer", "get_memory"],
+                            "Handle customer queries", 1)
+
+    def _market_research(self, topic: str, **_):
+        from tools.registry import get_tool_registry
+        r = get_tool_registry()
+        search_result = r.execute("web_search", {"query": topic, "limit": 5})
+        llm_result = r.execute("llm_infer", {
+            "prompt": f"Summarize market research for: {topic}", "max_tokens": 500,
+        })
+        return {"topic": topic, "sources": search_result, "summary": llm_result}
+
+    def _content_creation(self, topic: str, format: str = "article", **_):
+        from tools.registry import get_tool_registry
+        return get_tool_registry().execute(
+            "llm_infer",
+            {"prompt": f"Write a {format} about: {topic}", "max_tokens": 1000},
+        )
+
+    def _doc_intelligence(self, path: str, query: str = "", **_):
+        from tools.registry import get_tool_registry
+        r = get_tool_registry()
+        doc = r.execute("read_file", {"path": path})
+        return r.execute("llm_infer", {
+            "prompt": f"Analyze this document: {doc}\n\nQuery: {query}",
+            "max_tokens": 800,
+        })
+
+    def _lead_gen(self, criteria: str, **_):
+        return {"stub": True,
+                "blocked": "Lead generation requires HITL approval",
+                "criteria": criteria}
+
+    def _support(self, query: str, **_):
+        from tools.registry import get_tool_registry
+        return get_tool_registry().execute(
+            "llm_infer",
+            {"prompt": f"Help customer with: {query}", "max_tokens": 500},
+        )

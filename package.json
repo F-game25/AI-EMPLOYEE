@@ -8,7 +8,29 @@
     "install:deps": "bash install.sh",
     "start": "bash ./start.sh",
     "dev": "bash ./dev.sh",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:python-core": "python3 scripts/build_python_core_bundle.py --download --verify",
+    "build:python-core:full": "python3 scripts/build_python_core_bundle.py --download --verify --playwright-browsers",
+    "build:browser-core": "python3 scripts/build_python_core_bundle.py --verify --playwright-browsers",
+    "verify:python-core": "python3 scripts/build_python_core_bundle.py --verify",
+    "bootstrap:python-core": "python3 scripts/bootstrap_python_core.py",
+    "build:launcher": "npm --prefix launcher run build",
+    "package:enterprise:linux": "npm run verify:python-core && npm --prefix launcher run package:dir:offline && python3 scripts/verify_enterprise_linux_package.py",
+    "dist:desktop:linux": "npm --prefix launcher run build:linux",
+    "dist:desktop:mac": "npm --prefix launcher run build:mac",
+    "dist:desktop:win": "npm --prefix launcher run build:win",
+    "dist:desktop:all": "npm --prefix launcher run build:all",
     "test": "python3 -m pytest tests/ && python3 runtime/agents/agent_selftest.py",
-    "lint": "find runtime/agents -name '*.py' -exec python3 -m py_compile {} +"
+    "lint": "find runtime/agents -name '*.py' -exec python3 -m py_compile {} +",
+    "test:settings": "python3 -m pytest tests/test_settings_e2e.py -v",
+    "test:settings:frontend": "node tests/test_settings_frontend.js",
+    "test:settings:integration": "node tests/test_settings_integration.js",
+    "test:settings:all": "npm run test:settings && npm run test:settings:frontend && npm run test:settings:integration",
+    "test:security:node": "node tests/test_security_node.js",
+    "verify:settings": "bash scripts/verify-settings.sh"
+  },
+  "dependencies": {
+    "multer": "^2.1.1",
+    "uuid": "^14.0.0"
   }
 }

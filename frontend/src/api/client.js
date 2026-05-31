@@ -34,6 +34,7 @@ const api = {
   get:    (path, opts)       => _fetch('GET',    path, undefined, opts),
   post:   (path, body, opts) => _fetch('POST',   path, body,      opts),
   put:    (path, body, opts) => _fetch('PUT',    path, body,      opts),
+  patch:  (path, body, opts) => _fetch('PATCH',  path, body,      opts),
   delete: (path, opts)       => _fetch('DELETE', path, undefined, opts),
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -97,6 +98,22 @@ const api = {
     toggle:  ()        => api.post('/api/blacklight/toggle', {}),
     scan:    ()        => api.post('/api/blacklight/scan', {}),
     alerts:  ()        => api.get('/api/blacklight/alerts'),
+    tools:   ()        => api.get('/api/blacklight/tools'),
+    search:  (query)   => api.post('/api/blacklight/tools/search', { query }),
+    runTool: (payload) => api.post('/api/blacklight/tools/run', payload),
+  },
+
+  // ── Recon ────────────────────────────────────────────────────────────────
+  recon: {
+    tools:    ()        => api.get('/api/recon/tools'),
+    search:   (query)  => api.post('/api/recon/tools/search', { query }),
+    runTool:  (payload) => api.post('/api/recon/tools/run', payload),
+    cases:    ()        => api.get('/api/recon/cases'),
+    createCase: (payload) => api.post('/api/recon/cases', payload),
+    findings: (caseId)  => api.get(`/api/recon/findings${caseId ? `?case_id=${encodeURIComponent(caseId)}` : ''}`),
+    createFinding: (payload) => api.post('/api/recon/findings', payload),
+    updateFinding: (id, payload) => api.patch(`/api/recon/findings/${encodeURIComponent(id)}`, payload),
+    audit:    ()        => api.get('/api/recon/audit'),
   },
 
   // ── Fairness ──────────────────────────────────────────────────────────────
@@ -116,6 +133,9 @@ const api = {
   voice: {
     synthesize: (text, persona) => api.post('/api/voice/synthesize', { text, persona }),
     status:     ()              => api.get('/api/voice/status'),
+    config:     ()              => api.get('/api/voice/config'),
+    saveConfig: (payload)       => api.post('/api/voice/config', payload),
+    fishStatus: ()              => api.get('/api/voice/fish-speech/status'),
   },
 
   // ── Product / Ops ─────────────────────────────────────────────────────────

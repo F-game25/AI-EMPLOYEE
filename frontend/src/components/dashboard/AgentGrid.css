@@ -1,0 +1,178 @@
+/* ════════════════════════════════════════════════════════════════════
+   AgentGrid — ACTIVE AGENT SWARM right-rail panel
+   3×2 tiles + spawn tile, role-tinted avatars, status dots
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ag-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(14,18,32,0.78) 0%, rgba(8,11,22,0.92) 100%);
+  border: 1px solid var(--nx-border, rgba(229,199,107,0.14));
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.4),
+    0 8px 24px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.ag-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--nx-border, rgba(229,199,107,0.14));
+}
+.ag-panel__title {
+  font-family: var(--nx-font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--nx-tracking-cap, 0.18em);
+  text-transform: uppercase;
+  color: var(--nx-gold, #e5c76b);
+  text-shadow: 0 0 8px rgba(229,199,107,0.25);
+}
+.ag-panel__count {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  letter-spacing: var(--nx-tracking-cap, 0.18em);
+  text-transform: uppercase;
+  color: var(--nx-text-dim, #5a5747);
+  font-variant-numeric: tabular-nums;
+}
+
+.ag-panel__empty {
+  padding: 18px 8px;
+  text-align: center;
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  letter-spacing: var(--nx-tracking-cap, 0.18em);
+  text-transform: uppercase;
+  color: var(--nx-text-dim, #5a5747);
+}
+
+.ag-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 8px;
+}
+
+/* ── Tile ──────────────────────────────────────────────────────────── */
+.ag-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 9px;
+  background: rgba(20,24,38,0.55);
+  border: 1px solid var(--nx-border, rgba(229,199,107,0.14));
+  border-radius: 3px;
+  text-align: center;
+  transition: border-color var(--nx-dur-fast, 160ms) var(--nx-ease, ease),
+              background var(--nx-dur-fast, 160ms) var(--nx-ease, ease);
+}
+.ag-tile:hover {
+  border-color: var(--nx-border-strong, rgba(229,199,107,0.28));
+  background: rgba(26,30,46,0.72);
+}
+
+.ag-tile__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow:
+    0 0 0 2px rgba(0,0,0,0.45),
+    0 0 12px rgba(229,199,107,0.18);
+}
+
+.ag-tile__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+.ag-tile__name {
+  font-family: var(--nx-font-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--nx-gold, #e5c76b);
+  letter-spacing: -0.01em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ag-tile__role {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  letter-spacing: var(--nx-tracking-cap, 0.18em);
+  text-transform: uppercase;
+  color: var(--nx-text-dim, #5a5747);
+}
+.ag-tile__status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.ag-tile__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+.ag-tile__status-label {
+  font-family: var(--nx-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.ag-tile__success {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--nx-text, #ecead8);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Spawn tile ────────────────────────────────────────────────────── */
+.ag-tile--spawn {
+  background: transparent;
+  border: 1px dashed var(--nx-border-strong, rgba(229,199,107,0.28));
+  cursor: pointer;
+  justify-content: center;
+  font: inherit;
+  color: var(--nx-gold, #e5c76b);
+  appearance: none;
+}
+.ag-tile--spawn:hover {
+  background: rgba(229,199,107,0.06);
+  border-color: var(--nx-gold, #e5c76b);
+  box-shadow: 0 0 14px rgba(229,199,107,0.18);
+}
+.ag-tile__plus {
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1;
+  color: var(--nx-gold, #e5c76b);
+}
+.ag-tile__spawn-label {
+  font-family: var(--nx-font-mono);
+  font-size: 8px;
+  letter-spacing: var(--nx-tracking-cap, 0.18em);
+  text-transform: uppercase;
+  color: var(--nx-gold, #e5c76b);
+  font-weight: 700;
+}

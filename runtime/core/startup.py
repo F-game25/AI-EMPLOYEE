@@ -15,13 +15,14 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 UI_HOST = "127.0.0.1"
-UI_PORT = 8787
+UI_PORT = int(os.environ.get("PROBLEM_SOLVER_UI_PORT") or os.environ.get("PORT") or "8787")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOT_APP_DIR = REPO_ROOT / "runtime" / "agents" / "problem-solver-ui"
 BOT_MAIN_PATH = BOT_APP_DIR / "server.py"
 FRONTEND_DIR = REPO_ROOT / "frontend"
 FRONTEND_DIST = FRONTEND_DIR / "dist"
 WORKER_POOL_PATH = REPO_ROOT / "runtime" / "core" / "worker_pool.py"
+CORE_DEP_MANIFEST = REPO_ROOT / "runtime" / "config" / "core_dependency_manifest.json"
 
 
 def _ok(message: str) -> None:
@@ -40,8 +41,11 @@ def check_python_version() -> None:
 
 
 def check_node_installed() -> None:
-    if not shutil.which("node") or not shutil.which("npm"):
-        _fail("Node.js and npm must be installed")
+    node_bin = os.environ.get("NODE_BIN") or shutil.which("node")
+    if not node_bin:
+        _fail("Node runtime must be available")
+    if os.environ.get("AI_EMPLOYEE_PACKAGED") != "1" and not shutil.which("npm"):
+        _fail("npm must be installed for development startup")
     _ok("Node installed")
 
 
@@ -55,8 +59,8 @@ def check_port_available(port: int) -> None:
 
 def check_env_variables() -> None:
     configured_port = os.environ.get("PROBLEM_SOLVER_UI_PORT")
-    if configured_port and configured_port != str(UI_PORT):
-        _fail(f"PROBLEM_SOLVER_UI_PORT must be {UI_PORT}, got {configured_port}")
+    if configured_port and not configured_port.isdigit():
+        _fail(f"PROBLEM_SOLVER_UI_PORT must be numeric, got {configured_port}")
     try:
         __import__("fastapi")
         __import__("uvicorn")
@@ -65,7 +69,39 @@ def check_env_variables() -> None:
     _ok("Environment variables OK")
 
 
+def check_core_dependencies() -> None:
+    if not CORE_DEP_MANIFEST.exists():
+        _fail(f"Core dependency manifest missing: {CORE_DEP_MANIFEST}")
+    try:
+        manifest = json.loads(CORE_DEP_MANIFEST.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _fail(f"Core dependency manifest is invalid: {exc}")
+
+    missing: list[str] = []
+    for item in manifest.get("core", []):
+        import_name = item.get("import")
+        if not import_name:
+            continue
+        try:
+            __import__(import_name)
+        except Exception as exc:
+            missing.append(f"{item.get('pip', import_name)} ({import_name}): {exc}")
+
+    if missing:
+        detail = "\n  - ".join(missing)
+        _fail(
+            "Enterprise core dependency bundle is incomplete.\n"
+            f"  - {detail}\n"
+            "Rebuild the downloadable app with bundled wheels/vendor artifacts; "
+            "core dependencies may not be downloaded on first boot."
+        )
+    _ok(f"Enterprise core dependencies OK ({len(manifest.get('core', []))} checked)")
+
+
 def clear_python_caches() -> None:
+    if os.environ.get("AI_EMPLOYEE_PACKAGED") == "1":
+        _ok("Python cache cleanup skipped for packaged resources")
+        return
     removed = 0
     for root, dirs, files in os.walk(REPO_ROOT):
         if "__pycache__" in dirs:
@@ -133,7 +169,7 @@ def print_runtime_diagnostics() -> None:
     print(f"RUNNING FROM: {Path.cwd()}", flush=True)
     print(f"FILE PATH: {Path(__file__).resolve()}", flush=True)
     print(f"EXPECTED APP MAIN: {BOT_MAIN_PATH}", flush=True)
-    print(f"PYTHON: {shutil.which('python3') or sys.executable}", flush=True)
+    print(f"PYTHON: {sys.executable}", flush=True)
     print(f"UVICORN: {shutil.which('uvicorn') or 'not-found'}", flush=True)
     try:
         latest_commit = subprocess.check_output(
@@ -283,6 +319,7 @@ def startup_sequence() -> tuple[subprocess.Popen[str], subprocess.Popen[str]]:
     check_node_installed()
     check_port_available(UI_PORT)
     check_env_variables()
+    check_core_dependencies()
     verify_uvicorn_import_target()
     check_frontend_build()
     check_database()
@@ -340,6 +377,7 @@ def run_preflight() -> None:
     check_node_installed()
     check_port_available(UI_PORT)
     check_env_variables()
+    check_core_dependencies()
     verify_uvicorn_import_target()
     check_frontend_build()
     check_database()
@@ -351,8 +389,11 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.preflight:
-        run_preflight()
-        return 0
+        try:
+            run_preflight()
+            return 0
+        except RuntimeError:
+            return 1
 
     server_proc = None
     worker_proc = None
@@ -367,6 +408,8 @@ def main() -> int:
             time.sleep(1.0)
     except KeyboardInterrupt:
         print("[•] Shutdown requested", flush=True)
+    except RuntimeError:
+        return 1
     finally:
         _terminate(server_proc)
         _terminate(worker_proc)

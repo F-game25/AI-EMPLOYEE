@@ -1,0 +1,14 @@
+{
+  "id": "openclaw",
+  "source_url": "https://github.com/openclaw/openclaw",
+  "fork_url": "https://github.com/F-game25/openclaw-2.0",
+  "upstream_commit": "c8d9733e41bdd59d5e1e454d75e31abb655fc430",
+  "license": "MIT",
+  "checksum_sha256": "5c67ac39ab9f29f2bf8239fae1f205d96ec7b0be745ed60c4d4defe659cb6386",
+  "local_namespace": "aeternus_channels",
+  "risk_class": "medium",
+  "runtime_code_imported": false,
+  "imported_paths": ["runtime/config/fork_integration_manifest.json#channels"],
+  "approval_policy": "local_channel_only_external_adapters_disabled",
+  "patch_notes": "Recorded channel/session ideas for future native gateway work. External messaging adapters remain disabled."
+}

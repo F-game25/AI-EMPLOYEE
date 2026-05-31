@@ -1,0 +1,25 @@
+{
+  "tiers": [
+    { "weight": 1.00, "patterns": ["\\.gov(/|$)", "\\.edu(/|$)", "ietf\\.org", "w3\\.org", "iso\\.org", "iana\\.org", "ec\\.europa\\.eu", "europa\\.eu"] },
+    { "weight": 0.95, "patterns": ["docs\\.python\\.org", "developer\\.mozilla\\.org", "kernel\\.org", "rfc-editor\\.org", "nist\\.gov", "who\\.int"] },
+    { "weight": 0.90, "patterns": ["wikipedia\\.org", "wikimedia\\.org", "scholar\\.google\\.com", "arxiv\\.org", "pubmed", "nature\\.com", "science\\.org"] },
+    { "weight": 0.85, "patterns": ["reuters\\.com", "apnews\\.com", "bbc\\.co\\.uk", "bbc\\.com", "bloomberg\\.com", "ft\\.com", "wsj\\.com", "economist\\.com"] },
+    { "weight": 0.80, "patterns": ["nytimes\\.com", "washingtonpost\\.com", "theguardian\\.com", "nasdaq\\.com", "techcrunch\\.com", "theverge\\.com", "wired\\.com"] },
+    { "weight": 0.75, "patterns": ["github\\.com", "gitlab\\.com", "stackoverflow\\.com", "stackexchange\\.com", "crunchbase\\.com", "linkedin\\.com/company"] },
+    { "weight": 0.65, "patterns": ["medium\\.com", "dev\\.to", "substack\\.com", "hashnode\\.", "hackernoon\\.com"] },
+    { "weight": 0.55, "patterns": ["reddit\\.com", "quora\\.com", "ycombinator\\.com"] }
+  ],
+  "default_weight": 0.40,
+  "fork_integrations": {
+    "policy": "metadata_checked_native_enhancement",
+    "runtime_code_import_requires_manifest": true,
+    "allowed_licenses": ["MIT", "Apache-2.0"],
+    "sources": [
+      "agent-skills",
+      "financial-services",
+      "cashclaw",
+      "automaton",
+      "openclaw"
+    ]
+  }
+}

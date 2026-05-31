@@ -2,6 +2,7 @@
 
 const os = require('os');
 const { spawn, spawnSync } = require('child_process');
+const fishSpeech = require('./fish_speech');
 
 const DEFAULT_VOLUME = 0.9;
 
@@ -47,6 +48,10 @@ let engineAmplitude = 180;
 let engineTone = 'futuristic';
 let engineVoiceId = 'default';
 let engineChannel = 'system'; // 'system' | 'customer'
+let engineProvider = 'fish_speech'; // 'fish_speech' | 'local'
+let engineFishOptions = { ...fishSpeech.DEFAULT_OPTIONS };
+let lastProviderError = null;
+let lastArtifact = null;
 let queue = [];
 let draining = false;
 let consecutiveFailures = 0;
@@ -191,11 +196,22 @@ function setChannel(channel) {
   engineChannel = channel === 'customer' ? 'customer' : 'system';
 }
 
+function setProvider(provider) {
+  engineProvider = provider === 'local' ? 'local' : 'fish_speech';
+}
+
 function getChannel() {
   return engineChannel;
 }
 
 async function init(options = {}) {
+  setProvider(options.provider || engineProvider);
+  if (options.fishSpeech && typeof options.fishSpeech === 'object') {
+    engineFishOptions = fishSpeech.configure({ ...engineFishOptions, ...options.fishSpeech });
+  } else {
+    engineFishOptions = fishSpeech.configure(engineFishOptions);
+  }
+
   engineVolume = clampVolume(options.volume ?? engineVolume);
 
   if (options.profile && VOICE_PROFILES[options.profile]) {
@@ -212,7 +228,7 @@ async function init(options = {}) {
     backend = detectBackend();
     silentMode = backend === 'silent';
     initialized = true;
-    console.log(`[VOICE] Engine initialized (${backend}${silentMode ? ', silent mode' : ''})`);
+    console.log(`[VOICE] Engine initialized (provider=${engineProvider}, fallback=${backend}${silentMode ? ', silent mode' : ''})`);
   }
 }
 
@@ -225,6 +241,33 @@ async function runSpeak(text, channel) {
   const normalized = normalizeText(text, resolvedChannel);
   if (!normalized) return;
   if (!initialized) await init();
+
+  if (engineProvider === 'fish_speech' && engineFishOptions.enabled) {
+    try {
+      const ok = await fishSpeech.checkAvailability();
+      if (ok) {
+        speaking = true;
+        console.log(`[VOICE:${resolvedChannel}] Fish Speech S2 local: ${normalized}`);
+        lastArtifact = await fishSpeech.synthesizeAndPlay(normalized, {
+          ...engineFishOptions,
+          speed: engineSpeed,
+          channel: resolvedChannel,
+        });
+        lastProviderError = null;
+        speaking = false;
+        consecutiveFailures = 0;
+        return;
+      }
+      lastProviderError = fishSpeech.getStatus().last_error || 'Fish Speech local server is unavailable';
+    } catch (err) {
+      speaking = false;
+      lastProviderError = String(err.message || err);
+      consecutiveFailures += 1;
+      console.warn(`[VOICE] Fish Speech S2 failed, using local fallback: ${lastProviderError}`);
+      if (!engineFishOptions.localFallback) return;
+    }
+  }
+
   if (silentMode) return;
 
   const command = buildCommand(normalized);
@@ -294,6 +337,10 @@ async function reconfigure(options = {}) {
     await init(options);
     return;
   }
+  setProvider(options.provider || engineProvider);
+  if (options.fishSpeech && typeof options.fishSpeech === 'object') {
+    engineFishOptions = fishSpeech.configure({ ...engineFishOptions, ...options.fishSpeech });
+  }
   engineVolume = clampVolume(options.volume ?? engineVolume);
   if (options.profile && VOICE_PROFILES[options.profile]) {
     loadVoice(options.profile);
@@ -304,6 +351,20 @@ async function reconfigure(options = {}) {
     if (options.tone) setTone(options.tone);
     if (options.channel) setChannel(options.channel);
   }
+}
+
+function getStatus() {
+  return {
+    initialized,
+    provider: engineProvider,
+    fallback_backend: backend,
+    silent: silentMode,
+    speaking,
+    channel: engineChannel,
+    fish_speech: fishSpeech.getStatus(),
+    last_provider_error: lastProviderError,
+    last_artifact: lastArtifact,
+  };
 }
 
 // ── Chunked speak ─────────────────────────────────────────────────────────────
@@ -333,7 +394,9 @@ module.exports = {
   setSpeed,
   setTone,
   setChannel,
+  setProvider,
   getChannel,
+  getStatus,
   normalizeText,
   VOICE_PROFILES,
 };

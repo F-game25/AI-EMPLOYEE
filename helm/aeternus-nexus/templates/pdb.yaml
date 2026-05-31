@@ -1,0 +1,25 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "aeternus-nexus.fullname" . }}-node
+  labels:
+    {{- include "aeternus-nexus.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: node-backend
+      {{- include "aeternus-nexus.selectorLabels" . | nindent 6 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "aeternus-nexus.fullname" . }}-python
+  labels:
+    {{- include "aeternus-nexus.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: python-backend
+      {{- include "aeternus-nexus.selectorLabels" . | nindent 6 }}

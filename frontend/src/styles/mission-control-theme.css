@@ -1,0 +1,159 @@
+/**
+ * Mission Control Design System — Theme & Design Tokens
+ *
+ * Complete CSS custom property system for mission control aesthetic:
+ * - Base colors (blacks, surfaces)
+ * - Primary accent (cyan + variants)
+ * - Secondary accents (gold, orange, green, purple, red)
+ * - Text hierarchy (primary, secondary, muted, glow)
+ * - Borders & shadows (grid, glow, inner depth)
+ * - Animations & transitions
+ */
+
+:root {
+  /* ──────────────────────────────────────────────────────────
+     BASE COLORS — Dark Mission Control Palette
+     ────────────────────────────────────────────────────────── */
+
+  --mc-black: #0a0e27;
+  --mc-dark: #0f1629;
+  --mc-surface: #1a1f3a;
+  --mc-surface-hover: #242d4a;
+  --mc-grid: #1a2847;
+
+  /* ──────────────────────────────────────────────────────────
+     PRIMARY ACCENT — Cyan (LED-like, high contrast)
+     ────────────────────────────────────────────────────────── */
+
+  --mc-cyan: #00d9ff;
+  --mc-cyan-dark: #0088aa;
+  --mc-cyan-bright: #00ffff;
+  --mc-cyan-glow: rgba(0, 217, 255, 0.3);
+  --mc-cyan-glow-intense: rgba(0, 217, 255, 0.6);
+
+  /* ──────────────────────────────────────────────────────────
+     SECONDARY ACCENTS — Mission Control Color Palette
+     ────────────────────────────────────────────────────────── */
+
+  --mc-gold: #ffa500;
+  --mc-gold-dark: #cc8400;
+  --mc-gold-bright: #ffb933;
+
+  --mc-orange: #ff6b00;
+  --mc-orange-bright: #ff8533;
+
+  --mc-green: #00ff88;
+  --mc-green-dark: #00cc6b;
+
+  --mc-purple: #9d4edd;
+  --mc-purple-bright: #c77dff;
+
+  --mc-red: #ff3333;
+  --mc-red-dark: #cc2626;
+
+  /* ──────────────────────────────────────────────────────────
+     TEXT COLORS — Hierarchy with glow variants
+     ────────────────────────────────────────────────────────── */
+
+  --mc-text-primary: #e0e0e0;
+  --mc-text-secondary: #a0a0a0;
+  --mc-text-muted: #606080;
+
+  /* Text glow effect (text-shadow) */
+  --mc-text-glow: 0 0 8px rgba(0, 217, 255, 0.4);
+  --mc-text-glow-intense: 0 0 12px rgba(0, 217, 255, 0.8);
+  --mc-text-glow-gold: 0 0 8px rgba(255, 165, 0, 0.4);
+
+  /* ──────────────────────────────────────────────────────────
+     BORDERS — Grid & accent variants
+     ────────────────────────────────────────────────────────── */
+
+  --mc-border: 1px solid rgba(0, 217, 255, 0.2);
+  --mc-border-gold: 1px solid rgba(255, 165, 0, 0.3);
+  --mc-border-grid: 1px solid rgba(26, 40, 71, 0.6);
+
+  /* ──────────────────────────────────────────────────────────
+     SHADOWS — Glow effects for depth & focus
+     ────────────────────────────────────────────────────────── */
+
+  --mc-shadow-glow: 0 0 12px rgba(0, 217, 255, 0.25),
+                   0 0 24px rgba(0, 217, 255, 0.1);
+  --mc-shadow-glow-intense: 0 0 20px rgba(0, 217, 255, 0.5),
+                            0 0 40px rgba(0, 217, 255, 0.2);
+  --mc-shadow-gold: 0 0 12px rgba(255, 165, 0, 0.25),
+                    0 0 24px rgba(255, 165, 0, 0.1);
+  --mc-shadow-inner: inset 0 0 12px rgba(0, 217, 255, 0.05),
+                     inset 0 0 24px rgba(0, 217, 255, 0.02);
+
+  /* ──────────────────────────────────────────────────────────
+     ANIMATIONS — Named timings & easing
+     ────────────────────────────────────────────────────────── */
+
+  --mc-pulse: pulse 2s ease-in-out infinite;
+  --mc-glow-pulse: glow-pulse 2.4s ease-in-out infinite;
+  --mc-orbital: orbital 8s linear infinite;
+  --mc-scanline: scanline 3s ease-in-out infinite;
+  --mc-blink: blink 1.2s ease-in-out infinite;
+
+  /* Duration & Easing */
+  --mc-duration-fast: 150ms;
+  --mc-duration-normal: 300ms;
+  --mc-duration-slow: 600ms;
+  --mc-easing-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --mc-easing-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ──────────────────────────────────────────────────────────
+     GRADIENTS — Directional color flows
+     ────────────────────────────────────────────────────────── */
+
+  --mc-grad-cyan: linear-gradient(135deg, #00ffff 0%, #00d9ff 50%, #0088aa 100%);
+  --mc-grad-gold: linear-gradient(135deg, #ffb933 0%, #ffa500 50%, #cc8400 100%);
+  --mc-grad-cyber: linear-gradient(180deg, rgba(0, 217, 255, 0.1) 0%, transparent 100%);
+
+  /* ──────────────────────────────────────────────────────────
+     SPACING — 4px grid system
+     ────────────────────────────────────────────────────────── */
+
+  --mc-space-1: 4px;
+  --mc-space-2: 8px;
+  --mc-space-3: 12px;
+  --mc-space-4: 16px;
+  --mc-space-5: 24px;
+  --mc-space-6: 32px;
+
+  /* ──────────────────────────────────────────────────────────
+     RADIUS — Rounded corner scales
+     ────────────────────────────────────────────────────────── */
+
+  --mc-radius-sm: 4px;
+  --mc-radius-md: 8px;
+  --mc-radius-lg: 12px;
+  --mc-radius-xl: 16px;
+
+  /* ──────────────────────────────────────────────────────────
+     Z-INDEX — Layering system
+     ────────────────────────────────────────────────────────── */
+
+  --mc-z-base: 0;
+  --mc-z-background: 10;
+  --mc-z-content: 20;
+  --mc-z-modal: 100;
+  --mc-z-tooltip: 110;
+}
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE OVERRIDES
+   ════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --mc-pulse: none;
+    --mc-glow-pulse: none;
+    --mc-orbital: none;
+    --mc-scanline: none;
+    --mc-blink: none;
+    --mc-duration-fast: 1ms;
+    --mc-duration-normal: 1ms;
+    --mc-duration-slow: 1ms;
+  }
+}

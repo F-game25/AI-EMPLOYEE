@@ -1,0 +1,199 @@
+.md-editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0a0a14;
+  border: 1px solid rgba(229, 199, 107, 0.12);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Inter', sans-serif;
+}
+
+.md-editor__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(229, 199, 107, 0.08);
+  background: rgba(13, 13, 24, 0.6);
+  flex-wrap: wrap;
+}
+
+.md-editor__toolbar button {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.md-editor__toolbar button:hover {
+  border-color: #e5c76b;
+  color: #e5c76b;
+}
+
+.md-editor__toolbar button.is-active {
+  background: rgba(229, 199, 107, 0.15);
+  border-color: #e5c76b;
+  color: #e5c76b;
+}
+
+.md-editor__sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 0 6px;
+}
+
+.md-editor__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.md-editor__content .ProseMirror {
+  min-height: 100%;
+  outline: none;
+}
+
+.md-editor__content h1 {
+  font-size: 24px;
+  color: #e5c76b;
+  margin: 0 0 12px;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.md-editor__content h2 {
+  font-size: 18px;
+  color: #fbbf24;
+  margin: 18px 0 8px;
+  font-weight: 600;
+}
+
+.md-editor__content h3 {
+  font-size: 15px;
+  color: #d4a82e;
+  margin: 14px 0 6px;
+  font-weight: 600;
+}
+
+.md-editor__content p {
+  margin: 0 0 8px;
+}
+
+.md-editor__content code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.md-editor__content pre {
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.md-editor__content pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.md-editor__content blockquote {
+  border-left: 3px solid #e5c76b;
+  padding-left: 12px;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 8px 0;
+}
+
+.md-editor__content ul,
+.md-editor__content ol {
+  padding-left: 20px;
+  margin: 4px 0 8px;
+}
+
+.md-editor__content li {
+  margin: 2px 0;
+}
+
+.md-editor__content .wikilink {
+  display: inline-block;
+  background: rgba(34, 211, 238, 0.1);
+  color: #22d3ee;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.95em;
+  user-select: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.md-editor__content .wikilink--resolved {
+  background: rgba(34, 211, 238, 0.15);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+}
+
+.md-editor__content .wikilink--unresolved {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  border: 1px dashed rgba(245, 158, 11, 0.4);
+}
+
+.md-editor__content .wikilink:hover {
+  filter: brightness(1.2);
+}
+
+.md-editor__content .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+}
+
+.md-editor__autocomplete {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: #0d0d18;
+  border: 1px solid #e5c76b;
+  border-radius: 4px;
+  padding: 6px;
+  min-width: 200px;
+  max-width: 280px;
+  z-index: 10;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.md-editor__ac-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 3px;
+}
+
+.md-editor__ac-item:hover {
+  background: rgba(229, 199, 107, 0.1);
+  color: #e5c76b;
+}
+
+.md-editor__ac-empty {
+  padding: 6px 10px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  font-style: italic;
+}

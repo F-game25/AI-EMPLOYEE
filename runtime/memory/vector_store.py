@@ -46,14 +46,34 @@ from core.memory_index import embed_text, cosine_similarity, clamp
 
 _LOCK = threading.RLock()
 _MAX_ENTRIES = int(os.environ.get("AI_EMPLOYEE_VECTOR_STORE_MAX", "10000"))
+_ALLOWED_STORE_NAMES = {"vector_store.json", "code_index.json"}
 
 
 def _default_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    path = base / "state" / "vector_store.json"
+    # Honor STATE_DIR first (canonical, set by start.sh), then AI_EMPLOYEE_HOME/AI_HOME,
+    # then the repo — so every subsystem agrees on one state dir.
+    state = os.getenv("STATE_DIR")
+    if state:
+        path = Path(state) / "vector_store.json"
+    else:
+        home = os.getenv("AI_EMPLOYEE_HOME") or os.getenv("AI_HOME")
+        base = Path(home) if home else Path(__file__).resolve().parents[2]
+        path = base / "state" / "vector_store.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _safe_store_path(store_name: str = "vector_store.json") -> Path:
+    base = os.path.realpath(os.getenv("STATE_DIR") or Path.home() / ".ai-employee" / "state")
+    if store_name not in _ALLOWED_STORE_NAMES:
+        raise ValueError("invalid vector store name")
+    filename = "code_index.json" if store_name == "code_index.json" else "vector_store.json"
+    fullpath = os.path.realpath(os.path.join(base, filename))
+    if os.path.commonpath([base, fullpath]) != base:
+        raise ValueError("vector store path is outside allowed state root")
+    safe = Path(fullpath)
+    safe.parent.mkdir(parents=True, exist_ok=True)
+    return safe
 
 
 def _ts() -> str:
@@ -63,8 +83,8 @@ def _ts() -> str:
 class VectorStore:
     """File-backed long-term semantic memory with vector similarity search."""
 
-    def __init__(self, path: Path | None = None) -> None:
-        self._path = path or _default_path()
+    def __init__(self, store_name: str = "vector_store.json") -> None:
+        self._path = _safe_store_path(store_name)
         self._entries: dict[str, dict[str, Any]] = {}
         self._load()
 

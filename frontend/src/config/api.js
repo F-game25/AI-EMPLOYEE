@@ -7,6 +7,9 @@
 // the backend was accessed from a different host (LAN, Docker, WSL, etc.).
 export const API_URL = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8787'
 
+// API_BASE — use '' (empty string) so fetch('/api/...') uses current origin in both dev and prod.
+export const API_BASE = ''
+
 export const WS_URL = typeof window !== 'undefined'
   ? (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/ws'
   : 'ws://127.0.0.1:8787/ws'

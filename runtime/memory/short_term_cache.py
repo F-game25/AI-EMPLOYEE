@@ -76,6 +76,7 @@ class ShortTermCache:
             self._store[key] = {
                 "value": value,
                 "expires_at": _now() + max(0.0, float(effective_ttl)),
+                "ttl": float(effective_ttl),
             }
             self._write_count += 1
 
@@ -174,6 +175,30 @@ class ShortTermCache:
                 for k, e in self._store.items()
                 if e["expires_at"] >= now
             }
+
+    def snapshot_detailed(self) -> dict[str, dict[str, Any]]:
+        """Live entries with decay metadata — for short-term graph visualisation.
+
+        Each value: {value, expires_at, ttl, ttl_remaining, decay} where decay∈[0,1]
+        is the fraction of life elapsed (1 = about to expire), driving fade animation.
+        """
+        now = _now()
+        with _LOCK:
+            out: dict[str, dict[str, Any]] = {}
+            for k, e in self._store.items():
+                exp = e["expires_at"]
+                if exp < now:
+                    continue
+                ttl = e.get("ttl", self._default_ttl) or self._default_ttl
+                remaining = max(0.0, exp - now)
+                out[k] = {
+                    "value": e["value"],
+                    "expires_at": exp,
+                    "ttl": ttl,
+                    "ttl_remaining": remaining,
+                    "decay": round(1.0 - min(1.0, remaining / ttl), 3) if ttl else 0.0,
+                }
+            return out
 
     # ------------------------------------------------------------------
     # Internal helpers

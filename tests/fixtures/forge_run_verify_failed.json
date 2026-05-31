@@ -1,0 +1,71 @@
+{
+  "id": "run-fixture-verify-failed",
+  "run_id": "run-fixture-verify-failed",
+  "project_id": "project-test",
+  "goal": "Refactor error handling in server.js",
+  "status": "verify_failed",
+  "mode": "supervised",
+  "provider": "anthropic",
+  "max_iterations": 3,
+  "context_pack": {
+    "goal": "Refactor error handling in server.js",
+    "project": { "id": "project-test", "name": "Test Project", "target_type": "internal_repo", "write_access": true },
+    "constraints": { "approval_required_for_writes": true, "staged_apply_required": true },
+    "verification_commands": ["node --check src/app.js"]
+  },
+  "plan": { "id": "plan-fixture-vfail", "goal": "Refactor error handling in server.js", "verification_commands": ["node --check src/app.js"] },
+  "actions": [
+    {
+      "id": "action-fixture-vfail-1",
+      "type": "write_file",
+      "label": "Write src/app.js",
+      "file_path": "src/app.js",
+      "status": "staged",
+      "risk": "low",
+      "run_id": "run-fixture-verify-failed",
+      "workspace_meta": { "workspace_mode": "git_worktree", "git_head": "abc123" },
+      "created_at": "2026-05-27T12:00:00.000Z",
+      "updated_at": "2026-05-27T12:01:00.000Z"
+    }
+  ],
+  "patches": [
+    {
+      "action_id": "action-fixture-vfail-1",
+      "files": ["src/app.js"],
+      "policy": { "allowed": true, "risk_level": "low", "violations": [] },
+      "status": "staged",
+      "workspace_meta": { "workspace_mode": "git_worktree" }
+    }
+  ],
+  "approvals": [],
+  "test_results": [
+    {
+      "id": "verify-fixture-vfail-1",
+      "all_passed": false,
+      "results": [
+        {
+          "command": "node --check src/app.js",
+          "pass": false,
+          "code": 1,
+          "output": "/tmp/forge/runs/run-fixture-verify-failed/workspace/src/app.js:12\n  const x = {\nSyntaxError: Unexpected end of input",
+          "duration_ms": 89,
+          "sandbox_type": "process",
+          "sandbox_profile": "code",
+          "sandbox_audit": { "profile": "code" }
+        }
+      ],
+      "workspace_meta": { "workspace_mode": "git_worktree", "git_head": "abc123" },
+      "verified_at": "2026-05-27T12:02:00.000Z"
+    }
+  ],
+  "review": {
+    "status": "verify_failed",
+    "summary": "Verification failed. No project files were modified.",
+    "blocked": 0
+  },
+  "final_report": null,
+  "audit_ids": [],
+  "workspace_path": "/tmp/forge/runs/run-fixture-verify-failed/workspace",
+  "created_at": "2026-05-27T12:00:00.000Z",
+  "updated_at": "2026-05-27T12:02:00.000Z"
+}

@@ -1,0 +1,308 @@
+/* ═══════════════════════════════════════════════════════
+   BOTTOM DRAWER — Collapsible Task Pipeline + Telemetry
+   ═══════════════════════════════════════════════════════ */
+
+.bdrawer {
+  position: fixed;
+  bottom: 92px; /* clearance above the 80px cmd-bar */
+  right: 16px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(13, 13, 15, 0.92);
+  border: 1px solid rgba(255, 184, 0, 0.3);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 230, 170, 0.08);
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* When expanded, give it more room */
+.bdrawer--open {
+  width: 760px;
+}
+
+/* ── Tab handle (always visible) ── */
+.bdrawer__tab {
+  height: 36px;
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 184, 0, 0.18);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+
+.bdrawer__tab:hover {
+  background: rgba(255, 184, 0, 0.04);
+}
+
+.bdrawer__tab-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #FFB800;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.bdrawer__tab-total {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+.bdrawer__stage-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.bdrawer__stage-pill {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+  letter-spacing: 0.05em;
+}
+
+.bdrawer__stage-pill--pending    { background: rgba(100,100,255,0.15); color: #8888FF; border: 1px solid rgba(100,100,255,0.3); }
+.bdrawer__stage-pill--planning   { background: rgba(255,184,0,0.1);    color: #FFB800; border: 1px solid rgba(255,184,0,0.25); }
+.bdrawer__stage-pill--running    { background: rgba(0,255,136,0.1);    color: #00FF88; border: 1px solid rgba(0,255,136,0.3); }
+.bdrawer__stage-pill--validating { background: rgba(0,170,255,0.1);    color: #00AAFF; border: 1px solid rgba(0,170,255,0.3); }
+.bdrawer__stage-pill--completed  { background: rgba(100,100,100,0.1);  color: #888;    border: 1px solid rgba(100,100,100,0.2); }
+
+.bdrawer__tab-chevron {
+  font-size: 9px;
+  color: rgba(255, 184, 0, 0.5);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Mini-counts shown when drawer is collapsed (compact mode) */
+.bdrawer__stage-counts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.bdrawer__stage-mini {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  min-width: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.bdrawer__stage-mini--pending    { background: rgba(100,100,255,0.15); color: #8888FF; }
+.bdrawer__stage-mini--planning   { background: rgba(255,184,0,0.1);    color: #FFB800; }
+.bdrawer__stage-mini--running    { background: rgba(0,255,136,0.1);    color: #00FF88; }
+.bdrawer__stage-mini--validating { background: rgba(0,170,255,0.1);    color: #00AAFF; }
+.bdrawer__stage-mini--completed  { background: rgba(100,100,100,0.1);  color: #888; }
+
+/* ── Expanded content ── */
+.bdrawer__content {
+  display: flex;
+  height: 200px;
+  background: #0F0F12;
+  border-top: 1px solid rgba(255, 184, 0, 0.15);
+  overflow: hidden;
+}
+
+/* ── Kanban pipeline ── */
+.bdrawer__pipeline {
+  flex: 1;
+  display: flex;
+  overflow-x: auto;
+  border-right: 1px solid rgba(255, 184, 0, 0.1);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,184,0,0.2) transparent;
+}
+
+.bdrawer__column {
+  min-width: 160px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255, 184, 0, 0.06);
+  padding: 8px;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.bdrawer__column:last-child { border-right: none; }
+
+.bdrawer__col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.bdrawer__col-stage {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.bdrawer__col-stage--pending    { color: #8888FF; }
+.bdrawer__col-stage--planning   { color: #FFB800; }
+.bdrawer__col-stage--running    { color: #00FF88; }
+.bdrawer__col-stage--validating { color: #00AAFF; }
+.bdrawer__col-stage--completed  { color: #666; }
+
+.bdrawer__col-count {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.3);
+  background: rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 0 5px;
+}
+
+.bdrawer__col-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.bdrawer__task-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+
+.bdrawer__task-name {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.bdrawer__task-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bdrawer__task-priority {
+  font-size: 7px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+}
+
+.bdrawer__task-priority--high,
+.bdrawer__task-priority--critical { background: rgba(255,69,0,0.2); color: #FF6B35; border: 1px solid rgba(255,69,0,0.3); }
+.bdrawer__task-priority--medium   { background: rgba(255,184,0,0.15); color: #FFB800; border: 1px solid rgba(255,184,0,0.3); }
+.bdrawer__task-priority--low      { background: rgba(0,255,136,0.1); color: #00CC66; border: 1px solid rgba(0,255,136,0.2); }
+
+.bdrawer__task-agent {
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bdrawer__task-more {
+  font-size: 8px;
+  color: rgba(255, 184, 0, 0.4);
+  text-align: center;
+  padding: 2px 0;
+}
+
+/* ── Telemetry panel ── */
+.bdrawer__telemetry {
+  width: 340px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.bdrawer__tele-header {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.3);
+  letter-spacing: 0.1em;
+  display: flex;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.bdrawer__tele-header span {
+  color: #FFB800;
+  font-size: 8px;
+}
+
+.bdrawer__tele-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.bdrawer__telemetry-panel {
+  background: rgba(255, 184, 0, 0.03);
+  border: 1px solid rgba(255, 184, 0, 0.1);
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.bdrawer__tele-label {
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.bdrawer__tele-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFB800;
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.bdrawer__tele-unit {
+  font-size: 9px;
+  color: rgba(255, 184, 0, 0.5);
+  font-weight: 400;
+}
+
+.bdrawer__tele-trend {
+  font-size: 10px;
+  margin-left: 2px;
+}
+
+.bdrawer__tele-trend--up   { color: #00FF88; }
+.bdrawer__tele-trend--down { color: #FF4500; }
+
+.bdrawer__tele-chart {
+  display: block;
+  overflow: visible;
+}

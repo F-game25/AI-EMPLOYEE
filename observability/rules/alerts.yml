@@ -1,0 +1,104 @@
+groups:
+  - name: ai-employee
+    interval: 30s
+    rules:
+      # ── Error rate ────────────────────────────────────────────────────────
+      - alert: HighErrorRate
+        expr: rate(ai_employee_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error rate above 10% on {{ $labels.service }}"
+          description: >
+            {{ $labels.service }} is emitting errors at
+            {{ printf "%.2f" $value }} errors/s (threshold 0.10).
+            Check logs: http://localhost:3000/explore
+
+      # ── Node backend availability ─────────────────────────────────────────
+      - alert: NodeBackendDown
+        expr: up{job="ai-employee-node"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node.js backend unreachable"
+          description: >
+            Prometheus cannot scrape http://host.docker.internal:8787/metrics.
+            The Node.js backend may have crashed or the /metrics endpoint is
+            unresponsive. Restart with: bash /home/lf/AI-EMPLOYEE/start.sh
+
+      # ── Python backend availability ───────────────────────────────────────
+      - alert: PythonBackendDown
+        expr: up{job="ai-employee-python"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Python FastAPI backend unreachable"
+          description: >
+            Prometheus cannot scrape http://host.docker.internal:18790/metrics.
+            The Python AI backend may have crashed.
+            Check: tail -100 ~/.ai-employee/state/python-backend.log
+
+      # ── Task failure spike ────────────────────────────────────────────────
+      - alert: HighTaskFailureRate
+        expr: >
+          rate(ai_employee_tasks_failed_total[5m])
+          /
+          clamp_min(rate(ai_employee_tasks_total[5m]), 0.001)
+          > 0.2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Task failure rate exceeds 20% on {{ $labels.service }}"
+          description: >
+            More than 20% of tasks are failing over the last 5 minutes.
+            Current rate: {{ printf "%.1f" (mul $value 100) }}%.
+
+      # ── Agent count drops to zero ─────────────────────────────────────────
+      - alert: NoActiveAgents
+        expr: ai_employee_agents_active == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No active agents registered"
+          description: >
+            ai_employee_agents_active has been 0 for more than 2 minutes.
+            The system may be in Starter mode with no agents loaded, or
+            agent discovery has failed.
+
+      # ── Low task completion ratio ─────────────────────────────────────────
+      - alert: LowTaskCompletionRatio
+        expr: >
+          ai_employee_tasks_completed_total
+          /
+          clamp_min(ai_employee_tasks_total, 1)
+          < 0.7
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Task completion ratio below 70%"
+          description: >
+            Overall task success rate has dropped below 70% over a sustained
+            10-minute window. Current ratio: {{ printf "%.1f" (mul $value 100) }}%.
+
+      # ── Latency placeholder (replace when histogram is instrumented) ───────
+      # This rule fires only as an informational reminder — it evaluates true
+      # whenever the uptime metric is present (i.e., the backend is alive).
+      # Replace with histogram_quantile(0.95, ...) once latency histograms
+      # are added to the Node.js /metrics endpoint.
+      - alert: LatencyHistogramMissing
+        expr: absent(ai_employee_request_duration_seconds_bucket)
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "P95 latency histogram not yet instrumented"
+          description: >
+            The metric ai_employee_request_duration_seconds_bucket is absent.
+            Add a Prometheus histogram to the Node.js backend to enable real
+            P95/P99 latency alerting. This is an informational reminder only.

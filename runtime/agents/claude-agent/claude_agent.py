@@ -14,6 +14,7 @@ Configuration (in ~/.ai-employee/config/claude-agent.env):
     CLAUDE_AGENT_PORT   — port (default: 8788)
     CLAUDE_MAX_TOKENS   — max tokens per response (default: 4096)
 """
+import logging
 import os
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 
+logger = logging.getLogger(__name__)
 AI_HOME = Path(os.environ.get("AI_HOME", str(Path.home() / ".ai-employee")))
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-5")
@@ -189,7 +191,8 @@ def ask(payload: dict) -> JSONResponse:
         })
     except Exception as exc:
         _history.pop()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        logger.warning("claude message failed: %s", type(exc).__name__)
+        return JSONResponse({"error": "Claude request failed"}, status_code=500)
 
 
 @app.post("/api/clear")

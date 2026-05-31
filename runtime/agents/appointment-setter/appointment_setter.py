@@ -56,10 +56,16 @@ def load_chatlog():
     except Exception:
         return []
 
-def append_chatlog(e):
+def append_chatlog(message_len: int):
     CHATLOG.parent.mkdir(parents=True, exist_ok=True)
+    safe = {
+        "type": "bot",
+        "bot": "appointment-setter",
+        "ts": now_iso(),
+        "message_len": message_len,
+    }
     with open(CHATLOG, "a") as f:
-        f.write(json.dumps(e) + "\n")
+        f.write(json.dumps(safe) + "\n")
 
 def _ai(prompt: str, system: str = "") -> str:
     if not _AI_AVAILABLE:
@@ -353,8 +359,8 @@ def process_chatlog(last_idx: int) -> int:
             response = cmd_setter_scripts()
 
         if response:
-            print(response)
-            append_chatlog({"type": "bot", "bot": "appointment-setter", "message": response, "ts": now_iso()})
+            print(f"[appointment-setter] response ready ({len(response)} chars)")
+            append_chatlog(len(response))
 
     return new_idx
 

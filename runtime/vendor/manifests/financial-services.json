@@ -1,0 +1,14 @@
+{
+  "id": "financial-services",
+  "source_url": "https://github.com/anthropics/financial-services",
+  "fork_url": "https://github.com/F-game25/financial-services.",
+  "upstream_commit": "853f755a61f7bbb045c681327f46b354419030a1",
+  "license": "Apache-2.0",
+  "checksum_sha256": "fcea2e9a3b88c39b249e9a79f91641fbcaaa605f35633ec7e74158dde6181891",
+  "local_namespace": "aeternus_financial_services",
+  "risk_class": "medium",
+  "runtime_code_imported": false,
+  "imported_paths": ["runtime/config/fork_integration_manifest.json#finance_workflows"],
+  "approval_policy": "draft_outputs_only_human_approval_required",
+  "patch_notes": "Converted finance agent patterns into supervised draft workflow templates. No investment advice, ledger posting, or transaction execution."
+}

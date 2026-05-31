@@ -287,17 +287,19 @@ def cmd_send(issue_id: str) -> str:
     body       = issue["content"]
 
     if MAILCHIMP_API_KEY:
-        # Mailchimp stub — requires list ID and full API implementation
-        note = (
-            "NOTE: MAILCHIMP_API_KEY is set. To enable Mailchimp sending:\n"
-            "  1. Use the Mailchimp Campaigns API: POST /3.0/campaigns\n"
-            "  2. Set campaign content: PUT /3.0/campaigns/{id}/content\n"
-            "  3. Send: POST /3.0/campaigns/{id}/actions/send\n"
-            "  Implement with your Mailchimp list_id and audience settings."
-        )
-        append_outbox({"issue_id": issue_id, "recipients": len(recipients),
-                       "subject": subject, "ts": now_iso(), "channel": "mailchimp_stub"})
-        return f"[{now_iso()}] Mailchimp stub triggered for '{issue_id}'.\n{note}"
+        try:
+            from core.capabilities import require as cap_require
+            cap = cap_require("mailchimp")
+        except Exception:
+            cap = {"status": "not_configured", "reason": "capability system unavailable"}
+        append_outbox({
+            "issue_id": issue_id, "recipients": len(recipients),
+            "subject": subject, "ts": now_iso(), "channel": "mailchimp",
+            "capability_status": cap.get("status", "not_configured"),
+        })
+        return (f"[{now_iso()}] Mailchimp not configured (status={cap.get('status')}); "
+                f"issue '{issue_id}' saved to outbox. "
+                f"Enable via /api/capabilities once MAILCHIMP_LIST_ID + integration are set.")
 
     if not recipients:
         append_outbox({"issue_id": issue_id, "subject": subject, "ts": now_iso(),

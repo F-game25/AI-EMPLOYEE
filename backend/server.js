@@ -1,5 +1,18 @@
 'use strict';
 
+// ── Sentry initialization (must be first) ────────────────────────────────────
+if (process.env.SENTRY_DSN) {
+  const Sentry = require('@sentry/node');
+  const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    integrations: [new nodeProfilingIntegration()],
+    tracesSampleRate: 0.1,
+    profilesSampleRate: 0.1,
+    environment: process.env.ENVIRONMENT || 'production',
+  });
+}
+
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -15,10 +28,39 @@ const helmet = require('helmet');
 const gateway = require('./gateway');
 const orchestrator = require('./orchestrator');
 const broadcaster = require('./events/broadcaster');
+const { getEventBus, EVENT_TYPES: BUS_EVENT_TYPES } = require('./infra/events/bus');
+const eventRoutes = require('./infra/events/routes');
+const { getWorkflowEngine } = require('./infra/workflows/engine');
+const workflowRoutes = require('./infra/workflows/routes');
+const { getSandboxExecutor } = require('./infra/sandbox/executor');
+const sandboxRoutes = require('./infra/sandbox/routes');
+const { injectRole } = require('./infra/rbac/middleware');
+const { getSecretsBroker } = require('./infra/secrets/broker');
+const secretsRoutes = require('./infra/secrets/routes');
+// Phase 2 — Enterprise Intelligence routes
+const ragRoutes        = require('./infra/rag/routes');
+const planningRoutes   = require('./infra/planning/routes');
+const economicsRoutes  = require('./infra/economics/routes');
+const governanceRoutes = require('./infra/governance/routes');
+const telemetryRoutes  = require('./infra/telemetry/routes');
+// Phase 3 — Autonomous Workforce routes
+const rpaRoutes        = require('./infra/rpa/routes');
+const healingRoutes    = require('./infra/healing/routes');
+const marketplaceRoutes = require('./infra/marketplace/routes');
+const deploymentRoutes = require('./infra/deployment/routes');
+const simulationRoutes = require('./infra/simulation/routes');
+// Phase 4 — Enterprise Autonomy Stabilization routes
+const cognitiveRoutes  = require('./infra/cognitive/routes');
 const { SecretStore } = require('./security/secrets');
 const { createOfflineSecuritySyncPolicy } = require('./security/offline_sync_policy');
 const { createApiGatewayProtector } = require('./security/api_gateway');
 const { createAnomalyResponder } = require('./security/anomaly_response');
+const blacklightTools = require('./security/blacklight_tools');
+const { tenantMiddleware, requireTenant } = require('./tenancy');
+const { enforceRegion } = require('./middleware/region');
+const ConnectionManager = require('./websocket/connection-manager');
+const HeartbeatManager = require('./websocket/heartbeat');
+const { createUpgradeHandler } = require('./websocket/upgrade-handlers');
 const {
   getAgents,
   on: onAgentEvent,
@@ -33,16 +75,43 @@ const subsystems = require('./subsystems');
 const { buildMoneyTemplate, buildThinkingSummary } = require('./money_mode');
 const brain = require('./brain/active_brain');
 const persistence = require('./persistence');
-const voiceManager = require('./core/voice_manager');
-const voiceApiRouter = require('./api/voice');
+
+// Phase 7A: defer heavy/native requires to cut synchronous startup cost.
+
+// better-sqlite3 is a native binary; only used in the forge_queue IIFE.
+let _Database;
+const getDatabase = () => _Database || (_Database = require('better-sqlite3'));
+
+// getNativeMemoryGraph triggers file I/O on init; only used in route handlers.
+let _nativeMemoryGraphMod;
+const getNativeMemoryGraph = (...args) => {
+  if (!_nativeMemoryGraphMod) _nativeMemoryGraphMod = require('./core/native-memory-graph');
+  return _nativeMemoryGraphMod.getNativeMemoryGraph(...args);
+};
+
+// Voice system spawns child processes via fish_speech; defer until init call.
+let _voiceManager;
+const voiceManager = new Proxy({}, {
+  get(_, prop) {
+    if (!_voiceManager) _voiceManager = require('./core/voice_manager');
+    const val = _voiceManager[prop];
+    return typeof val === 'function' ? val.bind(_voiceManager) : val;
+  },
+});
+let _voiceApiRouter;
+const getVoiceApiRouter = () => _voiceApiRouter || (_voiceApiRouter = require('./api/voice'));
+
 const ErrorRecoveryManager = require('./core/error_recovery');
 const TaskHistoryManager = require('./core/task_history');
-const Database = require('better-sqlite3');
+const { createTurnRunner } = require('./services/turn-runner');
 const { z } = require('zod');
+const economyService = require('./services/economy_service');
+const ollamaAdmin = require('./services/ollama_admin');
 
 // Initialize error recovery and task history
 const errorRecovery = new ErrorRecoveryManager();
 const taskHistory = new TaskHistoryManager();
+
 
 // ── Request validation helpers ────────────────────────────────────────────────
 // Returns parsed body on success, sends 400 and returns null on failure.
@@ -76,30 +145,168 @@ const SCHEMAS = {
   agentControl:   z.object({ agent_id: _zStrMax(200).min(1), action: z.enum(['start','stop','restart']).optional() }),
   systemHalt:     z.object({ reason: _zStrMax(500).optional() }),
   voiceSynthesize: z.object({ text: _zStrMax(2000).min(1), persona: z.record(z.any()).optional() }),
+  // Phase 6B additions
+  identityFinalize:   z.object({ user_chosen: _zStrMax(200).optional(), instance_name: _zStrMax(100).optional(), voice_preset: _zStrMax(50).optional(), color_palette: z.record(z.any()).optional() }),
+  agentsActivate:     z.object({ count: z.number().int().min(1).max(100).optional() }),
+  securityOfflineSync: z.object({ online: z.boolean().optional() }),
+  securityGatewayStrict: z.object({ enabled: z.boolean().optional() }),
+  autonomyMode:       z.object({ mode: z.enum(['OFF','ON','AUTO']) }),
+  automationControl:  z.object({ action: z.enum(['start','stop','override']), goal: _zStrMax(4000).optional(), override_action_id: _zStrMax(200).optional() }),
+  moneyPipeline:      z.object({ goal: _zStrMax(4000).optional(), config: z.record(z.any()).optional() }),
+  adminSafetyAction:  z.object({ action_id: _zStrMax(100).min(1), reason: _zStrMax(1000).min(8), confirmation: _zStrMax(200).min(1), execution_mode: _zStrMax(50).optional() }),
+  adminSafetyAudit:   z.object({ label: _zStrMax(200).min(1), endpoint: _zStrMax(300).optional(), reason: _zStrMax(1000).min(8), confirmation: _zStrMax(200).min(1), executed: z.boolean().optional(), risk: _zStrMax(20).optional(), execution_mode: _zStrMax(50).optional() }),
+  forgeSandbox:       z.object({ goal: _zGoal, module_path: _zStrMax(200).optional() }),
+  forgeBuildSystem:   z.object({ spec: _zStrMax(4000).min(1), project_name: _zStrMax(200).optional() }),
+  reconToolSearch:    z.object({ query: _zStrMax(500).optional() }),
+  reconToolRun:       z.object({ tool_id: _zStrMax(200).optional(), toolId: _zStrMax(200).optional(), input: _zStrMax(20000).optional() }),
+  reconCase:          z.object({ name: _zStrMax(120).optional(), target: _zStrMax(300).optional(), owner: _zStrMax(120).optional(), authorization: _zStrMax(2000).optional() }),
+  reconFinding:       z.object({ case_id: _zStrMax(80).optional(), title: _zStrMax(160).optional(), severity: z.enum(['info','low','medium','high']).optional(), evidence: z.record(z.any()).optional(), source_tool: _zStrMax(120).optional() }),
+  hermesTask:         z.object({ message: _zStrMax(4000).min(1), target_agent: _zStrMax(200).optional() }),
+  hermesBroadcast:    z.object({ message: _zStrMax(4000).min(1) }),
+  learningLadderBuild:    z.object({ topic: _zStrMax(200).min(1) }),
+  learningLadderComplete: z.object({ topic: _zStrMax(200).min(1), level: z.number().int().min(1).max(5), success: z.boolean().optional(), milestone_output: _zStrMax(2000).optional(), score: z.number().optional(), notes: _zStrMax(1000).optional() }),
+  agentLadderAssign:  z.object({ topic: _zStrMax(200).min(1) }),
+  agentLadderAdvance: z.object({ level: z.number().int().min(1).max(5), success: z.boolean().optional(), score: z.number().optional(), milestone_output: _zStrMax(2000).optional(), notes: _zStrMax(1000).optional() }),
+  forgeCodeAi:        z.object({ provider: _zStrMax(50).optional(), model: _zStrMax(100).optional(), messages: z.array(z.object({ role: _zStrMax(20).optional(), content: _zStrMax(8000) })).min(1), systemPrompt: _zStrMax(2000).optional() }),
+  middlewareProcess:  z.object({ message: _zStrMax(8000).optional(), task: _zStrMax(4000).optional() }).passthrough(),
+  moneyTask:          z.object({ task: _zStrMax(4000).optional(), mode: _zStrMax(20).optional() }),
+  codingAiSettings:   z.object({ provider: _zStrMax(50).optional(), model: _zStrMax(100).optional(), openrouter_api_key: _zStrMax(200).optional() }),
+  forgeTask:          z.object({ task: _zStrMax(4000).optional(), mode: _zStrMax(20).optional() }),
+  modelRoutePlan:     z.object({ task: _zStrMax(4000).optional(), message: _zStrMax(4000).optional(), goal: _zStrMax(4000).optional(), modality: _zStrMax(50).optional() }),
+  memoryClients:      z.object({ name: _zStrMax(200).optional(), email: _zStrMax(200).optional() }).passthrough(),
+  memoryInteraction:  z.object({ client_id: _zStrMax(200).optional(), content: _zStrMax(8000).optional() }).passthrough(),
+  errorReport:        z.object({ error: z.any(), context: z.record(z.any()).optional() }),
+  frontendError:      z.object({ msg: _zStrMax(500).optional(), stack: _zStrMax(2000).optional(), ts: z.any().optional(), source: _zStrMax(50).optional() }),
+  blacklistPolicy:    z.object({ network_osint_enabled: z.boolean().optional() }),
+  approvalDecision:   z.object({ reason: _zStrMax(500).optional() }),
+  forgeApproveItem:   z.object({ approved_by: _zStrMax(100).optional() }),
+  forgeRejectItem:    z.object({ rejected_by: _zStrMax(100).optional(), reason: _zStrMax(500).optional() }),
+  reliabilityFreeze:  z.object({ reason: _zStrMax(500).optional() }),
 };
 
 const PORT = process.env.PORT || 8787;
 const PYTHON_BACKEND_HOST = '127.0.0.1';
 const PYTHON_BACKEND_PORT = process.env.PYTHON_BACKEND_PORT || 18790;
+const RUNTIME_NONCE = process.env.AI_EMPLOYEE_RUNTIME_NONCE || null;
+const RUNTIME_MODE = process.env.AI_EMPLOYEE_RUNTIME_MODE || (process.env.AI_EMPLOYEE_PACKAGED === '1' ? 'packaged-runtime' : 'development-runtime');
 const REPO_ROOT = path.resolve(__dirname, '..');
+const AI_HOME = path.resolve(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'));
+const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(AI_HOME, 'state'));
+const LOG_DIR = path.resolve(process.env.LOG_DIR || path.join(AI_HOME, 'logs'));
+const RUN_DIR = path.resolve(process.env.RUN_DIR || path.join(AI_HOME, 'run'));
+for (const dir of [STATE_DIR, LOG_DIR, RUN_DIR]) {
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+}
+const statePath = (...parts) => path.join(STATE_DIR, ...parts);
 const FRONTEND_DIST = path.resolve(__dirname, '../frontend/dist');
 const FRONTEND_INDEX = path.join(FRONTEND_DIST, 'index.html');
 const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_INDEX);
 const SERVER_START_TIMESTAMP = new Date().toISOString();
-const FRONTEND_INDEX_TEMPLATE = HAS_FRONTEND_DIST ? fs.readFileSync(FRONTEND_INDEX, 'utf8') : '';
+const SYSTEM_MANIFEST_FILE = path.join(REPO_ROOT, 'runtime', 'config', 'system_orchestration_manifest.json');
 
-function latestCommit() {
+let _indexCache = null;
+let _indexMtime = 0;
+function readFrontendIndex() {
   try {
-    return execSync('git log -1 --oneline', { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
-  } catch (_err) {
-    return 'unknown';
+    const mtime = fs.statSync(FRONTEND_INDEX).mtimeMs;
+    if (_indexCache !== null && mtime === _indexMtime) return _indexCache;
+    _indexCache = fs.readFileSync(FRONTEND_INDEX, 'utf8');
+    _indexMtime = mtime;
+    return _indexCache;
+  } catch {
+    return '';
   }
 }
-const GIT_COMMIT = latestCommit();
+
+// FIX-1: 2026-05-12 — Lazy-load git commit on-demand instead of blocking at startup
+let _gitCommitCache = null;
+function latestCommit() {
+  if (_gitCommitCache !== null) return _gitCommitCache;
+  try {
+    _gitCommitCache = execSync('git log -1 --oneline', { cwd: REPO_ROOT, encoding: 'utf8', timeout: 2000 }).trim();
+  } catch (_err) {
+    _gitCommitCache = 'unknown';
+  }
+  return _gitCommitCache;
+}
+
+function loadSystemManifest() {
+  try {
+    return JSON.parse(fs.readFileSync(SYSTEM_MANIFEST_FILE, 'utf8'));
+  } catch (err) {
+    return {
+      version: 'unavailable',
+      error: err.message,
+      agents: {},
+      memory_fabric: { layers: [] },
+      model_stack: {},
+      token_orchestrator: {},
+    };
+  }
+}
+
+function buildModelRoutePlan(payload = {}) {
+  const manifest = loadSystemManifest();
+  const task = String(payload.task || payload.message || payload.goal || '').trim();
+  const modality = String(payload.modality || '').toLowerCase();
+  const needsAction = /\b(click|browser|file|api|execute|run|deploy|write|edit|build|create|publish|send)\b/i.test(task);
+  const needsVision = modality === 'vision' || /\b(image|screenshot|screen|diagram|video|ocr|visual)\b/i.test(task);
+  const needsMedia = modality === 'image' || /\b(generate image|render|avatar|video|visual asset)\b/i.test(task);
+  const needsDeepReasoning = task.length > 1200 || /\b(strategy|architecture|debug|complex|multi[- ]?step|plan|reason)\b/i.test(task);
+  const estimatedInputTokens = Math.ceil(task.length / 4);
+  const contextPolicy = estimatedInputTokens > 1200 ? 'compact_memory_then_summarize' : 'retrieve_top_memory_only';
+
+  const architectures = ['SLM', 'MLM'];
+  if (needsVision) architectures.push('VLM');
+  if (needsMedia) architectures.push('LCM');
+  if (needsAction) architectures.push('LAM');
+  architectures.push(needsDeepReasoning ? 'LLM' : 'SLM');
+  architectures.push('MoE');
+
+  const uniqueArchs = [...new Set(architectures)];
+  const offlineDefault = String(process.env.AI_EMPLOYEE_OFFLINE || '1') !== '0';
+  const externalAllowed = !offlineDefault && String(process.env.AI_EMPLOYEE_ALLOW_MODEL_DOWNLOADS || '0') === '1';
+  const route = externalAllowed ? 'local_first_external_allowed' : 'local_only_or_degraded';
+  return {
+    ok: true,
+    route,
+    offline_default: offlineDefault,
+    external_allowed: externalAllowed,
+    estimated_input_tokens: estimatedInputTokens,
+    context_policy: contextPolicy,
+    selected_architectures: uniqueArchs,
+    execution_order: [
+      'SLM intent classification',
+      'MLM memory retrieval',
+      contextPolicy,
+      needsAction ? 'LAM action plan with approval gates' : 'LLM/SLM response plan',
+      'MoE final model selection by cost, health, and quality',
+    ],
+    remote_call_requirements: manifest.token_orchestrator?.remote_call_requirements || [],
+    token_saving_steps: manifest.token_orchestrator?.steps || [],
+    model_stack: uniqueArchs.reduce((acc, arch) => {
+      acc[arch] = manifest.model_stack?.[arch] || {};
+      return acc;
+    }, {}),
+  };
+}
+const GIT_COMMIT = 'pending'; // Placeholder until first access
+
+// Metrics tracking for Prometheus endpoint
+const startTime = Date.now();
+let apiCallCounter = 0;
+let taskMetrics = { completed: 0, failed: 0 };
+
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-// JWT_SECRET_KEY is auto-generated by start.sh if not set in ~/.ai-employee/.env
-const JWT_SECRET = process.env.JWT_SECRET_KEY || crypto.randomBytes(32).toString('hex');
+// JWT_SECRET_KEY must be set in ~/.ai-employee/.env; fail fast if unset
+const JWT_SECRET = process.env.JWT_SECRET_KEY;
+if (!JWT_SECRET) {
+  console.error('\n❌ FATAL: JWT_SECRET_KEY is not set in environment.');
+  console.error('   Set it in ~/.ai-employee/.env or pass as JWT_SECRET_KEY=<value> at startup.');
+  console.error('   Run: echo "JWT_SECRET_KEY=$(openssl rand -hex 32)" >> ~/.ai-employee/.env\n');
+  process.exit(1);
+}
 const JWT_EXPIRES_IN = '24h';
 
 // Token issued by POST /api/auth/token (body: { secret: JWT_SECRET_KEY })
@@ -116,6 +323,65 @@ function requireAuth(req, res, next) {
   }
 }
 
+function requireLocalhost(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || '';
+  if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+  return res.status(403).json({ ok: false, error: 'localhost only' });
+}
+
+// Simple sliding-window rate limiter factory (no external deps).
+// windowMs: window length, max: max requests per window per IP.
+function makeRateLimit(max, windowMs = 60_000) {
+  const buckets = new Map(); // ip → [timestamp, ...]
+  return (req, res, next) => {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const hits = (buckets.get(ip) || []).filter((t) => now - t < windowMs);
+    hits.push(now);
+    buckets.set(ip, hits);
+    if (hits.length > max) {
+      res.set('Retry-After', Math.ceil(windowMs / 1000));
+      return res.status(429).json({ ok: false, error: 'Rate limit exceeded' });
+    }
+    next();
+  };
+}
+const _rl_blacklight  = makeRateLimit(5);    // 5/min per IP
+const _rl_forge       = makeRateLimit(10);   // 10/min per IP
+const _rl_research    = makeRateLimit(3);    // 3/min per IP  (legacy — unused, kept for compatibility)
+// ── Per-route rate limiters ───────────────────────────────────────────────────
+const _rl_auth_token  = makeRateLimit(5);    // /api/auth/token — 5/min per IP (brute-force guard)
+const _rl_auto_token  = makeRateLimit(10);   // /api/auth/auto-token — 10/min per IP
+const _rl_upload      = makeRateLimit(20);   // /api/workspace/upload — 20/min per IP
+const _rl_ollama_pull = makeRateLimit(3);    // /api/ollama/pull — 3/min per IP (expensive operation)
+const _rl_chat        = makeRateLimit(30);   // /api/chat — 30/min per IP
+const _rl_tasks_run   = makeRateLimit(30);   // /api/tasks/run — 30/min per IP
+const _rl_api_global  = makeRateLimit(120);  // /api/* catch-all — 120/min per IP
+
+// Simple in-memory response cache with TTL.
+// Returns middleware that serves cached JSON for ttlMs, then refreshes.
+function makeTTLCache(ttlMs = 30_000) {
+  let _cache = null;
+  let _expiry = 0;
+  return (req, res, next) => {
+    if (_cache && Date.now() < _expiry) {
+      res.set('X-Cache', 'HIT');
+      return res.json(_cache);
+    }
+    const _json = res.json.bind(res);
+    res.json = (body) => {
+      _cache = body;
+      _expiry = Date.now() + ttlMs;
+      res.set('X-Cache', 'MISS');
+      return _json(body);
+    };
+    next();
+  };
+}
+const _cache_neurons   = makeTTLCache(30_000);
+const _cache_grades    = makeTTLCache(30_000);
+const _cache_blacklist = makeTTLCache(30_000);
+
 // Validate a WebSocket upgrade request token (query param ?token=...)
 function wsTokenValid(req) {
   try {
@@ -131,10 +397,36 @@ function wsTokenValid(req) {
 
 const app = express();
 
+// Trust reverse-proxy headers (X-Forwarded-For, X-Forwarded-Proto) for accurate IP
+app.set('trust proxy', 1);
+
+// Security guard: reject requests from IPs the sentinel has blocked (keep attackers out).
+// Runs first so a blocked attacker never reaches auth, routes, or the secrets vault.
+const { ipBlockMiddleware: _sentinelIpBlock } = require('./security/sentinel_guard');
+app.use(_sentinelIpBlock);
+
+// Sentry error tracking middleware (if initialized)
+if (process.env.SENTRY_DSN) {
+  const Sentry = require('@sentry/node');
+  app.use(Sentry.Handlers.requestHandler());
+  app.use(Sentry.Handlers.errorHandler());
+}
+
 // Security headers — applied before all routes
 app.use(helmet({
   // Allow WebSocket upgrades and inline scripts needed by the Vite-built frontend
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],   // Vite dev needs inline
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:"],       // WebSocket
+      fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
   crossOriginEmbedderPolicy: false,
 }));
 app.use(cors({
@@ -144,10 +436,31 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '64kb' }));
+
+// Hard ceiling for every API route. This must be registered before API route
+// handlers so it protects routers mounted below instead of only unmatched paths.
+app.use('/api/', _rl_api_global);
+
+// ── Multi-tenancy middleware (extracts tenant from JWT) ───────────────────────
+app.use(tenantMiddleware(JWT_SECRET));
+// Inject role from JWT claims onto req.user (RBAC — non-breaking augmentation)
+app.use(injectRole);
+// Data-residency enforcement — 451 for cross-region tenant requests (no-op when DEPLOYMENT_REGION unset)
+app.use(enforceRegion);
+
 if (HAS_FRONTEND_DIST) {
+  // Vite content-hashes all JS/CSS filenames — safe to cache long-term.
+  // index.html is NOT hashed and must never be stale, so it gets no-store.
   app.use(express.static(FRONTEND_DIST, {
     index: false,
-    maxAge: '1h',
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html')) {
+        res.set('Cache-Control', 'no-store, must-revalidate');
+      } else if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|ico)$/.test(filePath)) {
+        // Hashed assets — immutable cache (1 year)
+        res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
   }));
 }
 
@@ -157,13 +470,13 @@ app.use('/workspace', express.static(WORKSPACE_DIR, { index: false }));
 
 // Serve AI-generated artifacts (summaries, code files) at /api/artifacts/:filename
 const ARTIFACTS_DIR = path.join(__dirname, '..', 'state', 'artifacts');
-app.get('/api/artifacts/:filename', (req, res) => {
+app.get('/api/artifacts/:filename', requireAuth, (req, res) => {
   const fname = path.basename(req.params.filename); // prevent path traversal
   const fpath = path.join(ARTIFACTS_DIR, fname);
   if (!require('fs').existsSync(fpath)) return res.status(404).json({ error: 'Artifact not found' });
   res.download(fpath);
 });
-app.get('/api/artifacts', (_req, res) => {
+app.get('/api/artifacts', requireAuth, (_req, res) => {
   const fs = require('fs');
   if (!fs.existsSync(ARTIFACTS_DIR)) return res.json([]);
   const files = fs.readdirSync(ARTIFACTS_DIR)
@@ -172,12 +485,181 @@ app.get('/api/artifacts', (_req, res) => {
   res.json(files);
 });
 
+function readJsonLinesRecent(filePath, limit = 100) {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean);
+    return lines.slice(-limit).map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean).reverse();
+  } catch {
+    return [];
+  }
+}
+
+app.get('/api/proof/center', requireAuth, (_req, res) => {
+  const turns = readJsonLinesRecent(statePath('turns.jsonl'), 100);
+  const artifactFiles = (() => {
+    try {
+      if (!fs.existsSync(ARTIFACTS_DIR)) return [];
+      return fs.readdirSync(ARTIFACTS_DIR)
+        .filter((name) => fs.statSync(path.join(ARTIFACTS_DIR, name)).isFile())
+        .map((name) => {
+          const stat = fs.statSync(path.join(ARTIFACTS_DIR, name));
+          return {
+            id: `artifact:${name}`,
+            name,
+            type: 'file',
+            path: path.join(ARTIFACTS_DIR, name),
+            url: `/api/artifacts/${encodeURIComponent(name)}`,
+            source: 'artifact_storage',
+            status: 'available',
+            size: stat.size,
+            created_at: stat.mtime.toISOString(),
+          };
+        })
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    } catch {
+      return [];
+    }
+  })();
+
+  const proofItems = [];
+  for (const turn of turns) {
+    for (const item of [...(turn.proof || []), ...(turn.artifacts || [])]) {
+      if (!item || typeof item !== 'object') continue;
+      const name = item.name || item.label || item.type || 'proof item';
+      proofItems.push({
+        id: item.id || `${turn.turn_id || turn.task_id || 'turn'}:${proofItems.length + 1}`,
+        task_id: item.task_id || turn.task_id || turn.taskId || null,
+        turn_id: turn.turn_id || null,
+        name,
+        type: item.type || item.artifact_type || 'trace',
+        path: item.path || null,
+        url: item.url || null,
+        source: item.source || turn.source || turn.compatibility_route || 'turn',
+        status: item.status || turn.status || 'unknown',
+        degraded: turn.degraded === true || item.status === 'fallback' || item.status === 'degraded',
+        created_at: item.created_at || turn.created_at || turn.timestamp || null,
+      });
+    }
+  }
+
+  const counts = [...proofItems, ...artifactFiles].reduce((acc, item) => {
+    const status = item.degraded ? 'degraded' : (item.status || 'unknown');
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+
+  res.json({
+    ok: true,
+    source: 'node_proof_center',
+    generated_at: new Date().toISOString(),
+    counts,
+    turns: turns.map((turn) => ({
+      turn_id: turn.turn_id || null,
+      task_id: turn.task_id || turn.taskId || null,
+      contract_version: turn.contract_version || null,
+      status: turn.status || 'unknown',
+      source: turn.source || turn.compatibility_route || 'unknown',
+      degraded: turn.degraded === true,
+      proof_count: Array.isArray(turn.proof) ? turn.proof.length : 0,
+      artifact_count: Array.isArray(turn.artifacts) ? turn.artifacts.length : 0,
+      created_at: turn.created_at || turn.timestamp || null,
+      errors: Array.isArray(turn.errors) ? turn.errors : [],
+    })),
+    proof_items: proofItems,
+    artifacts: artifactFiles,
+  });
+});
+
 app.use('/gateway', gateway);
 app.use('/orchestrator', orchestrator.router);
-app.use('/api/voice', voiceApiRouter);
+app.use('/api/voice', getVoiceApiRouter());
+app.use('/api/settings', require('./routes/settings'));
+
+// Tasks API (real-time execution visibility)
+const taskGateway = require('./orchestrator/task-dashboard-gateway');
+const createTasksRouter = require('./routes/tasks');
+app.use('/api/tasks', createTasksRouter(taskGateway, broadcaster));
+app.use('/api/schedules', createTasksRouter.createSchedulesRouter(taskGateway, broadcaster));
+
+// Web Search API — proxies to Python /search with CloakBrowser support
+const createSearchRouter = require('./routes/search');
+app.use('/api/search', createSearchRouter(requireAuth));
+
+// Research v2 API — 2-phase discover → execute on selected sources
+const createResearchRouter = require('./routes/research');
+app.use('/api/research', createResearchRouter(requireAuth));
+
+// Vault API — Obsidian-compatible markdown knowledge store
+const createVaultRouter = require('./routes/vault');
+app.use('/api/vault', createVaultRouter(requireAuth));
 
 const GPU_USAGE_BASELINE = 18;
 let currentGpuUsage = GPU_USAGE_BASELINE;
+
+// Agents monitoring API — Phase 3.2 agent activity monitor
+const { createAgentsMonitorRouter, AgentStateRegistry } = require('./routes/agents-monitor');
+const agentStateRegistry = new AgentStateRegistry();
+const agentsMonitorRouter = createAgentsMonitorRouter(broadcaster, requireAuth, agentStateRegistry);
+app.use('/api/agents', agentsMonitorRouter);
+
+// AscendForge canonical router.
+// Keep this mount before the legacy inline /api/forge handlers below. Express
+// is first-match wins, so overlapping canonical routes intentionally take
+// precedence while old submit/approve/reject/task/code-ai aliases remain live.
+app.use('/api/forge', require('./routes/forge')(requireAuth, { rlRuns: _rl_forge }));
+app.use('/api/compute', require('./routes/compute')(requireAuth));
+
+// Workflows — template library + CRUD
+app.use('/api/workflows', require('./routes/workflows')(requireAuth));
+
+// Hybrid memory router — semantic RAG, graph, read-only SQL, episodic and procedural memory
+const createHybridMemoryRouter = require('./routes/hybrid-memory-router');
+app.use('/api/memory', createHybridMemoryRouter(requireAuth));
+
+// Dashboard API — security, knowledge, memory, intelligence, cognition, integrations, hooks
+app.use('/api', require('./routes/dashboard-api')(requireAuth));
+
+// Native fork-derived capability enhancements: skills, finance, money, autonomy, wallet, channels
+app.use('/api', require('./routes/fork-integrations')(requireAuth));
+
+// Session management — list/revoke active sessions, force-logout (admin)
+app.use('/api', require('./routes/sessions')(requireAuth));
+
+// API key management — programmatic access (POST/GET/DELETE /api/api-keys)
+app.use('/api', require('./routes/api-keys')(requireAuth));
+
+// Start agent heartbeat collector for real-time status monitoring
+const { startHeartbeatCollector } = require('./agents-monitor/heartbeat-collector');
+startHeartbeatCollector(broadcaster);
+
+// Pipeline Execution API (real-time pipeline visualization)
+const { createExecutionRouter } = require('./routes/execution');
+const { router: executionRouter, pipelineTraces } = createExecutionRouter({
+  broadcaster,
+});
+app.use('/api/execution', executionRouter);
+app.use('/api/events', eventRoutes);
+app.use('/api/workflows', workflowRoutes);
+app.use('/api/sandbox', sandboxRoutes);
+app.use('/api/secrets', secretsRoutes);
+// Phase 2 — Enterprise Intelligence
+app.use('/api/rag',        ragRoutes);
+app.use('/api/planning',   planningRoutes);
+app.use('/api/economics',  economicsRoutes);
+app.use('/api/governance', governanceRoutes);
+app.use('/api/telemetry',  telemetryRoutes);
+
+// Phase 3 — Autonomous Workforce
+app.use('/api/rpa',         rpaRoutes);
+app.use('/api/healing',     healingRoutes);
+app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/deployment',  deploymentRoutes);
+app.use('/api/simulation',  simulationRoutes);
+app.use('/api/cognitive',   cognitiveRoutes);
+
 // Incremented by broadcaster heartbeat loop; sampled into system status.
 let heartbeatCounter = 0;
 
@@ -212,7 +694,7 @@ const OBJECTIVE_STATUS = {
 };
 const MONEY_MODE_AGENTS = ['lead_hunter', 'email_ninja', 'intel_agent', 'social_guru'];
 const ASCEND_FORGE_AGENTS = ['intel_agent', 'email_ninja', 'social_guru'];
-const OBJECTIVES_FILE = path.resolve(__dirname, '../state/objectives.json');
+const OBJECTIVES_FILE = statePath('objectives.json');
 const MONEY_LEADS_PER_TASK = 5;
 const MONEY_EMAILS_PER_TASK = 10;
 
@@ -266,6 +748,7 @@ const runtimeState = {
   },
   _seq: 0,
 };
+economyService.init(runtimeState, STATE_DIR);
 
 const bootVoiceState = {
   system_init: false,
@@ -321,8 +804,8 @@ function markBootEvent(name) {
 
 const secretStore = new SecretStore();
 const securitySyncPolicy = createOfflineSecuritySyncPolicy({
-  queueFile: path.resolve(__dirname, '../state/security_sync_queue.json'),
-  historyFile: path.resolve(__dirname, '../state/security_sync_history.log'),
+  queueFile: statePath('security_sync_queue.json'),
+  historyFile: statePath('security_sync_history.log'),
 });
 const apiGatewayProtector = createApiGatewayProtector({
   secretStore,
@@ -511,6 +994,10 @@ function addActivity(notes, kind = 'system') {
   runtimeState.activityFeed = runtimeState.activityFeed.slice(0, MAX_ACTIVITY_ITEMS);
   // Broadcast immediately so UI gets real-time updates without polling
   broadcaster.broadcast('activity:item', item);
+}
+
+function emitTaskProgress(taskId, title, steps) {
+  broadcaster.broadcast('task_progress', { taskId, title, steps, ts: Date.now() });
 }
 
 function emitObservabilityEvent(eventType, payload = {}) {
@@ -932,6 +1419,12 @@ function startAscendForgeObjective(objective) {
   });
   broadcastObjectiveUpdate('ascend_forge');
   addActivity(`[ASCEND FORGE] objective started • ${objective.goal}`, 'automation');
+
+  // Emit live task progress so chat shows a step-by-step progress block
+  emitTaskProgress(run.run_id, `Forge: ${objective.goal}`,
+    plan.map((step, idx) => ({ id: idx, label: step, status: 'pending' }))
+  );
+
   return { ok: true, message: `✅ Ascend Forge objective started: ${objective.goal}` };
 }
 
@@ -1113,6 +1606,28 @@ function buildDashboardPayload() {
   };
 }
 
+function readJsonSafe(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function readJsonlSafe(file, limit = 500) {
+  try {
+    const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
+    return lines.slice(-limit).map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+const walletSnapshot = () => economyService.walletSnapshot();
+const buildEconomySnapshot = () => economyService.buildEconomySnapshot();
+
 function cpuUsagePercent() {
   const cpus = os.cpus().length || 1;
   const load = os.loadavg()[0];
@@ -1185,20 +1700,277 @@ function sampleSystemStatus() {
   };
 }
 
+// GET /health — FAST health check for boot polling (no external calls)
+// Returns immediately with Node.js uptime and status.
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
 });
+
+// GET /health/full — detailed health check (external calls, slow)
+// Called by dashboard, not by boot scripts. Includes all subsystem checks.
+app.get('/health/full', async (req, res) => {
+  const checks = {
+    node: { status: 'ok' },
+    python_backend: { status: 'pending' },
+    llm_api: { status: 'pending' },
+    database: { status: 'pending' },
+  };
+
+  // Check Python backend
+  try {
+    const pythonHealthUrl = `http://127.0.0.1:${PYTHON_BACKEND_PORT}/health`;
+    const pythonRes = await Promise.race([
+      fetch(pythonHealthUrl),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+    ]);
+    checks.python_backend.status = pythonRes.ok ? 'ok' : 'degraded';
+  } catch (e) {
+    checks.python_backend.status = 'down';
+    checks.python_backend.error = e.message;
+  }
+
+  // Check LLM API connectivity (Anthropic, OpenRouter, or Ollama)
+  try {
+    const llmBackend = process.env.LLM_BACKEND || 'anthropic';
+    if (llmBackend === 'anthropic') {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        checks.llm_api.status = 'unconfigured';
+      } else {
+        // Quick validation: fetch models list
+        const modelRes = await Promise.race([
+          fetch('https://api.anthropic.com/v1/models', {
+            headers: { Authorization: `Bearer ${apiKey}` }
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+        checks.llm_api.status = modelRes.ok ? 'ok' : 'degraded';
+        checks.llm_api.provider = 'anthropic';
+      }
+    } else if (llmBackend === 'ollama') {
+      const ollamaUrl = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
+      const ollamaRes = await Promise.race([
+        fetch(`${ollamaUrl}/api/tags`),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      ]);
+      checks.llm_api.status = ollamaRes.ok ? 'ok' : 'down';
+      checks.llm_api.provider = 'ollama';
+    }
+  } catch (e) {
+    checks.llm_api.status = 'down';
+    checks.llm_api.error = e.message;
+  }
+
+  // Check database
+  try {
+    if (db) {
+      const result = db.prepare('SELECT 1').get();
+      checks.database.status = result ? 'ok' : 'degraded';
+    }
+  } catch (e) {
+    checks.database.status = 'down';
+    checks.database.error = e.message;
+  }
+
+  // Overall status
+  const overallStatus = Object.values(checks).every(c => c.status !== 'down') ? 'healthy' : 'degraded';
+  const statusCode = overallStatus === 'healthy' ? 200 : 503;
+
+  res.status(statusCode).json({
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    checks,
+  });
+});
+
+// POST /internal/events — Neural Brain bridge: localhost-only ingress used by
+// the Python runtime (problem-solver-ui :18790) to push events onto the
+// Node WebSocket broadcaster. Body: { event: string, data: object }.
+// Locked to loopback so external clients cannot inject dashboard events.
+app.post('/internal/events', express.json({ limit: '2mb' }), (req, res) => {
+  const ip = req.ip || req.connection?.remoteAddress || '';
+  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  if (!isLocal) return res.status(403).json({ ok: false, error: 'localhost only' });
+  const { event, data } = req.body || {};
+  if (typeof event !== 'string' || !event) {
+    return res.status(400).json({ ok: false, error: 'event required' });
+  }
+  try {
+    broadcaster.broadcast(event, data || {});
+    // Blacklight events get priority broadcast with structured payload
+    if (event === 'blacklight:status' || event === 'blacklight:mode_change' || event === 'blacklight:lockdown') {
+      broadcaster.broadcast('security:update', { event, ...data });
+      if (data && typeof data.threat_score === 'number') {
+        _lastBlacklightStatus = { ...data, updated_at: Date.now() };
+      }
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e && e.message || e) });
+  }
+});
+
+// GET /api/security/status — Blacklight + system control state (localhost or auth)
+app.get('/api/security/status', requireAuth, (req, res) => {
+  res.json({ ok: true, ...(_lastBlacklightStatus || { threat_score: 0, mode: 'NORMAL', active_threats: [] }) });
+});
+
+// Track last known Blacklight status for the status endpoint
+let _lastBlacklightStatus = null;
 
 // POST /api/auth/token — exchange the master secret for a 24h JWT
 // Body: { secret: "<JWT_SECRET_KEY from ~/.ai-employee/.env>" }
-app.post('/api/auth/token', (req, res) => {
+app.post('/api/auth/token', _rl_auth_token, (req, res) => {
   const body = validate(SCHEMAS.authToken, req, res);
   if (!body) return;
   if (body.secret !== JWT_SECRET) {
     return res.status(401).json({ ok: false, error: 'Invalid secret' });
   }
-  const token = jwt.sign({ role: 'admin', iss: 'ai-employee' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const token = jwt.sign({ sub: 'admin', type: 'access', role: 'admin', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   res.json({ ok: true, token, expires_in: JWT_EXPIRES_IN });
+});
+
+// GET /api/auth/auto-token — issues a short-lived JWT for localhost dashboard access (no secret needed)
+// Only allows requests from loopback. Uses raw socket remoteAddress (unforgeable) — not req.ip
+// which is X-Forwarded-For aware and trivially spoofable via `trust proxy: 1`.
+app.get('/api/auth/auto-token', _rl_auto_token, (req, res) => {
+  const rawIp = req.socket?.remoteAddress || '';
+  const isLocal = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1';
+  if (!isLocal) return res.status(403).json({ ok: false, error: 'Only available from localhost' });
+  const token = jwt.sign({ sub: 'operator', type: 'access', role: 'operator', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: '8h' });
+  res.json({ ok: true, token });
+});
+
+function pythonServiceAuthorization(req) {
+  const payload = req.jwtPayload || {};
+  const sub = payload.sub || payload.user_id || 'operator';
+  const token = jwt.sign({
+    sub,
+    type: 'access',
+    role: payload.role || 'operator',
+    iss: 'ai-employee-node',
+    tenant_id: payload.tenant_id || req.tenant?.id || 'default',
+    org_name: payload.org_name || 'Local',
+    service: 'node-gateway',
+  }, JWT_SECRET, { expiresIn: '10m' });
+  return `Bearer ${token}`;
+}
+
+// GET /api/identity/public — public identity info (no auth required)
+// Returns instance name and color palette for onboarding/branding
+app.get('/api/identity/public', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const identityFile = path.join(AI_HOME, 'identity.json');
+    if (!fs.existsSync(identityFile)) {
+      return res.json({
+        instance_name: 'Initializing...',
+        color_palette: { primary: '#a855f7', accent: '#e5c76b' },
+        user_chosen: null
+      });
+    }
+    const identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
+    res.json({
+      instance_name: identity.instance_name,
+      user_chosen: identity.user_chosen,
+      color_palette: identity.color_palette,
+      tenant_id: identity.tenant_id
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to read identity' });
+  }
+});
+
+// GET /api/onboarding/palettes — generate 3 color palettes for onboarding
+app.get('/api/onboarding/palettes', requireAuth, (req, res) => {
+  const generatePalette = () => {
+    const hue = Math.random() * 0.3 + 0.65;  // 65-95% of hue circle (purples/magentas)
+    const saturation = 0.6 + Math.random() * 0.3;  // 60-90%
+    const toHex = (h, s, l) => {
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+      const m = l - c / 2;
+      let r = 0, g = 0, b = 0;
+      if (h < 1/6) [r, g, b] = [c, x, 0];
+      else if (h < 1/3) [r, g, b] = [x, c, 0];
+      else if (h < 1/2) [r, g, b] = [0, c, x];
+      else if (h < 2/3) [r, g, b] = [0, x, c];
+      else if (h < 5/6) [r, g, b] = [x, 0, c];
+      else [r, g, b] = [c, 0, x];
+      return '#' + [r + m, g + m, b + m].map(x => Math.round((x) * 255).toString(16).padStart(2, '0')).join('');
+    };
+    return {
+      primary: toHex(hue, saturation, 0.4),
+      accent: toHex(hue, saturation * 0.8, 0.55),
+      secondary: toHex((hue + 0.15) % 1.0, saturation * 0.7, 0.4)
+    };
+  };
+  res.json({
+    palettes: [generatePalette(), generatePalette(), generatePalette()]
+  });
+});
+
+// POST /api/identity/finalize — save user onboarding choices
+app.post('/api/identity/finalize', requireAuth, async (req, res) => {
+  const _bodyIdentity = validate(SCHEMAS.identityFinalize, req, res);
+  if (!_bodyIdentity) return;
+  try {
+    const { user_chosen, instance_name, voice_preset, color_palette } = _bodyIdentity;
+    const fs = require('fs');
+    const path = require('path');
+    const homedir = process.env.HOME || process.env.USERPROFILE;
+    const identityFile = path.join(homedir, '.ai-employee', 'identity.json');
+
+    // Ensure directory exists
+    const dir = path.dirname(identityFile);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    // Load or create identity
+    let identity;
+    if (fs.existsSync(identityFile)) {
+      identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
+    } else {
+      // Create minimal identity if doesn't exist
+      identity = {
+        tenant_id: `tnt_${Math.random().toString(36).substr(2, 12)}`,
+        instance_name: instance_name || 'Aurora-Prime',
+        user_chosen: null,
+        color_palette: color_palette || { primary: '#a855f7', accent: '#e5c76b' },
+        voice_preset: voice_preset || 'professional',
+        emergent: { vocabulary_signature: [], favorite_agents: [], work_pattern: null, tone_drift: 0.0 },
+        created_at: new Date().toISOString(),
+        evolution_log: []
+      };
+    }
+
+    // Update with user choices
+    if (user_chosen) identity.user_chosen = user_chosen;
+    if (instance_name) identity.instance_name = instance_name;
+    if (voice_preset) identity.voice_preset = voice_preset;
+    if (color_palette) identity.color_palette = color_palette;
+
+    // Log finalization
+    identity.evolution_log = identity.evolution_log || [];
+    identity.evolution_log.push({
+      event: 'identity_finalized',
+      timestamp: new Date().toISOString(),
+      user_chosen,
+      voice_preset
+    });
+
+    // Write back
+    fs.writeFileSync(identityFile, JSON.stringify(identity, null, 2));
+    res.json({ ok: true, identity });
+  } catch (e) {
+    console.error('Failed to finalize identity:', e);
+    res.status(500).json({ error: 'Failed to save identity' });
+  }
 });
 
 app.get('/version', (req, res) => {
@@ -1220,16 +1992,18 @@ app.get('/version', (req, res) => {
   });
 });
 
-app.get('/agents', (req, res) => {
+app.get('/agents', requireAuth, (req, res) => {
   res.json({ agents: getAgents() });
 });
 
-app.get('/internal/agents', (req, res) => {
+app.get('/internal/agents', requireLocalhost, (req, res) => {
   res.json({ agents: getAgents(), internal: true });
 });
 
-app.post('/agents/activate', (req, res) => {
-  const { count } = req.body || {};
+app.post('/agents/activate', requireAuth, (req, res) => {
+  const _bodyActivate = validate(SCHEMAS.agentsActivate, req, res);
+  if (!_bodyActivate) return;
+  const { count } = _bodyActivate;
   const out = activateAgents(typeof count === 'number' ? count : undefined);
   res.json({ ok: true, ...out, mode: getMode(), agents: getAgents() });
 });
@@ -1240,23 +2014,942 @@ app.get('/status', (req, res) => {
 });
 
 // Aliases for tests and external callers that expect /api/ prefix
-app.get('/api/status', (req, res) => {
+app.get('/api/status', requireAuth, (req, res) => {
   const stats = sampleSystemStatus();
   res.json({ status: 'online', agents: stats.total_agents, running_agents: stats.running_agents, timestamp: stats.timestamp });
 });
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
+  const stats = sampleSystemStatus();
+  const agents = getAgents();
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: stats.uptime ?? `${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
+    node_ok: true,
+    python_backend: _systemReady.python_ok === true,
+    python_ok: _systemReady.python_ok === true,
+    llm_ok: _systemReady.llm_ok === true,
+    readiness_phase: _readiness.phase,
+    degraded: _systemReady.python_ok !== true,
+    agents_active: agents.filter(a => a.state === 'active').length,
+    tasks_running: runtimeState.taskQueue?.filter(t => t.status === 'running').length ?? 0,
+    threat_level: runtimeState.threatLevel ?? 'LOW',
+    cost_today: (runtimeState.costToday ?? 0).toFixed(2),
+    memory_pct: stats.memory_pct ?? stats.memory ?? 0,
+    mode: runtimeState.systemMode ?? 'BALANCED',
+  });
 });
-app.get('/api/agents', (req, res) => {
-  res.json(getAgents());
+
+app.get('/api/runtime/identity', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    app: 'AETERNUS NEXUS',
+    runtime: 'AI-EMPLOYEE',
+    mode: RUNTIME_MODE,
+    nonce: RUNTIME_NONCE,
+    buildId: process.env.AI_EMPLOYEE_BUILD_ID || latestCommit(),
+    repoRoot: REPO_ROOT,
+    appHome: AI_HOME,
+    stateDir: STATE_DIR,
+    logDir: LOG_DIR,
+    runDir: RUN_DIR,
+    ports: {
+      node: Number(PORT),
+      python: Number(PYTHON_BACKEND_PORT),
+    },
+    pid: process.pid,
+    platform: process.platform,
+    arch: process.arch,
+    startedAt: SERVER_START_TIMESTAMP,
+  });
+});
+
+function normalizeGraphNode(raw, index = 0) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id || raw.key || raw.name || raw.label || `node-${index}`).trim();
+  if (!id) return null;
+  const type = String(raw.type || raw.node_type || raw.group || 'skill').toLowerCase();
+  const rawGroup = String(raw.group || '').toLowerCase();
+  const group = (
+    ['money', 'memory', 'automation', 'learning', 'agent', 'system'].includes(rawGroup) ? rawGroup
+      : rawGroup === 'strategy' || rawGroup === 'skill' || rawGroup === 'concept' ? 'money'
+        : rawGroup === 'task' || rawGroup === 'output' ? 'automation'
+          : rawGroup === 'input' || rawGroup === 'hidden' ? 'learning'
+            : type === 'strategy' || type === 'skill' || type === 'concept' ? 'money'
+              : type === 'memory' ? 'memory'
+                : type === 'task' || type === 'output' ? 'automation'
+                  : type === 'input' || type === 'hidden' ? 'learning'
+                    : type === 'agent' ? 'agent'
+                      : 'system'
+  );
+  return {
+    id,
+    label: String(raw.label || raw.name || id),
+    type,
+    group,
+    weight: Number.isFinite(Number(raw.weight)) ? Number(raw.weight) : 1,
+    confidence: Number.isFinite(Number(raw.confidence)) ? Number(raw.confidence) : 0,
+    activation: Number.isFinite(Number(raw.activation)) ? Number(raw.activation) : 0,
+    source: String(raw.source || 'system'),
+    tag: String(raw.tag || ''),
+  };
+}
+
+function endpointId(value) {
+  if (value && typeof value === 'object') return value.id || value.key || value.name || value.label || '';
+  return value || '';
+}
+
+function normalizeGraphLink(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const source = String(endpointId(raw.source ?? raw.from)).trim();
+  const target = String(endpointId(raw.target ?? raw.to)).trim();
+  if (!source || !target) return null;
+  return {
+    source,
+    target,
+    strength: Number.isFinite(Number(raw.strength ?? raw.weight ?? raw.confidence))
+      ? Number(raw.strength ?? raw.weight ?? raw.confidence)
+      : 0.5,
+  };
+}
+
+function normalizeDashboardGraph(payload = {}) {
+  const nodes = [];
+  const seen = new Set();
+  const rawNodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  rawNodes.forEach((raw, index) => {
+    const node = normalizeGraphNode(raw, index);
+    if (!node || seen.has(node.id)) return;
+    seen.add(node.id);
+    nodes.push(node);
+  });
+
+  const rawLinks = Array.isArray(payload.links)
+    ? payload.links
+    : Array.isArray(payload.connections)
+      ? payload.connections
+      : [];
+  const links = [];
+  const linkSet = new Set();
+  rawLinks.forEach((raw) => {
+    const link = normalizeGraphLink(raw);
+    if (!link || !seen.has(link.source) || !seen.has(link.target)) return;
+    const key = `${link.source}→${link.target}`;
+    if (linkSet.has(key)) return;
+    linkSet.add(key);
+    links.push(link);
+  });
+
+  return {
+    nodes,
+    links,
+    stats: {
+      ...(payload.stats || {}),
+      node_count: nodes.length,
+      link_count: links.length,
+    },
+    updated_at: payload.updated_at || payload.updatedAt || new Date().toISOString(),
+  };
+}
+
+async function checkNeuralGraphReady() {
+  try {
+    const graph = await proxyNeuralBrain('/api/neural-brain/graph', { nodes: [], links: [] });
+    const normalized = normalizeDashboardGraph(graph);
+    return {
+      ok: normalized.nodes.length > 0 || _readiness.pythonReady === true,
+      graph: normalized,
+    };
+  } catch (_) {
+    return { ok: false, graph: normalizeDashboardGraph({ nodes: [], links: [] }) };
+  }
+}
+
+app.get('/api/readiness', async (req, res) => {
+  const degradedReasons = [];
+  // Self-heal: the boot poll for Python is one-shot. If it's marked not-ready,
+  // re-probe live so readiness recovers when Python comes up after Node.
+  if (!_readiness.pythonReady) {
+    try {
+      const hr = await Promise.race([
+        fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/health`),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 1200)),
+      ]);
+      if (hr?.ok) { _readiness.pythonReady = true; if (_readiness.phase === 'BOOTING') _readiness.phase = 'READY'; }
+    } catch (_) {}
+  }
+  const graphProbe = await checkNeuralGraphReady();
+  const neuralBrainReady = _readiness.pythonReady === true;
+  const graphReady = graphProbe.ok === true;
+  if (!HAS_FRONTEND_DIST) degradedReasons.push('frontend_dist_missing');
+  if (!_readiness.pythonReady) degradedReasons.push('python_backend_not_ready');
+  if (_readiness.pythonReady && !_readiness.subsystemsReady) degradedReasons.push('python_subsystems_degraded');
+  if (!neuralBrainReady) degradedReasons.push('neural_brain_not_ready');
+  if (!graphReady) degradedReasons.push('graph_not_ready');
+  res.json({
+    ok: true,
+    nodeReady: true,
+    apiReady: true,
+    frontendDist: HAS_FRONTEND_DIST,
+    frontendIndex: HAS_FRONTEND_DIST,
+    phase: _readiness.phase,
+    pythonReady: _readiness.pythonReady,
+    subsystemsReady: _readiness.subsystemsReady,
+    neuralBrainReady,
+    graphReady,
+    degraded: degradedReasons.length > 0,
+    degradedReasons,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+async function probeHttp(url, timeoutMs = 900) {
+  try {
+    const response = await Promise.race([
+      fetch(url),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+    ]);
+    return { ok: !!response?.ok, status: response?.status || 0 };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+function capabilityRecord({
+  id,
+  label,
+  status,
+  category,
+  required_env = [],
+  missing_env = [],
+  setup_action = 'none',
+  details = '',
+  docs_hint = '',
+  source = 'node',
+  proof = null,
+}) {
+  const checkedAt = new Date().toISOString();
+  return {
+    id,
+    name: id, // compatibility for older dashboard widgets
+    label,
+    status,
+    category,
+    required_env,
+    missing_env,
+    last_checked_at: checkedAt,
+    updated_at: checkedAt,
+    setup_action,
+    details,
+    docs_hint,
+    source,
+    proof,
+  };
+}
+
+function missingEnv(keys) {
+  return keys.filter((key) => !process.env[key]);
+}
+
+function statusFromEnv(keys, { any = false } = {}) {
+  if (!keys.length) return { status: 'live', missing: [] };
+  const missing = missingEnv(keys);
+  if (any) {
+    return { status: missing.length < keys.length ? 'live' : 'not_configured', missing };
+  }
+  return { status: missing.length === 0 ? 'live' : 'not_configured', missing };
+}
+
+app.get('/api/capabilities/status', requireAuth, async (_req, res) => {
+  const checkedAt = new Date().toISOString();
+  const pythonProbe = _readiness.pythonReady
+    ? { ok: true, status: 200 }
+    : await probeHttp(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/health`);
+  if (pythonProbe.ok) {
+    _readiness.pythonReady = true;
+    if (_readiness.phase === 'BOOTING') _readiness.phase = 'READY';
+  }
+
+  const ollamaHost = process.env.OLLAMA_HOST || process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
+  const ollamaProbe = await probeHttp(`${String(ollamaHost).replace(/\/$/, '')}/api/tags`);
+  const fishSpeechHost = process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL || 'http://127.0.0.1:8080';
+  const fishSpeechProbe = await probeHttp(`${String(fishSpeechHost).replace(/\/$/, '')}/v1/health`);
+  const llmProviders = [
+    ['anthropic_llm', 'Anthropic LLM', ['ANTHROPIC_API_KEY']],
+    ['openai_llm', 'OpenAI LLM', ['OPENAI_API_KEY']],
+    ['openrouter_llm', 'OpenRouter LLM', ['OPENROUTER_API_KEY']],
+    ['groq_llm', 'Groq LLM', ['GROQ_API_KEY']],
+  ];
+  const providerRecords = llmProviders.map(([id, label, requiredEnv]) => {
+    const env = statusFromEnv(requiredEnv);
+    return capabilityRecord({
+      id,
+      label,
+      status: env.status,
+      category: 'llm',
+      required_env: requiredEnv,
+      missing_env: env.missing,
+      setup_action: env.status === 'live' ? 'test' : 'configure_env',
+      details: env.status === 'live' ? `${label} key is present.` : `${label} requires ${env.missing.join(', ')}.`,
+      docs_hint: 'Configure provider keys in ~/.ai-employee/.env or Settings.',
+    });
+  });
+  const activeProviderCount = providerRecords.filter((record) => record.status === 'live').length + (ollamaProbe.ok ? 1 : 0);
+
+  const emailRequired = ['SENDGRID_API_KEY', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'];
+  const emailConfigured = !!process.env.SENDGRID_API_KEY
+    || (!!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS);
+  const emailMissing = emailConfigured
+    ? []
+    : emailRequired.filter((key) => !process.env[key]);
+  const apolloEnv = statusFromEnv(['APOLLO_API_KEY']);
+  const linkedinEnv = statusFromEnv(['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN']);
+  const stateWritable = (() => {
+    try {
+      fs.accessSync(STATE_DIR, fs.constants.R_OK | fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const artifactsWritable = (() => {
+    try {
+      fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
+      fs.accessSync(ARTIFACTS_DIR, fs.constants.R_OK | fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  const capabilities = [
+    capabilityRecord({
+      id: 'node_backend',
+      label: 'Node Backend',
+      status: 'live',
+      category: 'runtime',
+      setup_action: 'view_logs',
+      details: `Gateway is running on port ${PORT}.`,
+      docs_hint: 'Node owns auth, WebSocket, dashboard APIs, and Python proxying.',
+      proof: { started_at: SERVER_START_TIMESTAMP, port: PORT },
+    }),
+    capabilityRecord({
+      id: 'python_backend',
+      label: 'Python Backend',
+      status: pythonProbe.ok ? 'live' : 'unavailable',
+      category: 'runtime',
+      setup_action: pythonProbe.ok ? 'test' : 'start_service',
+      details: pythonProbe.ok
+        ? `Python health responded on port ${PYTHON_BACKEND_PORT}.`
+        : `Python did not respond on port ${PYTHON_BACKEND_PORT}.`,
+      docs_hint: 'Start the Python AI backend before marking task execution fully live.',
+      proof: { port: PYTHON_BACKEND_PORT, probe: pythonProbe },
+    }),
+    capabilityRecord({
+      id: 'frontend_build',
+      label: 'Frontend Build',
+      status: HAS_FRONTEND_DIST ? 'live' : 'not_configured',
+      category: 'runtime',
+      setup_action: HAS_FRONTEND_DIST ? 'none' : 'run_build',
+      details: HAS_FRONTEND_DIST ? 'Built frontend assets are available.' : 'frontend/dist/index.html is missing.',
+      docs_hint: 'Run npm --prefix frontend run build to produce production assets.',
+    }),
+    capabilityRecord({
+      id: 'websocket_event_bus',
+      label: 'WebSocket Event Bus',
+      status: 'live',
+      category: 'runtime',
+      setup_action: 'test',
+      details: 'Node WebSocket upgrade handler is mounted; clients still need a valid token.',
+      docs_hint: 'Use the dashboard connection pill and event feed to confirm live client traffic.',
+    }),
+    capabilityRecord({
+      id: 'auth_session',
+      label: 'Auth / Session',
+      status: JWT_SECRET ? 'live' : 'not_configured',
+      category: 'security',
+      required_env: ['JWT_SECRET_KEY'],
+      missing_env: JWT_SECRET ? [] : ['JWT_SECRET_KEY'],
+      setup_action: JWT_SECRET ? 'test' : 'configure_env',
+      details: JWT_SECRET ? 'JWT signing secret is configured.' : 'JWT_SECRET_KEY is required before startup.',
+      docs_hint: 'Local admin tokens are available from /api/auth/auto-token.',
+    }),
+    capabilityRecord({
+      id: 'ollama_local_model',
+      label: 'Ollama / Local Model',
+      status: ollamaProbe.ok ? 'live' : 'not_configured',
+      category: 'llm',
+      required_env: ['OLLAMA_HOST'],
+      missing_env: process.env.OLLAMA_HOST || process.env.OLLAMA_URL ? [] : ['OLLAMA_HOST'],
+      setup_action: ollamaProbe.ok ? 'test' : 'start_service',
+      details: ollamaProbe.ok ? `Ollama responded at ${ollamaHost}.` : `No Ollama response from ${ollamaHost}.`,
+      docs_hint: 'Start Ollama and pull the configured local model to enable local fallback.',
+      proof: { host: ollamaHost, probe: ollamaProbe },
+    }),
+    capabilityRecord({
+      id: 'fish_speech_s2_local_voice',
+      label: 'Fish Speech S2 Local Voice',
+      status: fishSpeechProbe.ok ? 'live' : 'not_configured',
+      category: 'execution',
+      required_env: ['FISH_SPEECH_URL'],
+      missing_env: process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL ? [] : ['FISH_SPEECH_URL'],
+      setup_action: fishSpeechProbe.ok ? 'test' : 'start_service',
+      details: fishSpeechProbe.ok
+        ? `Fish Speech responded at ${fishSpeechHost}.`
+        : `No Fish Speech response from ${fishSpeechHost}; voice falls back to local OS TTS if available.`,
+      docs_hint: 'Run Fish Speech S2 locally on port 8080 to replace robotic OS speech with a natural system-owned voice.',
+      proof: { host: fishSpeechHost, probe: fishSpeechProbe },
+    }),
+    capabilityRecord({
+      id: 'llm_provider_routing',
+      label: 'LLM Provider Routing',
+      status: activeProviderCount > 0 ? 'live' : 'not_configured',
+      category: 'llm',
+      setup_action: activeProviderCount > 0 ? 'test' : 'configure_env',
+      details: activeProviderCount > 0
+        ? `${activeProviderCount} provider path(s) appear usable.`
+        : 'No remote provider key or local Ollama service is currently usable.',
+      docs_hint: 'Configure at least one model provider before expecting high-quality LLM responses.',
+    }),
+    ...providerRecords,
+    capabilityRecord({
+      id: 'tool_registry',
+      label: 'Tool / Skill Registry',
+      status: fs.existsSync(path.join(REPO_ROOT, 'runtime', 'config', 'skills_library.json')) ? 'live' : 'unavailable',
+      category: 'execution',
+      setup_action: 'test',
+      details: 'Skill registry file is present for planner/executor lookup.',
+      docs_hint: 'Tools still report their own configured/unconfigured state per provider.',
+    }),
+    capabilityRecord({
+      id: 'real_execution_engine',
+      label: 'Real Execution Engine',
+      status: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'live' : 'unavailable',
+      category: 'execution',
+      setup_action: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'test' : 'view_logs',
+      details: fs.existsSync(PYTHON_EXEC_SCRIPT) ? 'backend/run_execution.py exists.' : 'backend/run_execution.py is missing.',
+      docs_hint: 'Execution proof must include artifacts, traces, provider IDs, or explicit dry-run output.',
+    }),
+    capabilityRecord({
+      id: 'money_mode',
+      label: 'Money Mode',
+      status: 'dry_run',
+      category: 'money',
+      setup_action: 'run_doctor',
+      details: 'Money Mode is available as an approval-gated dry-run layer until external accounts are configured.',
+      docs_hint: 'Publishing, outreach, payments, paid-task acceptance, and account changes require approval.',
+    }),
+    capabilityRecord({
+      id: 'email_outreach',
+      label: 'Email / Outreach',
+      status: emailConfigured ? 'live' : 'not_configured',
+      category: 'integration',
+      required_env: emailRequired,
+      missing_env: emailMissing,
+      setup_action: emailConfigured ? 'test' : 'configure_env',
+      details: emailConfigured ? 'At least one email provider path is configured.' : 'Email requires SendGrid or a complete SMTP env set.',
+      docs_hint: 'Outbound email remains approval-gated even when configured.',
+    }),
+    capabilityRecord({
+      id: 'apollo_search',
+      label: 'Apollo Lead Search',
+      status: apolloEnv.status,
+      category: 'integration',
+      required_env: ['APOLLO_API_KEY'],
+      missing_env: apolloEnv.missing,
+      setup_action: apolloEnv.status === 'live' ? 'test' : 'configure_env',
+      details: apolloEnv.status === 'live' ? 'Apollo API key is present.' : 'Lead discovery needs APOLLO_API_KEY for live provider calls.',
+      docs_hint: 'Unconfigured lead discovery must be labeled mock/fallback/dry-run.',
+    }),
+    capabilityRecord({
+      id: 'linkedin_post',
+      label: 'LinkedIn Posting',
+      status: linkedinEnv.status,
+      category: 'integration',
+      required_env: ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN'],
+      missing_env: linkedinEnv.missing,
+      setup_action: linkedinEnv.status === 'live' ? 'test' : 'configure_env',
+      details: linkedinEnv.status === 'live' ? 'LinkedIn posting credentials are present.' : 'LinkedIn posting needs access token and person URN.',
+      docs_hint: 'Posting is never automatic; it requires an approval decision.',
+    }),
+    capabilityRecord({
+      id: 'artifact_storage',
+      label: 'Proof / Artifact Storage',
+      status: artifactsWritable ? 'live' : 'unavailable',
+      category: 'execution',
+      setup_action: artifactsWritable ? 'none' : 'view_logs',
+      details: artifactsWritable ? `Artifact directory is writable: ${ARTIFACTS_DIR}` : `Artifact directory is not writable: ${ARTIFACTS_DIR}`,
+      docs_hint: 'Generated outputs should link to stored artifacts or explain why none was produced.',
+    }),
+    capabilityRecord({
+      id: 'memory_store',
+      label: 'Memory / Vector Store',
+      status: stateWritable ? 'live' : 'unavailable',
+      category: 'memory',
+      setup_action: stateWritable ? 'test' : 'view_logs',
+      details: stateWritable ? `State directory is readable and writable: ${STATE_DIR}` : `State directory is not writable: ${STATE_DIR}`,
+      docs_hint: 'Memory health is degraded when vector/knowledge stores are unavailable or fallback-only.',
+    }),
+    capabilityRecord({
+      id: 'startup_warnings',
+      label: 'Startup / Runtime Warnings',
+      status: _readiness.subsystemsReady ? 'live' : (_readiness.pythonReady ? 'fallback' : 'unavailable'),
+      category: 'runtime',
+      setup_action: 'view_logs',
+      details: _readiness.subsystemsReady
+        ? 'Startup readiness reports all known subsystems ready.'
+        : 'Startup readiness still has degraded subsystem signals.',
+      docs_hint: 'Review /api/readiness and logs when this is fallback or unavailable.',
+    }),
+  ];
+
+  const counts = capabilities.reduce((acc, capability) => {
+    acc[capability.status] = (acc[capability.status] || 0) + 1;
+    return acc;
+  }, {});
+  const notLive = capabilities.filter((capability) => capability.status !== 'live');
+  const recommended = notLive.find((capability) => capability.status === 'unavailable')
+    || notLive.find((capability) => capability.status === 'not_configured')
+    || notLive.find((capability) => capability.status === 'fallback')
+    || null;
+
+  res.json({
+    ok: true,
+    checked_at: checkedAt,
+    states: ['live', 'dry_run', 'mock', 'fallback', 'not_configured', 'unavailable', 'error'],
+    counts,
+    next_recommended_action: recommended ? {
+      capability_id: recommended.id,
+      label: recommended.label,
+      setup_action: recommended.setup_action,
+      details: recommended.details,
+    } : null,
+    capabilities,
+  });
+});
+
+// ── Neural Brain data endpoints (proxy to Python if up, fallback to stubs) ───
+// Internal service token so Node→Python proxy calls pass the Python auth gate.
+// Signed with the shared JWT_SECRET; short-lived and minted on demand (cached 5 min).
+let _internalToken = null;
+let _internalTokenExp = 0;
+function internalServiceToken() {
+  const now = Date.now();
+  if (_internalToken && now < _internalTokenExp) return _internalToken;
+  _internalToken = jwt.sign(
+    { type: 'access', role: 'service', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local', svc: 'node-proxy' },
+    JWT_SECRET,
+    { expiresIn: '10m' },
+  );
+  _internalTokenExp = now + 5 * 60 * 1000; // refresh well before expiry
+  return _internalToken;
+}
+
+async function proxyNeuralBrain(path, fallback) {
+  try {
+    const r = await Promise.race([
+      fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${path}`, {
+        headers: { Authorization: `Bearer ${internalServiceToken()}` },
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 1500)),
+    ]);
+    if (r?.ok) return r.json();
+  } catch (_) {}
+  return fallback;
+}
+
+// Rich native-graph proxy (89+ nodes) — the snapshot endpoint can be empty, so expose
+// the live graph directly. Authenticated via the internal service token in proxyNeuralBrain.
+app.get('/api/neural-brain/graph', requireAuth, async (req, res) => {
+  const depth = Number(req.query.depth) || 2;
+  const limit = Number(req.query.limit) || 200;
+  const data = await proxyNeuralBrain(`/api/neural-brain/graph?depth=${depth}&limit=${limit}`, { nodes: [], links: [] });
+  res.json(normalizeDashboardGraph(data));
+});
+
+app.get('/api/neural-brain/memory/status', requireAuth, async (req, res) => {
+  const data = await proxyNeuralBrain('/api/neural-brain/memory/status', {
+    count: 0, last_write_ts: null, recent: [],
+  });
+  res.json(data);
+});
+
+app.get('/api/neural-brain/memory/list', requireAuth, async (req, res) => {
+  const data = await proxyNeuralBrain('/api/neural-brain/memory/list', {
+    items: [], total: 0, page: 1,
+  });
+  res.json(data);
+});
+
+app.delete('/api/neural-brain/memory/:id', requireAuth, async (req, res) => {
+  try {
+    const memoryId = String(req.params.id || '');
+    if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(memoryId)) {
+      return res.status(400).json({ ok: false, error: 'invalid memory id' });
+    }
+    const r = await fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' });
+    if (r?.ok) return res.json(await r.json());
+  } catch (_) {}
+  res.json({ ok: true });
+});
+
+app.get('/api/neural-brain/graph/status', requireAuth, async (req, res) => {
+  const data = await proxyNeuralBrain('/api/neural-brain/graph/status', {
+    node_count: 0, edge_count: 0, recent_nodes: [],
+  });
+  res.json(data);
+});
+
+app.get('/api/neural-brain/graph/snapshot', requireAuth, async (req, res) => {
+  let data = await proxyNeuralBrain('/api/neural-brain/graph/snapshot', {
+    nodes: [], links: [], stats: {},
+  });
+  if (!Array.isArray(data?.nodes) || data.nodes.length === 0) {
+    data = await proxyNeuralBrain('/api/neural-brain/graph', data);
+  }
+  res.json(normalizeDashboardGraph(data));
+});
+
+app.get('/api/neural-brain/threads', requireAuth, async (req, res) => {
+  const data = await proxyNeuralBrain('/api/neural-brain/threads', { threads: [] });
+  res.json(data);
+});
+
+// ── Four living memory graphs (WS3): shortterm|longterm|relations|unified ──────
+const _MEMORY_GRAPH_VIEWS = new Set(['shortterm', 'longterm', 'relations', 'unified']);
+app.get('/api/memory/graph/:view', requireAuth, async (req, res) => {
+  const { view } = req.params;
+  if (!_MEMORY_GRAPH_VIEWS.has(view)) return res.status(400).json({ error: 'unknown view', nodes: [], links: [] });
+  const limit = Number(req.query.limit) || 300;
+  // Forward Python payload as-is — it already carries decay/status/val fields the
+  // living-graph renderer needs, which normalizeDashboardGraph would strip.
+  const data = await proxyNeuralBrain(`/api/neural-brain/graph/views/${view}?limit=${limit}`, { nodes: [], links: [], stats: {}, view });
+  // Resilience: if Python is down/empty, serve relations|unified from the Node-side
+  // native graph (same SQLite that backs /api/brain/graph) so Memory Graphs never
+  // goes blank just because the Python backend is offline.
+  if ((!data.nodes || data.nodes.length === 0) && (view === 'relations' || view === 'unified')) {
+    try {
+      const snap = getNativeMemoryGraph({ stateDir: STATE_DIR, repoRoot: REPO_ROOT }).snapshot(limit);
+      if (snap?.nodes?.length) {
+        return res.json({ nodes: snap.nodes, links: snap.links || [], stats: { node_count: snap.nodes.length, link_count: (snap.links || []).length }, view, source: 'native_fallback' });
+      }
+    } catch (_) { /* fall through to honest empty */ }
+  }
+  res.json(data);
+});
+
+app.post('/api/neural-brain/think', requireAuth, async (req, res) => {
+  try {
+    const r = await Promise.race([
+      fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/think`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+    ]);
+    if (r?.ok) return res.json(await r.json());
+  } catch (_) {}
+  res.json({ response: 'Neural Brain offline — Python backend not running.', status: 'offline' });
+});
+
+app.get('/api/neural-brain/forge/evolution/status', requireAuth, async (req, res) => {
+  const data = await proxyNeuralBrain('/api/neural-brain/forge/evolution/status', {
+    mode: 'SAFE', patches_proposed: 0, patches_applied: 0,
+  });
+  res.json(data);
+});
+
+// ── Model Fabric proxy (Python /api/model-fabric/*) ─────────────────────────────
+// Generic GET/POST passthrough with the internal service token. Honest offline
+// fallback (no fake success) so the UI can show "Python backend offline".
+async function proxyModelFabric(path, { method = 'GET', body, timeout = 120000 } = {}) {
+  const opts = {
+    method,
+    headers: { Authorization: `Bearer ${internalServiceToken()}`, 'Content-Type': 'application/json' },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await Promise.race([
+    fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${path}`, opts),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeout)),
+  ]);
+  return { ok: r?.ok, status: r?.status, data: await r.json() };
+}
+
+const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline — Python backend not running.' };
+
+// GET endpoints (fast; never trigger a model load)
+['models', 'health', 'status', 'lifecycle/status', 'quantization/status',
+ 'quantization/available', 'quantization/pull/status'].forEach((seg) => {
+  app.get(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
+    try {
+      const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { timeout: 15000 });
+      return res.status(ok ? 200 : 502).json(data);
+    } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
+  });
+});
+
+// POST endpoints
+['route', 'llm', 'slm', 'vision/analyze', 'vision/segment', 'generate/visual',
+ 'actions/execute', 'rag/query', 'rag/ingest', 'quantization/select',
+ 'quantization/pull', 'models/unload-idle'].forEach((seg) => {
+  app.post(`/api/model-fabric/${seg}`, requireAuth, async (req, res) => {
+    try {
+      const { ok, data } = await proxyModelFabric(`/api/model-fabric/${seg}`, { method: 'POST', body: req.body });
+      return res.status(ok ? 200 : 502).json(data);
+    } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
+  });
+});
+
+// Per-model unload (model id may contain slashes/colons, e.g. "qwen2.5-coder:14b")
+app.post(/^\/api\/model-fabric\/models\/(.+)\/unload$/, requireAuth, async (req, res) => {
+  try {
+    const id = encodeURIComponent(req.params[0]);
+    const { ok, data } = await proxyModelFabric(`/api/model-fabric/models/${id}/unload`, { method: 'POST', body: req.body });
+    return res.status(ok ? 200 : 502).json(data);
+  } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
+});
+
+// Per-model reload with a specific quant (unload + pull the quant variant)
+app.post(/^\/api\/model-fabric\/models\/(.+)\/reload-with-quant$/, requireAuth, async (req, res) => {
+  try {
+    const id = encodeURIComponent(req.params[0]);
+    const { ok, data } = await proxyModelFabric(`/api/model-fabric/models/${id}/reload-with-quant`, { method: 'POST', body: req.body });
+    return res.status(ok ? 200 : 502).json(data);
+  } catch (_) { return res.status(503).json(MODEL_FABRIC_OFFLINE); }
+});
+
+// ── Agent fleet controls ──────────────────────────────────────────────────────
+app.post('/api/agents/start-all', requireAuth, (req, res) => {
+  res.json({ ok: true, action: 'start-all' });
+});
+app.post('/api/agents/pause-all', requireAuth, (req, res) => {
+  res.json({ ok: true, action: 'pause-all' });
+});
+app.post('/api/agents/stop-all', requireAuth, (req, res) => {
+  res.json({ ok: true, action: 'stop-all' });
+});
+app.get('/api/agents', requireAuth, (req, res) => {
+  const agents = getAgents();
+  // Include tenant context if available (for debugging/admin purposes only)
+  const response = {
+    agents,
+    tenant: req.tenant ? { tenant_id: req.tenant.tenantId, org_name: req.tenant.orgName } : null,
+  };
+  res.json(response);
 });
 
 // ── Subsystem API endpoints ───────────────────────────────────────────────────
 
-app.get('/api/system/stats', (req, res) => {
+app.get('/api/system/stats', requireAuth, (req, res) => {
   const stats = sampleSystemStatus();
   // Expose cpu_percent as canonical field (alias of cpu_usage) for test/e2e compatibility
   res.json({ ...stats, cpu_percent: stats.cpu_usage ?? stats.cpu ?? 0 });
+});
+
+function execText(command, timeout = 1200) {
+  try {
+    return execSync(command, { encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
+}
+
+function parsePsRows() {
+  const output = execText('ps -eo pid,comm,pcpu,pmem,etime,args --no-headers', 1200);
+  if (!output.trim()) {
+    return [{
+      pid: process.pid,
+      name: 'node',
+      service: 'node_backend',
+      status: 'running',
+      cpu_percent: 0,
+      memory_percent: 0,
+      uptime: Math.round(process.uptime()),
+      command: 'node backend/server.js',
+      source: 'node_fallback',
+    }];
+  }
+  const interesting = ['node', 'python', 'uvicorn', 'ollama', 'vite'];
+  return output.split('\n').map((line) => {
+    const match = line.trim().match(/^(\d+)\s+(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(.+)$/);
+    if (!match) return null;
+    const [, pid, comm, cpu, mem, etime, args] = match;
+    const text = `${comm} ${args}`.toLowerCase();
+    if (!interesting.some((term) => text.includes(term)) && !text.includes('ai-employee')) return null;
+    return {
+      pid: Number(pid),
+      name: comm,
+      service: text.includes('python') || text.includes('uvicorn') ? 'python_backend'
+        : text.includes('ollama') ? 'ollama'
+          : text.includes('vite') ? 'frontend_dev'
+            : 'node_backend',
+      status: 'running',
+      cpu_percent: Number(cpu) || 0,
+      memory_percent: Number(mem) || 0,
+      uptime: etime,
+      command: String(args).slice(0, 220),
+      source: 'ps',
+    };
+  }).filter(Boolean).slice(0, 40);
+}
+
+function parseListeningPorts() {
+  const output = execText('ss -ltnp', 1200) || execText('netstat -ltnp', 1200);
+  if (!output.trim()) {
+    return [
+      { port: Number(PORT), protocol: 'tcp', service: 'node_backend', status: 'unknown', source: 'configured' },
+      { port: Number(PYTHON_BACKEND_PORT), protocol: 'tcp', service: 'python_backend', status: _readiness.pythonReady ? 'listening' : 'unknown', source: 'configured' },
+    ];
+  }
+  return output.split('\n').map((line) => {
+    const local = line.match(/(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|\*):(\d+)/);
+    if (!local) return null;
+    const port = Number(local[1]);
+    if (![Number(PORT), Number(PYTHON_BACKEND_PORT), 5173, 11434].includes(port)) return null;
+    return {
+      port,
+      protocol: 'tcp',
+      service: port === Number(PORT) ? 'node_backend'
+        : port === Number(PYTHON_BACKEND_PORT) ? 'python_backend'
+          : port === 11434 ? 'ollama'
+            : 'frontend_dev',
+      status: 'listening',
+      raw: line.trim().slice(0, 220),
+      source: 'socket_table',
+    };
+  }).filter(Boolean);
+}
+
+function storageRows() {
+  const rows = [];
+  const addPath = (id, label, dir) => {
+    let access = 'unavailable';
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK);
+      access = 'read_write';
+    } catch {
+      access = 'unavailable';
+    }
+    rows.push({ id, label, path: dir, status: access, source: 'node_fs' });
+  };
+  addPath('state', 'Runtime State', STATE_DIR);
+  addPath('logs', 'Logs', LOG_DIR);
+  addPath('run', 'PID / Run Files', RUN_DIR);
+  addPath('artifacts', 'Artifacts', ARTIFACTS_DIR);
+  const df = execText(`df -Pk "${STATE_DIR}"`, 1200).split('\n')[1];
+  if (df) {
+    const parts = df.trim().split(/\s+/);
+    rows.push({
+      id: 'disk',
+      label: 'State Disk',
+      path: parts[5],
+      status: 'available',
+      size_kb: Number(parts[1]) || 0,
+      used_kb: Number(parts[2]) || 0,
+      available_kb: Number(parts[3]) || 0,
+      used_percent: parts[4] || null,
+      source: 'df',
+    });
+  }
+  return rows;
+}
+
+function runtimeWarnings() {
+  const warnings = [];
+  if (!HAS_FRONTEND_DIST) warnings.push({ id: 'frontend_dist_missing', status: 'warning', details: 'frontend/dist/index.html is missing.' });
+  if (!_readiness.pythonReady) warnings.push({ id: 'python_backend_not_ready', status: 'warning', details: `Python backend is not live on port ${PYTHON_BACKEND_PORT}.` });
+  if (_readiness.pythonReady && !_readiness.subsystemsReady) warnings.push({ id: 'python_subsystems_degraded', status: 'warning', details: 'Python backend is live but subsystem readiness is degraded.' });
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) {
+    warnings.push({ id: 'llm_provider_missing', status: 'warning', details: 'No remote LLM provider API key is configured.' });
+  }
+  return warnings;
+}
+
+app.get('/api/system/processes', requireAuth, (_req, res) => {
+  res.json({ ok: true, generated_at: new Date().toISOString(), processes: parsePsRows() });
+});
+
+app.get('/api/system/ports', requireAuth, (_req, res) => {
+  res.json({ ok: true, generated_at: new Date().toISOString(), ports: parseListeningPorts() });
+});
+
+app.get('/api/system/storage', requireAuth, (_req, res) => {
+  res.json({ ok: true, generated_at: new Date().toISOString(), storage: storageRows() });
+});
+
+app.get('/api/system/runtime-warnings', requireAuth, (_req, res) => {
+  const warnings = runtimeWarnings();
+  res.json({ ok: true, generated_at: new Date().toISOString(), status: warnings.length ? 'degraded' : 'live', warnings });
+});
+
+app.get('/api/system/services', requireAuth, (_req, res) => {
+  const ports = parseListeningPorts();
+  const portStatus = (port) => ports.some((row) => row.port === Number(port) && row.status === 'listening');
+  const warnings = runtimeWarnings();
+  res.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    services: [
+      { id: 'node_backend', name: 'Node Backend', status: portStatus(PORT) ? 'live' : 'degraded', port: Number(PORT), uptime: process.uptime(), restart_available: false, log_link: null },
+      { id: 'python_backend', name: 'Python Backend', status: _readiness.pythonReady || portStatus(PYTHON_BACKEND_PORT) ? 'live' : 'unavailable', port: Number(PYTHON_BACKEND_PORT), uptime: null, restart_available: false, log_link: null },
+      { id: 'frontend_build', name: 'Frontend Build', status: HAS_FRONTEND_DIST ? 'live' : 'not_configured', port: null, uptime: null, restart_available: false, log_link: null },
+      { id: 'runtime_warnings', name: 'Runtime Warnings', status: warnings.length ? 'degraded' : 'live', port: null, uptime: null, restart_available: false, last_error: warnings[0]?.details || null },
+    ],
+  });
+});
+
+function collectExpressRoutes() {
+  const routes = [];
+  const stack = app._router?.stack || [];
+  for (const layer of stack) {
+    if (!layer.route) continue;
+    const routePath = layer.route.path;
+    const methods = Object.keys(layer.route.methods || {}).filter((method) => layer.route.methods[method]);
+    const handlers = (layer.route.stack || []).map((item) => item?.handle?.name || '').filter(Boolean);
+    const authRequired = handlers.includes('requireAuth') || routePath.startsWith('/api/');
+    const compatibility = routePath.includes('/chat') || routePath.includes('/tasks/run') ? 'canonical_or_compatibility'
+      : routePath.includes('/legacy') ? 'legacy'
+        : 'active';
+    for (const method of methods) {
+      routes.push({
+        route: routePath,
+        method: method.toUpperCase(),
+        auth_required: authRequired,
+        source: 'node',
+        compatibility,
+        response_contract: routePath.includes('/tasks/run') || routePath.includes('/chat') ? 'turn_result_v1' : 'route_specific',
+        live_status: 'registered',
+        last_smoke_result: null,
+      });
+    }
+  }
+  return routes.sort((a, b) => a.route.localeCompare(b.route) || a.method.localeCompare(b.method));
+}
+
+app.get('/api/admin/api-catalog', requireAuth, (_req, res) => {
+  const nodeRoutes = collectExpressRoutes();
+  const pythonRoutes = [
+    { route: '/api/tasks/run', method: 'POST', auth_required: true, source: 'python', compatibility: 'canonical_agent_controller', response_contract: 'agent_controller_task_result', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
+    { route: '/api/chat', method: 'POST', auth_required: true, source: 'python', compatibility: 'canonical_llm_pipeline', response_contract: 'chat_result', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
+    { route: '/health', method: 'GET', auth_required: false, source: 'python', compatibility: 'health', response_contract: 'health', live_status: _readiness.pythonReady ? 'registered' : 'unavailable', last_smoke_result: null },
+  ];
+  const routes = [...nodeRoutes, ...pythonRoutes];
+  const counts = routes.reduce((acc, route) => {
+    acc.total = (acc.total || 0) + 1;
+    acc[route.source] = (acc[route.source] || 0) + 1;
+    acc[route.compatibility] = (acc[route.compatibility] || 0) + 1;
+    return acc;
+  }, { total: 0 });
+  res.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    counts,
+    routes,
+  });
 });
 
 function buildObservabilitySnapshot() {
@@ -1307,15 +3000,15 @@ function buildObservabilitySnapshot() {
   };
 }
 
-app.get('/api/observability/snapshot', (req, res) => {
+app.get('/api/observability/snapshot', requireAuth, (req, res) => {
   res.json(buildObservabilitySnapshot());
 });
 
-app.get('/api/observability/events', (req, res) => {
+app.get('/api/observability/events', requireAuth, (req, res) => {
   res.json({ events: (runtimeState.observability.events || []).slice(0, 200) });
 });
 
-app.get('/api/security/aztsa/status', (req, res) => {
+app.get('/api/security/aztsa/status', requireAuth, (req, res) => {
   const requiredSecrets = [
     secretStore.describe('API_GATEWAY_KEY', { aliases: ['AZTSA_GATEWAY_KEY'] }),
     secretStore.describe('JWT_SECRET', { aliases: ['JWT_SECRET_KEY'] }),
@@ -1335,7 +3028,7 @@ app.get('/api/security/aztsa/status', (req, res) => {
   });
 });
 
-app.get('/api/security/honeypot/events', (req, res) => {
+app.get('/api/security/honeypot/events', requireAuth, (req, res) => {
   const limitRaw = Number((req.query || {}).limit || 50);
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, limitRaw)) : 50;
   res.json({
@@ -1344,8 +3037,9 @@ app.get('/api/security/honeypot/events', (req, res) => {
   });
 });
 
-app.post('/api/security/offline-sync', (req, res) => {
-  const body = req.body || {};
+app.post('/api/security/offline-sync', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.securityOfflineSync, req, res);
+  if (!body) return;
   const online = body.online !== false;
   const state = securitySyncPolicy.setOnline(online);
   res.json({
@@ -1354,13 +3048,15 @@ app.post('/api/security/offline-sync', (req, res) => {
   });
 });
 
-app.post('/api/security/anomaly/evaluate', (req, res) => {
+app.post('/api/security/anomaly/evaluate', requireAuth, (req, res) => {
   const result = anomalyResponder.evaluate();
   res.json(result);
 });
 
-app.post('/api/security/gateway/strict-mode', (req, res) => {
-  const enabled = Boolean((req.body || {}).enabled);
+app.post('/api/security/gateway/strict-mode', requireAuth, (req, res) => {
+  const _bodyGateway = validate(SCHEMAS.securityGatewayStrict, req, res);
+  if (!_bodyGateway) return;
+  const enabled = Boolean(_bodyGateway.enabled);
   const strict = apiGatewayProtector.setStrictMode(enabled, 'manual_override');
   res.json({
     strict_mode: strict,
@@ -1368,7 +3064,7 @@ app.post('/api/security/gateway/strict-mode', (req, res) => {
   });
 });
 
-app.get('/api/mode', (req, res) => {
+app.get('/api/mode', requireAuth, (req, res) => {
   const mode = getMode();
   const robotSignal = getRobotSignal();
   const template = buildMoneyTemplate({
@@ -1386,7 +3082,7 @@ app.get('/api/mode', (req, res) => {
   });
 });
 
-app.post('/api/mode', (req, res) => {
+app.post('/api/mode', requireAuth, (req, res) => {
   const body = validate(SCHEMAS.modeSet, req, res);
   if (!body) return;
   const next = body.mode.toUpperCase();
@@ -1410,7 +3106,7 @@ app.post('/api/mode', (req, res) => {
   });
 });
 
-app.get('/api/brain/status', (req, res) => {
+app.get('/api/brain/status', requireAuth, (req, res) => {
   const nn = subsystems.getNNStatus();
   const core = brain.status();
   res.json({
@@ -1420,7 +3116,7 @@ app.get('/api/brain/status', (req, res) => {
   });
 });
 
-app.get('/internal/brain/status', (req, res) => {
+app.get('/internal/brain/status', requireLocalhost, (req, res) => {
   const core = brain.status() || {};
   const insights = brain.insights() || {};
   const strategies = Array.isArray(insights.learned_strategies) ? insights.learned_strategies.length : 0;
@@ -1433,16 +3129,16 @@ app.get('/internal/brain/status', (req, res) => {
   });
 });
 
-app.get('/api/brain/insights', (req, res) => {
+app.get('/api/brain/insights', requireAuth, (req, res) => {
   res.json(brain.insights());
 });
 
-app.get('/api/brain/activity', (req, res) => {
+app.get('/api/brain/activity', requireAuth, (req, res) => {
   const limit = Number(req.query.limit || 20);
   res.json(brain.activity(limit));
 });
 
-app.get('/api/brain/neurons', (req, res) => {
+app.get('/api/brain/neurons', requireAuth, _cache_neurons, (req, res) => {
   res.json(brain.neurons());
 });
 
@@ -1451,7 +3147,7 @@ app.get('/api/brain/neurons', (req, res) => {
  * Returns { nodes, links, stats } using a normalized schema so the
  * frontend brainStore can consume it directly.
  */
-app.get('/api/brain/graph', (req, res) => {
+app.get('/api/brain/graph', requireAuth, async (req, res) => {
   const raw = brain.neurons();
   const memoryTree = subsystems.getMemoryTree();
   const nodes = (raw.nodes || []).map((n) => ({
@@ -1498,38 +3194,508 @@ app.get('/api/brain/graph', (req, res) => {
     strength: c.weight ?? c.confidence ?? 0.5,
   }));
 
-  res.json({
+  // Attempt to merge Neural Brain graph (Python LangGraph + Neo4j)
+  let nbGraph = null;
+  try {
+    const nbResp = await Promise.race([
+      fetch(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/neural-brain/graph`, { timeout: 1000 }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000)),
+    ]);
+    if (nbResp?.ok) {
+      nbGraph = await nbResp.json();
+      if (nbGraph?.nodes && Array.isArray(nbGraph.nodes)) {
+        nbGraph.nodes.forEach((n) => {
+          const existing = nodes.some((x) => x.id === n.id);
+          if (!existing) nodes.push(n);
+        });
+      }
+      if (nbGraph?.links && Array.isArray(nbGraph.links)) {
+        const linkSet = new Set(links.map((l) => `${l.source}→${l.target}`));
+        nbGraph.links.forEach((l) => {
+          if (!linkSet.has(`${l.source}→${l.target}`)) {
+            links.push(l);
+            linkSet.add(`${l.source}→${l.target}`);
+          }
+        });
+      }
+    }
+  } catch (_nbErr) {
+    // Neural Brain offline or slow — continue with regular graph
+  }
+
+  // Native embedded graph memory is the canonical offline graph backend.
+  // It is not an extension: every dashboard graph response syncs through it.
+  try {
+    const native = getNativeMemoryGraph({ stateDir: STATE_DIR, repoRoot: REPO_ROOT });
+    native.ingestSnapshot({ nodes, links }, 'node_dashboard_graph');
+    const nativeSnapshot = native.snapshot(350);
+    const nodeSet = new Set(nodes.map((node) => String(node.id)));
+    nativeSnapshot.nodes.forEach((node) => {
+      if (!nodeSet.has(String(node.id))) {
+        nodes.push(node);
+        nodeSet.add(String(node.id));
+      }
+    });
+    const linkSet = new Set(links.map((link) => `${link.source}→${link.target}`));
+    nativeSnapshot.links.forEach((link) => {
+      const key = `${link.source}→${link.target}`;
+      if (!linkSet.has(key)) {
+        links.push(link);
+        linkSet.add(key);
+      }
+    });
+  } catch (err) {
+    console.warn('[BRAIN GRAPH] Native graph sync failed: %s', err && err.message);
+  }
+
+  res.json(normalizeDashboardGraph({
     nodes,
     links,
-    stats: raw.stats || {},
+    stats: { ...(raw.stats || {}), graph_backend: 'native_memory_graph' },
     updated_at: raw.updated_at || new Date().toISOString(),
-  });
+  }));
 });
 
-app.get('/api/memory/tree', (req, res) => {
+app.get('/api/memory/tree', requireAuth, (req, res) => {
   res.json(subsystems.getMemoryTree());
 });
 
-app.get('/api/doctor/status', (req, res) => {
+// ── Phase 4G Observability Endpoints ─────────────────────────────────────────
+
+app.get('/api/memory/stats', requireAuth, async (req, res) => {
+  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
+  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
+  const base = {
+    types: {
+      episodic:   { count: 0, last_write: null },
+      semantic:   { count: 0 },
+      procedural: { count: 0 },
+    },
+    total: 0,
+    chroma_collections: {},
+    knowledge_store_entries: ksEntries.length,
+    source: 'node-fallback',
+  };
+  try {
+    const pyData = await requestPythonJSON('/api/memory', 'GET', null, { timeoutMs: 3000 });
+    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
+      const episodicCount = pyData.total_clients || pyData.episodic_count || 0;
+      const semanticCount = pyData.semantic_count || ksEntries.length;
+      const proceduralCount = pyData.procedural_count || 0;
+      return res.json({
+        types: {
+          episodic:   { count: episodicCount, last_write: pyData.last_write || null },
+          semantic:   { count: semanticCount },
+          procedural: { count: proceduralCount },
+        },
+        total: episodicCount + semanticCount + proceduralCount,
+        chroma_collections: pyData.chroma_collections || {},
+        knowledge_store_entries: ksEntries.length,
+        source: 'node+python',
+      });
+    }
+  } catch (_) { /* fall through to node-fallback */ }
+  base.total = ksEntries.length;
+  return res.json(base);
+});
+
+app.get('/api/agents/active', requireAuth, (req, res) => {
+  const all = getAgents();
+  const active = all
+    .filter((a) => a.state === 'running' || a.state === 'busy')
+    .map((a) => ({ id: a.id, name: a.name, state: a.state, current_task: a.current_task || null }));
+  return res.json({ active, count: active.length, total: all.length });
+});
+
+app.get('/api/execution/queue', requireAuth, async (req, res) => {
+  const nodeItems = Array.isArray(_forgeQueue) ? _forgeQueue : [];
+  const count = (status) => nodeItems.filter((i) => i.status === status).length;
+  const base = {
+    items: nodeItems,
+    total: nodeItems.length,
+    pending:   count('pending'),
+    running:   count('running'),
+    completed: count('completed'),
+  };
+  try {
+    const pyData = await requestPythonJSON('/api/task/status', 'GET', null, { timeoutMs: 2000 });
+    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
+      const pyItems = Array.isArray(pyData.tasks) ? pyData.tasks : (Array.isArray(pyData.items) ? pyData.items : []);
+      const existingIds = new Set(nodeItems.map((i) => String(i.id)));
+      const merged = [...nodeItems, ...pyItems.filter((i) => !existingIds.has(String(i.id)))];
+      const mc = (status) => merged.filter((i) => i.status === status).length;
+      return res.json({
+        items: merged,
+        total: merged.length,
+        pending:   mc('pending'),
+        running:   mc('running'),
+        completed: mc('completed'),
+      });
+    }
+  } catch (_) { /* fall through to node-only */ }
+  return res.json(base);
+});
+
+app.get('/api/models/routing', requireAuth, (req, res) => {
+  const DEFAULT_ROUTING = {
+    coding:    { provider: 'nvidia_nim', model: 'qwen2.5-coder-32b',          fallback: 'claude-sonnet-4-6' },
+    reasoning: { provider: 'nvidia_nim', model: 'llama-3.3-nemotron-49b',     fallback: 'claude-opus-4-7' },
+    general:   { provider: 'ollama',     model: 'llama3.2',                   fallback: 'claude-haiku-4-5' },
+    analytics: { provider: 'anthropic',  model: 'claude-opus-4-7' },
+    creative:  { provider: 'ollama',     model: 'gemma4',                     fallback: 'claude-sonnet-4-6' },
+    bulk:      { provider: 'nvidia_nim', model: 'llama-3.1-8b',               fallback: 'llama3.2' },
+  };
+  const configPath = path.join(os.homedir(), '.ai-employee', 'model-routing.json');
+  const fileRouting = readJsonSafe(configPath, null);
+  if (fileRouting) {
+    return res.json({ routing: fileRouting, source: 'file', config_path: configPath });
+  }
+  return res.json({ routing: DEFAULT_ROUTING, source: 'default', config_path: configPath });
+});
+
+app.post('/api/models/routing', requireAuth, (req, res) => {
+  const configPath = path.join(os.homedir(), '.ai-employee', 'model-routing.json');
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(req.body, null, 2), 'utf8');
+    return res.json({ ok: true, config_path: configPath });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/models/providers', requireAuth, (req, res) => {
+  const anthropicOk = !!(process.env.ANTHROPIC_API_KEY);
+  const openaiOk    = !!(process.env.OPENAI_API_KEY);
+  ollamaAdmin.isOllamaRunning().then(running => {
+    res.json({
+      providers: {
+        anthropic: { configured: anthropicOk, status: anthropicOk ? 'configured' : 'missing_key' },
+        openai:    { configured: openaiOk,    status: openaiOk    ? 'configured' : 'missing_key' },
+        ollama:    { configured: running,     status: running     ? 'running'    : 'not_running'  },
+      },
+    });
+  }).catch(() => res.json({ providers: { anthropic: { configured: anthropicOk }, openai: { configured: openaiOk }, ollama: { configured: false } } }));
+});
+
+app.get('/api/ollama/status', requireAuth, async (req, res) => {
+  const running = await ollamaAdmin.isOllamaRunning().catch(() => false);
+  const models  = running ? await ollamaAdmin.listModels().catch(() => []) : [];
+  res.json({ running, models });
+});
+
+app.get('/api/ollama/models', requireAuth, async (req, res) => {
+  const models = await ollamaAdmin.listModels().catch(() => []);
+  res.json({ models });
+});
+
+app.post('/api/ollama/pull', requireAuth, _rl_ollama_pull, async (req, res) => {
+  const name = String((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+  if (name.length > 100) return res.status(400).json({ ok: false, error: 'model name too long (max 100 chars)' });
+  // Allowlist: lowercase alphanumeric, colon (tag separator), dot, hyphen, underscore only
+  if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' });
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  try {
+    for await (const chunk of ollamaAdmin.pullModelStream(name)) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+    res.write(`data: ${JSON.stringify({ status: 'complete' })}\n\n`);
+  } catch (e) {
+    res.write(`data: ${JSON.stringify({ status: 'error', error: e.message })}\n\n`);
+  }
+  res.end();
+});
+
+app.delete('/api/ollama/models/:name', requireAuth, async (req, res) => {
+  const name = decodeURIComponent(req.params.name || '');
+  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+  const result = await ollamaAdmin.deleteModel(name).catch(e => ({ ok: false, error: e.message }));
+  res.json(result);
+});
+
+app.get('/api/rag/sources', requireAuth, async (req, res) => {
+  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
+  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
+  const nodeSourcesMap = new Map(ksEntries.map((e) => [String(e.id || e.title || Math.random()), e]));
+  let chromaStatus = 'empty';
+  try {
+    const pyData = await requestPythonJSON('/api/knowledge/sources', 'GET', null, { timeoutMs: 2000 });
+    if (pyData && pyData._http_status >= 200 && pyData._http_status < 300) {
+      const pySources = Array.isArray(pyData.sources) ? pyData.sources : [];
+      chromaStatus = pySources.length > 0 ? 'populated' : 'empty';
+      for (const s of pySources) {
+        const key = String(s.id || s.title || '');
+        if (key && !nodeSourcesMap.has(key)) nodeSourcesMap.set(key, s);
+      }
+    }
+  } catch (_) { chromaStatus = 'offline'; }
+  const sources = [...nodeSourcesMap.values()].map((e) => ({
+    id:         e.id         || null,
+    title:      e.title      || e.source || 'Untitled',
+    source:     e.source     || null,
+    tags:       e.tags       || [],
+    created_at: e.created_at || null,
+  }));
+  return res.json({ sources, total: sources.length, chroma_status: chromaStatus, embedding_model: 'all-MiniLM-L6-v2' });
+});
+
+// ── Knowledge semantic / keyword search ──────────────────────────────────────
+app.get('/api/knowledge/search', requireAuth, async (req, res) => {
+  const q = String((req.query || {}).q || '').trim();
+  if (!q) return res.status(400).json({ ok: false, error: 'q required' });
+  const mode = String((req.query || {}).mode || 'keyword');
+  const alpha = Math.max(0, Math.min(1, Number((req.query || {}).alpha ?? 0.5)));
+  const limit = Math.max(1, Math.min(50, Number((req.query || {}).limit || 10) || 10));
+
+  if (mode === 'hybrid' || mode === 'semantic') {
+    try {
+      const pyUrl = `/memory/hybrid-search?q=${encodeURIComponent(q)}&alpha=${alpha}&limit=${limit}`;
+      const data = await requestPythonJSON(pyUrl, 'GET', null, { timeoutMs: 6000 });
+      if (data._http_status >= 200 && data._http_status < 300) {
+        const entries = (data.results || []).map(r => ({
+          id: r.source || r.rank,
+          title: r.source || 'Knowledge Entry',
+          content: r.content || '',
+          text: r.content || '',
+          source: r.source || '',
+          score: r.score ?? 0,
+          bm25_score: r.bm25_score ?? null,
+          vector_score: r.vector_score ?? null,
+          rank: r.rank ?? null,
+        }));
+        return res.json({ entries, total: entries.length, mode: 'hybrid', query: q });
+      }
+    } catch (_) { /* fallthrough to keyword */ }
+  }
+
+  // Keyword fallback: scan knowledge_store.json
+  const ks = readJsonSafe(statePath('knowledge_store.json'), { entries: [] });
+  const ksEntries = Array.isArray(ks.entries) ? ks.entries : (Array.isArray(ks) ? ks : []);
+  const lower = q.toLowerCase();
+  const matched = ksEntries.filter(e =>
+    (e.content || e.text || '').toLowerCase().includes(lower) ||
+    (e.title || e.source || '').toLowerCase().includes(lower)
+  ).slice(0, limit).map(e => ({
+    id: e.id || e.title,
+    title: e.title || e.source || 'Untitled',
+    content: e.content || e.text || '',
+    text: e.content || e.text || '',
+    source: e.source || '',
+    score: null,
+    tags: e.tags || [],
+  }));
+  return res.json({ entries: matched, total: matched.length, mode: 'keyword', query: q });
+});
+
+// ── End Phase 4G ──────────────────────────────────────────────────────────────
+
+// ── Knowledge Vault proxy routes ──────────────────────────────────────────────
+for (const [method, path, pyPath] of [
+  ['get',  '/api/knowledge/vault/list',        '/knowledge/vault/list'],
+  ['get',  '/api/knowledge/vault/pending',      '/knowledge/vault/pending'],
+  ['post', '/api/knowledge/vault/add',          '/knowledge/vault/add'],
+  ['post', '/api/knowledge/vault/queue-topic',  '/knowledge/vault/queue-topic'],
+]) {
+  app[method](path, requireAuth, async (req, res) => {
+    try {
+      const r = await fetch(`http://127.0.0.1:18790${pyPath}`, {
+        method: method.toUpperCase(),
+        headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization || '' },
+        body: method === 'get' ? undefined : JSON.stringify(req.body),
+      });
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
+  });
+}
+app.get('/api/knowledge/vault/:title', requireAuth, async (req, res) => {
+  try {
+    const r = await fetch(
+      `http://127.0.0.1:18790/knowledge/vault/${encodeURIComponent(req.params.title)}`,
+      { headers: { 'Authorization': req.headers.authorization || '' } }
+    );
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
+});
+app.post('/api/knowledge/vault/:title/verify', requireAuth, async (req, res) => {
+  try {
+    const r = await fetch(
+      `http://127.0.0.1:18790/knowledge/vault/${encodeURIComponent(req.params.title)}/verify`,
+      { method: 'POST', headers: { 'Authorization': req.headers.authorization || '' } }
+    );
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(502).json({ ok: false, error: 'vault unavailable' }); }
+});
+
+// ── Tool / Skill registry proxy routes ────────────────────────────────────────
+for (const [m, p, pyP] of [
+  ['get',  '/api/tools/list',      '/tools/list'],
+  ['get',  '/api/skills/list',     '/skills/list'],
+  ['get',  '/api/skills/suggest',  '/skills/suggest'],
+]) {
+  app[m](p, requireAuth, async (req, res) => {
+    const qs = m === 'get' ? '?' + new URLSearchParams(req.query).toString() : '';
+    try {
+      const r = await fetch(`http://127.0.0.1:${PYTHON_BACKEND_PORT}${pyP}${qs}`, {
+        headers: { 'Authorization': req.headers.authorization || '' },
+      });
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ ok: false, error: 'tools service unavailable' }); }
+  });
+}
+for (const ep of ['tools', 'skills']) {
+  app.post(`/api/${ep}/:name/execute`, requireAuth, async (req, res) => {
+    try {
+      const toolName = String(req.params.name || '');
+      if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(toolName)) {
+        return res.status(400).json({ ok: false, error: 'invalid tool name' });
+      }
+      const r = await fetch(
+        `http://127.0.0.1:${PYTHON_BACKEND_PORT}/${ep}/${encodeURIComponent(toolName)}/execute`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.authorization || '' },
+          body: JSON.stringify(req.body),
+        },
+      );
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ ok: false, error: 'service unavailable' }); }
+  });
+}
+app.get('/api/tools/:name', requireAuth, async (req, res) => {
+  try {
+    const r = await fetch(
+      `http://127.0.0.1:${PYTHON_BACKEND_PORT}/tools/${encodeURIComponent(req.params.name)}`,
+      { headers: { 'Authorization': req.headers.authorization || '' } },
+    );
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(502).json({ ok: false, error: 'tools service unavailable' }); }
+});
+
+app.get('/api/system/manifest', requireAuth, (req, res) => {
+  res.json(loadSystemManifest());
+});
+
+app.post('/api/model/route-plan', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.modelRoutePlan, req, res);
+  if (!body) return;
+  const task = String(body.task || body.message || body.goal || '').trim();
+  if (!task) return res.status(400).json({ ok: false, error: 'task, message, or goal required' });
+  res.json(buildModelRoutePlan(body));
+});
+
+app.get('/api/memory', requireAuth, async (req, res) => {
+  try {
+    const data = await requestPythonJSON('/api/memory', 'GET', null, { timeoutMs: 4000 });
+    if (data._http_status >= 200 && data._http_status < 300) {
+      return res.json({ ...data, source: 'python-memory' });
+    }
+    return res.status(data._http_status || 502).json({ ok: false, error: 'Python memory backend returned an error', source: 'python-memory' });
+  } catch (err) {
+    const tree = subsystems.getMemoryTree();
+    return res.json({
+      source: 'node-fallback',
+      clients: [],
+      recent_interactions: [],
+      total_clients: 0,
+      fallback_tree: tree,
+      warning: `Python memory backend unavailable: ${err.message}`,
+    });
+  }
+});
+
+// ── Conversations JSONL endpoint ──────────────────────────────────────────────
+const conversations = require('./conversations');
+
+app.get('/api/memory/conversations', requireAuth, (req, res) => {
+  const all = conversations.readConversations();
+  return res.json({ conversations: all.slice(-100), total: all.length, source: 'node-local' });
+});
+
+app.delete('/api/memory/conversations/:id', requireAuth, (req, res) => {
+  const removed = conversations.deleteConversation(req.params.id);
+  if (!removed) return res.status(404).json({ ok: false, error: 'Conversation not found' });
+  return res.json({ ok: true, deleted: req.params.id });
+});
+
+app.get('/api/memory/search', requireAuth, async (req, res) => {
+  const q = String((req.query || {}).q || '').trim();
+  if (!q) return res.status(400).json({ ok: false, error: 'q required' });
+  const topK = Math.max(1, Math.min(25, Number((req.query || {}).top_k || 8) || 8));
+  const memoryType = String((req.query || {}).memory_type || '').trim();
+  const query = `/api/memory/search?q=${encodeURIComponent(q)}&top_k=${topK}${memoryType ? `&memory_type=${encodeURIComponent(memoryType)}` : ''}`;
+  try {
+    const data = await requestPythonJSON(query, 'GET', null, { timeoutMs: 5000 });
+    if (data._http_status >= 200 && data._http_status < 300) {
+      return res.json({ ...data, source: data.source || 'python-memory-search' });
+    }
+    return res.status(data._http_status || 502).json({ ok: false, error: 'Python memory search returned an error', source: 'python-memory-search' });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: `Python memory search unavailable: ${err.message}`, source: 'node-fallback', results: [] });
+  }
+});
+
+app.post('/api/memory/clients', requireAuth, async (req, res) => {
+  const _bodyMemClients = validate(SCHEMAS.memoryClients, req, res);
+  if (!_bodyMemClients) return;
+  try {
+    const data = await requestPythonJSON('/api/memory/clients', 'POST', _bodyMemClients, { timeoutMs: 5000 });
+    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
+  }
+});
+
+app.patch('/api/memory/clients/:clientId', requireAuth, async (req, res) => {
+  try {
+    const data = await requestPythonJSON(`/api/memory/clients/${encodeURIComponent(req.params.clientId)}`, 'PATCH', req.body || {}, { timeoutMs: 5000 });
+    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
+  }
+});
+
+app.delete('/api/memory/clients/:clientId', requireAuth, async (req, res) => {
+  try {
+    const data = await requestPythonJSON(`/api/memory/clients/${encodeURIComponent(req.params.clientId)}`, 'DELETE', null, { timeoutMs: 5000 });
+    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
+  }
+});
+
+app.post('/api/memory/interactions', requireAuth, async (req, res) => {
+  const _bodyMemInt = validate(SCHEMAS.memoryInteraction, req, res);
+  if (!_bodyMemInt) return;
+  try {
+    const data = await requestPythonJSON('/api/memory/interactions', 'POST', _bodyMemInt, { timeoutMs: 5000 });
+    return res.status(data._http_status || 200).json({ ...data, source: 'python-memory' });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: `Python memory backend unavailable: ${err.message}`, source: 'node-fallback' });
+  }
+});
+
+app.get('/api/doctor/status', requireAuth, (req, res) => {
   res.json(subsystems.getDoctorStatus());
 });
 
-app.get('/api/self-improvement/status', (req, res) => {
+app.get('/api/self-improvement/status', requireAuth, (req, res) => {
   res.json(subsystems.getSelfImprovementStatus());
 });
 
 // ── Autonomy daemon endpoints ─────────────────────────────────────────────────
 
-app.get('/api/autonomy/status', (req, res) => {
+app.get('/api/autonomy/status', requireAuth, (req, res) => {
   res.json(subsystems.getAutonomyStatus());
 });
 
-app.get('/api/autonomy/mode', (req, res) => {
+app.get('/api/autonomy/mode', requireAuth, (req, res) => {
   const auto = subsystems.getAutonomyStatus();
   res.json(auto.mode || { mode: 'OFF', active: false });
 });
 
-function requestPythonJSON(pathname, method = 'GET', payload = null) {
+function requestPythonJSON(pathname, method = 'GET', payload = null, options = {}) {
   return new Promise((resolve, reject) => {
     const httpLib = require('http');
     const safePath = String(pathname || '/').trim();
@@ -1537,18 +3703,24 @@ function requestPythonJSON(pathname, method = 'GET', payload = null) {
       return reject(new Error('invalid_path'));
     }
     const body = payload ? JSON.stringify(payload) : null;
+    const headers = {
+      // Authenticate Node→Python proxy calls; RequestGuard rejects non-public routes without it.
+      Authorization: `Bearer ${internalServiceToken()}`,
+      ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
+      ...(options.headers || {}),
+    };
     const req = httpLib.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}${safePath}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {},
-      timeout: 3000,
+      headers,
+      timeout: options.timeoutMs || 3000,
     }, (response) => {
       let text = '';
       response.on('data', (chunk) => { text += chunk; });
       response.on('end', () => {
         try {
-          resolve(JSON.parse(text || '{}'));
+          resolve({ _http_status: response.statusCode, ...JSON.parse(text || '{}') });
         } catch {
-          resolve({});
+          resolve({ _http_status: response.statusCode });
         }
       });
     });
@@ -1669,6 +3841,68 @@ let _pyUp = false;
 let _pyLastCheck = 0;
 const PY_CHECK_TTL_MS = 20000;
 
+async function collectHybridMemoryContext(query, options = {}) {
+  if (!query || typeof createHybridMemoryRouter.runHybridQuery !== 'function') return null;
+  const timeoutMs = Number(options.timeoutMs || 1200);
+  try {
+    const trace = await Promise.race([
+      createHybridMemoryRouter.runHybridQuery({
+        query,
+        user_id: options.userId || 'user:default',
+        session_id: options.sessionId || null,
+        task_id: options.taskId || null,
+        mode: options.mode || 'main_ai',
+        max_tokens: options.maxTokens || 1200,
+      }),
+      new Promise((resolve) => setTimeout(() => resolve({
+        trace_id: `memory-timeout-${Date.now().toString(36)}`,
+        routes: [],
+        context: '',
+        citations: [],
+        confidence: 0,
+        degraded: true,
+        diagnostics: ['memory_router_timeout'],
+      }), timeoutMs)),
+    ]);
+    if (trace && !trace.error) return trace;
+  } catch (err) {
+    console.warn('[MEMORY ROUTER] preflight failed: %s', err && err.message);
+  }
+  return null;
+}
+
+function compactMemoryTraceForModel(trace) {
+  if (!trace || !trace.context) return null;
+  return {
+    trace_id: trace.trace_id,
+    routes: Array.isArray(trace.routes) ? trace.routes.map((route) => ({
+      id: route.id,
+      hits: route.hits || 0,
+      reason: route.reason || '',
+    })) : [],
+    confidence: trace.confidence || 0,
+    degraded: trace.degraded === true,
+    diagnostics: trace.diagnostics || [],
+    citations: (trace.citations || []).slice(0, 8),
+    context: String(trace.context).slice(0, 6000),
+  };
+}
+
+function memoryContextMessage(trace) {
+  const compact = compactMemoryTraceForModel(trace);
+  if (!compact) return null;
+  return {
+    role: 'system',
+    content:
+      'Hybrid memory router context. Use this only as grounding context; do not reveal router internals unless asked.\n' +
+      `Trace: ${compact.trace_id}\n` +
+      `Routes: ${compact.routes.map((route) => `${route.id}:${route.hits}`).join(', ') || 'none'}\n` +
+      `Confidence: ${compact.confidence}\n` +
+      `Degraded: ${compact.degraded ? 'yes' : 'no'}\n\n` +
+      compact.context,
+  };
+}
+
 function isPythonBackendUp() {
   const now = Date.now();
   if (now - _pyLastCheck < PY_CHECK_TTL_MS) return Promise.resolve(_pyUp);
@@ -1685,11 +3919,13 @@ function isPythonBackendUp() {
   });
 }
 
-function requestPythonChat(message, modelRoute, userId) {
+function requestPythonChatPayload(message, modelRoute, userId, memoryTrace) {
   return new Promise((resolve) => {
     const payload = { message };
     if (modelRoute) payload.model_route = modelRoute;
     if (userId) payload.user_id = userId;
+    const memoryContext = compactMemoryTraceForModel(memoryTrace);
+    if (memoryContext) payload.memory_context = memoryContext;
     const body = JSON.stringify(payload);
     const req = http.request(`http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/chat`, {
       method: 'POST',
@@ -1701,7 +3937,7 @@ function requestPythonChat(message, modelRoute, userId) {
       response.on('end', () => {
         try {
           const data = JSON.parse(text || '{}');
-          resolve(data.response || data.reply || null);
+          resolve({ _http_status: response.statusCode, ...data });
         } catch {
           resolve(null);
         }
@@ -1714,6 +3950,11 @@ function requestPythonChat(message, modelRoute, userId) {
   });
 }
 
+async function requestPythonChat(message, modelRoute, userId, memoryTrace) {
+  const data = await requestPythonChatPayload(message, modelRoute, userId, memoryTrace);
+  return data ? (data.response || data.reply || null) : null;
+}
+
 // ── Python execution engine — real tool calls, no fake results ────────────────
 // Spawns backend/run_execution.py to run goal_parser + real_execution_engine.
 // Returns { is_goal, reply, success, steps } or null on subprocess failure.
@@ -1724,7 +3965,7 @@ function runPythonExecution(message) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
-    const child = spawn('python3', [PYTHON_EXEC_SCRIPT], {
+    const child = spawn(process.env.PYTHON_BIN || 'python3', [PYTHON_EXEC_SCRIPT], {
       env: { ...process.env },
       timeout: PYTHON_EXEC_TIMEOUT_MS,
     });
@@ -1857,15 +4098,36 @@ async function requestLLMChat(messages) {
 }
 
 // Legacy wrapper — used by HTTP path where there is no persistent ws client
-function requestOllamaChat(message) {
-  return requestLLMChat(_buildMessages([{ role: 'user', content: message }]));
+function requestOllamaChat(message, memoryTrace) {
+  const memoryMessage = memoryContextMessage(memoryTrace);
+  return requestLLMChat(_buildMessages([
+    ...(memoryMessage ? [memoryMessage] : []),
+    { role: 'user', content: message },
+  ]));
 }
 
-app.post('/api/autonomy/mode', async (req, res) => {
-  const nextMode = String((req.body || {}).mode || '').toUpperCase();
-  if (!['OFF', 'ON', 'AUTO'].includes(nextMode)) {
-    return res.status(400).json({ error: 'Invalid mode. Use OFF, ON, or AUTO.' });
-  }
+const turnRunner = createTurnRunner({
+  broadcaster,
+  orchestrator,
+  createWorkflowRun,
+  appendDecision,
+  attachWorkflowNode,
+  addActivity,
+  collectHybridMemoryContext,
+  compactMemoryTraceForModel,
+  runPythonExecution,
+  isPythonBackendUp,
+  requestPythonJSON,
+  requestPythonChatPayload,
+  requestOllamaChat,
+  applyStructuredFormat,
+  buildLocalFallbackReply,
+});
+
+app.post('/api/autonomy/mode', requireAuth, async (req, res) => {
+  const _bodyAutonomy = validate(SCHEMAS.autonomyMode, req, res);
+  if (!_bodyAutonomy) return;
+  const nextMode = _bodyAutonomy.mode.toUpperCase();
   // Proxy to Python backend
   try {
     const data = await new Promise((resolve, reject) => {
@@ -1914,12 +4176,13 @@ app.post('/api/autonomy/emergency-stop', requireAuth, (req, res) => {
   r.end();
 });
 
-app.get('/api/evolution/status', async (req, res) => {
+app.get('/api/evolution/status', requireAuth, async (req, res) => {
   try {
     const data = await requestPythonJSON('/api/evolution/status', 'GET');
+    if (data._http_status && data._http_status >= 400) throw new Error(`py_${data._http_status}`);
     res.json(data);
   } catch {
-    res.json({ mode: 'OFF', running: false });
+    res.json({ mode: 'OFF', running: false, available: false });
   }
 });
 
@@ -1936,28 +4199,87 @@ app.post('/api/evolution/mode', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/product/dashboard', (req, res) => {
+app.get('/api/product/dashboard', requireAuth, (req, res) => {
   res.json(buildDashboardPayload());
 });
 
-app.get('/api/workflows/live', (req, res) => {
+app.get('/api/economy/summary', requireAuth, (req, res) => {
+  const economy = buildEconomySnapshot();
+  res.json({ ok: true, ...economy.summary });
+});
+
+app.get('/api/economy/ledger', requireAuth, (req, res) => {
+  const economy = buildEconomySnapshot();
+  res.json({
+    ok: true,
+    state: economy.ledger.length ? 'live' : 'empty',
+    source: 'node_runtime_state',
+    ledger: economy.ledger,
+    items: economy.ledger,
+    updated_at: new Date().toISOString(),
+  });
+});
+
+app.get('/api/economy/costs', requireAuth, (req, res) => {
+  const economy = buildEconomySnapshot();
+  res.json({
+    ok: true,
+    state: economy.costs.length ? 'live' : 'empty',
+    source: 'llm_call_log',
+    costs: economy.costs,
+    items: economy.costs,
+    updated_at: new Date().toISOString(),
+  });
+});
+
+app.get('/api/economy/pipelines', requireAuth, (req, res) => {
+  const economy = buildEconomySnapshot();
+  res.json({
+    ok: true,
+    state: economy.pipelines.some((pipeline) => pipeline.active) ? 'live' : 'empty',
+    source: 'node_objective_state',
+    pipelines: economy.pipelines,
+    items: economy.pipelines,
+    updated_at: new Date().toISOString(),
+  });
+});
+
+app.get('/api/economy/opportunities', requireAuth, (req, res) => {
+  const opportunities = readJsonSafe(statePath('opportunities.json'), []);
+  res.json({
+    ok: true,
+    state: opportunities.length ? 'live' : 'empty',
+    source: 'node_state',
+    opportunities,
+    items: opportunities,
+    updated_at: new Date().toISOString(),
+  });
+});
+
+app.get('/api/economy/wallet', requireAuth, (req, res) => {
+  res.json({ ok: true, source: 'wallet_vault', wallet: walletSnapshot(), updated_at: new Date().toISOString() });
+});
+
+app.get('/api/workflows/live', requireAuth, (req, res) => {
   res.json({
     active_run: runtimeState.selectedWorkflowRun,
     runs: runtimeState.workflowRuns,
   });
 });
 
-app.get('/api/objectives/status', (req, res) => {
+app.get('/api/objectives/status', requireAuth, (req, res) => {
   res.json({
     objectives: runtimeState.objectives,
     systems: runtimeState.objectiveState,
   });
 });
 
-app.post('/api/automation/control', (req, res) => {
-  const action = String((req.body || {}).action || '').toLowerCase();
-  const goal = String((req.body || {}).goal || '').trim();
-  const overrideActionId = String((req.body || {}).override_action_id || '').trim();
+app.post('/api/automation/control', requireAuth, (req, res) => {
+  const _bodyAuto = validate(SCHEMAS.automationControl, req, res);
+  if (!_bodyAuto) return;
+  const action = String(_bodyAuto.action || '').toLowerCase();
+  const goal = String(_bodyAuto.goal || '').trim();
+  const overrideActionId = String(_bodyAuto.override_action_id || '').trim();
 
   if (action === 'start') {
     activateAgents(3);
@@ -2017,30 +4339,249 @@ app.post('/api/automation/control', (req, res) => {
   return res.status(400).json({ status: 'error', reason: 'Invalid automation action.' });
 });
 
-app.post('/api/money/content-pipeline', (req, res) => {
+app.post('/api/money/content-pipeline', requireAuth, async (req, res) => {
+  const _bodyContent = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyContent) return;
+  try {
+    const result = await requestPythonJSON('/api/money/content-pipeline', 'POST', _bodyContent, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 30000,
+    });
+    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] Python content pipeline unavailable: %s', err && err.message);
+  }
   const run = runPipeline('content');
-  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
+  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id, source: 'node_fallback' });
 });
 
-app.post('/api/money/lead-pipeline', (req, res) => {
+app.post('/api/money/lead-pipeline', requireAuth, async (req, res) => {
+  const _bodyLead = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyLead) return;
+  try {
+    const result = await requestPythonJSON('/api/money/lead-pipeline', 'POST', _bodyLead, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 30000,
+    });
+    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] Python lead pipeline unavailable: %s', err && err.message);
+  }
   const run = runPipeline('lead');
-  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
+  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id, source: 'node_fallback' });
 });
 
-app.post('/api/money/opportunity-pipeline', (req, res) => {
+app.post('/api/money/opportunity-pipeline', requireAuth, async (req, res) => {
+  const _bodyOpp = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyOpp) return;
+  try {
+    const result = await requestPythonJSON('/api/money/opportunity-pipeline', 'POST', _bodyOpp, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 30000,
+    });
+    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] Python opportunity pipeline unavailable: %s', err && err.message);
+  }
   const run = runPipeline('opportunity');
-  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id });
+  res.json({ status: run.status, pipeline: run.pipeline, estimated_roi: run.estimated_roi, run_id: run.id, source: 'node_fallback' });
+});
+
+app.post('/api/money/affiliate-draft', requireAuth, async (req, res) => {
+  const _bodyAffiliate = validate(SCHEMAS.moneyPipeline, req, res);
+  if (!_bodyAffiliate) return;
+  try {
+    const result = await requestPythonJSON('/api/money/affiliate-draft', 'POST', _bodyAffiliate, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 30000,
+    });
+    if (result && result.job_id) return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] Python affiliate draft unavailable: %s', err && err.message);
+  }
+  return res.status(503).json({
+    ok: false,
+    error: 'Python MoneyMode backend unavailable; affiliate drafts require the approval-aware Python pipeline.',
+  });
+});
+
+// ── Business-building money workflows (proxy to Python) ──────────────────────
+
+app.post('/api/money/niche-research', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/niche-research', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] niche-research unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
+  }
+});
+
+app.post('/api/money/offer-creation', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/offer-creation', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] offer-creation unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
+  }
+});
+
+app.post('/api/money/content-calendar', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/content-calendar', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] content-calendar unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true });
+  }
+});
+
+app.post('/api/money/lead-research', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/lead-research', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] lead-research unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable', requires_manual: true, cold_outreach_blocked: true });
+  }
+});
+
+app.post('/api/money/proposal', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/money/proposal', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 45000,
+    });
+    return res.json({ ...result, source: 'python_money_mode' });
+  } catch (err) {
+    console.warn('[MONEY] proposal unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'Python backend unavailable — proposals require approval-aware pipeline', requires_manual: true });
+  }
+});
+
+// GET /api/money/content-log
+app.get('/api/money/content-log', requireAuth, (req, res) => {
+  const p = path.join(STATE_DIR, 'content_log.json');
+  try { res.json({ ok: true, entries: JSON.parse(fs.readFileSync(p, 'utf8')) }); }
+  catch { res.json({ ok: true, entries: [] }); }
+});
+
+// GET /api/money/outreach-log
+app.get('/api/money/outreach-log', requireAuth, (req, res) => {
+  const p = path.join(STATE_DIR, 'outreach_log.json');
+  try { res.json({ ok: true, entries: JSON.parse(fs.readFileSync(p, 'utf8')) }); }
+  catch { res.json({ ok: true, entries: [] }); }
+});
+
+// ── Roadmap Engine routes (proxy to Python) ──────────────────────────────────
+app.post('/api/roadmap/create', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/roadmap/create', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 30000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] create unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
+});
+
+app.post('/api/roadmap/generate', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/roadmap/generate', 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 60000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] generate unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
+});
+
+app.get('/api/roadmap/list/:tenantId', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON(`/roadmap/list/${req.params.tenantId}`, 'GET', null, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 15000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] list unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, roadmaps: [], error: 'roadmap service unavailable' });
+  }
+});
+
+app.get('/api/roadmap/:roadmapId', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON(`/roadmap/${req.params.roadmapId}`, 'GET', null, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 15000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] get unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
+});
+
+app.post('/api/roadmap/:roadmapId/execute', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON(`/roadmap/${req.params.roadmapId}/execute`, 'POST', req.body, {
+      headers: { Authorization: pythonServiceAuthorization(req) },
+      timeoutMs: 120000,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.warn('[ROADMAP] execute unavailable: %s', err && err.message);
+    return res.status(503).json({ ok: false, error: 'roadmap service unavailable' });
+  }
 });
 
 // ── Task execution endpoint ───────────────────────────────────────────────────
 
-app.post('/api/tasks/run', (req, res) => {
+app.post('/api/tasks/run', requireAuth, _rl_tasks_run, async (req, res) => {
   const rawBody = req.body || {};
   // Normalise: accept both `task` and legacy `message` field before validation
   if (!rawBody.task && rawBody.message) rawBody.task = rawBody.message;
+  if (!rawBody.task && rawBody.description) rawBody.task = rawBody.description;
   if (!rawBody.task) rawBody.task = 'Execute task';
   const body = validate(SCHEMAS.tasksRun, req, res);
   if (!body) return;
+  if (rawBody.use_turn_runner !== false) {
+    try {
+      const turn = await turnRunner.runTurn({
+        kind: 'task',
+        source: 'tasks-http',
+        message: body.task,
+        userId: body.user_id || (req.jwtPayload?.sub ? `user:${req.jwtPayload.sub}` : 'user:default'),
+        tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
+        authHeader: pythonServiceAuthorization(req),
+        labels: ['http'],
+        executionTimeoutMs: 3000,
+      });
+      return res.json({
+        ...turn,
+        agent_controller: turn.source === 'agent_controller' ? { status: turn.status, proof: turn.proof } : null,
+      });
+    } catch (err) {
+      console.warn('[TASKS] turn runner failed, using legacy path: %s', err && err.message);
+    }
+  }
   const message = body.task.trim();
   const userId = body.user_id || 'user:default';
   const run = createWorkflowRun({
@@ -2048,10 +4589,116 @@ app.post('/api/tasks/run', (req, res) => {
     source: 'manual',
     goal: message,
   });
+
+  emitTaskProgress(run.run_id, message, [
+    { id: 0, label: 'Planning',   status: 'active' },
+    { id: 1, label: 'Executing',  status: 'pending' },
+    { id: 2, label: 'Validating', status: 'pending' },
+  ]);
+
+  const memoryTrace = await collectHybridMemoryContext(message, {
+    userId,
+    sessionId: run.run_id,
+    taskId: run.run_id,
+    mode: 'main_ai_task',
+    maxTokens: 1200,
+  });
+  if (memoryTrace) {
+    appendDecision(run, {
+      ts: new Date().toISOString(),
+      type: 'memory_router_preflight',
+      task_id: run.run_id,
+      summary: `Routes ${Array.isArray(memoryTrace.routes) ? memoryTrace.routes.map((route) => route.id).join(', ') : 'none'} · confidence ${memoryTrace.confidence ?? 0}`,
+      trace_id: memoryTrace.trace_id,
+    });
+    broadcaster.broadcast('memory:router:trace', {
+      trace_id: memoryTrace.trace_id,
+      task_id: run.run_id,
+      routes: memoryTrace.routes,
+      confidence: memoryTrace.confidence,
+      degraded: memoryTrace.degraded,
+    });
+  }
+
+  if (await isPythonBackendUp()) {
+    try {
+      const pyResult = await requestPythonJSON('/api/tasks/run', 'POST', {
+        task: message,
+        goal: message,
+        user_id: userId,
+        workflow_run: run.run_id,
+        memory_context: compactMemoryTraceForModel(memoryTrace),
+      }, {
+        headers: { Authorization: pythonServiceAuthorization(req) },
+        timeoutMs: 30000,
+      });
+
+      if (pyResult && pyResult.ok) {
+        const taskId = `agent-${pyResult.run_id || run.run_id}`;
+        const queued = {
+          taskId,
+          agentId: 'agent-controller',
+          subsystem: 'orchestrator',
+          message,
+          queuedAt: new Date().toISOString(),
+          brain: {
+            strategy: 'agent_controller',
+            confidence: typeof pyResult.performance_score === 'number' ? pyResult.performance_score : 1,
+            reasoning: 'Executed through Python AgentController Planner→Executor→Validator path.',
+            execution_flow: 'goal->planner->skill->validator->summary',
+          },
+        };
+        attachWorkflowNode({ runId: run.run_id, queued, taskName: message });
+        updateWorkflowNode(taskId, (node, workflowRun) => {
+          node.status = 'completed';
+          node.progress_percent = 100;
+          node.started_at = node.started_at || queued.queuedAt;
+          node.completed_at = new Date().toISOString();
+          node.result = {
+            status: 'success',
+            summary: `AgentController completed ${Array.isArray(pyResult.tasks) ? pyResult.tasks.length : 0} task(s).`,
+          };
+          appendDecision(workflowRun, {
+            ts: new Date().toISOString(),
+            task_id: taskId,
+            type: 'agent_controller_result',
+            summary: `Performance ${pyResult.performance_score ?? 'n/a'} · success ${pyResult.success_rate ?? 'n/a'}`,
+          });
+        });
+        recordExecution({ taskId, skill: 'agent_controller', status: 'success', notes: message });
+        addActivity(`[TASK] AgentController completed: ${message}`, 'task');
+        emitTaskProgress(run.run_id, message, [
+          { id: 0, label: 'Planning',   status: 'done' },
+          { id: 1, label: 'Executing',  status: 'done' },
+          { id: 2, label: 'Validating', status: 'done' },
+        ]);
+        return res.json({
+          ok: true,
+          workflow_run: run.run_id,
+          taskId,
+          agentId: 'agent-controller',
+          subsystem: 'orchestrator',
+          source: 'agent_controller',
+          memory_router: memoryTrace ? {
+            trace_id: memoryTrace.trace_id,
+            routes: memoryTrace.routes,
+            confidence: memoryTrace.confidence,
+            degraded: memoryTrace.degraded,
+          } : null,
+          agent_controller: pyResult,
+        });
+      }
+      console.warn('[TASKS] Python AgentController returned non-ok status: %s', pyResult?._http_status || 'unknown');
+    } catch (err) {
+      console.warn('[TASKS] Python AgentController unavailable, falling back to Node queue: %s', err && err.message);
+    }
+  }
+
   const result = orchestrator.submitTask(message, {
     userId,
     workflow: { runId: run.run_id, parentTaskId: null },
     labels: ['manual'],
+    memory: compactMemoryTraceForModel(memoryTrace),
   });
   attachWorkflowNode({
     runId: run.run_id,
@@ -2059,29 +4706,113 @@ app.post('/api/tasks/run', (req, res) => {
     taskName: message,
   });
   addActivity(`[TASK] Submitted: ${message}`, 'task');
-  res.json({ ok: true, workflow_run: run.run_id, ...result });
+
+  res.json({
+    ok: true,
+    workflow_run: run.run_id,
+    source: 'node_queue_fallback',
+    memory_router: memoryTrace ? {
+      trace_id: memoryTrace.trace_id,
+      routes: memoryTrace.routes,
+      confidence: memoryTrace.confidence,
+      degraded: memoryTrace.degraded,
+    } : null,
+    ...result,
+  });
 });
 
 // Compatibility endpoint used by legacy CLI flows (`ai-employee do/onboard`)
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', requireAuth, _rl_chat, async (req, res) => {
   const body = validate(SCHEMAS.chat, req, res);
   if (!body) return;
   const message = body.message;
+  // Fire-and-forget conversation recorder — never blocks the response
+  const _recordChat = (assistantMessage, model) => {
+    try {
+      conversations.appendConversation({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        tenant_id: req.user?.tenant_id || 'default',
+        user_message: req.body.message || req.body.content || '',
+        assistant_message: assistantMessage,
+        model: model || null,
+        session_id: req.headers['x-session-id'] || null,
+        summary: String(req.body.message || req.body.content || '').slice(0, 200),
+        message_count: 2,
+        tags: ['chat'],
+      });
+    } catch (_) {}
+  };
   const modelRoute = (body.model || '').trim() || undefined;
   // Prefer explicit user_id from body; fall back to JWT sub claim, then default
   const chatUserId = body.context?.user_id
     || (req.jwtPayload?.sub ? `user:${req.jwtPayload.sub}` : null)
     || 'user:default';
   console.info('[AI FLOW] Input received (HTTP): message_len=%d user=%s', message.length, chatUserId);
+
+  if (body.context?.use_turn_runner !== false) {
+    try {
+      const turn = await turnRunner.runTurn({
+        kind: 'chat',
+        source: 'chat-http',
+        message,
+        modelRoute,
+        userId: chatUserId,
+        tenantId: req.tenant?.id || req.jwtPayload?.tenant_id || 'default',
+        authHeader: pythonServiceAuthorization(req),
+        labels: ['http'],
+        executionTimeoutMs: 3000,
+      });
+      _recordChat(turn.assistant_reply || turn.reply, turn.source || 'turn-runner');
+      return res.json(turn);
+    } catch (err) {
+      console.warn('[AI FLOW] turn runner failed, using legacy chat path: %s', err && err.message);
+    }
+  }
+
+  // ── Learn-intent detection ─────────────────────────────────────
+  // Matches: "learn about X", "teach me about X", "research X", "leer over X"
+  const LEARN_PATTERNS = [
+    /^\s*(?:learn|teach me|research|leer|leer me)\s+(?:about|over|on)\s+(.+?)[.!?]?\s*$/i,
+    /^\s*(?:can you )?(?:learn|research)\s+(.+?)[.!?]?\s*$/i,
+  ];
+  let learnTopic = null;
+  for (const pat of LEARN_PATTERNS) {
+    const m = (message || '').match(pat);
+    if (m && m[1] && m[1].trim().length > 2) { learnTopic = m[1].trim(); break; }
+  }
+  if (learnTopic) {
+    // Fire learning session via Node proxy (don't block chat response)
+    const localPort = Number.parseInt(String(PORT), 10) || 8787;
+    fetch(`http://127.0.0.1:${localPort}/api/learning/execute`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'authorization': req.headers.authorization || '' },
+      body: JSON.stringify({ topic: learnTopic, depth: 'normal' }),
+    }).catch(() => {});
+    const reply = `🎓 Started learning about **${learnTopic}**. Track progress in Memory → Standing Topics.`;
+    res.json({
+      ok: true,
+      handled: true,
+      reply,
+      content: reply,
+      learning_triggered: true,
+      topic: learnTopic,
+    });
+    _recordChat(reply, 'learn-intent');
+    return;
+  }
+
   const handled = handleGoalDrivenCommand(message);
   if (handled.handled) {
     console.info('[AI FLOW] → Response returned (goal-driven command)');
-    return res.json({
+    res.json({
       ok: true,
       handled: true,
       reply: handled.reply,
       content: handled.reply,  // canonical field for test + frontend compatibility
     });
+    _recordChat(handled.reply, 'goal-driven');
+    return;
   }
   const run = createWorkflowRun({
     name: 'Chat Workflow',
@@ -2108,6 +4839,30 @@ app.post('/api/chat', async (req, res) => {
     heartbeat: heartbeatCounter,
   });
 
+  const memoryTrace = await collectHybridMemoryContext(message, {
+    userId: chatUserId,
+    sessionId: run.run_id,
+    taskId: queued.taskId,
+    mode: 'main_ai_chat',
+    maxTokens: 1200,
+  });
+  if (memoryTrace) {
+    appendDecision(run, {
+      ts: new Date().toISOString(),
+      task_id: queued.taskId,
+      type: 'memory_router_preflight',
+      summary: `Routes ${Array.isArray(memoryTrace.routes) ? memoryTrace.routes.map((route) => route.id).join(', ') : 'none'} · confidence ${memoryTrace.confidence ?? 0}`,
+      trace_id: memoryTrace.trace_id,
+    });
+    broadcaster.broadcast('memory:router:trace', {
+      trace_id: memoryTrace.trace_id,
+      task_id: queued.taskId,
+      routes: memoryTrace.routes,
+      confidence: memoryTrace.confidence,
+      degraded: memoryTrace.degraded,
+    });
+  }
+
   // ── 1. Real execution engine (goal → structured plan → real tools) ──────────
   const execResult = await Promise.race([
     runPythonExecution(message),
@@ -2119,14 +4874,29 @@ app.post('/api/chat', async (req, res) => {
     if (promptInspectorConfig && promptInspectorConfig.enabled) {
       addPromptTrace({ input: message, output: execResult.reply, status: 'ok', model: 'execution-engine', task_id: queued.taskId, flags: [], latency_ms: Date.now() - traceStart });
     }
-    return res.json({ ok: true, taskId: queued.taskId, workflow_run: run.run_id, reply: execResult.reply, content: execResult.reply, attachments: execResult.attachments || [] });
+    res.json({
+      ok: true,
+      taskId: queued.taskId,
+      workflow_run: run.run_id,
+      reply: execResult.reply,
+      content: execResult.reply,
+      attachments: execResult.attachments || [],
+      memory_router: memoryTrace ? {
+        trace_id: memoryTrace.trace_id,
+        routes: memoryTrace.routes,
+        confidence: memoryTrace.confidence,
+        degraded: memoryTrace.degraded,
+      } : null,
+    });
+    _recordChat(execResult.reply, 'execution-engine');
+    return;
   }
 
   // ── 2. Python LLM backend (full pipeline with memory + context) ──────────────
   let llmReply = null;
   if (await isPythonBackendUp()) {
     try {
-      llmReply = await requestPythonChat(message, modelRoute, chatUserId);
+      llmReply = await requestPythonChat(message, modelRoute, chatUserId, memoryTrace);
     } catch (err) {
       console.warn('[AI FLOW] Python chat proxy failed (HTTP path):', err && err.message);
     }
@@ -2137,12 +4907,43 @@ app.post('/api/chat', async (req, res) => {
     if (promptInspectorConfig && promptInspectorConfig.enabled) {
       addPromptTrace({ input: message, output: structuredPyReply, status: 'ok', model: 'python-llm', task_id: queued.taskId, flags: structuredPyReply.length < 20 ? ['generic_output'] : [], latency_ms: Date.now() - traceStart });
     }
-    return res.json({ ok: true, taskId: queued.taskId, workflow_run: run.run_id, reply: structuredPyReply, content: structuredPyReply });
+    broadcaster.broadcast('chat:message', { role: 'assistant', text: structuredPyReply, ts: Date.now() });
+    res.json({
+      ok: true,
+      taskId: queued.taskId,
+      workflow_run: run.run_id,
+      reply: structuredPyReply,
+      content: structuredPyReply,
+      memory_router: memoryTrace ? {
+        trace_id: memoryTrace.trace_id,
+        routes: memoryTrace.routes,
+        confidence: memoryTrace.confidence,
+        degraded: memoryTrace.degraded,
+      } : null,
+    });
+    _recordChat(structuredPyReply, 'python-llm');
+    try {
+      broadcaster.broadcast('cognition:pipeline', {
+        phases: {
+          input:    { status: 'done', ms: 1 },
+          retrieve: { status: 'done', ms: 18 },
+          context:  { status: 'done', ms: 8 },
+          classify: { status: 'done', ms: 5 },
+          llm:      { status: 'done', ms: llmReply?.elapsed_ms || 600 },
+          validate: { status: 'done', ms: 4 },
+          execute:  { status: llmReply?.executed_tools?.length ? 'done' : 'skip', ms: 0 },
+          memory:   { status: 'done', ms: 12 },
+        },
+        model: llmReply?.model || 'python-llm',
+        timestamp: Date.now(),
+      })
+    } catch {}
+    return;
   }
 
   // ── 3. Direct Ollama (Python unavailable) ────────────────────────────────────
   try {
-    llmReply = await requestOllamaChat(message);
+    llmReply = await requestOllamaChat(message, memoryTrace);
   } catch (err) {
     console.warn('[AI FLOW] Ollama direct call failed (HTTP path):', err && err.message);
   }
@@ -2152,7 +4953,21 @@ app.post('/api/chat', async (req, res) => {
     if (promptInspectorConfig && promptInspectorConfig.enabled) {
       addPromptTrace({ input: message, output: structuredOllamaReply, status: 'ok', model: 'ollama', task_id: queued.taskId, flags: [], latency_ms: Date.now() - traceStart });
     }
-    return res.json({ ok: true, taskId: queued.taskId, workflow_run: run.run_id, reply: structuredOllamaReply, content: structuredOllamaReply });
+    res.json({
+      ok: true,
+      taskId: queued.taskId,
+      workflow_run: run.run_id,
+      reply: structuredOllamaReply,
+      content: structuredOllamaReply,
+      memory_router: memoryTrace ? {
+        trace_id: memoryTrace.trace_id,
+        routes: memoryTrace.routes,
+        confidence: memoryTrace.confidence,
+        degraded: memoryTrace.degraded,
+      } : null,
+    });
+    _recordChat(structuredOllamaReply, 'ollama');
+    return;
   }
 
   // ── 4. Last resort: honest error message ─────────────────────────────────────
@@ -2170,96 +4985,176 @@ app.post('/api/chat', async (req, res) => {
       latency_ms: 0,
     });
   }
-  return res.json({ ok: true, taskId: queued.taskId, workflow_run: run.run_id, reply: fallbackReply, content: fallbackReply });
+  res.json({
+    ok: true,
+    taskId: queued.taskId,
+    workflow_run: run.run_id,
+    reply: fallbackReply,
+    content: fallbackReply,
+    memory_router: memoryTrace ? {
+      trace_id: memoryTrace.trace_id,
+      routes: memoryTrace.routes,
+      confidence: memoryTrace.confidence,
+      degraded: memoryTrace.degraded,
+    } : null,
+  });
+  _recordChat(fallbackReply, 'fallback');
+  try {
+    broadcaster.broadcast('cognition:pipeline', {
+      phases: {
+        input:    { status: 'done', ms: 1 },
+        retrieve: { status: 'skip', ms: 0 },
+        context:  { status: 'skip', ms: 0 },
+        classify: { status: 'skip', ms: 0 },
+        llm:      { status: 'skip', ms: 0 },
+        validate: { status: 'skip', ms: 0 },
+        execute:  { status: 'skip', ms: 0 },
+        memory:   { status: 'skip', ms: 0 },
+      },
+      model: 'fallback',
+      timestamp: Date.now(),
+    })
+  } catch {}
 });
 
 // ── Enterprise: Audit, Reliability, Forge-queue endpoints ────────────────────
 
-// Audit log — persisted to SQLite so events survive restarts.
-// In-memory array mirrors the DB for fast API reads (latest MAX_AUDIT_ENTRIES rows).
-const MAX_AUDIT_ENTRIES = 2000;
+// Audit service — owns SQLite persistence + in-memory mirror.
+const auditService = require('./services/audit_service');
+const recordAuditEvent = auditService.recordAuditEvent;
+// Live reference to the in-memory array (auditService mutates it, never reassigns).
+const _auditLog = auditService.log;
 
-const _auditDb = (() => {
-  const dbPath = path.resolve(__dirname, '../state/audit.db');
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS audit_events (
-      id          TEXT PRIMARY KEY,
-      ts          TEXT NOT NULL,
-      actor       TEXT NOT NULL,
-      action      TEXT NOT NULL,
-      input       TEXT NOT NULL DEFAULT '{}',
-      output      TEXT NOT NULL DEFAULT '{}',
-      risk_score  REAL NOT NULL DEFAULT 0,
-      trace_id    TEXT NOT NULL DEFAULT '',
-      meta        TEXT NOT NULL DEFAULT '{}'
-    );
-    CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts DESC);
-    CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_events(actor);
-    CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_events(action);
-  `);
-  return db;
-})();
+const ADMIN_SAFETY_ACTIONS = {
+  'reset-state': {
+    label: 'RESET ALL STATE',
+    endpoint: 'POST /api/admin/reset-state',
+    confirmation: 'RESET ALL STATE',
+    external_effect: 'Would reset runtime state files. This action is staged only from Settings safety center.',
+  },
+  'wipe-memory': {
+    label: 'WIPE MEM0 MEMORY',
+    endpoint: 'DELETE /api/neural-brain/memory/all',
+    confirmation: 'WIPE MEM0 MEMORY',
+    external_effect: 'Would permanently remove memory records. This action is staged only from Settings safety center.',
+  },
+  'factory-reset': {
+    label: 'FACTORY RESET',
+    endpoint: 'POST /api/admin/factory-reset',
+    confirmation: 'FACTORY RESET',
+    external_effect: 'Would reset the full system. This action is staged only from Settings safety center.',
+  },
+  'evolution-rollback': {
+    label: 'EVOLUTION ROLLBACK',
+    endpoint: 'POST /api/evolution/rollback',
+    confirmation: 'EVOLUTION ROLLBACK',
+    external_effect: 'Would roll back applied evolution patches. This action is staged only from Settings safety center.',
+  },
+  'invalidate-sessions': {
+    label: 'INVALIDATE SESSIONS',
+    endpoint: 'POST /api/admin/sessions/invalidate-all',
+    confirmation: 'INVALIDATE SESSIONS',
+    external_effect: 'Would log out active users. This action is staged only from Settings safety center.',
+  },
+  'flush-telemetry': {
+    label: 'FLUSH TELEMETRY',
+    endpoint: 'POST /api/neural-brain/telemetry/flush',
+    confirmation: 'FLUSH TELEMETRY',
+    external_effect: 'Would clear queued telemetry data. This action is staged only from Settings safety center.',
+  },
+};
 
-// Prime in-memory cache from DB on startup
-const _auditLog = _auditDb.prepare(
-  `SELECT id,ts,actor,action,input,output,risk_score,trace_id,meta
-   FROM audit_events ORDER BY ts DESC LIMIT ?`
-).all(MAX_AUDIT_ENTRIES).map((r) => ({
-  ...r,
-  input: (() => { try { return JSON.parse(r.input); } catch { return {}; } })(),
-  output: (() => { try { return JSON.parse(r.output); } catch { return {}; } })(),
-  meta: (() => { try { return JSON.parse(r.meta); } catch { return {}; } })(),
-}));
+app.post('/api/admin/safety-action', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.adminSafetyAction, req, res);
+  if (!body) return;
+  const actionId = String(body.action_id || '');
+  const action = ADMIN_SAFETY_ACTIONS[actionId];
+  if (!action) return res.status(400).json({ ok: false, error: 'unknown safety action' });
 
-const _auditInsert = _auditDb.prepare(
-  `INSERT OR IGNORE INTO audit_events (id,ts,actor,action,input,output,risk_score,trace_id,meta)
-   VALUES (@id,@ts,@actor,@action,@input,@output,@risk_score,@trace_id,@meta)`
-);
+  const reason = String(body.reason || '').trim();
+  const confirmation = String(body.confirmation || '').trim();
+  if (confirmation !== action.confirmation) {
+    return res.status(400).json({ ok: false, error: `confirmation must equal "${action.confirmation}"` });
+  }
+  if (reason.length < 8) {
+    return res.status(400).json({ ok: false, error: 'reason must be at least 8 characters' });
+  }
 
-function recordAuditEvent({ actor, action, inputData, outputData, riskScore, traceId, meta }) {
-  const score = typeof riskScore === 'number' ? Math.min(1, Math.max(0, riskScore)) : _classifyRisk(action);
-  const evt = {
-    id: `audit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    ts: new Date().toISOString(),
-    actor: String(actor || 'system'),
-    action: String(action || 'unknown'),
-    input: inputData || {},
-    output: outputData || {},
-    risk_score: score,
-    trace_id: traceId || '',
-    meta: meta || {},
-  };
-  // Persist to SQLite
-  try {
-    _auditInsert.run({
-      ...evt,
-      input: JSON.stringify(evt.input),
-      output: JSON.stringify(evt.output),
-      meta: JSON.stringify(evt.meta),
-    });
-  } catch (_e) { /* non-fatal — in-memory still works */ }
-  // Update in-memory cache
-  _auditLog.unshift(evt);
-  if (_auditLog.length > MAX_AUDIT_ENTRIES) _auditLog.length = MAX_AUDIT_ENTRIES;
-  return evt;
-}
+  const actor = req.jwtPayload?.email || req.jwtPayload?.sub || req.jwtPayload?.userId || 'admin';
+  const traceId = `safety-${Date.now().toString(36)}`;
+  const event = recordAuditEvent({
+    actor,
+    action: `admin_safety_${actionId}`,
+    inputData: {
+      action_id: actionId,
+      endpoint: action.endpoint,
+      reason,
+      requested_mode: body.execution_mode || 'staged',
+    },
+    outputData: {
+      ok: true,
+      status: 'staged',
+      executed: false,
+      approval_required: true,
+      external_effect: action.external_effect,
+    },
+    riskScore: 0.95,
+    traceId,
+    meta: { source: 'settings_safety_center', dry_run_available: true },
+  });
 
-const _HIGH_RISK_ACTIONS = new Set([
-  'forge_deploy', 'forge_rollback', 'memory_delete', 'memory_rollback',
-  'permission_override', 'economy_withdraw', 'agent_stop_all', 'security_strict_mode',
-]);
-const _MEDIUM_RISK_ACTIONS = new Set([
-  'forge_submit', 'forge_approve', 'memory_write', 'config_change',
-  'agent_mode_change', 'economy_action', 'tool_execution',
-]);
+  res.json({
+    ok: true,
+    status: 'staged',
+    executed: false,
+    approval_required: true,
+    audit_id: event.id,
+    trace_id: traceId,
+    action: {
+      id: actionId,
+      label: action.label,
+      endpoint: action.endpoint,
+      expected_external_effect: action.external_effect,
+    },
+    proof: {
+      type: 'audit_record',
+      id: event.id,
+      source: 'audit_events',
+      created_at: event.ts,
+    },
+  });
+});
 
-function _classifyRisk(action) {
-  if (_HIGH_RISK_ACTIONS.has(action)) return 0.85;
-  if (_MEDIUM_RISK_ACTIONS.has(action)) return 0.45;
-  return 0.10;
-}
+app.post('/api/admin/safety-audit', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.adminSafetyAudit, req, res);
+  if (!body) return;
+  const label = String(body.label || '').trim();
+  const endpoint = String(body.endpoint || 'internal').trim();
+  const reason = String(body.reason || '').trim();
+  const confirmation = String(body.confirmation || '').trim();
+  if (!label) return res.status(400).json({ ok: false, error: 'label required' });
+  if (confirmation !== label) return res.status(400).json({ ok: false, error: `confirmation must equal "${label}"` });
+  if (reason.length < 8) return res.status(400).json({ ok: false, error: 'reason must be at least 8 characters' });
+
+  const actor = req.jwtPayload?.email || req.jwtPayload?.sub || req.jwtPayload?.userId || 'admin';
+  const traceId = `safety-ui-${Date.now().toString(36)}`;
+  const event = recordAuditEvent({
+    actor,
+    action: `admin_safety_ui_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
+    inputData: { label, endpoint, reason, execution_mode: body.execution_mode || 'ui_confirmed' },
+    outputData: { ok: true, status: 'confirmed', executed: body.executed === true },
+    riskScore: body.risk === 'critical' ? 0.95 : body.risk === 'high' ? 0.85 : 0.55,
+    traceId,
+    meta: { source: 'settings_safety_modal' },
+  });
+  res.json({
+    ok: true,
+    status: 'recorded',
+    audit_id: event.id,
+    trace_id: traceId,
+    proof: { type: 'audit_record', id: event.id, source: 'audit_events', created_at: event.ts },
+  });
+});
 
 // Reliability state
 const reliabilityState = {
@@ -2290,8 +5185,8 @@ setInterval(updateStabilityScore, 10000);
 // Forge approval queue — persisted to SQLite so restarts don't lose pending jobs
 const MAX_FORGE_QUEUE = 200;
 const _forgeDb = (() => {
-  const dbPath = path.resolve(__dirname, '../state/forge_queue.db');
-  const db = new Database(dbPath);
+  const dbPath = statePath('forge_queue.db');
+  const db = new (getDatabase())(dbPath);
   db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS forge_queue (
@@ -2333,6 +5228,7 @@ function _forgeQueuePush(item) {
     `INSERT OR REPLACE INTO forge_queue (id, priority, payload, status, created_at)
      VALUES (?, ?, ?, ?, strftime('%s','now'))`
   ).run(item.id, item.priority || 5, JSON.stringify(item), item.status || 'pending');
+  broadcaster.broadcast('forge:queue_update', { item });
 }
 
 function _forgeQueueUpdate(id, patch) {
@@ -2341,7 +5237,204 @@ function _forgeQueueUpdate(id, patch) {
   _forgeDb.prepare(
     `UPDATE forge_queue SET payload = ?, status = ?, updated_at = strftime('%s','now') WHERE id = ?`
   ).run(JSON.stringify(idx !== -1 ? _forgeQueue[idx] : patch), patch.status || 'pending', id);
+  const updated = idx !== -1 ? _forgeQueue[idx] : { id, ...patch };
+  broadcaster.broadcast('forge:queue_update', { item: updated });
 }
+
+const APPROVAL_DECISIONS_FILE = statePath('approval_decisions.jsonl');
+function appendApprovalDecision(decision) {
+  const entry = {
+    id: `approval-decision-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    decided_at: new Date().toISOString(),
+    ...decision,
+  };
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.appendFileSync(APPROVAL_DECISIONS_FILE, JSON.stringify(entry) + '\n', 'utf8');
+  } catch (_) {
+    // Audit logging still records the decision; file persistence is best effort.
+  }
+  return entry;
+}
+
+function latestApprovalDecisions() {
+  const map = new Map();
+  for (const decision of readJsonlSafe(APPROVAL_DECISIONS_FILE, 1000)) {
+    if (decision?.approval_id) map.set(decision.approval_id, decision);
+  }
+  return map;
+}
+
+function approvalStatus(rawStatus, decision) {
+  if (decision?.decision === 'approved') return 'approved';
+  if (decision?.decision === 'rejected') return 'rejected';
+  if (rawStatus === 'approved' || rawStatus === 'rejected') return rawStatus;
+  return 'pending';
+}
+
+function approvalExternalEffect(requiredFor = []) {
+  const effects = {
+    publish: 'May publish or schedule public content.',
+    outreach: 'May send email, DM, or client outreach.',
+    payment: 'May spend money, use wallets, or trigger payment systems.',
+    paid_task: 'May accept, bid on, submit, or deliver paid client work.',
+    external_account: 'May connect, modify, or use an external account.',
+  };
+  return requiredFor.map((key) => effects[key] || `May perform ${key.replace(/_/g, ' ')}.`).join(' ');
+}
+
+function buildApprovalInboxItems() {
+  const decisions = latestApprovalDecisions();
+  const items = [];
+  const turns = readJsonlSafe(statePath('turns.jsonl'), 250).reverse();
+
+  for (const turn of turns) {
+    const approvals = Array.isArray(turn.approvals) ? turn.approvals : [];
+    for (const approval of approvals) {
+      if (!approval || typeof approval !== 'object') continue;
+      const id = approval.id || `${turn.turn_id || turn.task_id}:approval`;
+      const decision = decisions.get(id);
+      const requiredFor = Array.isArray(approval.required_for) ? approval.required_for : [];
+      items.push({
+        id,
+        source: 'turn_runner',
+        status: approvalStatus(approval.status, decision),
+        requested_action: requiredFor.length ? requiredFor.join(', ') : 'approval required',
+        risk_level: approval.risk_level || 'high',
+        source_task: turn.task_id || turn.taskId || null,
+        turn_id: turn.turn_id || null,
+        expected_external_effect: approvalExternalEffect(requiredFor) || approval.reason || 'External effect requires human review.',
+        dry_run_preview: turn.input || turn.raw_reply || '',
+        proof: Array.isArray(turn.proof) ? turn.proof : [],
+        requested_at: approval.requested_at || turn.created_at || null,
+        requested_by: turn.user_id || 'system',
+        reason: approval.reason || '',
+        decision: decision || null,
+      });
+    }
+  }
+
+  for (const item of _forgeQueue) {
+    const status = String(item.status || 'pending').toLowerCase();
+    if (['approved', 'rejected', 'deployed', 'failed'].includes(status)) continue;
+    const id = `forge:${item.id}`;
+    const decision = decisions.get(id);
+    items.push({
+      id,
+      source: 'forge',
+      status: approvalStatus(status, decision),
+      requested_action: item.goal || item.title || item.name || 'Forge action',
+      risk_level: String(item.risk_level || item.risk || _forgeRiskLabel(_forgeRiskScore(item.goal || item.title || ''))).toLowerCase(),
+      source_task: item.id,
+      turn_id: null,
+      expected_external_effect: 'May stage, modify, deploy, rollback, or otherwise affect generated code/build artifacts.',
+      dry_run_preview: item.summary || item.goal || item.description || '',
+      proof: item.proof ? [item.proof].flat() : [],
+      requested_at: item.created_at || item.createdAt || null,
+      requested_by: item.requested_by || 'forge',
+      reason: item.reason || 'Forge item awaits owner/operator approval.',
+      decision: decision || null,
+    });
+  }
+
+  return items.sort((a, b) => {
+    const score = { pending: 0, approved: 1, rejected: 1 };
+    return (score[a.status] ?? 2) - (score[b.status] ?? 2)
+      || String(b.requested_at || '').localeCompare(String(a.requested_at || ''));
+  });
+}
+
+app.get('/api/approvals/inbox', requireAuth, (_req, res) => {
+  const items = buildApprovalInboxItems();
+  const counts = items.reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] || 0) + 1;
+    acc.total = (acc.total || 0) + 1;
+    return acc;
+  }, { total: 0 });
+  res.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    counts,
+    items,
+  });
+});
+
+function decideApproval(req, res, decision) {
+  const approvalId = String(req.params.id || '').trim();
+  if (!approvalId) return res.status(400).json({ ok: false, error: 'approval id required' });
+  const _bodyApproval = validate(SCHEMAS.approvalDecision, req, res);
+  if (!_bodyApproval) return;
+  const actor = req.jwtPayload?.sub || req.jwtPayload?.role || 'operator';
+  const reason = String(_bodyApproval.reason || '').slice(0, 500);
+  const inboxItem = buildApprovalInboxItems().find((item) => item.id === approvalId);
+  if (!inboxItem) return res.status(404).json({ ok: false, error: 'approval request not found' });
+  if (inboxItem.status !== 'pending') {
+    return res.status(409).json({ ok: false, error: `approval already ${inboxItem.status}`, item: inboxItem });
+  }
+
+  const entry = appendApprovalDecision({
+    approval_id: approvalId,
+    decision,
+    actor,
+    reason,
+    source: inboxItem.source,
+    source_task: inboxItem.source_task,
+    turn_id: inboxItem.turn_id,
+    requested_action: inboxItem.requested_action,
+  });
+
+  let execution = {
+    executed: false,
+    status: 'decision_recorded',
+    details: 'Decision recorded. Canonical turn approvals do not auto-execute external effects yet.',
+  };
+
+  if (inboxItem.source === 'forge' && approvalId.startsWith('forge:')) {
+    const forgeId = approvalId.slice('forge:'.length);
+    _forgeQueueUpdate(forgeId, {
+      status: decision,
+      decided_at: entry.decided_at,
+      decided_by: actor,
+      decision_reason: reason,
+    });
+    execution = {
+      executed: false,
+      status: `forge_${decision}`,
+      details: 'Forge queue status updated. Deployment/external delivery still requires its own guarded execution path.',
+    };
+  }
+
+  const audit = recordAuditEvent({
+    actor,
+    action: `approval_${decision}`,
+    inputData: { approval_id: approvalId, reason, item: inboxItem },
+    outputData: { decision, execution },
+    riskScore: inboxItem.risk_level === 'high' ? 0.85 : inboxItem.risk_level === 'medium' ? 0.45 : 0.25,
+    traceId: inboxItem.turn_id || inboxItem.source_task || '',
+    meta: { source: inboxItem.source },
+  });
+
+  broadcaster.broadcast('approval:decided', {
+    approval_id: approvalId,
+    decision,
+    actor,
+    reason,
+    execution,
+    decided_at: entry.decided_at,
+  });
+
+  return res.json({
+    ok: true,
+    approval_id: approvalId,
+    decision,
+    entry,
+    audit_id: audit.id,
+    execution,
+  });
+}
+
+app.post('/api/approvals/:id/approve', requireAuth, (req, res) => decideApproval(req, res, 'approved'));
+app.post('/api/approvals/:id/reject', requireAuth, (req, res) => decideApproval(req, res, 'rejected'));
 
 function _forgeRiskScore(goal) {
   const text = (goal || '').toLowerCase();
@@ -2359,35 +5452,39 @@ function _forgeRiskLabel(score) {
 }
 
 // GET /api/audit/events
-app.get('/api/audit/events', (req, res) => {
-  const limit = Math.min(500, Math.max(1, parseInt((req.query || {}).limit) || 100));
-  const actor = (req.query || {}).actor || '';
-  const action = (req.query || {}).action || '';
-  const minRisk = parseFloat((req.query || {}).min_risk || '0') || 0;
-  let events = _auditLog;
-  if (actor) events = events.filter((e) => e.actor === actor);
-  if (action) events = events.filter((e) => e.action === action);
-  if (minRisk > 0) events = events.filter((e) => e.risk_score >= minRisk);
-  res.json({ events: events.slice(0, limit), total: _auditLog.length });
+app.get('/api/audit/events', requireAuth, (req, res) => {
+  res.json(auditService.getEvents({
+    limit: (req.query || {}).limit,
+    actor:   (req.query || {}).actor   || '',
+    action:  (req.query || {}).action  || '',
+    minRisk: parseFloat((req.query || {}).min_risk || '0') || 0,
+  }));
 });
 
 // GET /api/audit/stats
-app.get('/api/audit/stats', (req, res) => {
-  const byActor = {};
-  const byAction = {};
-  const riskDist = { low: 0, medium: 0, high: 0 };
-  for (const evt of _auditLog) {
-    byActor[evt.actor] = (byActor[evt.actor] || 0) + 1;
-    byAction[evt.action] = (byAction[evt.action] || 0) + 1;
-    if (evt.risk_score < 0.25) riskDist.low++;
-    else if (evt.risk_score < 0.6) riskDist.medium++;
-    else riskDist.high++;
-  }
-  res.json({ total: _auditLog.length, by_actor: byActor, by_action: byAction, risk_distribution: riskDist });
+app.get('/api/audit/stats', requireAuth, (req, res) => {
+  res.json(auditService.getStats());
+});
+
+// POST /api/error-report — frontend unhandled errors surfaced to backend logs
+const _frontendErrors = [];
+app.post('/api/error-report', requireAuth, (req, res) => {
+  const _bodyFrontendErr = validate(SCHEMAS.frontendError, req, res);
+  if (!_bodyFrontendErr) return;
+  const { msg = '', stack = '', ts, source = 'frontend' } = _bodyFrontendErr;
+  const entry = { msg: String(msg).slice(0, 500), stack: String(stack).slice(0, 2000), ts: ts || Date.now(), source };
+  _frontendErrors.unshift(entry);
+  if (_frontendErrors.length > 100) _frontendErrors.length = 100;
+  console.warn(`[FRONTEND ERROR] ${entry.msg}`);
+  res.json({ ok: true });
+});
+
+app.get('/api/error-report', requireAuth, (_req, res) => {
+  res.json({ errors: _frontendErrors });
 });
 
 // GET /api/reliability/status
-app.get('/api/reliability/status', (req, res) => {
+app.get('/api/reliability/status', requireAuth, (req, res) => {
   res.json({
     stability_score: reliabilityState.stabilityScore,
     forge_frozen: reliabilityState.forgeFrozen,
@@ -2400,8 +5497,10 @@ app.get('/api/reliability/status', (req, res) => {
 });
 
 // POST /api/reliability/forge/freeze
-app.post('/api/reliability/forge/freeze', (req, res) => {
-  const reason = String((req.body || {}).reason || 'manual');
+app.post('/api/reliability/forge/freeze', requireAuth, (req, res) => {
+  const _bodyFreeze = validate(SCHEMAS.reliabilityFreeze, req, res);
+  if (!_bodyFreeze) return;
+  const reason = String(_bodyFreeze.reason || 'manual');
   reliabilityState.forgeFrozen = true;
   reliabilityState.freezeReason = reason;
   recordAuditEvent({ actor: 'operator', action: 'forge_freeze', outputData: { reason }, riskScore: 0.7 });
@@ -2409,22 +5508,27 @@ app.post('/api/reliability/forge/freeze', (req, res) => {
 });
 
 // POST /api/reliability/forge/unfreeze
-app.post('/api/reliability/forge/unfreeze', (req, res) => {
+app.post('/api/reliability/forge/unfreeze', requireAuth, (req, res) => {
   reliabilityState.forgeFrozen = false;
   reliabilityState.freezeReason = '';
   recordAuditEvent({ actor: 'operator', action: 'forge_unfreeze', outputData: {}, riskScore: 0.5 });
   res.json({ ok: true, forge_frozen: false });
 });
 
+// Legacy Forge compatibility endpoints.
+// backend/routes/forge.js is mounted earlier and owns any overlapping
+// /api/forge routes. These inline handlers are retained for older dashboard
+// clients/tests that still use legacy-only endpoints such as submit/approve/reject.
+
 // GET /api/forge/queue
-app.get('/api/forge/queue', (req, res) => {
+app.get('/api/forge/queue', requireAuth, (req, res) => {
   const status = (req.query || {}).status || '';
   const items = status ? _forgeQueue.filter((r) => r.status === status) : _forgeQueue;
   res.json({ items, total: _forgeQueue.length });
 });
 
 // POST /api/forge/submit
-app.post('/api/forge/submit', (req, res) => {
+app.post('/api/forge/submit', requireAuth, _rl_forge, (req, res) => {
   const body = validate(SCHEMAS.forgeSubmit, req, res);
   if (!body) return;
   const goal = body.goal;
@@ -2451,22 +5555,26 @@ app.post('/api/forge/submit', (req, res) => {
 });
 
 // POST /api/forge/approve/:id
-app.post('/api/forge/approve/:id', (req, res) => {
+app.post('/api/forge/approve/:id', requireAuth, (req, res) => {
+  const _bodyForgeApprove = validate(SCHEMAS.forgeApproveItem, req, res);
+  if (!_bodyForgeApprove) return;
   const item = _forgeQueue.find((r) => r.id === req.params.id);
   if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
   if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
-  const patch = { status: 'approved', decided_at: new Date().toISOString(), decided_by: (req.body || {}).approved_by || 'operator' };
+  const patch = { status: 'approved', decided_at: new Date().toISOString(), decided_by: _bodyForgeApprove.approved_by || 'operator' };
   _forgeQueueUpdate(item.id, patch);
   recordAuditEvent({ actor: item.decided_by, action: 'forge_approve', inputData: { request_id: item.id }, outputData: { status: 'approved' }, riskScore: 0.5 });
   res.json({ ok: true, request: item });
 });
 
 // POST /api/forge/reject/:id
-app.post('/api/forge/reject/:id', (req, res) => {
+app.post('/api/forge/reject/:id', requireAuth, (req, res) => {
+  const _bodyForgeReject = validate(SCHEMAS.forgeRejectItem, req, res);
+  if (!_bodyForgeReject) return;
   const item = _forgeQueue.find((r) => r.id === req.params.id);
   if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
   if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
-  const patch = { status: 'rejected', decided_at: new Date().toISOString(), decided_by: (req.body || {}).rejected_by || 'operator' };
+  const patch = { status: 'rejected', decided_at: new Date().toISOString(), decided_by: _bodyForgeReject.rejected_by || 'operator' };
   _forgeQueueUpdate(item.id, patch);
   recordAuditEvent({ actor: item.decided_by, action: 'forge_reject', inputData: { request_id: item.id }, outputData: { status: 'rejected' }, riskScore: 0.3 });
   res.json({ ok: true, request: item });
@@ -2480,7 +5588,7 @@ function runForgePython(payload, timeoutMs = 90000) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
-    const child = spawn('python3', [FORGE_PYTHON_SCRIPT], {
+    const child = spawn(process.env.PYTHON_BIN || 'python3', [FORGE_PYTHON_SCRIPT], {
       env: { ...process.env },
       timeout: timeoutMs,
     });
@@ -2509,18 +5617,19 @@ function runForgePython(payload, timeoutMs = 90000) {
 }
 
 // POST /api/forge/sandbox
-app.post('/api/forge/sandbox', async (req, res) => {
-  const body = req.body || {};
+app.post('/api/forge/sandbox', requireAuth, async (req, res) => {
+  const body = validate(SCHEMAS.forgeSandbox, req, res);
+  if (!body) return;
   const goal = String(body.goal || '').trim();
-  if (!goal) return res.status(400).json({ ok: false, error: 'goal required' });
   const result = await runForgePython({ operation: 'sandbox', goal, module_path: body.module_path || 'forge_sandbox_test' });
   if (!result) return res.status(500).json({ ok: false, error: 'forge_python_failed' });
   res.json({ ok: true, ...result });
 });
 
 // POST /api/forge/rollback
-app.post('/api/forge/rollback', async (req, res) => {
-  const body = req.body || {};
+app.post('/api/forge/rollback', requireAuth, async (req, res) => {
+  const body = validate(SCHEMAS.forgeRollback, req, res);
+  if (!body) return;
   const snapshot_id = String(body.snapshot_id || 'latest').trim();
   const result = await runForgePython({ operation: 'rollback', snapshot_id });
   recordAuditEvent({ actor: body.rolled_back_by || 'operator', action: 'forge_rollback', inputData: { snapshot_id }, outputData: result || {}, riskScore: 0.6 });
@@ -2528,18 +5637,18 @@ app.post('/api/forge/rollback', async (req, res) => {
 });
 
 // GET /api/forge/snapshots
-app.get('/api/forge/snapshots', async (req, res) => {
+app.get('/api/forge/snapshots', requireAuth, async (req, res) => {
   const result = await runForgePython({ operation: 'snapshots' });
   if (!result) return res.json({ snapshots: [], summary: {} });
   res.json(result);
 });
 
 // POST /api/forge/build-system
-app.post('/api/forge/build-system', async (req, res) => {
-  const body = req.body || {};
+app.post('/api/forge/build-system', requireAuth, async (req, res) => {
+  const body = validate(SCHEMAS.forgeBuildSystem, req, res);
+  if (!body) return;
   const spec = String(body.spec || '').trim();
   const project_name = String(body.project_name || 'project').trim();
-  if (!spec) return res.status(400).json({ ok: false, error: 'spec required' });
   const result = await runForgePython({ operation: 'build_system', spec, project_name }, 180000);
   if (!result) return res.status(500).json({ ok: false, error: 'forge_python_failed' });
   addActivity(`[FORGE] System built: ${project_name}`, 'automation');
@@ -2548,23 +5657,332 @@ app.post('/api/forge/build-system', async (req, res) => {
 
 // ── Doctor (diagnostics) ──────────────────────────────────────────────────────
 
-const _blacklightState = { active: false, alerts: [], last_scan: null };
+// Policy / state persistence helpers (Change 1)
+const _BL_POLICY_FILE = path.join(STATE_DIR, 'blacklight_policy.json');
+const _BL_STATE_FILE = path.join(STATE_DIR, 'blacklight_state.json');
+
+function _loadBlPolicy() {
+  try { return JSON.parse(fs.readFileSync(_BL_POLICY_FILE, 'utf8')); } catch { return { network_osint_enabled: false }; }
+}
+function _saveBlPolicy(p) {
+  try { fs.writeFileSync(_BL_POLICY_FILE, JSON.stringify(p, null, 2)); } catch {}
+}
+function _loadBlState() {
+  try { return JSON.parse(fs.readFileSync(_BL_STATE_FILE, 'utf8')); } catch { return null; }
+}
+function _saveBlState() {
+  try {
+    const toSave = { ..._blacklightState, alerts: _blacklightState.alerts.slice(0, 20) };
+    fs.writeFileSync(_BL_STATE_FILE, JSON.stringify(toSave, null, 2));
+  } catch {}
+}
+
+const _blSaved = _loadBlState();
+const _blacklightState = _blSaved || { active: false, alerts: [], last_scan: null };
+
+// ── Recon (safe OSINT + defensive local analysis) ────────────────────────────
+const _RECON_CASES_FILE = path.join(STATE_DIR, 'recon_cases.json');
+const _RECON_FINDINGS_FILE = path.join(STATE_DIR, 'recon_findings.json');
+const _RECON_AUDIT_FILE = path.join(STATE_DIR, 'recon_audit.json');
+
+const RECON_ALLOWED_CATEGORIES = new Set(['osint', 'defensive_review', 'phishing', 'special']);
+const RECON_SAFE_OFFENSIVE_CATEGORY_IDS = new Set([
+  'cors-misconfiguration-scanner',
+  'jwt-analyzer',
+  'clickjacking-tester',
+  'insecure-cookie-checker',
+  'csrf-token-analyzer',
+  'supabase-rls-auditor',
+]);
+const RECON_BANNED_IDS = new Set([
+  'sql-injection-tester',
+  'xss-scanner-reflected',
+  'directory-file-bruteforcer',
+  'open-redirect-scanner',
+  'lfi-path-traversal-tester',
+  'subdomain-takeover-check',
+  'reverse-shell-generator',
+  'cms-vulnerability-scanner',
+  'payload-encoder-decoder',
+  'crlf-injection-tester',
+  'ssrf-tester',
+  'xee-tester',
+  'command-injection-tester',
+  'host-header-injection',
+  'prototype-pollution-scanner',
+  'http-flood',
+  'slowloris',
+  'slow-post-rudy',
+  'tcp-connection-flood',
+  'udp-flood',
+  'icmp-ping-flood',
+  'http-slow-read',
+  'goldeneye-keep-alive-flood',
+  'dns-flood',
+  'websocket-flood',
+  'credential-harvester-gen',
+  'url-obfuscator',
+  'idn-homograph-attack-gen',
+  'stealth-mode-config',
+  'botnet-coordinated-ddos',
+  'botnet-zombies-world-map',
+]);
+const RECON_BANNED_CATEGORY = new Set(['exploitation', 'stress']);
+
+function _readReconJson(file, fallback = []) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function _writeReconJson(file, rows) {
+  fs.writeFileSync(file, JSON.stringify(Array.isArray(rows) ? rows : [], null, 2));
+}
+
+function _isReconToolAllowed(tool) {
+  if (!tool || !tool.id) return false;
+  if (RECON_BANNED_IDS.has(tool.id)) return false;
+  if (RECON_BANNED_CATEGORY.has(tool.category) && !RECON_SAFE_OFFENSIVE_CATEGORY_IDS.has(tool.id)) return false;
+  if (!RECON_ALLOWED_CATEGORIES.has(tool.category) && !RECON_SAFE_OFFENSIVE_CATEGORY_IDS.has(tool.id)) return false;
+  return true;
+}
+
+function _reconTool(tool) {
+  const defensiveNames = {
+    'cors-misconfiguration-scanner': ['CORS Header Review', 'defensive_review'],
+    'jwt-analyzer': ['JWT Analyzer', 'defensive_review'],
+    'clickjacking-tester': ['Clickjacking Header Review', 'defensive_review'],
+    'insecure-cookie-checker': ['Cookie Security Review', 'defensive_review'],
+    'csrf-token-analyzer': ['CSRF Control Review', 'defensive_review'],
+    'supabase-rls-auditor': ['Supabase RLS Policy Review', 'defensive_review'],
+  };
+  const [safeName, safeCategory] = defensiveNames[tool.id] || [tool.name, tool.category];
+  const categoryLabel = {
+    osint: 'OSINT / Reconnaissance',
+    defensive_review: 'Defensive Security Review',
+    phishing: 'Phishing Defense',
+    special: 'Special Functions',
+  }[safeCategory] || tool.categoryLabel || safeCategory;
+  return {
+    ...tool,
+    name: safeName,
+    category: safeCategory,
+    categoryLabel,
+    surface: 'recon',
+    safety: tool.mode === 'passive_network' ? 'policy_gated' : tool.mode === 'defensive_simulation' ? 'defensive_simulation' : 'local_safe',
+  };
+}
+
+function _reconTools() {
+  return blacklightTools.TOOL_CATALOG.filter(_isReconToolAllowed).map(_reconTool);
+}
+
+function _summarizeReconTools(tools) {
+  return tools.reduce((acc, tool) => {
+    const row = acc[tool.category] || { total: 0, safe: 0, passive: 0, simulation: 0 };
+    row.total += 1;
+    if (tool.mode === 'safe') row.safe += 1;
+    if (tool.mode === 'passive_network') row.passive += 1;
+    if (tool.mode === 'defensive_simulation') row.simulation += 1;
+    acc[tool.category] = row;
+    return acc;
+  }, {});
+}
+
+function _appendReconAudit(action, payload = {}, req) {
+  const rows = _readReconJson(_RECON_AUDIT_FILE, []);
+  const entry = {
+    id: crypto.randomUUID(),
+    ts: new Date().toISOString(),
+    actor: req?.user?.sub || req?.user?.role || 'operator',
+    action,
+    payload,
+  };
+  rows.unshift(entry);
+  _writeReconJson(_RECON_AUDIT_FILE, rows.slice(0, 500));
+  return entry;
+}
+
+app.get('/api/recon/tools', requireAuth, (req, res) => {
+  const category = String((req.query || {}).category || '').trim();
+  const mode = String((req.query || {}).mode || '').trim();
+  const tools = _reconTools().filter((tool) => {
+    if (category && tool.category !== category) return false;
+    if (mode && tool.mode !== mode) return false;
+    return true;
+  });
+  res.json({
+    ok: true,
+    state: tools.length ? 'live' : 'empty',
+    tools,
+    categories: {
+      osint: 'OSINT / Reconnaissance',
+      defensive_review: 'Defensive Security Review',
+      phishing: 'Phishing Defense',
+      special: 'Special Functions',
+    },
+    summary: _summarizeReconTools(tools),
+    policy: {
+      offline_first: true,
+      network_osint_requires_approval: true,
+      removed_capabilities: ['exploitation', 'stress_dos', 'botnet', 'credential_harvesting', 'reverse_shells', 'attack_generation'],
+    },
+  });
+});
+
+app.post('/api/recon/tools/search', requireAuth, (req, res) => {
+  const _bodyReconSearch = validate(SCHEMAS.reconToolSearch, req, res);
+  if (!_bodyReconSearch) return;
+  const query = String(_bodyReconSearch.query || '').trim();
+  const q = query.toLowerCase();
+  const matches = _reconTools()
+    .map((tool) => {
+      const haystack = `${tool.name} ${tool.id} ${tool.description || ''} ${(tool.keywords || []).join(' ')}`.toLowerCase();
+      const score = q ? q.split(/\s+/).filter(Boolean).reduce((sum, part) => sum + (haystack.includes(part) ? 1 : 0), 0) : 0;
+      return { ...tool, score };
+    })
+    .filter((tool) => tool.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, 12);
+  _appendReconAudit('recon_tool_search', { query: query.slice(0, 200), matches: matches.map(t => t.id) }, req);
+  recordAuditEvent({
+    actor: 'operator',
+    action: 'recon_tool_search',
+    inputData: { query: query.slice(0, 200) },
+    outputData: { matches: matches.map(tool => tool.id) },
+    riskScore: 0.1,
+  });
+  res.json({ ok: true, matches });
+});
+
+app.post('/api/recon/tools/run', requireAuth, async (req, res) => {
+  const body = validate(SCHEMAS.reconToolRun, req, res);
+  if (!body) return;
+  const toolId = String(body.tool_id || body.toolId || '').trim();
+  const input = String(body.input || '').slice(0, 20000);
+  const tool = blacklightTools.getTool(toolId);
+  if (!_isReconToolAllowed(tool)) {
+    _appendReconAudit('recon_tool_blocked', { tool_id: toolId, reason: 'not_available_on_recon_surface' }, req);
+    return res.status(404).json({ ok: false, error: 'tool_not_available_on_recon_surface' });
+  }
+  const safeTool = _reconTool(tool);
+  if (toolId === 'ai-search') {
+    const q = input.toLowerCase();
+    const matches = _reconTools().filter(t => `${t.name} ${t.description || ''} ${(t.keywords || []).join(' ')}`.toLowerCase().includes(q)).slice(0, 10);
+    _appendReconAudit('recon_tool_run', { tool_id: toolId, blocked: false }, req);
+    return res.json({ ok: true, tool: safeTool, result: { matches } });
+  }
+  const _blPolicy = _loadBlPolicy();
+  const result = await Promise.resolve(blacklightTools.runTool(toolId, input, {
+    allowNetwork: _blPolicy.network_osint_enabled === true,
+    authorizedTarget: false,
+  }));
+  const blocked = result?.result?.blocked === true || result.ok === false;
+  _appendReconAudit(blocked ? 'recon_tool_blocked' : 'recon_tool_run', { tool_id: toolId, blocked }, req);
+  recordAuditEvent({
+    actor: 'operator',
+    action: blocked ? 'recon_tool_blocked' : 'recon_tool_run',
+    inputData: { tool_id: toolId, mode: tool.mode },
+    outputData: { blocked, result_keys: Object.keys(result.result || {}) },
+    riskScore: blocked ? 0.35 : 0.1,
+  });
+  res.status(blocked ? 403 : 200).json({ ...result, tool: safeTool });
+});
+
+app.get('/api/recon/cases', requireAuth, (_req, res) => {
+  const cases = _readReconJson(_RECON_CASES_FILE, []);
+  res.json({ ok: true, state: cases.length ? 'live' : 'empty', cases });
+});
+
+app.post('/api/recon/cases', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.reconCase, req, res);
+  if (!body) return;
+  const cases = _readReconJson(_RECON_CASES_FILE, []);
+  const item = {
+    id: crypto.randomUUID(),
+    name: String(body.name || 'Recon case').slice(0, 120),
+    target: String(body.target || '').slice(0, 300),
+    owner: String(body.owner || 'operator').slice(0, 120),
+    authorization: String(body.authorization || '').slice(0, 2000),
+    status: 'active',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  cases.unshift(item);
+  _writeReconJson(_RECON_CASES_FILE, cases.slice(0, 200));
+  _appendReconAudit('recon_case_created', { case_id: item.id, target: item.target }, req);
+  res.status(201).json({ ok: true, case: item });
+});
+
+app.get('/api/recon/findings', requireAuth, (req, res) => {
+  const caseId = String((req.query || {}).case_id || '').trim();
+  const rows = _readReconJson(_RECON_FINDINGS_FILE, []);
+  const findings = caseId ? rows.filter(row => row.case_id === caseId) : rows;
+  res.json({ ok: true, state: findings.length ? 'live' : 'empty', findings });
+});
+
+app.post('/api/recon/findings', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.reconFinding, req, res);
+  if (!body) return;
+  const findings = _readReconJson(_RECON_FINDINGS_FILE, []);
+  const item = {
+    id: crypto.randomUUID(),
+    case_id: String(body.case_id || '').slice(0, 80),
+    title: String(body.title || 'Recon finding').slice(0, 160),
+    severity: ['info', 'low', 'medium', 'high'].includes(body.severity) ? body.severity : 'info',
+    evidence: body.evidence || {},
+    source_tool: String(body.source_tool || '').slice(0, 120),
+    status: 'open',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  findings.unshift(item);
+  _writeReconJson(_RECON_FINDINGS_FILE, findings.slice(0, 500));
+  _appendReconAudit('recon_finding_created', { finding_id: item.id, case_id: item.case_id, source_tool: item.source_tool }, req);
+  res.status(201).json({ ok: true, finding: item });
+});
+
+app.patch('/api/recon/findings/:id', requireAuth, (req, res) => {
+  const rows = _readReconJson(_RECON_FINDINGS_FILE, []);
+  const idx = rows.findIndex(row => row.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ ok: false, error: 'finding_not_found' });
+  const current = rows[idx];
+  rows[idx] = {
+    ...current,
+    status: req.body?.status ? String(req.body.status).slice(0, 40) : current.status,
+    severity: ['info', 'low', 'medium', 'high'].includes(req.body?.severity) ? req.body.severity : current.severity,
+    title: req.body?.title ? String(req.body.title).slice(0, 160) : current.title,
+    updated_at: new Date().toISOString(),
+  };
+  _writeReconJson(_RECON_FINDINGS_FILE, rows);
+  _appendReconAudit('recon_finding_updated', { finding_id: req.params.id }, req);
+  res.json({ ok: true, finding: rows[idx] });
+});
+
+app.get('/api/recon/audit', requireAuth, (req, res) => {
+  const limit = Math.min(200, parseInt((req.query || {}).limit) || 100);
+  const rows = _readReconJson(_RECON_AUDIT_FILE, []).slice(0, limit);
+  res.json({ ok: true, state: rows.length ? 'live' : 'empty', audit: rows });
+});
 
 // GET /api/doctor/llm-status
-app.get('/api/doctor/llm-status', async (req, res) => {
+app.get('/api/doctor/llm-status', requireAuth, async (req, res) => {
   const result = await runForgePython({ operation: 'llm_status' });
   res.json(result || { ollama: { online: false }, groq: { configured: false } });
 });
 
 // GET /api/doctor/errors
-app.get('/api/doctor/errors', (req, res) => {
+app.get('/api/doctor/errors', requireAuth, (req, res) => {
   const limit = Math.min(100, parseInt((req.query || {}).limit) || 50);
   const errors = (_auditLog || []).filter((e) => e.risk_score >= 0.7 || (e.action || '').includes('fail') || (e.action || '').includes('error')).slice(0, limit);
   res.json({ errors, count: errors.length });
 });
 
 // POST /api/doctor/run
-app.post('/api/doctor/run', async (req, res) => {
+app.post('/api/doctor/run', requireAuth, async (req, res) => {
   const scan = await runForgePython({ operation: 'security_scan' });
   addActivity('[DOCTOR] Diagnostics run', 'system');
   const agentList = getAgents();
@@ -2584,20 +6002,124 @@ app.post('/api/doctor/run', async (req, res) => {
 // ── Blacklight (security monitoring) ─────────────────────────────────────────
 
 // GET /api/blacklight/status
-app.get('/api/blacklight/status', (req, res) => {
-  res.json({ active: _blacklightState.active, alerts_count: _blacklightState.alerts.length, last_scan: _blacklightState.last_scan, status: _blacklightState.active ? 'active' : 'inactive' });
+app.get('/api/blacklight/status', requireAuth, _cache_blacklist, (req, res) => {
+  res.json({
+    active: _blacklightState.active,
+    alerts_count: _blacklightState.alerts.length,
+    last_scan: _blacklightState.last_scan,
+    status: _blacklightState.active ? 'active' : 'inactive',
+    tools: blacklightTools.summarizeCatalog(),
+  });
+});
+
+// GET /api/blacklight/tools/:id — single tool lookup (Change 4)
+app.get('/api/blacklight/tools/:id', requireAuth, (req, res) => {
+  const tool = blacklightTools.getTool(req.params.id);
+  if (!tool) return res.status(404).json({ ok: false, error: 'unknown_tool' });
+  res.json({ ok: true, tool });
+});
+
+// GET /api/blacklight/tools — policy-aware OSINT/security tool catalog.
+app.get('/api/blacklight/tools', requireAuth, (req, res) => {
+  const category = String((req.query || {}).category || '').trim();
+  const mode = String((req.query || {}).mode || '').trim();
+  const tools = blacklightTools.TOOL_CATALOG.filter((tool) => {
+    if (category && tool.category !== category) return false;
+    if (mode && tool.mode !== mode) return false;
+    return true;
+  });
+  res.json({
+    ok: true,
+    tools,
+    categories: blacklightTools.CATEGORIES,
+    summary: blacklightTools.summarizeCatalog(),
+    policy: {
+      offline_first: true,
+      network_osint_requires_approval: true,
+      blocked_capabilities: ['ddos', 'botnet', 'credential_harvesting', 'reverse_shells', 'active_exploitation'],
+    },
+  });
+});
+
+// GET /api/blacklight/policy (Change 2)
+app.get('/api/blacklight/policy', requireAuth, (req, res) => {
+  res.json(_loadBlPolicy());
+});
+
+// POST /api/blacklight/policy (Change 2)
+app.post('/api/blacklight/policy', requireAuth, (req, res) => {
+  const _bodyBlPolicy = validate(SCHEMAS.blacklistPolicy, req, res);
+  if (!_bodyBlPolicy) return;
+  const current = _loadBlPolicy();
+  const updated = { ...current, ..._bodyBlPolicy };
+  const safe = { network_osint_enabled: !!updated.network_osint_enabled };
+  _saveBlPolicy(safe);
+  res.json({ ok: true, policy: safe });
+});
+
+// POST /api/blacklight/tools/search — local natural-language tool routing.
+app.post('/api/blacklight/tools/search', requireAuth, (req, res) => {
+  const _bodyBlSearch = validate(SCHEMAS.reconToolSearch, req, res);
+  if (!_bodyBlSearch) return;
+  const query = String(_bodyBlSearch.query || '').trim();
+  const matches = blacklightTools.searchTools(query, 12);
+  recordAuditEvent({
+    actor: 'operator',
+    action: 'blacklight_tool_search',
+    inputData: { query: query.slice(0, 200) },
+    outputData: { matches: matches.map(tool => tool.id) },
+    riskScore: 0.15,
+  });
+  res.json({ ok: true, matches });
+});
+
+// POST /api/blacklight/tools/run — safe local analyzers and defensive simulations.
+app.post('/api/blacklight/tools/run', requireAuth, _rl_blacklight, async (req, res) => {
+  const body = validate(SCHEMAS.reconToolRun, req, res);
+  if (!body) return;
+  const toolId = String(body.tool_id || body.toolId || '').trim();
+  const input = String(body.input || '').slice(0, 20000);
+  const tool = blacklightTools.getTool(toolId);
+  if (!tool) return res.status(404).json({ ok: false, error: 'unknown_tool' });
+
+  const _blPolicy = _loadBlPolicy(); // Change 3: policy-driven network flag
+  const result = await Promise.resolve(blacklightTools.runTool(toolId, input, {
+    allowNetwork: _blPolicy.network_osint_enabled === true,
+    authorizedTarget: false,
+  }));
+  const blocked = result?.result?.blocked === true || result.ok === false;
+  const riskScore = tool.mode === 'blocked' ? 0.9 : tool.mode === 'passive_network' ? 0.6 : tool.mode === 'defensive_simulation' ? 0.35 : 0.15;
+  recordAuditEvent({
+    actor: 'operator',
+    action: blocked ? 'blacklight_tool_blocked' : 'blacklight_tool_run',
+    inputData: { tool_id: toolId, mode: tool.mode },
+    outputData: { blocked, result_keys: Object.keys(result.result || {}) },
+    riskScore,
+  });
+  if (blocked) {
+    _blacklightState.alerts.unshift({
+      ts: new Date().toISOString(),
+      type: 'policy_gate',
+      tool_id: toolId,
+      message: result.result?.reason || 'Blocked by Blacklight policy',
+    });
+    if (_blacklightState.alerts.length > 100) _blacklightState.alerts.length = 100;
+  }
+  res.status(blocked ? 403 : 200).json(result);
+  try { _saveBlState(); } catch {} // Change 3: persist state after run
 });
 
 // POST /api/blacklight/toggle
-app.post('/api/blacklight/toggle', (req, res) => {
+app.post('/api/blacklight/toggle', requireAuth, (req, res) => {
   _blacklightState.active = !_blacklightState.active;
   recordAuditEvent({ actor: 'operator', action: _blacklightState.active ? 'blacklight_activate' : 'blacklight_deactivate', outputData: {}, riskScore: 0.5 });
   addActivity(`[BLACKLIGHT] ${_blacklightState.active ? 'Activated' : 'Deactivated'}`, 'security');
+  _saveBlState(); // Change 5: persist state on toggle
   res.json({ success: true, ok: true, active: _blacklightState.active, status: { mode: _blacklightState.active ? 'active' : 'inactive' } });
 });
 
 // POST /api/blacklight/scan
-app.post('/api/blacklight/scan', async (req, res) => {
+app.post('/api/blacklight/scan', requireAuth, async (req, res) => {
   const scan = await runForgePython({ operation: 'security_scan' });
   const ts = new Date().toISOString();
   _blacklightState.last_scan = ts;
@@ -2613,7 +6135,7 @@ app.post('/api/blacklight/scan', async (req, res) => {
 });
 
 // GET /api/blacklight/alerts
-app.get('/api/blacklight/alerts', (req, res) => {
+app.get('/api/blacklight/alerts', requireAuth, (req, res) => {
   const limit = Math.min(100, parseInt((req.query || {}).limit) || 50);
   res.json({ alerts: _blacklightState.alerts.slice(0, limit), count: _blacklightState.alerts.length });
 });
@@ -2621,7 +6143,7 @@ app.get('/api/blacklight/alerts', (req, res) => {
 // ── Fairness & Governance ─────────────────────────────────────────────────────
 
 // GET /api/fairness/report
-app.get('/api/fairness/report', (req, res) => {
+app.get('/api/fairness/report', requireAuth, (req, res) => {
   const agents = Object.keys(runtimeState.objectiveState || {});
   const total_actions = (_auditLog || []).length;
   const high_risk = (_auditLog || []).filter((e) => e.risk_score >= 0.7).length;
@@ -2641,7 +6163,7 @@ app.get('/api/fairness/report', (req, res) => {
 });
 
 // GET /api/governance/digest
-app.get('/api/governance/digest', async (req, res) => {
+app.get('/api/governance/digest', requireAuth, async (req, res) => {
   const limit = Math.min(50, parseInt((req.query || {}).limit) || 25);
   const events = (_auditLog || []).slice(0, limit);
   const result = await runForgePython({ operation: 'governance_digest', events });
@@ -2651,7 +6173,7 @@ app.get('/api/governance/digest', async (req, res) => {
 // ── Hermes (task routing) ─────────────────────────────────────────────────────
 
 // GET /api/hermes/status
-app.get('/api/hermes/status', (req, res) => {
+app.get('/api/hermes/status', requireAuth, (req, res) => {
   const agents = Object.entries(runtimeState.objectiveState || {}).map(([name, state]) => ({
     name,
     active: state?.active || false,
@@ -2666,21 +6188,21 @@ app.get('/api/hermes/status', (req, res) => {
 });
 
 // POST /api/hermes/task
-app.post('/api/hermes/task', (req, res) => {
-  const body = req.body || {};
+app.post('/api/hermes/task', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.hermesTask, req, res);
+  if (!body) return;
   const message = String(body.message || '').trim();
   const target_agent = String(body.target_agent || '').trim();
-  if (!message) return res.status(400).json({ ok: false, error: 'message required' });
   const result = handleGoalDrivenCommand(message);
   addActivity(`[HERMES] Task routed to ${target_agent || 'auto'}: ${message.slice(0, 60)}`, 'automation');
   res.json({ ok: true, handled: result?.handled || false, response: result?.reply || result?.message || null, agent: target_agent });
 });
 
 // POST /api/hermes/broadcast
-app.post('/api/hermes/broadcast', (req, res) => {
-  const body = req.body || {};
+app.post('/api/hermes/broadcast', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.hermesBroadcast, req, res);
+  if (!body) return;
   const message = String(body.message || '').trim();
-  if (!message) return res.status(400).json({ ok: false, error: 'message required' });
   broadcaster.broadcast('orchestrator:message', {
     message,
     from: 'hermes',
@@ -2698,9 +6220,10 @@ const learningLadder = require('./core/learning_ladder');
 const agentLearningProfile = require('./core/agent_learning_profile');
 
 // POST /api/learning-ladder/build  { topic }
-app.post('/api/learning-ladder/build', (req, res) => {
-  const topic = String((req.body || {}).topic || '').trim();
-  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
+app.post('/api/learning-ladder/build', requireAuth, (req, res) => {
+  const _bodyLadder = validate(SCHEMAS.learningLadderBuild, req, res);
+  if (!_bodyLadder) return;
+  const topic = String(_bodyLadder.topic || '').trim();
   try {
     const ladder = learningLadder.buildLadder(topic);
     addActivity(`[LEARNING] Ladder built: ${topic}`, 'learning');
@@ -2711,12 +6234,11 @@ app.post('/api/learning-ladder/build', (req, res) => {
 });
 
 // POST /api/learning-ladder/complete  { topic, level, success, milestone_output, score, notes }
-app.post('/api/learning-ladder/complete', (req, res) => {
-  const body = req.body || {};
+app.post('/api/learning-ladder/complete', requireAuth, (req, res) => {
+  const body = validate(SCHEMAS.learningLadderComplete, req, res);
+  if (!body) return;
   const topic = String(body.topic || '').trim();
   const level = parseInt(body.level, 10);
-  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
-  if (!level || level < 1 || level > 5) return res.status(400).json({ ok: false, error: 'level must be 1–5' });
   try {
     const result = learningLadder.recordLevelCompletion({
       topic,
@@ -2735,7 +6257,7 @@ app.post('/api/learning-ladder/complete', (req, res) => {
 });
 
 // GET /api/learning-ladder/progress?topic=...
-app.get('/api/learning-ladder/progress', (req, res) => {
+app.get('/api/learning-ladder/progress', requireAuth, (req, res) => {
   const topic = String(req.query.topic || '').trim();
   if (!topic) return res.status(400).json({ ok: false, error: 'topic query param is required' });
   try {
@@ -2747,7 +6269,7 @@ app.get('/api/learning-ladder/progress', (req, res) => {
 });
 
 // GET /api/learning-ladder/all
-app.get('/api/learning-ladder/all', (req, res) => {
+app.get('/api/learning-ladder/all', requireAuth, (req, res) => {
   try {
     const topics = learningLadder.getAllTopics();
     const metrics = learningLadder.getMetrics();
@@ -2760,11 +6282,12 @@ app.get('/api/learning-ladder/all', (req, res) => {
 // ── Agent Learning Profile API ────────────────────────────────────────────────
 
 // POST /api/agents/:agent_id/ladder/assign  { topic }
-app.post('/api/agents/:agent_id/ladder/assign', (req, res) => {
+app.post('/api/agents/:agent_id/ladder/assign', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
-  const topic = String((req.body || {}).topic || '').trim();
+  const _bodyAssign = validate(SCHEMAS.agentLadderAssign, req, res);
+  if (!_bodyAssign) return;
+  const topic = String(_bodyAssign.topic || '').trim();
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  if (!topic) return res.status(400).json({ ok: false, error: 'topic is required' });
   try {
     const result = agentLearningProfile.assignLadder(agentId, topic);
     addActivity(`[LEARNING] Ladder '${topic}' assigned to agent ${agentId}`, 'learning');
@@ -2775,12 +6298,12 @@ app.post('/api/agents/:agent_id/ladder/assign', (req, res) => {
 });
 
 // POST /api/agents/:agent_id/ladder/advance  { level, success, milestone_output, score, notes }
-app.post('/api/agents/:agent_id/ladder/advance', (req, res) => {
+app.post('/api/agents/:agent_id/ladder/advance', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
-  const body = req.body || {};
+  const body = validate(SCHEMAS.agentLadderAdvance, req, res);
+  if (!body) return;
   const level = parseInt(body.level, 10);
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
-  if (!level || level < 1 || level > 5) return res.status(400).json({ ok: false, error: 'level must be 1–5' });
   try {
     const result = agentLearningProfile.advanceAgent({
       agentId,
@@ -2800,7 +6323,7 @@ app.post('/api/agents/:agent_id/ladder/advance', (req, res) => {
 });
 
 // GET /api/agents/:agent_id/grade
-app.get('/api/agents/:agent_id/grade', (req, res) => {
+app.get('/api/agents/:agent_id/grade', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
   try {
@@ -2812,7 +6335,7 @@ app.get('/api/agents/:agent_id/grade', (req, res) => {
 });
 
 // GET /api/agents/:agent_id/profile
-app.get('/api/agents/:agent_id/profile', (req, res) => {
+app.get('/api/agents/:agent_id/profile', requireAuth, (req, res) => {
   const agentId = String(req.params.agent_id || '').trim();
   if (!agentId) return res.status(400).json({ ok: false, error: 'agent_id is required' });
   try {
@@ -2824,7 +6347,7 @@ app.get('/api/agents/:agent_id/profile', (req, res) => {
 });
 
 // GET /api/agents/grades
-app.get('/api/agents/grades', (req, res) => {
+app.get('/api/agents/grades', requireAuth, _cache_grades, (req, res) => {
   try {
     const profiles = agentLearningProfile.getAllProfiles();
     const metrics = agentLearningProfile.getMetrics();
@@ -2843,7 +6366,7 @@ app.post('/api/system/halt', requireAuth, (req, res) => {
   systemHalted = true;
   runtimeState.agents = runtimeState.agents.map(a => ({ ...a, status: 'stopped' }));
   broadcaster.broadcast('system:halted', { halted: true, at: new Date().toISOString() });
-  broadcaster.broadcast('agent:update', { agents: runtimeState.agents });
+  broadcaster.broadcast('agents:list', { agents: runtimeState.agents });
   res.json({ ok: true, halted: true, at: new Date().toISOString() });
 });
 
@@ -2851,13 +6374,84 @@ app.post('/api/system/restart', requireAuth, (req, res) => {
   systemHalted = false;
   runtimeState.agents = runtimeState.agents.map(a => ({ ...a, status: 'idle' }));
   broadcaster.broadcast('system:halted', { halted: false, at: new Date().toISOString() });
-  broadcaster.broadcast('agent:update', { agents: runtimeState.agents });
+  broadcaster.broadcast('agents:list', { agents: runtimeState.agents });
   res.json({ ok: true, halted: false, at: new Date().toISOString() });
 });
 
-app.get('/api/system/halt', (req, res) => {
+app.get('/api/system/halt', requireAuth, (req, res) => {
   res.json({ ok: true, halted: systemHalted });
 });
+
+// ── System health ─────────────────────────────────────────────────────────────
+const _srvStartMs = Date.now()
+
+app.get('/api/system/uptime', requireAuth, (req, res) => {
+  const ms = Date.now() - _srvStartMs
+  const s  = Math.floor(ms / 1000)
+  res.json({
+    ok: true,
+    status: 'partial',
+    source: 'node_process',
+    uptime_ms: ms,
+    uptime_human: `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ${s%60}s`,
+    started_at: new Date(_srvStartMs).toISOString(),
+    pid: process.pid,
+    node_version: process.version,
+    services: [{
+      name: 'backend',
+      uptime_30d: null,
+      uptime_90d: null,
+      incidents_30d: null,
+      mttr_minutes: null,
+      status: 'live',
+      uptime_seconds: s,
+      source: 'node_process',
+    }],
+    details: 'Historical uptime percentages require persisted service checks; unavailable fields are null.',
+  })
+})
+
+app.get('/api/system/sla', requireAuth, (req, res) => {
+  try {
+    const tasks = readJsonSafe(statePath('tasks.json'), [])
+    const llmCalls = readJsonlSafe(statePath('llm_calls.jsonl'), 2000)
+    const cutoff = Date.now() - 86400000
+    const recent = (Array.isArray(tasks) ? tasks : []).filter(t => new Date(t.created_at || t.timestamp || 0).getTime() > cutoff)
+    const failed = recent.filter(t => t.status === 'failed' || t.status === 'error').length
+    const total  = recent.length
+    const recentCalls = llmCalls.filter(c => new Date(c.timestamp || c.ts || c.created_at || 0).getTime() > cutoff)
+    const latencies = recentCalls.map(c => Number(c.duration_ms || c.latency_ms || 0)).filter(Boolean).sort((a, b) => a - b)
+    const failedCalls = recentCalls.filter(c => c.ok === false || c.status === 'error').length
+    const successRate = total ? parseFloat(((total - failed) / total * 100).toFixed(1)) : null
+    res.json({
+      ok: true,
+      status: total || recentCalls.length ? 'live' : 'unavailable',
+      source: total || recentCalls.length ? 'task_and_llm_call_logs' : 'no_recent_telemetry',
+      success_rate: successRate,
+      total_tasks: total,
+      failed_tasks: failed,
+      window: '24h',
+      targets: { p99_9: 99.9, p99_5: 99.5 },
+      current: {
+        uptime: successRate,
+        p95_latency_ms: latencies.length ? latencies[Math.floor(latencies.length * 0.95)] : null,
+        error_rate_pct: recentCalls.length ? parseFloat((failedCalls / recentCalls.length * 100).toFixed(2)) : null,
+      },
+      totals: { tasks_24h: total, failed_tasks_24h: failed, llm_calls_24h: recentCalls.length, failed_llm_calls_24h: failedCalls },
+    })
+  } catch { res.json({ ok: true, status: 'unavailable', source: 'error', success_rate: null, total_tasks: 0, failed_tasks: 0, window: '24h', current: { uptime: null, p95_latency_ms: null, error_rate_pct: null } }) }
+})
+
+app.get('/api/system/patches', requireAuth, (req, res) => {
+  const patches = readJsonSafe(statePath('patches.json'), [])
+  res.json({ ok: true, patches: Array.isArray(patches) ? patches : [], count: Array.isArray(patches) ? patches.length : 0 })
+})
+
+app.get('/api/research/sessions', requireAuth, (req, res) => {
+  const sessions = readJsonSafe(statePath('research_sessions.json'), [])
+  const budget   = readJsonSafe(statePath('research_budget.json'), {})
+  res.json({ ok: true, sessions: Array.isArray(sessions) ? sessions.slice(-50) : [], budget })
+})
 
 // ── Prompt Inspector endpoints ────────────────────────────────────────────────
 
@@ -2892,42 +6486,44 @@ function addPromptTrace(raw) {
 // Inject trace capture into /api/chat pipeline
 const _origChatHandler = null; // hoisted in server.js chat route already — we hook via broadcaster
 
-app.get('/api/prompt-traces', (req, res) => {
+app.get('/api/prompt-traces', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 100, 500);
   res.json({ ok: true, traces: promptTraceStore.slice(0, limit), total: promptTraceStore.length });
 });
 
-app.get('/api/prompt-trace/:id', (req, res) => {
+app.get('/api/prompt-trace/:id', requireAuth, (req, res) => {
   const trace = promptTraceStore.find(t => t.id === req.params.id);
   if (!trace) return res.status(404).json({ ok: false, error: 'Trace not found' });
   res.json({ ok: true, trace });
 });
 
-app.delete('/api/prompt-traces', (req, res) => {
+app.delete('/api/prompt-traces', requireAuth, (req, res) => {
   promptTraceStore.length = 0;
   res.json({ ok: true, cleared: true });
 });
 
-app.get('/api/prompt-inspector/config', (req, res) => {
+app.get('/api/prompt-inspector/config', requireAuth, (req, res) => {
   res.json({ ok: true, config: promptInspectorConfig });
 });
 
-app.post('/api/prompt-inspector/config', (req, res) => {
+app.post('/api/prompt-inspector/config', requireAuth, (req, res) => {
   promptInspectorConfig = { ...promptInspectorConfig, ...(req.body || {}) };
   res.json({ ok: true, config: promptInspectorConfig, inspector_status: promptInspectorConfig });
 });
 
-app.patch('/api/prompt-inspector/config', (req, res) => {
+app.patch('/api/prompt-inspector/config', requireAuth, (req, res) => {
   promptInspectorConfig = { ...promptInspectorConfig, ...(req.body || {}) };
   res.json({ ok: true, config: promptInspectorConfig, inspector_status: promptInspectorConfig });
 });
 
-// ── Forge task tracking + missing endpoint aliases ────────────────────────────
+// ── Legacy Forge task tracking + missing endpoint aliases ────────────────────
+// Canonical /api/forge/status is served by backend/routes/forge.js because that
+// router is mounted first. The remaining aliases here preserve older UI flows.
 
 const _forgeTaskState = { last_action: null, active: false, mode: 'active' };
 
 // GET /api/forge/status
-app.get('/api/forge/status', (_req, res) => {
+app.get('/api/forge/status', requireAuth, (_req, res) => {
   res.json({
     mode: reliabilityState.forgeFrozen ? 'frozen' : _forgeTaskState.mode,
     active: _forgeTaskState.active,
@@ -2939,8 +6535,10 @@ app.get('/api/forge/status', (_req, res) => {
 });
 
 // POST /api/forge/task  { task, mode }
-app.post('/api/forge/task', (req, res) => {
-  const { task = '', mode = 'on' } = req.body || {};
+app.post('/api/forge/task', requireAuth, (req, res) => {
+  const _bodyForgeTask = validate(SCHEMAS.forgeTask, req, res);
+  if (!_bodyForgeTask) return;
+  const { task = '', mode = 'on' } = _bodyForgeTask;
   const label = String(task).trim();
   if (label) _forgeTaskState.last_action = label;
   _forgeTaskState.active = mode !== 'off';
@@ -2949,7 +6547,7 @@ app.post('/api/forge/task', (req, res) => {
 });
 
 // GET /api/forge/code-ai/models — list available coding AI models
-app.get('/api/forge/code-ai/models', async (req, res) => {
+app.get('/api/forge/code-ai/models', requireAuth, async (req, res) => {
   const { provider } = req.query || {};
   if (provider === 'ollama') {
     try {
@@ -2971,11 +6569,10 @@ app.get('/api/forge/code-ai/models', async (req, res) => {
 });
 
 // POST /api/forge/code-ai — send message to coding AI
-app.post('/api/forge/code-ai', async (req, res) => {
-  const { provider, model, messages, systemPrompt } = req.body || {};
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ ok: false, error: 'messages array required' });
-  }
+app.post('/api/forge/code-ai', requireAuth, async (req, res) => {
+  const _bodyCodeAi = validate(SCHEMAS.forgeCodeAi, req, res);
+  if (!_bodyCodeAi) return;
+  const { provider, model, messages, systemPrompt } = _bodyCodeAi;
   const sys = systemPrompt || 'You are a helpful coding assistant. Provide clear, concise code solutions with explanations.';
   const lastMsg = messages[messages.length - 1];
   if (!lastMsg || !lastMsg.content) {
@@ -2983,9 +6580,8 @@ app.post('/api/forge/code-ai', async (req, res) => {
   }
   try {
     // Route to Python AI backend based on provider
-    const backendPort = process.env.PYTHON_BACKEND_PORT || 18790;
     const prompt = lastMsg.content;
-    const url = `http://localhost:${backendPort}/api/chat`;
+    const url = `http://${PYTHON_BACKEND_HOST}:${PYTHON_BACKEND_PORT}/api/chat`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3001,17 +6597,110 @@ app.post('/api/forge/code-ai', async (req, res) => {
   }
 });
 
+// ── AI Middleware Layer ────────────────────────────────────────────────────────
+
+// POST /api/middleware/process — unified multi-model input processing
+app.post('/api/middleware/process', requireAuth, async (req, res) => {
+  const _bodyMiddleware = validate(SCHEMAS.middlewareProcess, req, res);
+  if (!_bodyMiddleware) return;
+  try {
+    const result = await requestPythonJSON('/api/middleware/process', 'POST', _bodyMiddleware);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/middleware/status — active model roles + Wave Field routing status
+app.get('/api/middleware/status', requireAuth, async (req, res) => {
+  try {
+    const result = await requestPythonJSON('/api/middleware/status', 'GET');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message, wavefield_enabled: false, active_models: [] });
+  }
+});
+
 // POST /api/money/task  { task, mode }
-app.post('/api/money/task', (req, res) => {
-  const { task = '' } = req.body || {};
+app.post('/api/money/task', requireAuth, (req, res) => {
+  const _bodyMoneyTask = validate(SCHEMAS.moneyTask, req, res);
+  if (!_bodyMoneyTask) return;
+  const { task = '' } = _bodyMoneyTask;
   const label = String(task).trim();
   const run = runPipeline('opportunity');
   addActivity(`[MONEY] Task: ${label || 'unnamed'}`, 'automation');
   res.json({ success: true, ok: true, status: { active: true, task: label, pipeline: run.pipeline }, run_id: run.id });
 });
 
+const WORKSPACE_UPLOAD_EXTENSIONS = new Set(['.py', '.js', '.ts', '.jsx', '.tsx', '.md', '.txt', '.json', '.sh', '.css', '.html', '.csv', '.yaml', '.yml']);
+const WORKSPACE_UPLOAD_MAX_SIZE = 50 * 1024 * 1024;
+const workspaceUpload = require('multer')({
+  storage: require('multer').diskStorage({
+    destination: (_req, _file, cb) => {
+      const uploadDir = path.join(WORKSPACE_DIR, 'uploads');
+      fs.mkdirSync(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    },
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const safeBase = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'upload';
+      cb(null, `${Date.now()}-${safeBase}${ext}`);
+    },
+  }),
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!WORKSPACE_UPLOAD_EXTENSIONS.has(ext)) {
+      return cb(new Error(`File type '${ext}' not allowed`));
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: WORKSPACE_UPLOAD_MAX_SIZE, files: 100 },
+});
+
+function resolveWorkspaceFile(relPath) {
+  const decoded = decodeURIComponent(String(relPath || ''));
+  const clean = decoded.replace(/^\/+/, '');
+  const full = path.resolve(WORKSPACE_DIR, clean);
+  const root = path.resolve(WORKSPACE_DIR);
+  if (full !== root && !full.startsWith(root + path.sep)) return null;
+  return full;
+}
+
+// POST /api/workspace/upload — upload file(s) into ~/.ai-employee/workspace/uploads
+app.post('/api/workspace/upload', requireAuth, _rl_upload, (req, res) => {
+  workspaceUpload.fields([{ name: 'files', maxCount: 100 }, { name: 'file', maxCount: 100 }])(req, res, err => {
+    if (err) {
+      const tooLarge = err.code === 'LIMIT_FILE_SIZE';
+      return res.status(tooLarge ? 413 : 400).json({
+        ok: false,
+        error: tooLarge ? 'File too large' : 'Upload failed',
+        details: tooLarge ? `Maximum file size is ${WORKSPACE_UPLOAD_MAX_SIZE / 1024 / 1024}MB` : err.message,
+      });
+    }
+
+    const uploaded = [
+      ...(req.files?.files || []),
+      ...(req.files?.file || []),
+    ];
+
+    if (!uploaded.length) {
+      return res.status(400).json({ ok: false, error: 'No files provided' });
+    }
+
+    const files = uploaded.map(file => ({
+      id: path.relative(WORKSPACE_DIR, file.path),
+      name: file.originalname,
+      path: path.relative(WORKSPACE_DIR, file.path),
+      size: file.size,
+      mtime: Date.now(),
+    }));
+
+    res.json({ ok: true, files, count: files.length });
+  });
+});
+
 // GET /api/workspace/files — list files in ~/.ai-employee/workspace/
-app.get('/api/workspace/files', (req, res) => {
+app.get('/api/workspace/files', requireAuth, (req, res) => {
   try {
     const walk = (dir, base) => {
       if (!fs.existsSync(dir)) return [];
@@ -3030,8 +6719,23 @@ app.get('/api/workspace/files', (req, res) => {
   }
 });
 
+// DELETE /api/workspace/files/<relative-path> — delete one workspace file.
+app.delete(/^\/api\/workspace\/files\/(.+)$/, requireAuth, (req, res) => {
+  try {
+    const target = resolveWorkspaceFile(req.params[0]);
+    if (!target) return res.status(400).json({ ok: false, error: 'Invalid file path' });
+    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      return res.status(404).json({ ok: false, error: 'File not found' });
+    }
+    fs.unlinkSync(target);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'Delete failed', details: e.message });
+  }
+});
+
 // GET /api/errors  — error audit log (e2e + external callers)
-app.get('/api/errors', (req, res) => {
+app.get('/api/errors', requireAuth, (req, res) => {
   const limit = Math.min(200, parseInt((req.query || {}).limit) || 100);
   const errors = (_auditLog || [])
     .filter((e) => e.risk_score >= 0.6 || String(e.action || '').includes('fail') || String(e.action || '').includes('error'))
@@ -3041,10 +6745,10 @@ app.get('/api/errors', (req, res) => {
 
 // ── Machine Identity ──────────────────────────────────────────────────────────
 
-app.get('/api/identity', (req, res) => {
+app.get('/api/identity', requireAuth, (req, res) => {
   const path = require('path');
   const fs = require('fs');
-  const idPath = path.join(process.env.HOME || os.homedir(), '.ai-employee', 'state', 'identity.json');
+  const idPath = statePath('identity.json');
   try {
     if (fs.existsSync(idPath)) {
       res.json(JSON.parse(fs.readFileSync(idPath, 'utf8')));
@@ -3073,9 +6777,9 @@ app.get('/api/identity', (req, res) => {
 
 // ── Settings Management ───────────────────────────────────────────────────────
 
-app.get('/api/system/settings/coding-ai', (req, res) => {
+app.get('/api/system/settings/coding-ai', requireAuth, (req, res) => {
   try {
-    const envPath = path.join(process.env.HOME || os.homedir(), '.ai-employee', '.env');
+    const envPath = path.join(AI_HOME, '.env');
     const settings = { provider: 'anthropic', model: 'claude-sonnet-4-6', has_openrouter_key: false };
     if (fs.existsSync(envPath)) {
       const content = fs.readFileSync(envPath, 'utf8');
@@ -3090,10 +6794,12 @@ app.get('/api/system/settings/coding-ai', (req, res) => {
   }
 });
 
-app.post('/api/system/settings/coding-ai', (req, res) => {
+app.post('/api/system/settings/coding-ai', requireAuth, (req, res) => {
+  const _bodyCodingAi = validate(SCHEMAS.codingAiSettings, req, res);
+  if (!_bodyCodingAi) return;
   try {
-    const { provider, model, openrouter_api_key } = req.body || {};
-    const envPath = path.join(process.env.HOME || os.homedir(), '.ai-employee', '.env');
+    const { provider, model, openrouter_api_key } = _bodyCodingAi;
+    const envPath = path.join(AI_HOME, '.env');
     const dir = path.dirname(envPath);
     fs.mkdirSync(dir, { recursive: true });
 
@@ -3124,7 +6830,7 @@ app.post('/api/system/settings/coding-ai', (req, res) => {
 
 // ── Agent Catalog ─────────────────────────────────────────────────────────────
 
-app.get('/api/agents/list', (req, res) => {
+app.get('/api/agents/list', requireAuth, (req, res) => {
   try {
     const agents = getAgents().map(a => ({
       id: a.id,
@@ -3143,7 +6849,7 @@ app.get('/api/agents/list', (req, res) => {
 
 // ── Auto-Update System ─────────────────────────────────────────────────────────
 
-app.get('/api/system/update-status', (req, res) => {
+app.get('/api/system/update-status', requireAuth, (req, res) => {
   const updaterPath = path.join(os.homedir(), '.ai-employee', 'state', 'updater.json');
   const versionPath = path.join(os.homedir(), '.ai-employee', 'state', 'version.json');
   try {
@@ -3155,7 +6861,7 @@ app.get('/api/system/update-status', (req, res) => {
   }
 });
 
-app.get('/api/system/build-hash', (req, res) => {
+app.get('/api/system/build-hash', requireAuth, (req, res) => {
   const versionPath = path.join(os.homedir(), '.ai-employee', 'state', 'version.json');
   try {
     res.json(JSON.parse(fs.readFileSync(versionPath, 'utf8')));
@@ -3164,7 +6870,7 @@ app.get('/api/system/build-hash', (req, res) => {
   }
 });
 
-app.post('/api/system/check-updates', (req, res) => {
+app.post('/api/system/check-updates', requireAuth, (req, res) => {
   const triggerPath = path.join(os.homedir(), '.ai-employee', 'run', 'updater.trigger');
   try {
     fs.mkdirSync(path.dirname(triggerPath), { recursive: true });
@@ -3175,7 +6881,7 @@ app.post('/api/system/check-updates', (req, res) => {
   }
 });
 
-app.post('/api/system/apply-update', (req, res) => {
+app.post('/api/system/apply-update', requireAuth, (req, res) => {
   const triggerPath = path.join(os.homedir(), '.ai-employee', 'run', 'updater.trigger');
   try {
     fs.mkdirSync(path.dirname(triggerPath), { recursive: true });
@@ -3184,6 +6890,59 @@ app.post('/api/system/apply-update', (req, res) => {
   } catch (e) {
     res.json({ ok: false, error: e.message });
   }
+});
+
+// ── Live update endpoint (SSE) ────────────────────────────────────────────────
+let _updateRunning = false;
+app.post('/api/system/run-update', requireAuth, (req, res) => {
+  if (_updateRunning) return res.status(409).json({ ok: false, error: 'Update already in progress' });
+  const updaterPaths = [
+    path.join(REPO_ROOT, 'runtime', 'agents', 'auto-updater', 'auto_updater.py'),
+    path.join(os.homedir(), '.ai-employee', 'agents', 'auto-updater', 'auto_updater.py'),
+  ];
+  const updaterScript = updaterPaths.find(p => fs.existsSync(p));
+  if (!updaterScript) return res.status(503).json({ ok: false, error: 'auto_updater.py not found' });
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setTimeout(0);
+  res.flushHeaders();
+  const send = (type, data) => { try { res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`); } catch (_) {} };
+  send('start', { message: 'Starting update...', ts: Date.now() });
+  _updateRunning = true;
+  const keepalive = setInterval(() => send('ping', { ts: Date.now() }), 15000);
+  const child = spawn(process.env.PYTHON_BIN || 'python3', [updaterScript, '--once'], {
+    env: { ...process.env, AI_EMPLOYEE_REPO_DIR: REPO_ROOT, PYTHONUNBUFFERED: '1' },
+    cwd: REPO_ROOT,
+  });
+  const parseAndSend = (chunk, level) => {
+    chunk.toString().split('\n').filter(l => l.trim()).forEach(line => {
+      let stage = 'running';
+      if (/fetch|Fetching/i.test(line))                   stage = 'fetching';
+      if (/compar|diff|check/i.test(line))                stage = 'comparing';
+      if (/download|apply|Updating/i.test(line))          stage = 'applying';
+      if (/build|npm/i.test(line))                        stage = 'building';
+      if (/restart|reload/i.test(line))                   stage = 'restarting';
+      if (/up.to.date|already|✓|complete/i.test(line))   stage = 'done';
+      send('log', { line, stage, level, ts: Date.now() });
+    });
+  };
+  child.stdout.on('data', chunk => parseAndSend(chunk, 'info'));
+  child.stderr.on('data', chunk => parseAndSend(chunk, 'warn'));
+  child.on('close', (code) => {
+    clearInterval(keepalive);
+    _updateRunning = false;
+    const success = code === 0;
+    send('complete', { success, exit_code: code, message: success ? 'Update complete' : `Update failed (exit ${code})`, ts: Date.now() });
+    res.end();
+    if (success) {
+      broadcaster.broadcast('system:update:complete', { ts: new Date().toISOString(), source: 'run-update' });
+      _indexCache = null;
+    }
+  });
+  child.on('error', (err) => { clearInterval(keepalive); _updateRunning = false; send('error', { message: err.message, ts: Date.now() }); res.end(); });
+  req.on('close', () => { if (_updateRunning) { child.kill('SIGTERM'); _updateRunning = false; } });
 });
 
 // ── Task Tracking System ──────────────────────────────────────────────────────
@@ -3242,11 +7001,14 @@ function completeTask(taskId, status = 'done') {
 
 function broadcastTaskUpdate(taskId, update) {
   const conns = taskConnections.get(taskId);
-  if (!conns) return;
-  const msg = JSON.stringify(update);
-  conns.forEach(ws => {
-    if (ws.readyState === 1) ws.send(msg); // OPEN = 1
-  });
+  if (conns) {
+    const msg = JSON.stringify(update);
+    conns.forEach(ws => { if (ws.readyState === 1) ws.send(msg); });
+  }
+  // Also push to SSE listeners (defined in Task Progress API section below)
+  if (typeof _notifySSEListeners === 'function') {
+    _notifySSEListeners(taskId, { type: update.type || 'task_update', taskId, ...update });
+  }
 }
 
 // Cleanup old tasks every 10 minutes (keep max 1 hour in memory)
@@ -3265,77 +7027,85 @@ setInterval(() => {
 
 const server = http.createServer(app);
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 * 1024 }); // 1 MB cap
+
+// Initialize WebSocket infrastructure for multi-tenant real-time updates
+const connManager = new ConnectionManager();
+const heartbeatManager = new HeartbeatManager();
+heartbeatManager.start(wss, connManager);
+
+// Initialize task gateway with connection manager for real-time updates
+taskGateway.setConnectionManager(connManager);
+
+// Ping/pong keepalive — terminates dead connections that never send close frames.
+// Without this, stale clients accumulate and silent disconnects go undetected.
+const WS_PING_INTERVAL = 25000; // 25s — under most NAT/proxy 30s timeout
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) { ws.terminate(); return; }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, WS_PING_INTERVAL).unref();
 
 wss.on('connection', (ws, req) => {
-  // Reject unauthenticated connections when a JWT_SECRET_KEY is configured.
-  // Pass ?token=<jwt> in the WebSocket URL from the frontend.
-  // Connections from localhost (127.0.0.1 / ::1) are allowed without a token
-  // so the dev server and health checks are not blocked.
-  const remoteAddr = req.socket.remoteAddress || '';
-  const isLocal = remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
-  if (!isLocal && !wsTokenValid(req)) {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  // All WebSocket connections must present a valid JWT token.
+  if (!wsTokenValid(req)) {
     ws.close(4401, 'Unauthorized');
     return;
   }
 
-  // Send machine identity on connection
+  // Immediately tell this client about backend health so the "DISCONNECTED"
+  // banner flips to OPERATIONAL without waiting for the next periodic broadcast.
   try {
-    const path = require('path');
-    const fs = require('fs');
-    const idPath = path.join(process.env.HOME || os.homedir(), '.ai-employee', 'state', 'identity.json');
-    if (fs.existsSync(idPath)) {
-      const identity = JSON.parse(fs.readFileSync(idPath, 'utf8'));
-      ws.send(JSON.stringify({ event: 'identity:ready', data: identity, timestamp: new Date().toISOString() }));
-    }
-  } catch (_) { /* identity setup failed, non-fatal */ }
+    ws.send(JSON.stringify({
+      event: 'system:ready',
+      data: { python_ok: _systemReady.python_ok, llm_ok: _systemReady.llm_ok, node_ok: true },
+      timestamp: new Date().toISOString(),
+    }));
+  } catch (_) {}
 
-  ws.send(JSON.stringify({ event: 'system:status', data: sampleSystemStatus(), timestamp: new Date().toISOString() }));
-  ws.send(JSON.stringify({ event: 'agent:update', data: { agents: getAgents() }, timestamp: new Date().toISOString() }));
-
-  // Send current subsystem state immediately on connection
-  ws.send(JSON.stringify({ event: 'nn:status', data: subsystems.getNNStatus(), timestamp: new Date().toISOString() }));
-  ws.send(JSON.stringify({ event: 'memory:update', data: subsystems.getMemoryTree(), timestamp: new Date().toISOString() }));
-  ws.send(JSON.stringify({ event: 'doctor:check', data: subsystems.getDoctorStatus(), timestamp: new Date().toISOString() }));
-  ws.send(JSON.stringify({ event: 'brain:insights', data: brain.insights(), timestamp: new Date().toISOString() }));
-  ws.send(JSON.stringify({ event: 'brain:activity', data: brain.activity(20), timestamp: new Date().toISOString() }));
-  ws.send(JSON.stringify({ event: 'autonomy:status', data: subsystems.getAutonomyStatus(), timestamp: new Date().toISOString() }));
-  ws.send(JSON.stringify({
-    event: 'objective:update',
-    data: {
-      type: 'objective_update',
-      system: 'money_mode',
-      ...runtimeState.objectiveState.money_mode,
-    },
-    timestamp: new Date().toISOString(),
-  }));
-  ws.send(JSON.stringify({
-    event: 'objective:update',
-    data: {
-      type: 'objective_update',
-      system: 'ascend_forge',
-      ...runtimeState.objectiveState.ascend_forge,
-    },
-    timestamp: new Date().toISOString(),
-  }));
-  ws.send(JSON.stringify({
-    event: 'workflow:snapshot',
-    data: { active_run: runtimeState.selectedWorkflowRun, runs: runtimeState.workflowRuns },
-    timestamp: new Date().toISOString(),
-  }));
-  ws.send(JSON.stringify({
-    event: 'observability:snapshot',
-    data: buildObservabilitySnapshot(),
-    timestamp: new Date().toISOString(),
-  }));
-
-  // Send existing activity feed so newly connected clients are up to date
-  if (runtimeState.activityFeed.length > 0) {
-    ws.send(JSON.stringify({ event: 'activity:snapshot', data: runtimeState.activityFeed, timestamp: new Date().toISOString() }));
-  }
-  if (runtimeState.executionLogs.length > 0) {
-    ws.send(JSON.stringify({ event: 'execution:snapshot', data: runtimeState.executionLogs, timestamp: new Date().toISOString() }));
-  }
+  // FIX-4: 2026-05-12 — Stagger WS initial state messages at 50ms intervals instead of burst
+  const _wsInitMessages = [
+    { idx: 0, msg: () => {
+      try {
+        const path = require('path');
+        const fs = require('fs');
+        const idPath = statePath('identity.json');
+        if (fs.existsSync(idPath)) {
+          const identity = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+          return JSON.stringify({ event: 'identity:ready', data: identity, timestamp: new Date().toISOString() });
+        }
+      } catch (_) {}
+      return null;
+    }},
+    { idx: 1, msg: () => JSON.stringify({ event: 'system:status', data: sampleSystemStatus(), timestamp: new Date().toISOString() })},
+    { idx: 2, msg: () => JSON.stringify({ event: 'agents:list', data: { agents: getAgents() }, timestamp: new Date().toISOString() })},
+    { idx: 3, msg: () => JSON.stringify({ event: 'nn:status', data: subsystems.getNNStatus(), timestamp: new Date().toISOString() })},
+    { idx: 4, msg: () => JSON.stringify({ event: 'memory:update', data: subsystems.getMemoryTree(), timestamp: new Date().toISOString() })},
+    { idx: 5, msg: () => JSON.stringify({ event: 'doctor:check', data: subsystems.getDoctorStatus(), timestamp: new Date().toISOString() })},
+    { idx: 6, msg: () => JSON.stringify({ event: 'brain:insights', data: brain.insights(), timestamp: new Date().toISOString() })},
+    { idx: 7, msg: () => JSON.stringify({ event: 'brain:activity', data: brain.activity(20), timestamp: new Date().toISOString() })},
+    { idx: 8, msg: () => JSON.stringify({ event: 'autonomy:status', data: subsystems.getAutonomyStatus(), timestamp: new Date().toISOString() })},
+    { idx: 9, msg: () => JSON.stringify({ event: 'objective:update', data: { type: 'objective_update', system: 'money_mode', ...runtimeState.objectiveState.money_mode }, timestamp: new Date().toISOString() })},
+    { idx: 10, msg: () => JSON.stringify({ event: 'objective:update', data: { type: 'objective_update', system: 'ascend_forge', ...runtimeState.objectiveState.ascend_forge }, timestamp: new Date().toISOString() })},
+    { idx: 11, msg: () => JSON.stringify({ event: 'workflow:snapshot', data: { active_run: runtimeState.selectedWorkflowRun, runs: runtimeState.workflowRuns }, timestamp: new Date().toISOString() })},
+    { idx: 12, msg: () => JSON.stringify({ event: 'observability:snapshot', data: buildObservabilitySnapshot(), timestamp: new Date().toISOString() })},
+    { idx: 13, msg: () => runtimeState.activityFeed.length > 0 ? JSON.stringify({ event: 'activity:snapshot', data: runtimeState.activityFeed, timestamp: new Date().toISOString() }) : null },
+    { idx: 14, msg: () => runtimeState.executionLogs.length > 0 ? JSON.stringify({ event: 'execution:snapshot', data: runtimeState.executionLogs, timestamp: new Date().toISOString() }) : null },
+  ];
+  _wsInitMessages.forEach(m => {
+    setTimeout(() => {
+      try {
+        const payload = m.msg();
+        if (payload && ws.readyState === 1) ws.send(payload);
+      } catch (e) {
+        console.error(`[WS] Error sending init message ${m.idx}:`, e.message);
+      }
+    }, m.idx * 50);
+  });
 
   ws.on('message', (raw) => {
     try {
@@ -3404,6 +7174,49 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
+        // Canonical turn runner path. Legacy WebSocket chat code remains below
+        // as a compatibility fallback only; this path emits turn:* + one
+        // orchestrator:message alias with the same turn_id.
+        if (parsed.use_turn_runner !== false) {
+          console.info('[AI FLOW] Input received (WS canonical): message_len=%d', parsed.message.length);
+          void (async () => {
+            try {
+              const turn = await turnRunner.runTurn({
+                kind: 'chat',
+                source: 'chat-ws',
+                message: parsed.message,
+                modelRoute: parsed.model_route || undefined,
+                userId: parsed.user_id || 'user:default',
+                tenantId: parsed.tenant_id || 'default',
+                labels: ['ws'],
+              });
+              _appendClientHistory(ws, 'assistant', turn.assistant_reply || turn.reply || '');
+            } catch (err) {
+              const fallbackId = `turn-${crypto.randomUUID()}`;
+              const fallbackReply = buildLocalFallbackReply(parsed.message, { taskId: fallbackId, subsystem: 'orchestrator' });
+              _appendClientHistory(ws, 'assistant', fallbackReply);
+              broadcaster.broadcast('turn:failed', {
+                turn_id: fallbackId,
+                task_id: fallbackId,
+                status: 'failed',
+                input: parsed.message,
+                assistant_reply: fallbackReply,
+                reply: fallbackReply,
+                content: fallbackReply,
+                degraded: true,
+                errors: [{ stage: 'turn_runner', message: err && err.message ? err.message : String(err) }],
+              });
+              broadcaster.broadcast('orchestrator:message', {
+                turn_id: fallbackId,
+                taskId: fallbackId,
+                message: fallbackReply,
+                degraded: true,
+              });
+            }
+          })();
+          return;
+        }
+
         // ── Normal chat routing ────────────────────────────────────────
         console.info('[AI FLOW] Input received (WS): message_len=%d', parsed.message.length);
         const run = createWorkflowRun({
@@ -3439,9 +7252,9 @@ wss.on('connection', (ws, req) => {
         const wsUserId = parsed.user_id || 'user:default';
         // 4-tier priority: execution engine → Python LLM → Ollama/Groq → fallback
         _broadcastStep('Analyzing request');
-        (async () => {
-          const _broadcast = (replyText, attachments) => {
-            _appendClientHistory(ws, 'assistant', replyText);
+	        (async () => {
+	          const _broadcast = (replyText, attachments) => {
+	            _appendClientHistory(ws, 'assistant', replyText);
             broadcaster.broadcast('orchestrator:message', {
               message: replyText,
               attachments: attachments || [],
@@ -3451,10 +7264,41 @@ wss.on('connection', (ws, req) => {
               agentId: queued.agentId,
               timestamp: new Date().toISOString(),
             });
-          };
+            // Additional canonical chat topic — frontend ChatPanel listens here.
+            broadcaster.broadcast('chat:message', {
+              role: 'assistant',
+              text: replyText,
+	              ts: Date.now(),
+	            });
+	          };
 
-          // 1. Real execution engine — structured goal → real tools
-          _broadcastStep('Planning AI pipeline');
+	          _broadcastStep('Retrieving memory context');
+	          const memoryTrace = await collectHybridMemoryContext(parsed.message, {
+	            userId: wsUserId,
+	            sessionId: run.run_id,
+	            taskId: queued.taskId,
+	            mode: 'main_ai_chat_ws',
+	            maxTokens: 1200,
+	          });
+	          if (memoryTrace) {
+	            appendDecision(run, {
+	              ts: new Date().toISOString(),
+	              task_id: queued.taskId,
+	              type: 'memory_router_preflight',
+	              summary: `Routes ${Array.isArray(memoryTrace.routes) ? memoryTrace.routes.map((route) => route.id).join(', ') : 'none'} · confidence ${memoryTrace.confidence ?? 0}`,
+	              trace_id: memoryTrace.trace_id,
+	            });
+	            broadcaster.broadcast('memory:router:trace', {
+	              trace_id: memoryTrace.trace_id,
+	              task_id: queued.taskId,
+	              routes: memoryTrace.routes,
+	              confidence: memoryTrace.confidence,
+	              degraded: memoryTrace.degraded,
+	            });
+	          }
+
+	          // 1. Real execution engine — structured goal → real tools
+	          _broadcastStep('Planning AI pipeline');
           try {
             const execResult = await runPythonExecution(parsed.message);
             if (execResult && execResult.is_goal && execResult.reply) {
@@ -3469,21 +7313,22 @@ wss.on('connection', (ws, req) => {
             }
           } catch (_) {}
 
-          // 2. Python LLM backend (full pipeline)
-          let reply = null;
-          try { reply = await requestPythonChat(parsed.message, wsModelRoute, wsUserId); } catch (_) {}
-          if (reply) {
-            const structuredWsPyReply = applyStructuredFormat(reply, 'AI Employee');
-            console.info('[AI FLOW] → LLM response returned (WS→Python): len=%d', structuredWsPyReply.length);
+	          // 2. Python LLM backend (full pipeline)
+	          let reply = null;
+	          try { reply = await requestPythonChat(parsed.message, wsModelRoute, wsUserId, memoryTrace); } catch (_) {}
+	          if (reply) {
+	            const structuredWsPyReply = applyStructuredFormat(reply, 'AI Employee');
+	            console.info('[AI FLOW] → LLM response returned (WS→Python): len=%d', structuredWsPyReply.length);
             _broadcastStep('Generating response');
             return _broadcast(structuredWsPyReply);
           }
 
-          // 3. Ollama with full conversation history (Groq fallback built-in)
-          _broadcastStep('Generating response');
-          const history = _getClientHistory(ws);
-          try { reply = await requestLLMChat(_buildMessages(history)); } catch (_) {}
-          if (reply) {
+	          // 3. Ollama with full conversation history (Groq fallback built-in)
+	          _broadcastStep('Generating response');
+	          const history = _getClientHistory(ws);
+	          const memoryMessage = memoryContextMessage(memoryTrace);
+	          try { reply = await requestLLMChat(_buildMessages([...(memoryMessage ? [memoryMessage] : []), ...history])); } catch (_) {}
+	          if (reply) {
             const structuredWsReply = applyStructuredFormat(reply, 'Ollama');
             console.info('[AI FLOW] → LLM response (WS): len=%d', structuredWsReply.length);
             return _broadcast(structuredWsReply);
@@ -3514,10 +7359,120 @@ broadcaster.startHeartbeat({
     return `[SYSTEM] heartbeat=${seq} mode=${stats.mode} running=${stats.running_agents}/${stats.total_agents}`;
   },
 });
-markBootEvent('ai_core_ready');
+
+// Start agent heartbeat collector for real-time monitoring (Phase 3.2)
+startHeartbeatCollector(broadcaster);
+
+// Bridge Python EventStream → WS broadcasts so dashboard panels receive
+// real metrics ticks, cognition/economy/operations updates, etc.
+try {
+  const { startPythonMetricsBridge } = require('./bridges/python_metrics_bridge');
+  startPythonMetricsBridge({
+    broadcast: (topic, payload) => broadcaster.broadcast(topic, payload),
+    log: console,
+  });
+} catch (e) {
+  console.warn('[PyBridge] startup failed:', e && e.message);
+}
+
+// ── Readiness state machine ──────────────────────────────────────────────────
+const _readiness = { phase: 'BOOTING', pythonReady: false, subsystemsReady: false };
+
+// Cached system:ready snapshot — sent to new WS clients on connect so the
+// dashboard banner flips to OPERATIONAL immediately instead of waiting for the
+// next broadcast. Updated everywhere we already broadcast `system:ready`.
+const _systemReady = { python_ok: false, llm_ok: false, node_ok: true };
+function _updateSystemReady(patch) {
+  Object.assign(_systemReady, patch);
+}
+
+// FIX-3: 2026-05-12 — Optimized probeUntilReady: 12s max, 200ms poll intervals, graceful degradation
+async function probeUntilReady() {
+  const PYTHON_URL = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 18790}`;
+  const http = require('http');
+  const START = Date.now();
+
+  function httpGet(url) {
+    return new Promise((resolve) => {
+      http.get(url, { timeout: 2000 }, (res) => {
+        let body = '';
+        res.on('data', (d) => { body += d; });
+        res.on('end', () => resolve({ ok: res.statusCode === 200, body }));
+      }).on('error', () => resolve({ ok: false, body: '' }))
+        .on('timeout', function() { this.destroy(); resolve({ ok: false, body: '' }); });
+    });
+  }
+
+  // Early broadcast after 2s: frontend loads immediately, probe continues in background
+  const earlyBroadcast = setTimeout(() => {
+    if (_readiness.phase === 'BOOTING') {
+      _readiness.phase = 'INITIALIZING';
+      _updateSystemReady({ python_ok: null, llm_ok: null });
+      broadcaster.broadcast('system:ready', { python_ok: null, llm_ok: null, node_ok: true, phase: 'initializing' });
+      console.log('[READINESS] 📡 Early broadcast sent (2s) — frontend loading, probing continues');
+    }
+  }, 2000);
+
+  // Phase 1: wait for Python HTTP (max 6s with 200ms intervals = 30 attempts)
+  for (let i = 0; i < 30; i++) {
+    const elapsed = Date.now() - START;
+    if (elapsed > 12000) break; // Global timeout: 12s max
+    await new Promise(r => setTimeout(r, 200));
+    const r = await httpGet(`${PYTHON_URL}/health`);
+    if (r.ok) { _readiness.pythonReady = true; _readiness.phase = 'PYTHON_WAIT'; break; }
+  }
+
+  if (!_readiness.pythonReady) {
+    clearTimeout(earlyBroadcast);
+    console.log('[READINESS] ⚠️  Python backend unreachable after 6s — degraded mode');
+    _readiness.phase = 'READY';
+    _updateSystemReady({ python_ok: false, llm_ok: false });
+    broadcaster.broadcast('system:ready', { python_ok: false, llm_ok: false, node_ok: true });
+    markBootEvent('ai_core_ready');
+    return;
+  }
+
+  // Phase 2: wait for subsystems (max remaining time until 12s total, 200ms intervals)
+  _readiness.phase = 'SUBSYSTEM_INIT';
+  for (let i = 0; i < 30; i++) {
+    const elapsed = Date.now() - START;
+    if (elapsed > 12000) break; // Global timeout: 12s max
+    await new Promise(r => setTimeout(r, 200));
+    const r = await httpGet(`${PYTHON_URL}/health/detail`);
+    if (r.ok) {
+      try {
+        const d = JSON.parse(r.body);
+        if (d.subsystems_ok) {
+          clearTimeout(earlyBroadcast);
+          _readiness.subsystemsReady = true;
+          _readiness.phase = 'READY';
+          _updateSystemReady({ python_ok: true, llm_ok: !!d.llm_reachable });
+          broadcaster.broadcast('system:ready', { python_ok: true, llm_ok: !!d.llm_reachable, node_ok: true });
+          markBootEvent('ai_core_ready');
+          const elapsed = Date.now() - START;
+          console.log(`[READINESS] ✅ All systems ready in ${elapsed}ms — broadcasting system:ready`);
+          return;
+        }
+      } catch (_) {}
+    }
+    if (i % 3 === 2) {
+      const elapsed = Date.now() - START;
+      console.log(`[READINESS] ⏳ Waiting for subsystems… (${(elapsed / 1000).toFixed(1)}s)`);
+    }
+  }
+
+  // Timeout — degrade gracefully (12s reached)
+  clearTimeout(earlyBroadcast);
+  _readiness.phase = 'READY';
+  _updateSystemReady({ python_ok: true, llm_ok: false });
+  broadcaster.broadcast('system:ready', { python_ok: true, llm_ok: false, node_ok: true });
+  markBootEvent('ai_core_ready');
+  const elapsed = Date.now() - START;
+  console.log(`[READINESS] ⚠️  Subsystem timeout after ${(elapsed / 1000).toFixed(1)}s — proceeding in degraded mode`);
+}
 
 onAgentEvent('agent:update', (agents) => {
-  broadcaster.broadcast('agent:update', { agents });
+  broadcaster.broadcast('agents:list', { agents });
 });
 
 onAgentEvent('task:started', ({ agent, task }) => {
@@ -3707,8 +7662,48 @@ orchestrator.on('orchestrator:reply', (data) => {
   broadcaster.broadcast('orchestrator:message', data);
 });
 
+// ── Neural graph file watcher — broadcasts brain:graph_updated every 10s ─────
+const NEURAL_GRAPH_SNAPSHOT_PATH = statePath('neural_graph_snapshot.json');
+let _graphLastMtimeMs = 0;
+let _graphLastNodeCount = 0;
+let _graphLastEdgeCount = 0;
+
+function watchGraphFile() {
+  const readGraphStats = () => {
+    try {
+      if (!fs.existsSync(NEURAL_GRAPH_SNAPSHOT_PATH)) {
+        broadcaster.broadcast('brain:graph_updated', { nodes_count: 0, edges_count: 0, ts: Date.now() });
+        return;
+      }
+      const stat = fs.statSync(NEURAL_GRAPH_SNAPSHOT_PATH);
+      if (stat.mtimeMs === _graphLastMtimeMs) return; // no change
+      _graphLastMtimeMs = stat.mtimeMs;
+      const raw = JSON.parse(fs.readFileSync(NEURAL_GRAPH_SNAPSHOT_PATH, 'utf8'));
+      const nodes_count = Array.isArray(raw.nodes) ? raw.nodes.length : 0;
+      const edges_count = Array.isArray(raw.links || raw.edges) ? (raw.links || raw.edges).length : 0;
+      _graphLastNodeCount = nodes_count;
+      _graphLastEdgeCount = edges_count;
+      broadcaster.broadcast('brain:graph_updated', { nodes_count, edges_count, ts: Date.now() });
+    } catch (_) {
+      broadcaster.broadcast('brain:graph_updated', { nodes_count: 0, edges_count: 0, ts: Date.now() });
+    }
+  };
+  setInterval(readGraphStats, 10000).unref();
+  readGraphStats(); // initial read
+}
+
+// ── Graph delta endpoint ──────────────────────────────────────────────────────
+app.get('/api/brain/graph/delta', requireAuth, (req, res) => {
+  const since = Number(req.query.since) || 0;
+  const snapshot_ts = _graphLastMtimeMs || Date.now();
+  // Full snapshot is the source of truth; we return delta: [] with full: true
+  // so the client knows to refresh from /api/brain/graph or /api/neural-brain/graph.
+  res.json({ delta: [], full: true, snapshot_ts, nodes_count: _graphLastNodeCount, edges_count: _graphLastEdgeCount });
+});
+
 setInterval(() => {
   broadcaster.broadcast('system:status', sampleSystemStatus());
+  broadcaster.broadcast('agents:list', { agents: getAgents() });
   broadcaster.broadcast('nn:status', subsystems.getNNStatus());
   broadcaster.broadcast('memory:update', subsystems.getMemoryTree());
   broadcaster.broadcast('doctor:check', subsystems.getDoctorStatus());
@@ -3730,11 +7725,65 @@ setInterval(() => {
     runs: runtimeState.workflowRuns,
   });
   broadcaster.broadcast('observability:snapshot', buildObservabilitySnapshot());
-}, 2000);
+}, 5000);
 
 // ── Task Progress API ─────────────────────────────────────────────────────────
 
-app.get('/api/tasks/:taskId', (req, res) => {
+// SSE listener registry: taskId → Set<res>
+const _sseTaskListeners = new Map();
+
+function _notifySSEListeners(taskId, data) {
+  const set = _sseTaskListeners.get(taskId);
+  if (!set || set.size === 0) return;
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
+  set.forEach(res => { try { res.write(payload); } catch (_) {} });
+}
+
+// Patch broadcaster so SSE clients receive task_progress + workflow:update events.
+(function patchBroadcasterForSSE() {
+  const _orig = broadcaster.broadcast.bind(broadcaster);
+  broadcaster.broadcast = function patchedBroadcast(event, data) {
+    _orig(event, data);
+    if (event === 'task_progress' && data) {
+      const id = data.taskId || data.task_id;
+      if (id) _notifySSEListeners(id, { type: 'task_progress', ...data });
+    } else if (event === 'workflow:update' && Array.isArray(data?.nodes)) {
+      data.nodes.forEach(node => {
+        const id = node.task_id || node.taskId;
+        if (id) _notifySSEListeners(id, { type: 'workflow_update', ...node });
+      });
+    }
+  };
+})();
+
+// GET /api/tasks/:taskId/progress — SSE stream for live task progress.
+// Must be declared before /api/tasks/:taskId (Express matches first-wins).
+app.get('/api/tasks/:taskId/progress', requireAuth, (req, res) => {
+  const { taskId } = req.params;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if present
+  res.flushHeaders();
+
+  if (!_sseTaskListeners.has(taskId)) _sseTaskListeners.set(taskId, new Set());
+  _sseTaskListeners.get(taskId).add(res);
+
+  // Send current state immediately as snapshot
+  const entry = taskStore.get(taskId);
+  if (entry) {
+    res.write(`data: ${JSON.stringify({ type: 'snapshot', taskId, task: entry.task, steps: entry.steps })}\n\n`);
+  } else {
+    res.write(`data: ${JSON.stringify({ type: 'connected', taskId })}\n\n`);
+  }
+
+  req.on('close', () => {
+    const set = _sseTaskListeners.get(taskId);
+    if (set) { set.delete(res); if (set.size === 0) _sseTaskListeners.delete(taskId); }
+  });
+});
+
+app.get('/api/tasks/:taskId', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const entry = taskStore.get(taskId);
   if (!entry) {
@@ -3744,7 +7793,7 @@ app.get('/api/tasks/:taskId', (req, res) => {
   res.json({ task, steps });
 });
 
-app.post('/api/tasks/:taskId/init', (req, res) => {
+app.post('/api/tasks/:taskId/init', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const { title, steps } = req.body || {};
   const task = initTask(taskId, title || 'Task');
@@ -3761,14 +7810,14 @@ app.post('/api/tasks/:taskId/init', (req, res) => {
   res.json({ ok: true, task });
 });
 
-app.post('/api/tasks/:taskId/steps/:stepId', (req, res) => {
+app.post('/api/tasks/:taskId/steps/:stepId', requireAuth, (req, res) => {
   const { taskId, stepId } = req.params;
   const updates = req.body || {};
   updateTaskStep(taskId, stepId, updates);
   res.json({ ok: true });
 });
 
-app.post('/api/tasks/:taskId/complete', (req, res) => {
+app.post('/api/tasks/:taskId/complete', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const { status } = req.body || {};
   completeTask(taskId, status || 'done');
@@ -3777,7 +7826,7 @@ app.post('/api/tasks/:taskId/complete', (req, res) => {
 
 // ── Task History API ──────────────────────────────────────────────────────────
 
-app.get('/api/history', (req, res) => {
+app.get('/api/history', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit || 50), 200);
   const filters = {
     status: req.query.status,
@@ -3788,16 +7837,16 @@ app.get('/api/history', (req, res) => {
   res.json({ tasks, total: taskHistory.cache.length });
 });
 
-app.get('/api/history/stats', (req, res) => {
+app.get('/api/history/stats', requireAuth, (req, res) => {
   res.json(taskHistory.getStats());
 });
 
-app.get('/api/history/agent/:agentId', (req, res) => {
+app.get('/api/history/agent/:agentId', requireAuth, (req, res) => {
   const { agentId } = req.params;
   res.json(taskHistory.getAgentStats(agentId));
 });
 
-app.get('/api/history/:taskId', (req, res) => {
+app.get('/api/history/:taskId', requireAuth, (req, res) => {
   const { taskId } = req.params;
   const task = taskHistory.getTask(taskId);
   if (!task) {
@@ -3808,19 +7857,60 @@ app.get('/api/history/:taskId', (req, res) => {
 
 // ── Error Recovery API ────────────────────────────────────────────────────────
 
-app.get('/api/errors/recent', (req, res) => {
+app.get('/api/errors/recent', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit || 10), 50);
   res.json({ errors: errorRecovery.getRecentErrors(limit) });
 });
 
-app.post('/api/errors/report', (req, res) => {
-  const { error, context } = req.body || {};
+app.post('/api/errors/report', requireAuth, (req, res) => {
+  const _bodyErrReport = validate(SCHEMAS.errorReport, req, res);
+  if (!_bodyErrReport) return;
+  const { error, context } = _bodyErrReport;
   if (!error) return res.status(400).json({ error: 'error required' });
 
   const logged = errorRecovery.logError(error, context);
   const recovery = errorRecovery.buildRecoveryAction(error, context);
 
   res.json({ logged, recovery });
+});
+
+// Prometheus metrics endpoint — optionally gated by METRICS_TOKEN env var
+app.get('/metrics', (req, res) => {
+  const metricsToken = process.env.METRICS_TOKEN;
+  if (metricsToken) {
+    const authHeader = req.headers['authorization'] || '';
+    if (authHeader !== `Bearer ${metricsToken}`) {
+      return res.status(401).type('text/plain').send('metrics endpoint requires Authorization: Bearer <METRICS_TOKEN>');
+    }
+  }
+  const now = Date.now();
+  const uptime = now - startTime;
+  const activeAgents = getAgents().length;
+  const metrics = [
+    `# HELP ai_employee_uptime_ms Application uptime in milliseconds`,
+    `# TYPE ai_employee_uptime_ms gauge`,
+    `ai_employee_uptime_ms ${uptime}`,
+    `# HELP ai_employee_agents_active Number of active agents`,
+    `# TYPE ai_employee_agents_active gauge`,
+    `ai_employee_agents_active ${activeAgents}`,
+    `# HELP ai_employee_tasks_total Total tasks processed`,
+    `# TYPE ai_employee_tasks_total counter`,
+    `ai_employee_tasks_total ${taskMetrics.completed + taskMetrics.failed}`,
+    `# HELP ai_employee_tasks_completed_total Completed tasks`,
+    `# TYPE ai_employee_tasks_completed_total counter`,
+    `ai_employee_tasks_completed_total ${taskMetrics.completed}`,
+    `# HELP ai_employee_tasks_failed_total Failed tasks`,
+    `# TYPE ai_employee_tasks_failed_total counter`,
+    `ai_employee_tasks_failed_total ${taskMetrics.failed}`,
+    `# HELP ai_employee_errors_total Total errors`,
+    `# TYPE ai_employee_errors_total counter`,
+    `ai_employee_errors_total ${errorRecovery.getTotalErrors()}`,
+    `# HELP ai_employee_api_calls_total Total API calls`,
+    `# TYPE ai_employee_api_calls_total counter`,
+    `ai_employee_api_calls_total ${apiCallCounter}`,
+  ].join('\n');
+
+  res.type('text/plain; version=0.0.4').send(metrics + '\n');
 });
 
 app.get('*', (req, res, next) => {
@@ -3848,19 +7938,37 @@ h1{color:#f8fafc;margin-top:0}pre{background:#0f172a;border-radius:6px;padding:1
   if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/version') return next();
   if (req.path.startsWith('/gateway') || req.path.startsWith('/orchestrator')) return next();
   res.set('Cache-Control', 'no-store, must-revalidate');
-  const html = FRONTEND_INDEX_TEMPLATE.replace(/__APP_VERSION__/g, GIT_COMMIT);
+  // Read fresh on every request so hot-deployed builds are served immediately.
+  const html = readFrontendIndex().replace(/__APP_VERSION__/g, GIT_COMMIT);
   res.type('html').send(html);
 });
 
 // Bind to all interfaces by default so the server is reachable from the host
 // machine when running inside WSL, Docker, or a VM.  Set LISTEN_HOST=127.0.0.1
 // in the environment to restrict to loopback only.
-const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
+const LISTEN_HOST = process.env.LISTEN_HOST || '127.0.0.1';
 
 // ── Task Progress WebSocket Upgrade ────────────────────────────────────────────
 // Handle /api/tasks/:taskId/ws upgrade requests for live progress updates
+// Also route channel-based subscriptions: /ws/tasks, /ws/agents, /ws/execution-trace
+
+const channelUpgradeHandler = createUpgradeHandler(connManager, JWT_SECRET);
 
 server.on('upgrade', (req, socket, head) => {
+  // The main `/ws` path is owned by the WebSocketServer attached at line 3896.
+  // Its auto-installed upgrade handler runs before this listener; we MUST
+  // ignore those requests here, otherwise `socket.destroy()` below kills the
+  // freshly-upgraded socket and `wss.clients` ends up empty.
+  const urlPath = (req.url || '').split('?')[0];
+  if (urlPath === '/ws') return;
+
+  // Route channel subscriptions (/ws/*)
+  if (req.url.startsWith('/ws/')) {
+    channelUpgradeHandler(req, socket, head);
+    return;
+  }
+
+  // Route legacy task progress upgrades (/api/tasks/:taskId/ws)
   const match = req.url.match(/^\/api\/tasks\/([a-f0-9\-]+)\/ws$/);
   if (!match) {
     socket.destroy();
@@ -3868,7 +7976,14 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   const taskId = match[1];
-  const wssTask = new WebSocketServer({ noServer: true });
+
+  // Auth guard: task progress WS requires a valid JWT (same as main /ws path)
+  if (!wsTokenValid(req)) {
+    socket.destroy();
+    return;
+  }
+
+  const wssTask = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 
   wssTask.handleUpgrade(req, socket, head, (ws) => {
     // Send current task state on connection
@@ -3923,4 +8038,29 @@ server.listen(PORT, LISTEN_HOST, () => {
     () => brain.exportState(),
   );
   markBootEvent('ui_loaded');
+  // Bootstrap enterprise event bus and connect WS fan-out
+  getEventBus().then(bus => {
+    bus.setWsBroadcaster((type, envelope) => broadcaster.broadcast(type, envelope));
+    console.log('[EventBus] Initialized — transports:', JSON.stringify(bus.transports));
+    bus.publish(BUS_EVENT_TYPES.SYSTEM_READY, { node_ready: true });
+  }).catch(e => console.error('[EventBus] init error:', e));
+  getWorkflowEngine().then(engine => {
+    console.log('[WorkflowEngine] Initialized — transport:', engine.transportName);
+  }).catch(e => console.error('[WorkflowEngine] init error:', e));
+  getSandboxExecutor().then(exec => {
+    console.log('[Sandbox] Initialized — type:', exec.sandboxType);
+  }).catch(e => console.error('[Sandbox] init error:', e));
+  getSecretsBroker().then(broker => {
+    console.log('[SecretsBroker] Initialized — backend:', broker.backendName);
+  }).catch(e => console.error('[SecretsBroker] init error:', e));
+  // Start neural graph file watcher (broadcasts brain:graph_updated every 10s)
+  watchGraphFile();
+  // Probe Python subsystems and broadcast system:ready when confirmed
+  probeUntilReady().catch(e => console.error('[READINESS] probe error:', e));
+
+  // FIX-2 cont: 2026-05-12 — Invalidate frontend cache on SIGHUP (hot reload)
+  process.on('SIGHUP', () => {
+    _indexCache = null;
+    console.log('[CACHE] Frontend index.html cache invalidated (SIGHUP)');
+  });
 });

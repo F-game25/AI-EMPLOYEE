@@ -1,0 +1,13 @@
+apiVersion: v2
+name: aeternus-nexus
+description: Aeternus Nexus — Enterprise AI Workforce Operating System
+type: application
+version: 0.1.0
+appVersion: "3.0.0"
+maintainers:
+  - name: Aeternus Team
+keywords:
+  - ai
+  - enterprise
+  - autonomous-workforce
+  - multi-agent

@@ -58,33 +58,29 @@ export default function NeuralNetworkPanel() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // WS broadcast populates nnStatus in store — react to store changes
+  useEffect(() => {
+    if (nn && (nn.available !== undefined || nn.mode)) {
+      setLoading(false)
+      setError('')
+    }
+  }, [nn])
+
+  // One-time initial fetch if store is empty
   useEffect(() => {
     let cancelled = false
-
-    const loadBrainStatus = async () => {
+    ;(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/brain/status`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
-        if (cancelled) return
-        setNnStatus(data || {})
-        setError('')
+        if (!cancelled) { setNnStatus(data || {}); setLoading(false) }
       } catch (e) {
-        if (cancelled) return
-        console.error('Failed to load brain status', e)
-        setError('Unable to load brain status')
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) { setError('Unable to load brain status'); setLoading(false) }
       }
-    }
-
-    loadBrainStatus()
-    const timer = setInterval(loadBrainStatus, 3000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [setNnStatus])
+    })()
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const modeColor = MODE_COLORS[nn.mode] || 'var(--text-muted)'
   const isSimulated = nn.data_source === 'simulated'

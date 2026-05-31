@@ -1,0 +1,152 @@
+/* ════════════════════════════════════════════════════════════════════
+   <HexFrame> — Hexagonal/chamfered border wrapper.
+   Used for KPI tile icons, agent avatars, status indicators.
+   Pure CSS — no SVG, fully GPU-accelerated, no layout cost.
+   ════════════════════════════════════════════════════════════════════ */
+
+.nx-hex {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  background: var(--nx-gold-grad-soft);
+  border: 1px solid var(--nx-border);
+  color: var(--nx-gold);
+  font-size: 14px;
+  /* hexagonal pointy-top mask */
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  transition: transform var(--nx-dur-fast) var(--nx-ease),
+              filter var(--nx-dur-fast) var(--nx-ease),
+              background var(--nx-dur-fast) var(--nx-ease);
+}
+
+/* Inner glow ring */
+.nx-hex::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: radial-gradient(60% 60% at 50% 50%, rgba(229,199,107,0.20), transparent 70%);
+  clip-path: inherit;
+  pointer-events: none;
+}
+
+/* ── Sizes ─────────────────────────────────────────────────────────── */
+.nx-hex--xs { width: 22px; height: 22px; font-size: 10px; }
+.nx-hex--sm { width: 28px; height: 28px; font-size: 12px; }
+.nx-hex--md { width: 36px; height: 36px; font-size: 14px; }
+.nx-hex--lg { width: 48px; height: 48px; font-size: 18px; }
+.nx-hex--xl { width: 64px; height: 64px; font-size: 24px; }
+
+/* ── Tone variants ─────────────────────────────────────────────────── */
+.nx-hex--cool {
+  background: linear-gradient(135deg, rgba(96,165,250,0.18), rgba(96,165,250,0.04));
+  border-color: rgba(96,165,250,0.30);
+  color: var(--nx-info);
+}
+.nx-hex--cool::before {
+  background: radial-gradient(60% 60% at 50% 50%, rgba(96,165,250,0.20), transparent 70%);
+}
+
+.nx-hex--success {
+  background: linear-gradient(135deg, rgba(34,197,94,0.18), rgba(34,197,94,0.04));
+  border-color: rgba(34,197,94,0.30);
+  color: var(--nx-success);
+}
+.nx-hex--success::before {
+  background: radial-gradient(60% 60% at 50% 50%, rgba(34,197,94,0.22), transparent 70%);
+}
+
+.nx-hex--warn {
+  background: linear-gradient(135deg, rgba(245,158,11,0.18), rgba(245,158,11,0.04));
+  border-color: rgba(245,158,11,0.30);
+  color: var(--nx-warning);
+}
+.nx-hex--warn::before {
+  background: radial-gradient(60% 60% at 50% 50%, rgba(245,158,11,0.22), transparent 70%);
+}
+
+.nx-hex--alert {
+  background: linear-gradient(135deg, rgba(239,68,68,0.18), rgba(239,68,68,0.04));
+  border-color: rgba(239,68,68,0.30);
+  color: var(--nx-danger);
+}
+.nx-hex--alert::before {
+  background: radial-gradient(60% 60% at 50% 50%, rgba(239,68,68,0.22), transparent 70%);
+}
+
+.nx-hex--purple {
+  background: linear-gradient(135deg, rgba(168,85,247,0.20), rgba(168,85,247,0.04));
+  border-color: rgba(168,85,247,0.30);
+  color: var(--nx-purple);
+}
+.nx-hex--purple::before {
+  background: radial-gradient(60% 60% at 50% 50%, rgba(168,85,247,0.22), transparent 70%);
+}
+
+/* ── Glow / animation modifiers ────────────────────────────────────── */
+.nx-hex--glow {
+  filter: drop-shadow(0 0 8px rgba(229,199,107,0.45));
+}
+.nx-hex--cool.nx-hex--glow   { filter: drop-shadow(0 0 8px rgba(96,165,250,0.45)); }
+.nx-hex--success.nx-hex--glow{ filter: drop-shadow(0 0 8px rgba(34,197,94,0.45)); }
+.nx-hex--warn.nx-hex--glow   { filter: drop-shadow(0 0 8px rgba(245,158,11,0.45)); }
+.nx-hex--alert.nx-hex--glow  { filter: drop-shadow(0 0 8px rgba(239,68,68,0.45)); }
+.nx-hex--purple.nx-hex--glow { filter: drop-shadow(0 0 8px rgba(168,85,247,0.45)); }
+
+.nx-hex--pulse {
+  animation: nx-hex-pulse 2.4s ease-in-out infinite;
+}
+@keyframes nx-hex-pulse {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(229,199,107,0.35)); }
+  50%      { filter: drop-shadow(0 0 14px rgba(229,199,107,0.65)); }
+}
+
+/* Interactive */
+.nx-hex--button {
+  cursor: pointer;
+  background: var(--nx-gold-grad-soft);
+}
+.nx-hex--button:hover {
+  background: linear-gradient(135deg, rgba(229,199,107,0.28), rgba(199,154,62,0.12));
+  transform: translateY(-1px);
+}
+.nx-hex--button:active {
+  transform: translateY(0);
+}
+
+/* Outer ring (orbital frame around hex) */
+.nx-hex-ring {
+  position: relative;
+  display: inline-flex;
+  padding: 4px;
+}
+.nx-hex-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--nx-border);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.6;
+}
+.nx-hex-ring::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 1px dashed var(--nx-border-faint);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.nx-hex__content {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
