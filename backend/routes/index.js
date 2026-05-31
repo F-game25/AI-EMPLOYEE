@@ -1,0 +1,695 @@
+'use strict';
+/**
+ * Route Registry — single source of truth for all API endpoints.
+ *
+ * Each entry documents: path, method, auth requirement, source file.
+ * Used for API catalog, documentation, and onboarding.
+ *
+ * Auth legend:
+ *   true        = requireAuth (JWT Bearer token)
+ *   'localhost' = requireLocalhost (raw socket == 127.0.0.1)
+ *   false       = public / no auth
+ *   'optional'  = token accepted but not required (e.g. /version)
+ */
+
+const ROUTE_REGISTRY = [
+
+  // ── Health & Observability ────────────────────────────────────────────────
+  { method: 'GET',    path: '/health',                              auth: false,       file: 'server.js' },
+  { method: 'GET',    path: '/health/full',                         auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/health',                          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/readiness',                       auth: false,       file: 'server.js' },
+  { method: 'GET',    path: '/api/runtime/identity',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/metrics',                             auth: 'optional',  file: 'server.js' },
+  { method: 'GET',    path: '/version',                             auth: 'optional',  file: 'server.js' },
+  { method: 'GET',    path: '/status',                              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/status',                          auth: true,        file: 'server.js' },
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/auth/token',                      auth: false,       file: 'server.js' },
+  { method: 'GET',    path: '/api/auth/auto-token',                 auth: 'localhost', file: 'server.js' },
+
+  // ── Identity & Onboarding ─────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/identity/public',                 auth: false,       file: 'server.js' },
+  { method: 'POST',   path: '/api/identity/finalize',               auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/identity',                        auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/onboarding/palettes',             auth: true,        file: 'server.js' },
+
+  // ── Agents ────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/agents',                              auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/agents/activate',                     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/agents',                          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/agents/list',                     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/agents/active',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/agents/grades',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/agents/start-all',                auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/agents/pause-all',                auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/agents/stop-all',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/agents/:agent_id/grade',          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/agents/:agent_id/profile',        auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/agents/:agent_id/ladder/assign',  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/agents/:agent_id/ladder/advance', auth: true,        file: 'server.js' },
+
+  // agents-monitor router (mounted at /api/agents)
+  { method: 'GET',    path: '/api/agents/:agentId/capabilities',    auth: true,        file: 'routes/agents-monitor.js' },
+  { method: 'GET',    path: '/api/agents/:agentId/skills',          auth: true,        file: 'routes/agents-monitor.js' },
+  { method: 'GET',    path: '/api/agents/monitor/status',           auth: true,        file: 'routes/agents-monitor.js' },
+  { method: 'GET',    path: '/api/agents/monitor/:agentId',         auth: true,        file: 'routes/agents-monitor.js' },
+  { method: 'GET',    path: '/api/agents/monitor/:agentId/metrics', auth: true,        file: 'routes/agents-monitor.js' },
+  { method: 'POST',   path: '/api/agents/monitor/:agentId/restart', auth: true,        file: 'routes/agents-monitor.js' },
+  { method: 'POST',   path: '/api/agents/monitor/subscribe',        auth: true,        file: 'routes/agents-monitor.js' },
+
+  // ── Internal / Localhost-only ─────────────────────────────────────────────
+  { method: 'GET',    path: '/internal/agents',                     auth: 'localhost', file: 'server.js' },
+  { method: 'GET',    path: '/internal/brain/status',               auth: 'localhost', file: 'server.js' },
+  { method: 'POST',   path: '/internal/events',                     auth: 'localhost', file: 'server.js' },
+
+  // ── Chat & Tasks (core LLM pipeline) ─────────────────────────────────────
+  { method: 'POST',   path: '/api/chat',                            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/tasks/run',                       auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/tasks/:taskId/progress',          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/tasks/:taskId',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/tasks/:taskId/init',              auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/tasks/:taskId/steps/:stepId',     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/tasks/:taskId/complete',          auth: true,        file: 'server.js' },
+
+  // tasks router (mounted at /api/tasks)
+  { method: 'POST',   path: '/api/tasks/internal/broadcast',        auth: false,       file: 'routes/tasks.js' },
+  { method: 'GET',    path: '/api/tasks/list',                      auth: true,        file: 'routes/tasks.js' },
+  { method: 'GET',    path: '/api/tasks/history',                   auth: true,        file: 'routes/tasks.js' },
+  { method: 'GET',    path: '/api/tasks/research/recent',           auth: true,        file: 'routes/tasks.js' },
+  { method: 'GET',    path: '/api/tasks/:id',                       auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/tasks/queue',                     auth: true,        file: 'routes/tasks.js' },
+  { method: 'PUT',    path: '/api/tasks/:id/status',                auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/tasks/:id/context-response',      auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/tasks/:id/cancel',                auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/tasks/:id/retry',                 auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/tasks/:id/trace',                 auth: true,        file: 'routes/tasks.js' },
+
+  // schedules router (mounted at /api/schedules via createSchedulesRouter)
+  { method: 'GET',    path: '/api/schedules/',                      auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/schedules/',                      auth: true,        file: 'routes/tasks.js' },
+  { method: 'PATCH',  path: '/api/schedules/:id',                   auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/schedules/:id/run',               auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/schedules/:id/pause',             auth: true,        file: 'routes/tasks.js' },
+  { method: 'POST',   path: '/api/schedules/:id/resume',            auth: true,        file: 'routes/tasks.js' },
+  { method: 'DELETE', path: '/api/schedules/:id',                   auth: true,        file: 'routes/tasks.js' },
+
+  // ── Task History & Error Recovery ─────────────────────────────────────────
+  { method: 'GET',    path: '/api/history',                         auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/history/stats',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/history/agent/:agentId',          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/history/:taskId',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/errors/recent',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/errors/report',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/errors',                          auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/error-report',                    auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/error-report',                    auth: true,        file: 'server.js' },
+
+  // ── System ────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/system/stats',                    auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/processes',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/ports',                    auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/storage',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/runtime-warnings',         auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/services',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/manifest',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/uptime',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/sla',                      auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/patches',                  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/system/halt',                     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/system/restart',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/halt',                     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/update-status',            auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/build-hash',               auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/system/check-updates',            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/system/apply-update',             auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/system/run-update',               auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/auto-update-settings',     auth: true,        file: 'server.js' },
+  { method: 'PATCH',  path: '/api/system/auto-update-settings',     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/system/trigger-update',           auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/watchdog-status',          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/system/settings/coding-ai',       auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/system/settings/coding-ai',       auth: true,        file: 'server.js' },
+
+  // ── Capabilities & Admin ──────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/capabilities/status',             auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/admin/api-catalog',               auth: true,        file: 'server.js' },
+
+  // ── Mode & Automation ─────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/mode',                            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/mode',                            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/automation/control',              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/objectives/status',               auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/workflows/live',                  auth: true,        file: 'server.js' },
+
+  // ── Autonomy ──────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/autonomy/status',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/autonomy/mode',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/autonomy/mode',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/autonomy/emergency-stop',         auth: true,        file: 'server.js' },
+
+  // ── Evolution ─────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/evolution/status',                auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/evolution/mode',                  auth: true,        file: 'server.js' },
+
+  // ── Brain ─────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/brain/status',                    auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/brain/insights',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/brain/activity',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/brain/neurons',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/brain/graph',                     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/brain/graph/delta',               auth: true,        file: 'server.js' },
+
+  // ── Neural Brain (proxy → Python) ─────────────────────────────────────────
+  { method: 'GET',    path: '/api/neural-brain/graph',              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/neural-brain/graph/status',       auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/neural-brain/graph/snapshot',     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/neural-brain/memory/status',      auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/neural-brain/memory/list',        auth: true,        file: 'server.js' },
+  { method: 'DELETE', path: '/api/neural-brain/memory/:id',         auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/neural-brain/threads',            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/neural-brain/think',              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/neural-brain/forge/evolution/status', auth: true,    file: 'server.js' },
+
+  // ── Memory ────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/memory',                          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/memory/graph/:view',              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/memory/tree',                     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/memory/stats',                    auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/memory/conversations',            auth: true,        file: 'server.js' },
+  { method: 'DELETE', path: '/api/memory/conversations/:id',        auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/memory/search',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/memory/clients',                  auth: true,        file: 'server.js' },
+  { method: 'PATCH',  path: '/api/memory/clients/:clientId',        auth: true,        file: 'server.js' },
+  { method: 'DELETE', path: '/api/memory/clients/:clientId',        auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/memory/interactions',             auth: true,        file: 'server.js' },
+
+  // hybrid-memory-router (mounted at /api/memory)
+  { method: 'GET',    path: '/api/memory/router/status',            auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'POST',   path: '/api/memory/router/query',             auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'GET',    path: '/api/memory/router/trace/:id',         auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'GET',    path: '/api/memory/graph/status',             auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'GET',    path: '/api/memory/graph/snapshot',           auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'GET',    path: '/api/memory/graph/maintenance',        auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'POST',   path: '/api/memory/graph/backup',             auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'POST',   path: '/api/memory/graph/repair',             auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'POST',   path: '/api/memory/graph/restore',            auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'POST',   path: '/api/memory/graph/merge',              auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'GET',    path: '/api/memory/sql/status',               auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'POST',   path: '/api/memory/sql/query',                auth: true,        file: 'routes/hybrid-memory-router.js' },
+  { method: 'GET',    path: '/api/memory/procedural/status',        auth: true,        file: 'routes/hybrid-memory-router.js' },
+
+  // ── Knowledge ─────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/knowledge/search',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/knowledge/vault/list',            auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/knowledge/vault/pending',         auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/knowledge/vault/add',             auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/knowledge/vault/queue-topic',     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/knowledge/vault/:title',          auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/knowledge/vault/:title/verify',   auth: true,        file: 'server.js' },
+
+  // ── Tools & Skills ────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/tools/list',                      auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/tools/:name',                     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/tools/:name/execute',             auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/skills/list',                     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/skills/suggest',                  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/skills/:name/execute',            auth: true,        file: 'server.js' },
+
+  // ── Models & Routing ──────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/models/routing',                  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/models/routing',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/models/providers',                auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model/route-plan',                auth: true,        file: 'server.js' },
+
+  // Model Fabric (proxy → Python, loop-generated)
+  { method: 'GET',    path: '/api/model-fabric/models',             auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/model-fabric/health',             auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/model-fabric/status',             auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/model-fabric/lifecycle/status',   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/model-fabric/quantization/status',     auth: true,   file: 'server.js' },
+  { method: 'GET',    path: '/api/model-fabric/quantization/available',  auth: true,   file: 'server.js' },
+  { method: 'GET',    path: '/api/model-fabric/quantization/pull/status',auth: true,   file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/route',              auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/llm',                auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/slm',                auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/vision/analyze',     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/vision/segment',     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/generate/visual',    auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/actions/execute',    auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/rag/query',          auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/rag/ingest',         auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/quantization/select',auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/quantization/pull',  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/models/unload-idle', auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/models/:id/unload',  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/model-fabric/models/:id/reload-with-quant', auth: true, file: 'server.js' },
+
+  // ── Ollama ────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/ollama/status',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/ollama/models',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/ollama/pull',                     auth: true,        file: 'server.js' },
+  { method: 'DELETE', path: '/api/ollama/models/:name',             auth: true,        file: 'server.js' },
+
+  // ── Observability ─────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/observability/snapshot',          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/observability/events',            auth: true,        file: 'server.js' },
+
+  // ── Economy ───────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/economy/summary',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/economy/ledger',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/economy/costs',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/economy/pipelines',               auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/economy/opportunities',           auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/economy/wallet',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/product/dashboard',               auth: true,        file: 'server.js' },
+
+  // ── Money Mode Pipelines ──────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/money/content-pipeline',          auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/lead-pipeline',             auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/opportunity-pipeline',      auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/affiliate-draft',           auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/niche-research',            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/offer-creation',            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/content-calendar',          auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/lead-research',             auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/proposal',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/money/content-log',               auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/money/outreach-log',              auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/money/task',                      auth: true,        file: 'server.js' },
+
+  // ── Roadmap ───────────────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/roadmap/create',                  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/roadmap/generate',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/roadmap/list/:tenantId',          auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/roadmap/:roadmapId',              auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/roadmap/:roadmapId/execute',      auth: true,        file: 'server.js' },
+
+  // ── Security ──────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/security/status',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/security/aztsa/status',           auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/security/honeypot/events',        auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/security/offline-sync',           auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/security/anomaly/evaluate',       auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/security/gateway/strict-mode',    auth: true,        file: 'server.js' },
+
+  // ── RAG / Sources ─────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/rag/sources',                     auth: true,        file: 'server.js' },
+
+  // ── Approvals ─────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/approvals/inbox',                 auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/approvals/:id/approve',           auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/approvals/:id/reject',            auth: true,        file: 'server.js' },
+
+  // ── Audit ─────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/audit/events',                    auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/audit/stats',                     auth: true,        file: 'server.js' },
+
+  // ── Reliability ───────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/reliability/status',              auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/reliability/forge/freeze',        auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/reliability/forge/unfreeze',      auth: true,        file: 'server.js' },
+
+  // ── Admin Safety ──────────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/admin/safety-action',             auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/admin/safety-audit',              auth: true,        file: 'server.js' },
+
+  // ── Forge (canonical router) ──────────────────────────────────────────────
+  { method: 'GET',    path: '/api/forge/engine/status',             auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/skills/recommend',          auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/plan',                      auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/plans',                     auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/actions',                   auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/agents/blueprint',          auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/agents/blueprints',         auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/agents/:id/register',       auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/execute',                   auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs',                      auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs/stream',               auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/runs',                      auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/runs/:id',                  auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs/:id/approve',          auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs/:id/verify',           auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs/:id/apply',            auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/runs/:id/transcript',       auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/runs/:id/pending-approvals',auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs/:id/approve-action',   auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs/:id/reject-action',    auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/runs/:id/continue',         auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/runs/:id/patches',          auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/runs/:id/replay',           auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/projects/:id/forge-metrics',auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/agents/status',             auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/projects',                  auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/projects/:id',              auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/projects',                  auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/projects/import',           auth: true,        file: 'routes/forge.js' },
+  { method: 'DELETE', path: '/api/forge/projects/:id',              auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/files/tree',                auth: true,        file: 'routes/forge.js' },
+  { method: 'GET',    path: '/api/forge/files/read',                auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/files/write',               auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/sessions',                  auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/sessions/:id/messages',     auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/sessions/:id/messages/stream', auth: true,    file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/actions/:id/approve',       auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/actions/:id/reject',        auth: true,        file: 'routes/forge.js' },
+  { method: 'POST',   path: '/api/forge/sandbox',                   auth: true,        file: 'routes/forge.js' }, // canonical; legacy inline also exists
+  { method: 'GET',    path: '/api/forge/swarm/config',              auth: true,        file: 'routes/forge.js' },
+
+  // Forge (legacy inline handlers — kept for older UI clients)
+  { method: 'GET',    path: '/api/forge/queue',                     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/forge/submit',                    auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/forge/approve/:id',               auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/forge/reject/:id',                auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/forge/rollback',                  auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/forge/snapshots',                 auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/forge/build-system',              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/forge/status',                    auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/forge/task',                      auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/forge/code-ai/models',            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/forge/code-ai',                   auth: true,        file: 'server.js' },
+
+  // ── Blacklight (security monitoring) ─────────────────────────────────────
+  { method: 'GET',    path: '/api/blacklight/status',               auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/blacklight/tools',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/blacklight/tools/:id',            auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/blacklight/tools/search',         auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/blacklight/tools/run',            auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/blacklight/policy',               auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/blacklight/policy',               auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/blacklight/toggle',               auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/blacklight/scan',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/blacklight/alerts',               auth: true,        file: 'server.js' },
+
+  // ── Recon ─────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/recon/tools',                     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/recon/tools/search',              auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/recon/tools/run',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/recon/cases',                     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/recon/cases',                     auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/recon/findings',                  auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/recon/findings',                  auth: true,        file: 'server.js' },
+  { method: 'PATCH',  path: '/api/recon/findings/:id',              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/recon/audit',                     auth: true,        file: 'server.js' },
+
+  // ── Doctor / Diagnostics ──────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/doctor/status',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/doctor/llm-status',               auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/doctor/errors',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/doctor/run',                      auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/self-improvement/status',         auth: true,        file: 'server.js' },
+
+  // ── Fairness & Governance ─────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/fairness/report',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/governance/digest',               auth: true,        file: 'server.js' },
+
+  // ── Hermes (task routing) ─────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/hermes/status',                   auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/hermes/task',                     auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/hermes/broadcast',                auth: true,        file: 'server.js' },
+
+  // ── Learning Ladder ────────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/learning-ladder/build',           auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/learning-ladder/complete',        auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/learning-ladder/progress',        auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/learning-ladder/all',             auth: true,        file: 'server.js' },
+
+  // ── Prompt Inspector ──────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/prompt-traces',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/prompt-trace/:id',                auth: true,        file: 'server.js' },
+  { method: 'DELETE', path: '/api/prompt-traces',                   auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/prompt-inspector/config',         auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/prompt-inspector/config',         auth: true,        file: 'server.js' },
+  { method: 'PATCH',  path: '/api/prompt-inspector/config',         auth: true,        file: 'server.js' },
+
+  // ── Middleware ────────────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/middleware/process',              auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/middleware/status',               auth: true,        file: 'server.js' },
+
+  // ── Workspace ─────────────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/workspace/upload',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/workspace/files',                 auth: true,        file: 'server.js' },
+  { method: 'DELETE', path: '/api/workspace/files/*',               auth: true,        file: 'server.js' },
+
+  // ── Artifacts & Proof ─────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/artifacts',                       auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/artifacts/:filename',             auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/preview/:filename',               auth: 'optional',  file: 'server.js' },
+  { method: 'GET',    path: '/api/proof/center',                    auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/demos/:filename',                 auth: false,       file: 'server.js' },
+
+  // ── Research ──────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/research/sessions',               auth: true,        file: 'server.js' },
+  { method: 'POST',   path: '/api/search',                          auth: 'optional',  file: 'routes/search.js' },
+  { method: 'POST',   path: '/api/research/discover',               auth: true,        file: 'routes/research.js' },
+  { method: 'POST',   path: '/api/research/execute',                auth: true,        file: 'routes/research.js' },
+
+  // ── Vault (Obsidian knowledge store) ─────────────────────────────────────
+  { method: 'GET',    path: '/api/vault/notes',                     auth: true,        file: 'routes/vault.js' },
+  { method: 'GET',    path: '/api/vault/notes/:id',                 auth: true,        file: 'routes/vault.js' },
+  { method: 'PUT',    path: '/api/vault/notes/:id',                 auth: true,        file: 'routes/vault.js' },
+  { method: 'POST',   path: '/api/vault/notes',                     auth: true,        file: 'routes/vault.js' },
+  { method: 'DELETE', path: '/api/vault/notes/:id',                 auth: true,        file: 'routes/vault.js' },
+  { method: 'POST',   path: '/api/vault/rebuild-indices',           auth: true,        file: 'routes/vault.js' },
+  { method: 'GET',    path: '/api/vault/search',                    auth: true,        file: 'routes/vault.js' },
+  { method: 'GET',    path: '/api/vault/graph',                     auth: true,        file: 'routes/vault.js' },
+  { method: 'GET',    path: '/api/vault/broken-links',              auth: true,        file: 'routes/vault.js' },
+
+  // ── Workflows (template library + CRUD) ───────────────────────────────────
+  { method: 'GET',    path: '/api/workflows',                       auth: true,        file: 'routes/workflows.js' },
+  { method: 'GET',    path: '/api/workflows/templates',             auth: true,        file: 'routes/workflows.js' },
+  { method: 'GET',    path: '/api/workflows/templates/:id',         auth: true,        file: 'routes/workflows.js' },
+  { method: 'POST',   path: '/api/workflows/templates/:id/instantiate', auth: true,   file: 'routes/workflows.js' },
+  { method: 'GET',    path: '/api/workflows/runs',                  auth: true,        file: 'routes/workflows.js' },
+  { method: 'POST',   path: '/api/workflows',                       auth: true,        file: 'routes/workflows.js' },
+  { method: 'POST',   path: '/api/workflows/:id/run',               auth: true,        file: 'routes/workflows.js' },
+  { method: 'GET',    path: '/api/workflows/:id/runs',              auth: true,        file: 'routes/workflows.js' },
+  { method: 'DELETE', path: '/api/workflows/:id',                   auth: true,        file: 'routes/workflows.js' },
+
+  // ── Execution (pipeline traces) ───────────────────────────────────────────
+  { method: 'GET',    path: '/api/execution/queue',                 auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/execution/pipeline/:taskId',      auth: true,        file: 'routes/execution.js' },
+  { method: 'GET',    path: '/api/execution/active',                auth: true,        file: 'routes/execution.js' },
+  { method: 'POST',   path: '/api/execution/trace/:taskId',         auth: true,        file: 'routes/execution.js' },
+  { method: 'POST',   path: '/api/execution/phase-update',          auth: true,        file: 'routes/execution.js' },
+
+  // ── Orders ────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/orders',                          auth: true,        file: 'routes/orders.js' },
+  { method: 'POST',   path: '/api/orders',                          auth: true,        file: 'routes/orders.js' },
+  { method: 'GET',    path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
+  { method: 'PATCH',  path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
+  { method: 'DELETE', path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
+
+  // ── Settings ──────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/settings',                        auth: true,        file: 'routes/settings.js' },
+  { method: 'POST',   path: '/api/settings',                        auth: true,        file: 'routes/settings.js' },
+  { method: 'POST',   path: '/api/settings/validate',               auth: true,        file: 'routes/settings.js' },
+  { method: 'POST',   path: '/api/settings/reset',                  auth: true,        file: 'routes/settings.js' },
+  { method: 'DELETE', path: '/api/settings/:section/:key',          auth: true,        file: 'routes/settings.js' },
+  { method: 'POST',   path: '/api/settings/test/:provider',         auth: true,        file: 'routes/settings.js' },
+
+  // ── Sessions ──────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/sessions',                        auth: true,        file: 'routes/sessions.js' },
+  { method: 'DELETE', path: '/api/sessions/:session_id',            auth: true,        file: 'routes/sessions.js' },
+  { method: 'DELETE', path: '/api/sessions',                        auth: true,        file: 'routes/sessions.js' },
+  { method: 'POST',   path: '/api/sessions/force-logout/:user_id',  auth: true,        file: 'routes/sessions.js' },
+
+  // ── API Keys ──────────────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/api-keys',                        auth: true,        file: 'routes/api-keys.js' },
+  { method: 'GET',    path: '/api/api-keys',                        auth: true,        file: 'routes/api-keys.js' },
+  { method: 'DELETE', path: '/api/api-keys/:key_id',                auth: true,        file: 'routes/api-keys.js' },
+
+  // ── Compute ───────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/compute/local-status',            auth: true,        file: 'routes/compute.js' },
+  { method: 'GET',    path: '/api/compute/providers',               auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/estimate',                auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/search-offers',           auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/request-approval',        auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/verify-owner',            auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/purchase',                auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/start-job',               auth: true,        file: 'routes/compute.js' },
+  { method: 'GET',    path: '/api/compute/jobs/:id/sync-status',    auth: true,        file: 'routes/compute.js' },
+  { method: 'GET',    path: '/api/compute/jobs/:id/manifest',       auth: true,        file: 'routes/compute.js' },
+  { method: 'GET',    path: '/api/compute/jobs/:id/artifacts',      auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/jobs/:id/heartbeat',      auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/jobs/:id/checkpoint',     auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/jobs/:id/collect',        auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/jobs/:id/force-sync',     auth: true,        file: 'routes/compute.js' },
+  { method: 'GET',    path: '/api/compute/jobs/:id/recover',        auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/jobs/:id/safe-teardown',  auth: true,        file: 'routes/compute.js' },
+  { method: 'POST',   path: '/api/compute/stop-job',                auth: true,        file: 'routes/compute.js' },
+  { method: 'GET',    path: '/api/compute/jobs',                    auth: true,        file: 'routes/compute.js' },
+  { method: 'GET',    path: '/api/compute/spend',                   auth: true,        file: 'routes/compute.js' },
+
+  // ── Voice ─────────────────────────────────────────────────────────────────
+  { method: 'GET',    path: '/api/voice/*',                         auth: true,        file: 'api/voice.js' },
+  { method: 'POST',   path: '/api/voice/*',                         auth: true,        file: 'api/voice.js' },
+
+  // ── Dashboard API (large domain router) ──────────────────────────────────
+  { method: 'GET',    path: '/api/security/threats',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/security/blocked-ips/:ip',        auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/security/strict-mode',            auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/security/rotate-jwt',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/security/audit',                  auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/security/hitl',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/security/hitl/:id/:action',       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/security/gdpr',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/security/policy-rules',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/security/api-keys',               auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/security/api-keys',               auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/security/api-keys/:id/rotate',    auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/security/api-keys/:id',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/security/sessions',               auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/security/sessions/:id',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/security/sessions',               auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/security/rate-limits',            auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/security/rate-limits',            auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/knowledge/search',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/knowledge/search',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/knowledge/search/semantic',       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/knowledge/search/semantic',       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/knowledge/:id',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/knowledge/:id',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/knowledge/manual',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/knowledge/upload',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/knowledge/ingest-queue',          auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/personal-facts',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/personal-facts',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/memory/personal-facts/:id',       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/memory/personal-facts/:id',       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/conversations',            auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/conversations/:id',        auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/conversations/:id/export', auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/forget',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/health',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/semantic/stats',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/semantic/reindex',         auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/adapter/status',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/adapter/search',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/adapter/add',              auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/verify',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/pending-review',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/memory/pending-review/:id',       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/pending-review/:id/approve', auth: true,     file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/pending-review/:id/reject', auth: true,      file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/memory/pending-review/:id/edit',  auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/intelligence/llm-calls',          auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/intelligence/cost-breakdown',     auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/intelligence/insights',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/intelligence/ask',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/cognition/pipeline-trace',        auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/cognition/decisions',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/cognition/decisions',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/cognition/learning/strategies',   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/cognition/learning/success-rate', auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/cognition/learning/ab-tests',     auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/cognition/learning/ab-tests',     auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PATCH',  path: '/api/cognition/learning/ab-tests/:id', auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/integrations',                    auth: false,       file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/integrations/list',               auth: false,       file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/integrations/activity',           auth: false,       file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/integrations/:id',                auth: false,       file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/integrations/:id/connect',        auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/integrations/:id',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/settings/notifications',          auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/settings/notifications',          auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/settings/billing',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/settings/billing',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/users',                           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/users',                           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/users/:id',                       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/roles',                           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/roles',                           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/roles/:id',                       auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/permissions-matrix',              auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/permissions-matrix',              auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/ollama/models',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/ollama/models/:name',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/ollama/models/:name',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/ollama/pull',                     auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/settings/main-model',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/settings/main-model',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/settings/subsystems',             auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/settings/subsystem-routing/:id',  auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/topics',                          auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/topics/:id',                      auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'PUT',    path: '/api/topics/:id',                      auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/topics/:id/pin',                  auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/topics/:id/refresh',              auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'DELETE', path: '/api/topics/:id',                      auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/learning/execute',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/learning/sessions',               auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/learning/sessions/:id',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/models/metrics',                  auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/models/registry',                 auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/system/hardware',                 auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/brain/graph',                     auth: true,        file: 'routes/dashboard-api.js' },
+
+  // ── Fork-integrations (skills, finance, money, autonomy, wallet, channels) ─
+  { method: 'GET',    path: '/api/vendor/sources',                  auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/skills/library',                  auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/skills/library/:id',              auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/skills/packs',                    auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/skills/recommend',                auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/agents/:id/capabilities',         auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/agents/:id/skills',               auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/finance/workflows',               auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/business/templates',              auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/business/brand-kits',             auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/business/templates/:id/brand-kit',auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/finance/workflows/:id/run',       auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/finance/workflows/:runId/approve',auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/money/tasks',                     auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/money/tasks/:id/evaluate',        auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/money/tasks/:id/quote-draft',     auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/money/tasks/:id/deliver',         auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/money/feedback',                  auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/autonomy/policy',                 auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/autonomy/tool-call/evaluate',     auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/autonomy/heartbeat',              auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/autonomy/heartbeat/task',         auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/channels',                        auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/channels/:id/pair',               auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/channels/:id/send',               auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/sessions',                        auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/sessions/:id/route',              auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/wallet/status',                   auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/wallet/create',                   auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/wallet/claim-request',            auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/wallet/compute-purchase/quote',   auth: true,        file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/mobile/status',                   auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/mobile/pair/request',             auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'GET',    path: '/api/mobile/pair/:id/status',          auth: false,       file: 'routes/fork-integrations.js' },
+  { method: 'POST',   path: '/api/mobile/pair/:id/approve',         auth: true,        file: 'routes/fork-integrations.js' },
+
+  // ── Infra routers (Phase 2–4) ─────────────────────────────────────────────
+  { method: '*',      path: '/api/events/*',                        auth: true,        file: 'infra/events/routes.js' },
+  { method: '*',      path: '/api/workflows/*',                     auth: true,        file: 'infra/workflows/routes.js' },
+  { method: '*',      path: '/api/sandbox/*',                       auth: true,        file: 'infra/sandbox/routes.js' },
+  { method: '*',      path: '/api/secrets/*',                       auth: true,        file: 'infra/secrets/routes.js' },
+  { method: '*',      path: '/api/rag/*',                           auth: true,        file: 'infra/rag/routes.js' },
+  { method: '*',      path: '/api/planning/*',                      auth: true,        file: 'infra/planning/routes.js' },
+  { method: '*',      path: '/api/economics/*',                     auth: true,        file: 'infra/economics/routes.js' },
+  { method: '*',      path: '/api/governance/*',                    auth: true,        file: 'infra/governance/routes.js' },
+  { method: '*',      path: '/api/telemetry/*',                     auth: true,        file: 'infra/telemetry/routes.js' },
+  { method: '*',      path: '/api/rpa/*',                           auth: true,        file: 'infra/rpa/routes.js' },
+  { method: '*',      path: '/api/healing/*',                       auth: true,        file: 'infra/healing/routes.js' },
+  { method: '*',      path: '/api/marketplace/*',                   auth: true,        file: 'infra/marketplace/routes.js' },
+  { method: '*',      path: '/api/deployment/*',                    auth: true,        file: 'infra/deployment/routes.js' },
+  { method: '*',      path: '/api/simulation/*',                    auth: true,        file: 'infra/simulation/routes.js' },
+  { method: '*',      path: '/api/cognitive/*',                     auth: true,        file: 'infra/cognitive/routes.js' },
+
+  // ── Gateway & Orchestrator (pass-through routers) ─────────────────────────
+  { method: '*',      path: '/gateway/*',                           auth: false,       file: 'gateway/index.js' },
+  { method: '*',      path: '/orchestrator/*',                      auth: false,       file: 'orchestrator/index.js' },
+
+  // ── Topics & Learning (via createTopicsRouter / createLearningRouter) ─────
+  { method: 'GET',    path: '/api/topics',                          auth: true,        file: 'routes/topics.js' },
+  { method: 'GET',    path: '/api/topics/:id',                      auth: true,        file: 'routes/topics.js' },
+  { method: 'GET',    path: '/api/learning',                        auth: true,        file: 'routes/learning.js' },
+  { method: 'POST',   path: '/api/learning/execute',                auth: true,        file: 'routes/learning.js' },
+
+];
+
+module.exports = { ROUTE_REGISTRY };

@@ -723,6 +723,125 @@ app.use('/api/deployment',  requireAuth, deploymentRoutes);
 app.use('/api/simulation',  requireAuth, simulationRoutes);
 app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
 
+// ── Phase 1 Route Extraction — extracted inline routes ────────────────────────
+// These routers replace inline app.get/post/delete handlers that lived in
+// server.js. The inline handlers remain temporarily (and are now dead code)
+// until they are removed in Phase 1b. Routers registered first take priority
+// since Express uses first-match routing.
+//
+// deps object: shared server.js scope passed to each factory so extracted
+// routes have identical access to the same variables.
+{
+  // graphDeltaState wraps the three let-scalars mutated by the brain interval
+  const graphDeltaState = { lastMtimeMs: 0, lastNodeCount: 0, lastEdgeCount: 0 };
+  // Expose setters so the existing setInterval (lines ~7818-7824) can update the object.
+  // The interval is patched below to write into this object instead of the lets.
+  global._graphDeltaState = graphDeltaState;
+
+  // Shared deps object — consumed by all extracted route factories
+  const _routeDeps = {
+    // Auth & middleware
+    requireAuth,
+    requireLocalhost: (req, res, next) => {
+      const addr = req.socket?.remoteAddress || '';
+      if (addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1') return next();
+      res.status(403).json({ ok: false, error: 'Localhost only' });
+    },
+    validate,
+    SCHEMAS,
+    // Core constants
+    PORT, PYTHON_BACKEND_HOST, PYTHON_BACKEND_PORT,
+    REPO_ROOT, AI_HOME, STATE_DIR, LOG_DIR, RUN_DIR, statePath,
+    ARTIFACTS_DIR, WORKSPACE_DIR,
+    GIT_COMMIT, SERVER_START_TIMESTAMP, JWT_SECRET,
+    HAS_FRONTEND_DIST,
+    // Mutable scalars — wrapped as getter/setter to preserve reactivity
+    getApiCallCounter: () => apiCallCounter,
+    getSystemHalted: () => systemHalted,
+    setSystemHalted: (v) => { systemHalted = v; },
+    getBlacklightStatus: () => _lastBlacklightStatus,
+    setBlacklightStatus: (v) => { _lastBlacklightStatus = v; },
+    getSrvStartMs: () => _srvStartMs,
+    // Modules & services
+    broadcaster, errorRecovery, taskHistory,
+    economyService, ollamaAdmin, autoUpdateWatchdog,
+    brain, subsystems, getNativeMemoryGraph,
+    getAgents, activateAgents, getMode, setMode, getRobotSignal,
+    getRunningAgentCount, stopAllAgents,
+    buildMoneyTemplate, buildThinkingSummary,
+    addActivity, runPipeline, readJsonSafe, readJsonlSafe, sampleSystemStatus,
+    normalizeDashboardGraph, proxyNeuralBrain, checkNeuralGraphReady,
+    requestPythonJSON,
+    apiGatewayProtector, anomalyResponder, securitySyncPolicy, secretStore,
+    runtimeState, _readiness, _systemReady,
+    // TTL caches
+    _cache_grades,
+    // Graph delta state (wraps let scalars)
+    graphDeltaState,
+    // Task infrastructure — declared late in file, use lazy getters
+    getTaskStore: () => taskStore,
+    getSseTaskListeners: () => _sseTaskListeners,
+    initTask: (...a) => initTask(...a),
+    updateTaskStep: (...a) => updateTaskStep(...a),
+    completeTask: (...a) => completeTask(...a),
+    // Prompt inspector (mutable config)
+    promptTraceStore: (() => {
+      // promptTraceStore is a let array — share by wrapping in an object
+      // Routes read/write via deps.getPromptTraces() / deps.addPromptTrace()
+      return null; // populated below after promptTraceStore is declared
+    })(),
+    getPromptTraces: () => promptTraceStore,
+    addPromptTrace: (t) => {
+      promptTraceStore.push(t);
+      if (promptTraceStore.length > MAX_TRACES) promptTraceStore.shift();
+    },
+    clearPromptTraces: () => { promptTraceStore.length = 0; },
+    getPromptInspectorConfig: () => promptInspectorConfig,
+    setPromptInspectorConfig: (v) => { promptInspectorConfig = v; },
+    patchPromptInspectorConfig: (patch) => { Object.assign(promptInspectorConfig, patch); },
+    // Rate limiters
+    _rl_upload,
+    // Node builtins (for routes that need them)
+    fs, path, http,
+  };
+
+  // Late-declared variables are not yet defined at this point in the file.
+  // Wrap _routeDeps in a Proxy so that any property access is deferred until
+  // the actual request handler runs (by which time all declarations are done).
+  const _lazyRouteDeps = new Proxy(_routeDeps, {
+    get(target, prop) {
+      // Lazy resolution for properties that need late-declared variables
+      switch (prop) {
+        case 'taskStore':             return taskStore;
+        case '_sseTaskListeners':     return _sseTaskListeners;
+        case 'promptTraceStore':      return promptTraceStore;
+        case 'MAX_TRACES':            return MAX_TRACES;
+        case 'promptInspectorConfig': return promptInspectorConfig;
+        case '_piCfgRef':             return promptInspectorConfig;
+        case '_srvStartMs':           return _srvStartMs;
+        case 'systemHalted':          return systemHalted;
+        case 'MODEL_FABRIC_OFFLINE':  return MODEL_FABRIC_OFFLINE;
+        case 'reliabilityState':      return reliabilityState;
+        case '_forgeQueue':           return _forgeQueue;
+        default: return Reflect.get(target, prop);
+      }
+    },
+  });
+
+  // Mount extracted route groups — these shadow the inline handlers below
+  const createHealthRouter         = require('./routes/health');
+  const createAuthIdentityRouter   = require('./routes/auth-identity');
+  const createAgentsBrainRouter    = require('./routes/agents-brain');
+  const createSystemOpsRouter      = require('./routes/system-ops');
+  const createArtifactsTasksRouter = require('./routes/artifacts-tasks');
+
+  app.use('/', createHealthRouter(_lazyRouteDeps));
+  app.use('/', createAuthIdentityRouter(_lazyRouteDeps));
+  app.use('/', createAgentsBrainRouter(_lazyRouteDeps));
+  app.use('/', createSystemOpsRouter(_lazyRouteDeps));
+  app.use('/', createArtifactsTasksRouter(_lazyRouteDeps));
+}
+
 // Incremented by broadcaster heartbeat loop; sampled into system status.
 let heartbeatCounter = 0;
 
