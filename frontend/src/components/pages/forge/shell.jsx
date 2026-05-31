@@ -1075,11 +1075,23 @@ export function AgentsView() {
                 <span style={{ font: '700 11px Inter, sans-serif', color: c }}>{(a.name || 'A')[0]}</span>
               </div>
               <div className="af-grow">
-                <div className="af-flex" style={{ gap: 6 }}>
+                <div className="af-flex" style={{ gap: 6, alignItems: 'center' }}>
                   <span style={{ font: '600 11.5px Inter, sans-serif', color: 'var(--af-text)' }}>{a.name}</span>
                   <span style={{ width: 5, height: 5, borderRadius: '50%', background: c, boxShadow: `0 0 6px ${c}`, animation: a.status !== 'idle' ? 'afPulse 2s ease-in-out infinite' : 'none' }} />
+                  {a.swarm_used && (
+                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', padding: '1px 5px', borderRadius: 3, background: 'rgba(96,165,250,0.15)', color: '#60A5FA', border: '1px solid rgba(96,165,250,0.3)' }}>
+                      SWARM
+                    </span>
+                  )}
                 </div>
-                <div style={{ font: '500 9.5px monospace', color: 'var(--af-text-dim)', letterSpacing: '0.06em', marginTop: 1, textTransform: 'uppercase' }}>{a.model}</div>
+                <div style={{ font: '500 9.5px monospace', color: 'var(--af-text-dim)', letterSpacing: '0.06em', marginTop: 1, textTransform: 'uppercase' }}>
+                  {a.model}
+                  {a.swarm_confidence != null && (
+                    <span style={{ marginLeft: 6, color: a.swarm_confidence > 0.7 ? '#4ade80' : a.swarm_confidence > 0.5 ? '#facc15' : '#f87171' }}>
+                      {Math.round(a.swarm_confidence * 100)}% conf
+                    </span>
+                  )}
+                </div>
                 {a.task && <div className="af-truncate" style={{ font: '400 10.5px monospace', color: 'var(--af-text-muted)', marginTop: 3 }}>{a.task}</div>}
               </div>
               <div className={`af-pill af-pill--sm ${a.status === 'idle' ? 'af-pill--idle' : ''}`} style={{ flexShrink: 0 }}>
