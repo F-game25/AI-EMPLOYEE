@@ -2,7 +2,7 @@
     "_meta": {
         "version": "2.1",
         "description": "Capabilities map for all AI agents — used by task-orchestrator for intelligent routing",
-        "total_agents": 110,
+        "total_agents": 56,
         "updated_at": "2026-05-31",
         "model_routing": {
             "sales": {
