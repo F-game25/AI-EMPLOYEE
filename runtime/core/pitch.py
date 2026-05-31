@@ -106,7 +106,15 @@ def genereer_pitch(order_id: str, *, demo_url: str = "") -> dict[str, Any]:
         f"GEEN prijs, GEEN betaallink, GEEN verkooptaal. Schrijf ALLEEN het bericht."
     )
 
-    tekst = _llm(prompt, max_tokens=300)
+    # Swarm mode: generate 3 pitch variants in parallel, pick strongest
+    try:
+        from core.swarm_engine import swarm_pitch
+        result = swarm_pitch(prompt, context=f"Bedrijf: {naam}, Branche: {branche}, Plaats: {plaats}", n_agents=3)
+        tekst = result.answer if result.confidence > 0.4 else _llm(prompt, max_tokens=300)
+        logger.info("pitch: swarm confidence=%.2f winner=agent%d", result.confidence, result.winner_agent)
+    except Exception as exc:
+        logger.debug("pitch: swarm niet beschikbaar (%s), gebruik enkelvoudige LLM", exc)
+        tekst = _llm(prompt, max_tokens=300)
 
     _sla_pitch_op(order_id, tekst)
 
