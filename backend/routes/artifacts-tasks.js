@@ -193,31 +193,8 @@ module.exports = function createArtifactsTasksRouter(deps) {
 
   // ── Demos ──────────────────────────────────────────────────────────────────
 
-  // GET /api/demos/:filename — serve generated demo HTML with custom security headers.
-  // No auth required: demo links are shared externally with customers.
-  // Use res.send() not res.sendFile() so we control every header explicitly;
-  // Helmet sets restrictive headers globally, demo pages need permissive CSP.
-  router.get('/demos/:filename', (req, res) => {
-    const fname = path.basename(req.params.filename);
-    if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
-    const demoPath = path.join(AI_HOME, 'state', 'artifacts', 'demos', fname);
-    if (!fs.existsSync(demoPath)) return res.status(404).send('Demo niet gevonden');
-
-    const html = fs.readFileSync(demoPath, 'utf8');
-    res.removeHeader('X-Download-Options');
-    res.removeHeader('Cross-Origin-Opener-Policy');
-    res.removeHeader('Cross-Origin-Resource-Policy');
-    res.set({
-      'Content-Type': 'text/html; charset=utf-8',
-      'X-Frame-Options': 'SAMEORIGIN',
-      'Cache-Control': 'no-store',
-      'Content-Security-Policy':
-        "default-src 'self' data:; script-src 'self' 'unsafe-inline'; " +
-        "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; " +
-        "font-src 'self' data:; frame-ancestors 'self';",
-    });
-    res.send(html);
-  });
+  // NOTE: /api/demos/:filename (demo serving) lives canonically in routes/media.js.
+  // The duplicate that used to be here was removed to avoid a double route registration.
 
   // ── Legacy forge (status / task / code-ai) ─────────────────────────────────
   // Note: canonical /api/forge/* routes are served by routes/forge.js which is

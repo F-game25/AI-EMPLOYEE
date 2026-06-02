@@ -128,7 +128,7 @@ module.exports = function createMediaRouter(deps) {
   // Uses res.send() instead of res.sendFile() to control every header explicitly.
   // Helmet sets restrictive headers globally; demo pages need permissive inline CSP
   // and no download-forcing headers so they open cleanly in a new browser tab.
-  router.get('/demos/:filename', (req, res) => {
+  router.get('/api/demos/:filename', (req, res) => {
     const fname = path.basename(req.params.filename);
     if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
     const demoPath = path.join(AI_HOME, 'state', 'artifacts', 'demos', fname);
