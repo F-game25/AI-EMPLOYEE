@@ -1,0 +1,71 @@
+.ce-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ce-wrap svg {
+  overflow: visible;
+  display: block;
+}
+
+/* Ring CSS-only rotations — cheap compositor layer, no JS */
+.ce-ring-outer {
+  transform-origin: center;
+  animation: ce-spin 110s linear infinite;
+}
+.ce-ring-inner {
+  transform-origin: center;
+  animation: ce-spin 72s linear infinite reverse;
+}
+
+@keyframes ce-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Lite mode + reduced motion: freeze rings, keep pupil active */
+@media (prefers-reduced-motion: reduce) {
+  .ce-ring-outer, .ce-ring-inner { animation: none; }
+}
+html[data-perf="low"] .ce-ring-outer,
+html[data-perf="low"] .ce-ring-inner {
+  animation: none;
+}
+
+/* Blink overlay — triggered by JS setting data-blink on the svg */
+.ce-eyelid {
+  transform-origin: 0% 50%;
+  transform: scaleY(0);
+  transition: transform 60ms ease-in;
+}
+.ce-wrap[data-blink="1"] .ce-eyelid {
+  transform: scaleY(1);
+  transition: transform 50ms ease-in;
+}
+
+/* Toolbar mode: tighter click target */
+.ce-wrap--toolbar {
+  border-radius: 50%;
+  padding: 4px;
+}
+.ce-wrap--toolbar:hover {
+  background: rgba(229, 199, 107, 0.08);
+}
+
+/* Dashboard mode: subtle hover pulse */
+.ce-wrap--dashboard:hover .ce-rim {
+  opacity: 0.9;
+}
+
+/* Pulse animation for critical/thinking state */
+@keyframes ce-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.ce-wrap[data-state="thinking"] .ce-rim,
+.ce-wrap[data-state="critical"] .ce-rim {
+  animation: ce-pulse 1.2s ease-in-out infinite;
+}

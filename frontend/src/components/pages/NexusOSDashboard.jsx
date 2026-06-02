@@ -8,9 +8,7 @@ import { useSecurityStore } from '../../store/securityStore'
 import { useEventFeedStore } from '../../store/eventFeedStore'
 import { useSystemStore } from '../../store/systemStore'
 import { useChannelState, STATE_COLOR } from '../../hooks/useChannelState'
-import CognitiveCoreReactor from '../core/reactor/CognitiveCoreReactor'
-import LightingSpill from '../core/reactor/LightingSpill'
-import '../core/reactor/LightingSpill.css'
+import CognitiveEye from '../avatar/CognitiveEye'
 import NeuralActivityStrip from '../dashboard/NeuralActivityStrip'
 import AgentGridNew from '../dashboard/AgentGrid'
 import QuickActionsNew from '../dashboard/QuickActions'
@@ -351,20 +349,11 @@ export default function NexusOSDashboard() {
               {orchestratorState}
             </div>
           </div>
-          <div className="nxd__orbwrap">
-            <LightingSpill state={orchestratorState} />
-            <CognitiveCoreReactor
-              state={orchestratorState}
-              tokensRate={modelCalls.length * 1000}
-              reasoningCount={reasoningSteps.length}
-              contextDepth={contextDepth}
-              memoryRate={memoryRate}
-              agentActivity={activeAgents}
-              taskActivity={running}
-              gpuTemp={gpuTemp}
-              gpuUsage={gpu}
-              focusKeyword={focusKeyword}
-              eyeSize={580}
+          <div className="nxd__orbwrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CognitiveEye
+              size={420}
+              mode="dashboard"
+              onClick={() => window.dispatchEvent(new CustomEvent('nx:companion:open'))}
             />
           </div>
 

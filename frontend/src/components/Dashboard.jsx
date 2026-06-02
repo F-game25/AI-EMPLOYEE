@@ -48,6 +48,7 @@ const CognitionPage     = lazy(() => import('./pages/CognitionPage'))
 const ReconPage         = lazy(() => import('./pages/ReconPage'))
 const PromptInspectorPage = lazy(() => import('./pages/PromptInspectorPage'))
 const SalesPage         = lazy(() => import('./pages/sales/SalesPage'))
+const AvatarLabPage     = lazy(() => import('./pages/AvatarLabPage'))
 import { API_URL } from '../config/api'
 import { usePerformanceMode } from '../hooks/usePerformanceMode'
 import TopBar from './dashboard/TopBar'
@@ -111,6 +112,7 @@ const PAGES = {
   'user-views':     UserExperienceCenter,
   'roles':          UserExperienceCenter,
   'perspectives':   UserExperienceCenter,
+  'avatar-lab':     AvatarLabPage,
 }
 
 function DashboardMountedSignal({ section }) {
@@ -212,6 +214,13 @@ export default function Dashboard() {
     const openChat = () => setChatPanelOpen(true)
     window.addEventListener('nx:chat:open', openChat)
     return () => window.removeEventListener('nx:chat:open', openChat)
+  }, [])
+
+  // Companion click (dashboard eye / toolbar eye) → open chat panel
+  useEffect(() => {
+    const openCompanion = () => setChatPanelOpen(v => !v)
+    window.addEventListener('nx:companion:open', openCompanion)
+    return () => window.removeEventListener('nx:companion:open', openCompanion)
   }, [])
 
   const PageComponent = PAGES[activeSection] || DashboardPage

@@ -7,5 +7,5 @@
 export { default as RingPanel } from './RingPanel'
 export { default as SystemBar } from './SystemBar'
 export { default as EventFeed } from './EventFeed'
-export { default as CentralCognitiveCore } from './CentralCognitiveCore'
+
 export { default as ChatPanel } from './ChatPanel'

@@ -1218,6 +1218,11 @@ html[data-perf="low"] *::after {
   transition: none !important;
   box-shadow: none !important;
 }
+/* ChatPanel slide must work even in Lite mode — it's the user-facing open/close */
+html[data-perf="low"] .chat-panel {
+  transition: transform 200ms ease-out !important;
+}
+/* CognitiveEye ring animations allowed in full mode; CSS handles lite via its own rules */
 /* Skip-to-content link — visible only on keyboard focus. */
 .skip-link {
   position: absolute; left: 8px; top: -48px; z-index: 9999;

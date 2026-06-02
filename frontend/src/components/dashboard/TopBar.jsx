@@ -8,7 +8,7 @@ import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useUpdateCheck } from '../../hooks/useUpdateCheck'
 import { setPerformanceTier } from '../../hooks/usePerformanceMode'
 import { CommandPill, ClockModule, StatusPill, HexButton } from '../nexus-ui'
-import MiniEye from '../core/MiniEye'
+import CognitiveEye from '../avatar/CognitiveEye'
 import './TopBar.css'
 
 const PAGE_LABELS = {
@@ -303,8 +303,13 @@ export default function TopBar() {
             }}
           >⚡ LITE</button>
 
-          {/* Route-aware mini-eye */}
-          <MiniEye size={22} className="nx-topbar__mini-eye" />
+          {/* Companion eye — same CognitiveEye, 32px toolbar size */}
+          <CognitiveEye
+            size={32}
+            mode="toolbar"
+            onClick={() => window.dispatchEvent(new CustomEvent('nx:companion:open'))}
+            className="nx-topbar__mini-eye"
+          />
 
           <span className="nx-topbar__divider" />
 
