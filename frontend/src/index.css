@@ -1201,6 +1201,22 @@ body {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+  .scanlines::after { display: none !important; }
+  *, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+}
+
+/* ── Lite / low performance tier — drop the expensive compositing ──────────────
+   Full-screen scanlines overlay + backdrop blurs are the main GPU cost on large
+   screens. Killing them (and decorative animations) makes weak machines fluid. */
+html[data-perf="low"] .scanlines::after { display: none !important; }
+html[data-perf="low"] *,
+html[data-perf="low"] *::before,
+html[data-perf="low"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
 }
 /* Skip-to-content link — visible only on keyboard focus. */
 .skip-link {

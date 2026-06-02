@@ -3,6 +3,8 @@ import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useEventFeedStore } from '../../store/eventFeedStore'
 import { WaveformStrip } from '../nexus-ui'
 import { useTelemetryBuffer } from '../../hooks/useTelemetryBuffer'
+import { useVisibleInterval } from '../../hooks/useVisibleInterval'
+import { usePerformanceMode } from '../../hooks/usePerformanceMode'
 import './NeuralActivityStrip.css'
 
 const LED_CHANNELS = [
@@ -36,12 +38,11 @@ export default function NeuralActivityStrip() {
     if (channel) setPulses(p => ({ ...p, [channel]: Date.now() }))
   }, [recentEvents])
 
-  // Re-render every 600ms so LED active-state expiry refreshes
+  // Re-render so LED active-state expiry refreshes — paused when tab hidden,
+  // and slower on low-tier devices.
+  const { pollMultiplier } = usePerformanceMode()
   const [, setTick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTick(n => n + 1), 600)
-    return () => clearInterval(id)
-  }, [])
+  useVisibleInterval(() => setTick(n => n + 1), 1000, pollMultiplier)
 
   const reasoningRate = reasoningSteps.length
   const memoryCount   = memoryWritesArr.length

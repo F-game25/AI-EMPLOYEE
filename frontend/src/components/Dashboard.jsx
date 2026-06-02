@@ -49,6 +49,7 @@ const ReconPage         = lazy(() => import('./pages/ReconPage'))
 const PromptInspectorPage = lazy(() => import('./pages/PromptInspectorPage'))
 const SalesPage         = lazy(() => import('./pages/sales/SalesPage'))
 import { API_URL } from '../config/api'
+import { usePerformanceMode } from '../hooks/usePerformanceMode'
 import TopBar from './dashboard/TopBar'
 import BottomDrawer from './dock/BottomDrawer'
 import ErrorBoundary from './ErrorBoundary'
@@ -134,6 +135,11 @@ export default function Dashboard() {
   const setActiveSection = useAppStore(s => s.setActiveSection)
   const navigate = useNavigate()
   const location = useLocation()
+  const { tier } = usePerformanceMode()
+
+  // Expose the performance tier as a root attribute so CSS can drop expensive
+  // compositing (backdrop blurs, scanlines, animations) on low/Lite mode.
+  useEffect(() => { document.documentElement.dataset.perf = tier }, [tier])
 
   // Sync URL → store when user navigates with browser back/forward
   useEffect(() => {

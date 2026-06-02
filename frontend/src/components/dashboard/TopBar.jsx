@@ -6,6 +6,7 @@ import { useSecurityStore } from '../../store/securityStore'
 import { useEconomyStore } from '../../store/economyStore'
 import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useUpdateCheck } from '../../hooks/useUpdateCheck'
+import { setPerformanceTier } from '../../hooks/usePerformanceMode'
 import { CommandPill, ClockModule, StatusPill, HexButton } from '../nexus-ui'
 import MiniEye from '../core/MiniEye'
 import './TopBar.css'
@@ -117,6 +118,7 @@ export default function TopBar() {
   const systemHealth  = useAppStore(s => s.systemHealth) || {}
   const nnStatus      = useAppStore(s => s.nnStatus)
   const activeSection = useAppStore(s => s.activeSection)
+  const liteActive = (() => { try { return localStorage.getItem('nx_perf_tier') === 'low' } catch { return false } })()
   const { updateReady, updateComplete, applying, applyUpdate } = useUpdateCheck()
   const toggleMobileSidebar = useSystemStore(s => s.toggleMobileSidebar)
 
@@ -285,6 +287,21 @@ export default function TopBar() {
           </div>
 
           <span className="nx-topbar__divider" />
+
+          {/* Lite-mode toggle — forces the low performance tier (fast, no heavy FX) */}
+          <button
+            type="button"
+            className="nx-topbar__lite"
+            onClick={() => setPerformanceTier(liteActive ? null : 'low')}
+            title={liteActive ? 'Lite-modus aan — klik voor volledige visuals' : 'Lite-modus: snelle UI zonder zware effecten'}
+            style={{
+              background: liteActive ? 'var(--gold-molten, #e5c76b)' : 'transparent',
+              color: liteActive ? '#111215' : 'var(--text-muted, #8A8A96)',
+              border: '1px solid var(--border-gold, rgba(229,199,107,0.3))',
+              borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 700,
+              cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '.04em',
+            }}
+          >⚡ LITE</button>
 
           {/* Route-aware mini-eye */}
           <MiniEye size={22} className="nx-topbar__mini-eye" />
