@@ -77,39 +77,38 @@ def render_site(ctx: dict, theme: dict) -> dict[str, str]:
     meta = ctx["meta"]
     out: dict[str, str] = {}
 
-    # Availability of real, Lars-confirmed content — empty sections are skipped.
-    has_diensten = bool(ctx.get("diensten"))
+    # Sections render lazily: a block is only built when its data exists. Empty
+    # blocks (reviews/gallery/stat_strip) also self-guard. diensten is always
+    # present (real or branche-typical fallback).
     has_reviews  = bool(ctx.get("reviews"))
     has_gallery  = bool(ctx.get("gallery"))
     has_stats    = bool(ctx.get("stats"))
-    # Stats are shown via a dedicated strip (when present), so keep the 'over'
-    # block visual — avoid its statband variant to prevent duplication.
+    # Stats show via a dedicated strip → avoid the 'over' statband variant.
     ov_variant = 1 if vv["over"] == 2 else vv["over"]
 
     def nav_footer(active):
         ctx["active"] = active
         return blocks.nav(ctx, vv["nav"]), blocks.footer(ctx, vv["footer"])
 
-    def opt(cond, html):
-        return html if cond else ""
-
-    # Home
+    # Home — full, professional even with little data.
     n, f = nav_footer("index.html")
     home = (n + blocks.hero(ctx, vv["hero"])
-            + opt(has_stats, blocks.stat_strip(ctx))
-            + opt(has_diensten, blocks.diensten(ctx, vv["diensten"]))
+            + (blocks.stat_strip(ctx) if has_stats else "")
+            + blocks.diensten(ctx, vv["diensten"])
+            + blocks.werkwijze(ctx)
             + blocks.over(ctx, ov_variant)
-            + opt(has_gallery, blocks.gallery(ctx))
-            + opt(has_reviews, blocks.reviews(ctx, vv["reviews"]))
+            + (blocks.gallery(ctx) if has_gallery else "")
+            + (blocks.reviews(ctx, vv["reviews"]) if has_reviews else "")
+            + blocks.waarom(ctx)
             + blocks.cta(ctx, vv["cta"]) + f)
     out["index.html"] = _doc(title_base, meta, theme, home, ctx)
 
-    # Diensten — itemized list if we have real services, else a general intro.
+    # Diensten
     n, f = nav_footer("diensten.html")
     dn = (n + _pagehead(ctx, "Diensten", f"Wat {naam} voor u kan betekenen in {plaats} en omgeving.")
-          + (blocks.diensten(ctx, vv["diensten"], head=False) if has_diensten
-             else blocks.over(ctx, 1, full=True))
-          + opt(has_gallery, blocks.gallery(ctx))
+          + blocks.diensten(ctx, vv["diensten"], head=False)
+          + blocks.werkwijze(ctx)
+          + (blocks.gallery(ctx) if has_gallery else "")
           + blocks.cta(ctx, vv["cta"]) + f)
     out["diensten.html"] = _doc(f"Diensten — {naam}", meta, theme, dn, ctx)
 
@@ -117,8 +116,10 @@ def render_site(ctx: dict, theme: dict) -> dict[str, str]:
     n, f = nav_footer("over.html")
     ov = (n + _pagehead(ctx, "Over ons", f"Het verhaal achter {naam}.")
           + blocks.over(ctx, ov_variant, full=True)
-          + opt(has_gallery, blocks.gallery(ctx))
-          + opt(has_reviews, blocks.reviews(ctx, vv["reviews"]))
+          + (blocks.stat_strip(ctx) if has_stats else "")
+          + blocks.waarom(ctx)
+          + (blocks.gallery(ctx) if has_gallery else "")
+          + (blocks.reviews(ctx, vv["reviews"]) if has_reviews else "")
           + blocks.cta(ctx, vv["cta"]) + f)
     out["over.html"] = _doc(f"Over ons — {naam}", meta, theme, ov, ctx)
 

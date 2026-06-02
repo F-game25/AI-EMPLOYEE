@@ -133,17 +133,14 @@ def reviews(ctx, v=0):
     if not revs:
         return ""
     sh = '<div class="sec-head center"><span class="eyebrow">Klanten aan het woord</span><h2>Wat klanten zeggen</h2></div>'
-    if v == 0:
-        cards = "".join(f'<div class="rev-card"><div class="stars">★★★★★</div><p>{t}</p><div class="who">— {w}</div></div>'
+    who = lambda w: f'<div class="who">— {w}</div>' if w else ''  # noqa: E731
+    if v == 0 or v >= 2:
+        cards = "".join(f'<div class="rev-card"><div class="stars">★★★★★</div><p>{t}</p>{who(w)}</div>'
                         for t, w in revs)
         body = f'<div class="rev-cards">{cards}</div>'
-    elif v == 1:
+    else:  # v == 1 — single quote (revs is guaranteed non-empty)
         t, w = revs[0]
-        body = f'<div class="rev-single"><div class="stars">★★★★★</div><blockquote>{t}</blockquote><div class="who">— {w}</div></div>'
-    else:
-        cards = "".join(f'<div class="rev-card"><div class="stars">★★★★★</div><p>{t}</p><div class="who">— {w}</div></div>'
-                        for t, w in revs)
-        body = f'<div class="rev-cards">{cards}</div>'
+        body = f'<div class="rev-single"><div class="stars">★★★★★</div><blockquote>{t}</blockquote>{who(w)}</div>'
     return f'<section class="section section--alt"><div class="container">{sh}{body}</div></section>'
 
 
@@ -176,6 +173,33 @@ def _info_items(ctx):
     if ctx["website"]:
         out.append(("🌐", "Website", ctx["website_link"]))
     return out
+
+
+# ── WERKWIJZE (generiek, eerlijk — altijd toonbaar) ────────────────────────────
+def werkwijze(ctx, v=0):
+    steps = [
+        ("Neem contact op", "Bel of mail ons — we denken vrijblijvend met je mee."),
+        ("Afspraak op maat", "Heldere afspraken over aanpak, planning en prijs."),
+        ("Vakkundig geregeld", "We voeren het netjes uit en blijven bereikbaar."),
+    ]
+    cells = "".join(
+        f'<div class="step"><div class="step-n">{i + 1}</div><h3>{t}</h3><p>{d}</p></div>'
+        for i, (t, d) in enumerate(steps)
+    )
+    return f"""<section class="section section--alt"><div class="container">
+  <div class="sec-head center"><span class="eyebrow">Zo werkt het</span><h2>In drie stappen geregeld</h2></div>
+  <div class="steps">{cells}</div></div></section>"""
+
+
+# ── WAAROM / WAARDEN (generiek, eerlijk — altijd toonbaar) ──────────────────────
+def waarom(ctx, v=0):
+    vals = "".join(f'<div class="value"><div class="svc-ico">{ic}</div><h3>{t}</h3><p>{d}</p></div>'
+                   for ic, t, d in ctx.get("values", []))
+    if not vals:
+        return ""
+    return f"""<section class="section"><div class="container">
+  <div class="sec-head center"><span class="eyebrow">Waarom {ctx['naam']}</span><h2>Waarom klanten voor ons kiezen</h2></div>
+  <div class="values">{vals}</div></div></section>"""
 
 
 # ── STAT STRIP (alleen bij echte cijfers) ──────────────────────────────────────

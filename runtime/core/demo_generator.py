@@ -66,6 +66,81 @@ def _e(text: str) -> str:
     return _html.escape(str(text), quote=True)
 
 
+# Branche-typische diensten — generieke categorieën als Lars (nog) niets invult.
+# Geen verzonnen specifieke claims; gewone categorieën die bij de branche horen.
+_BRANCHE_DIENSTEN: list[tuple[tuple[str, ...], list[tuple[str, str]]]] = [
+    (("kapper", "haar", "barbier"), [
+        ("Knippen", "Voor dames, heren en kinderen."),
+        ("Kleuren & highlights", "Van bijwerken tot een complete kleuromslag."),
+        ("Föhnen & styling", "Een verzorgde look voor elke gelegenheid."),
+        ("Behandelingen", "Verzorging voor gezond en sterk haar.")]),
+    (("schoonheid", "beauty", "huid", "nagel", "spa"), [
+        ("Gezichtsbehandeling", "Reiniging en verzorging op maat."),
+        ("Wenkbrauwen & wimpers", "Epileren, verven en stylen."),
+        ("Ontharen", "Professioneel en zorgvuldig."),
+        ("Huidverbetering", "Advies en behandeling voor een stralende huid.")]),
+    (("schoon", "onderhoud"), [
+        ("Kantoorschoonmaak", "Een frisse werkplek, dagelijks of periodiek."),
+        ("Woningschoonmaak", "Uw huis grondig en betrouwbaar schoon."),
+        ("Glasbewassing", "Streeploze ramen, binnen en buiten."),
+        ("Opleverschoonmaak", "Compleet schoon bij verhuizing of verbouwing.")]),
+    (("loodgiet", "sanitair", "installat"), [
+        ("Lekkages verhelpen", "Snel opgespoord en vakkundig verholpen."),
+        ("Badkamer & sanitair", "Van kraan tot complete badkamer."),
+        ("CV & verwarming", "Onderhoud, storingen en vervanging."),
+        ("Spoedservice", "Snel ter plaatse bij acute problemen.")]),
+    (("elektr",), [
+        ("Groepenkast & bekabeling", "Veilig en volgens de norm."),
+        ("Verlichting", "Sfeer- en functionele verlichting."),
+        ("Laadpalen", "Installatie voor thuis en bedrijf."),
+        ("Storingen", "Snel opgelost door een vakman.")]),
+    (("schilder",), [
+        ("Binnenschilderwerk", "Strak afgewerkte muren en kozijnen."),
+        ("Buitenschilderwerk", "Bescherming én uitstraling."),
+        ("Behang & wandafwerking", "Van spachtelputz tot behang."),
+        ("Houtrotherstel", "Reparatie voor en tijdens het schilderen.")]),
+    (("bouw", "aannem", "timmer", "verbouw"), [
+        ("Verbouwingen", "Van idee tot opgeleverd resultaat."),
+        ("Aanbouw & dakkapel", "Meer ruimte, vakkundig gebouwd."),
+        ("Timmerwerk", "Maatwerk in hout."),
+        ("Onderhoud", "Klein en groot onderhoud aan uw woning.")]),
+    (("tuin", "groen", "hovenier"), [
+        ("Tuinaanleg", "Een tuin die bij u past."),
+        ("Tuinonderhoud", "Het hele jaar verzorgd."),
+        ("Bestrating", "Paden, terrassen en opritten."),
+        ("Beplanting", "Advies en aanplant op maat.")]),
+    (("restaurant", "horeca", "eten", "cafe", "café", "lunch"), [
+        ("À la carte", "Met zorg bereide gerechten."),
+        ("Lunch", "Vers en gevarieerd."),
+        ("Catering", "Ook buiten de deur."),
+        ("Groepen & reserveren", "Voor elke gelegenheid.")]),
+    (("bakker",), [
+        ("Brood & broodjes", "Elke dag vers gebakken."),
+        ("Taarten op maat", "Voor elk feest."),
+        ("Gebak", "Ambachtelijk en vers."),
+        ("Lunchhoek", "Belegde broodjes en koffie.")]),
+    (("auto", "garage", "reparatie", "monteur"), [
+        ("Onderhoud & APK", "Uw auto veilig op de weg."),
+        ("Reparaties", "Vakkundig en eerlijk."),
+        ("Banden", "Wisselen, opslag en vervanging."),
+        ("Diagnose", "Snel de oorzaak gevonden.")]),
+]
+_DIENSTEN_DEFAULT = [
+    ("Persoonlijk advies", "We denken met u mee voor de beste aanpak."),
+    ("Vakkundige uitvoering", "Net, op tijd en volgens afspraak."),
+    ("Service & nazorg", "Ook na de klus blijven we bereikbaar."),
+    ("Spoed mogelijk", "Snel ter plaatse wanneer het nodig is."),
+]
+
+
+def _branche_diensten(branche: str) -> list[tuple[str, str]]:
+    b = (branche or "").lower()
+    for keys, items in _BRANCHE_DIENSTEN:
+        if any(k in b for k in keys):
+            return items
+    return _DIENSTEN_DEFAULT
+
+
 def _norm_pairs(items, k1: str, k2: str) -> list[tuple[str, str]]:
     """Normalize a list of dicts/strings/tuples into [(a, b)] pairs, dropping empties.
 
@@ -131,6 +206,8 @@ def genereer_demo(
 
     # ── Echte data uit research/Lars — diensten/reviews/stats/foto's: nooit verzonnen ──
     diensten_items = _norm_pairs(rd.get("diensten"), "naam", "omschrijving")
+    if not diensten_items:                       # niets ingevuld → branche-typische categorieën
+        diensten_items = _branche_diensten(branche)
     review_items   = _norm_pairs(rd.get("reviews"), "tekst", "naam")
     stat_items     = _norm_pairs(rd.get("stats"), "cijfer", "label")
     fotos          = [f for f in (rd.get("fotos") or []) if isinstance(f, str) and f.strip()]

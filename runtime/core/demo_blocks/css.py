@@ -171,6 +171,15 @@ form.card{background:var(--surface);border:1px solid var(--border);border-radius
 .footer .bottom{border-top:1px solid rgba(255,255,255,.12);padding-top:1.5rem;font-size:.85rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem}
 .footer--simple{text-align:center}
 .footer--simple .bottom{justify-content:center;border:none;padding-top:0}
+/* werkwijze / process steps */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;counter-reset:step}
+.step{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:2rem 1.8rem}
+.step-n{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-family:var(--font-h);font-weight:800;
+  font-size:1.2rem;background:var(--accent);color:#fff;margin-bottom:1.1rem}
+.step h3{margin-bottom:.5rem}
+.step::after{content:"→";position:absolute;top:2.4rem;right:-1.05rem;color:var(--accent);font-size:1.3rem;font-weight:700;z-index:2}
+.step:last-child::after{display:none}
+
 /* gallery + neutral (image-less) panels */
 .gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem}
 .gal-item{aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;background:var(--alt);box-shadow:var(--shadow)}
@@ -185,6 +194,8 @@ form.card{background:var(--surface);border:1px solid var(--border);border-radius
   .nav-toggle-label span{width:24px;height:2px;background:var(--text);border-radius:2px}
   .nav .nav-cta{display:none}
   .hero--split .grid,.about--split .grid,.contact-split,.cta-split{grid-template-columns:1fr}
+  .steps{grid-template-columns:1fr}
+  .step::after{display:none}
   .cta-split .right{text-align:left}
   .field-row{grid-template-columns:1fr}
   .statband .grid{grid-template-columns:repeat(2,1fr)}
