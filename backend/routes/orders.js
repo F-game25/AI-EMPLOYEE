@@ -183,14 +183,23 @@ order = order_ophalen(${JSON.stringify(id)})
 if not order:
   print(json.dumps({"ok": False, "error": "Order niet gevonden"}))
 else:
-  data = research_bedrijf(order['bedrijfsnaam'], order['plaats'])
-  # Persist research_data on the order
+  try:
+    existing = json.loads(order.get('research_data') or '{}')
+    if not isinstance(existing, dict): existing = {}
+  except Exception:
+    existing = {}
+  data = research_bedrijf(order['bedrijfsnaam'], order['plaats'], website=existing.get('website'))
+  # Merge: keep Lars's earlier non-empty fields; new findings only fill/overwrite where non-empty.
+  merged = dict(existing)
+  for k, v in data.items():
+    if v not in (None, "", []):
+      merged[k] = v
   try:
     with _conn() as conn:
-      conn.execute("UPDATE orders SET research_data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), ${JSON.stringify(id)}))
+      conn.execute("UPDATE orders SET research_data=? WHERE id=?", (json.dumps(merged, ensure_ascii=False), ${JSON.stringify(id)}))
   except Exception as exc:
     pass  # non-fatal — data still returned
-  print(json.dumps({"ok": True, "research_data": data}))
+  print(json.dumps({"ok": True, "research_data": merged}))
 `;
       const result = await pyCall(snippet, 30_000);
       res.status(result.ok ? 200 : 500).json(result);

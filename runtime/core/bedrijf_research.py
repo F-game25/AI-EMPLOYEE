@@ -36,6 +36,21 @@ _SOCIAL   = re.compile(
     re.IGNORECASE,
 )
 _URL = re.compile(r"https?://[^\s\"<>]+", re.IGNORECASE)
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_OG_IMAGE = re.compile(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', re.I)
+_IMG_SRC = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.I)
+# Images that are almost never real content photos.
+_IMG_SKIP = re.compile(
+    r"(logo|icon|sprite|favicon|placeholder|avatar|pixel|spinner|loader|badge|button|"
+    r"instagram|facebook|whatsapp|twitter|linkedin|youtube|tiktok|\.svg($|\?)|data:)",
+    re.I,
+)
+# Best-effort opening-hours line: a weekday followed by times somewhere on the line.
+_OPENING = re.compile(
+    r"(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag|ma|di|wo|do|vr|za|zo)\b[^\n<]{0,60}?"
+    r"\d{1,2}[:.]\d{2}\s*[-–tot]{1,3}\s*\d{1,2}[:.]\d{2}",
+    re.I,
+)
 
 _SKIP_DOMAINS = (
     "duckduckgo", "google", "facebook", "instagram", "linkedin",
@@ -78,7 +93,11 @@ def _fetch(url: str, timeout: int = 10) -> str:
 
 def _ddg_snippet(query: str) -> str:
     url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote_plus(query)
-    return _fetch(url, timeout=12)
+    html = _fetch(url, timeout=12)
+    # Anomaly/captcha page → treat as no result (don't parse garbage).
+    if "anomaly" in html.lower():
+        return ""
+    return html
 
 
 def _strip_tags(html: str) -> str:
@@ -108,6 +127,45 @@ def _score_website(url: str) -> tuple[str, str]:
     if old_hits >= 1:
         return "slechte_site", "Mogelijk verouderd — controleer zelf"
     return "goede_site", "Site ziet er redelijk modern uit"
+
+
+def _extract_site_details(website: str) -> dict[str, Any]:
+    """Fetch the business's own site and pull real extras: email, photos, opening hours.
+
+    Anything not found stays empty — never fabricated.
+    """
+    out: dict[str, Any] = {"email": None, "fotos": [], "openingstijden": None}
+    html = _fetch(website, timeout=10)
+    if not html:
+        return out
+
+    # Email — prefer mailto:, fall back to a plain address in the page text.
+    mailto = re.search(r'mailto:([^"\'?>\s]+@[^"\'?>\s]+)', html, re.I)
+    if mailto:
+        out["email"] = mailto.group(1).strip()
+    else:
+        m = _EMAIL.search(_strip_tags(html))
+        if m and not m.group(0).lower().endswith((".png", ".jpg", ".gif")):
+            out["email"] = m.group(0).strip()
+
+    # Photos — og:image first, then content <img> (absolute, filtered), deduped.
+    fotos: list[str] = []
+    for src in _OG_IMAGE.findall(html) + _IMG_SRC.findall(html):
+        if not src or _IMG_SKIP.search(src):
+            continue
+        absurl = urllib.parse.urljoin(website, src)
+        if absurl.lower().startswith(("http://", "https://")) and absurl not in fotos:
+            fotos.append(absurl)
+        if len(fotos) >= 6:
+            break
+    out["fotos"] = fotos
+
+    # Opening hours — best effort; leave None if not clearly present.
+    oh = _OPENING.search(_strip_tags(html))
+    if oh:
+        out["openingstijden"] = re.sub(r"\s+", " ", oh.group(0)).strip()
+
+    return out
 
 
 def _parse_single_result(html: str) -> dict[str, Any]:
@@ -160,7 +218,7 @@ def _merge_results(results: list[dict[str, Any]], queries: list[str]) -> dict[st
     return merged
 
 
-def research_bedrijf(bedrijfsnaam: str, plaats: str) -> dict[str, Any]:
+def research_bedrijf(bedrijfsnaam: str, plaats: str, website: str | None = None) -> dict[str, Any]:
     """Search the web for real info about a business using parallel swarm queries.
 
     Runs 3 DuckDuckGo queries in parallel with different angles, merges the
@@ -209,20 +267,32 @@ def research_bedrijf(bedrijfsnaam: str, plaats: str) -> dict[str, Any]:
     postcodes = []
     adres     = merged["adres"]
 
-    website = merged["website"]
+    # Prefer a known website (e.g. from the finder) over a re-discovered one.
+    website = (website or "").strip() or merged["website"]
 
+    # Extra echte velden van de eigen site (alleen als er een website is).
+    email = None
+    fotos: list[str] = []
+    openingstijden = None
     if website:
         website_status, website_reden = _score_website(website)
+        details = _extract_site_details(website)
+        email = details.get("email")
+        fotos = details.get("fotos") or []
+        openingstijden = details.get("openingstijden")
     else:
         website_status, website_reden = "geen_site", "Geen website gevonden — ideale kandidaat"
 
     result: dict[str, Any] = {
         "telefoon":       telefoon,
+        "email":          email,
         "adres":          adres,
+        "openingstijden": openingstijden,
         "website":        website,
         "website_status": website_status,
         "website_reden":  website_reden,
         "social":         merged["social"],
+        "fotos":          fotos,
         "snippet":        merged["snippet"],
         "bron":           merged["bron"],
         "swarm_queries":  len(raw_results),

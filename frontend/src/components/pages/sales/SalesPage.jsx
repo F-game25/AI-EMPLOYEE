@@ -48,21 +48,29 @@ function Finder({ onCreated }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [kandidaten, setKandidaten] = useState([])
+  const [melding, setMelding] = useState('')
   const [creating, setCreating] = useState({})
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   async function zoek(e) {
-    e.preventDefault(); setErr(null); setKandidaten([]); setBusy(true)
+    e.preventDefault(); setErr(null); setKandidaten([]); setMelding(''); setBusy(true)
     try {
       const res = await api.post('/api/orders/search', { stad: form.stad, branche: form.branche, aantal: parseInt(form.aantal) || 8 })
-      if (res.ok) setKandidaten(res.kandidaten || []); else setErr(res.error || 'Zoeken mislukt')
+      if (res.ok) { setKandidaten(res.kandidaten || []); setMelding(res.kandidaten?.length ? '' : (res.melding || 'Geen bedrijven gevonden.')) }
+      else setErr(res.error || 'Zoeken mislukt')
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
   async function voegToe(k, i) {
     setCreating(c => ({ ...c, [i]: true }))
     try {
       const res = await api.post('/api/orders', { bedrijfsnaam: k.bedrijfsnaam, plaats: k.plaats, branche: k.branche, contact: k.contact || '', prijs: 299 })
-      if (res.ok) { onCreated(res.order); setKandidaten(p => p.filter((_, j) => j !== i)) } else alert(res.error || 'Aanmaken mislukt')
+      if (res.ok) {
+        // Carry the finder's website into research_data so research/demo can use it.
+        if (k.website) {
+          try { await api.post(`/api/orders/${res.order.id}/research-data`, { research_data: { website: k.website } }) } catch { /* non-fatal */ }
+        }
+        onCreated(res.order); setKandidaten(p => p.filter((_, j) => j !== i))
+      } else alert(res.error || 'Aanmaken mislukt')
     } catch (e) { alert(e.message) } finally { setCreating(c => ({ ...c, [i]: false })) }
   }
 
@@ -75,6 +83,7 @@ function Finder({ onCreated }) {
         <button className="sl-btn sl-btn--primary" type="submit" disabled={busy}>{busy ? 'Zoeken…' : 'Zoek'}</button>
       </form>
       {err && <p className="sl-err">{err}</p>}
+      {melding && <p className="sl-hint">{melding}</p>}
       {kandidaten.length > 0 && (
         <div className="sl-cand">
           <SectionLabel rule>{kandidaten.length} kandidaten</SectionLabel>
