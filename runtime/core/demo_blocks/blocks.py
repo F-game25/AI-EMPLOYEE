@@ -76,7 +76,9 @@ def hero(ctx, v=0):
 # ── DIENSTEN ──────────────────────────────────────────────────────────────────
 def diensten(ctx, v=0, head=True):
     v %= VARIANTS["diensten"]
-    items = ctx["diensten"]
+    items = ctx.get("diensten") or []
+    if not items:
+        return ""
     sh = ('<div class="sec-head center"><span class="eyebrow">Wat wij doen</span>'
           f'<h2>Onze diensten</h2><p class="lead">Vakwerk voor {ctx["plaats"]} en omgeving.</p></div>') if head else ""
     if v == 0:
@@ -127,7 +129,9 @@ def over(ctx, v=0, full=False):
 # ── REVIEWS ───────────────────────────────────────────────────────────────────
 def reviews(ctx, v=0):
     v %= VARIANTS["reviews"]
-    revs = ctx["reviews"]
+    revs = ctx.get("reviews") or []
+    if not revs:
+        return ""
     sh = '<div class="sec-head center"><span class="eyebrow">Klanten aan het woord</span><h2>Wat klanten zeggen</h2></div>'
     if v == 0:
         cards = "".join(f'<div class="rev-card"><div class="stars">★★★★★</div><p>{t}</p><div class="who">— {w}</div></div>'
