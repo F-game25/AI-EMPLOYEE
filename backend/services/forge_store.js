@@ -290,6 +290,130 @@ class ForgeStore {
     this.lastError = err?.message || String(err)
     this._db = null
   }
+
+  // ── Training runs ─────────────────────────────────────────────────────────
+
+  _trainingFile(projectId) {
+    return path.join(this.forgeHome, 'training', `${projectId}.json`)
+  }
+
+  _loadTrainingData(projectId) {
+    return readJson(this._trainingFile(projectId), { training_runs: [], model_versions: [] })
+  }
+
+  _saveTrainingData(projectId, data) {
+    writeJson(this._trainingFile(projectId), data)
+  }
+
+  createTrainingRun(projectId, params = {}) {
+    const data = this._loadTrainingData(projectId)
+    const run = {
+      training_run_id: `tr-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 6)}`,
+      project_id: projectId,
+      model_type: params.model_type || 'intent_classifier',
+      status: 'PENDING',
+      metrics: {},
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    }
+    data.training_runs.unshift(run)
+    this._saveTrainingData(projectId, data)
+    return run
+  }
+
+  getTrainingRuns(projectId) {
+    return this._loadTrainingData(projectId).training_runs
+  }
+
+  findTrainingRun(trainingRunId) {
+    const home = this.forgeHome
+    const trainingDir = path.join(home, 'training')
+    if (!require('fs').existsSync(trainingDir)) return null
+    for (const f of require('fs').readdirSync(trainingDir)) {
+      if (!f.endsWith('.json')) continue
+      const data = readJson(path.join(trainingDir, f), { training_runs: [] })
+      const run = data.training_runs.find(r => r.training_run_id === trainingRunId)
+      if (run) return run
+    }
+    return null
+  }
+
+  updateTrainingRun(trainingRunId, patch) {
+    const home = this.forgeHome
+    const trainingDir = path.join(home, 'training')
+    if (!require('fs').existsSync(trainingDir)) return null
+    for (const f of require('fs').readdirSync(trainingDir)) {
+      if (!f.endsWith('.json')) continue
+      const file = path.join(trainingDir, f)
+      const data = readJson(file, { training_runs: [], model_versions: [] })
+      const idx = data.training_runs.findIndex(r => r.training_run_id === trainingRunId)
+      if (idx === -1) continue
+      data.training_runs[idx] = { ...data.training_runs[idx], ...patch, updated_at: nowIso() }
+      writeJson(file, data)
+      return data.training_runs[idx]
+    }
+    return null
+  }
+
+  getTrainingSummary(projectId) {
+    const data = this._loadTrainingData(projectId)
+    const runs = data.training_runs || []
+    const versions = data.model_versions || []
+    return {
+      total_runs: runs.length,
+      completed: runs.filter(r => r.status === 'COMPLETED').length,
+      failed: runs.filter(r => r.status === 'FAILED').length,
+      pending: runs.filter(r => r.status === 'PENDING').length,
+      training: runs.filter(r => r.status === 'TRAINING').length,
+      model_versions: versions.length,
+      last_run: runs[0] || null,
+    }
+  }
+
+  // ── Model versions ────────────────────────────────────────────────────────
+
+  getModelVersions(projectId, opts = {}) {
+    const data = this._loadTrainingData(projectId)
+    let versions = data.model_versions || []
+    if (opts.model_type) versions = versions.filter(v => v.model_type === opts.model_type)
+    return versions.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+  }
+
+  upsertModelVersion(projectId, mv) {
+    const data = this._loadTrainingData(projectId)
+    const versions = data.model_versions || []
+    const idx = versions.findIndex(v => v.model_version_id === mv.model_version_id)
+    if (idx >= 0) versions[idx] = { ...versions[idx], ...mv, updated_at: nowIso() }
+    else versions.unshift({ ...mv, created_at: mv.created_at || nowIso() })
+    data.model_versions = versions
+    this._saveTrainingData(projectId, data)
+    return versions.find(v => v.model_version_id === mv.model_version_id)
+  }
+
+  // ── Cognitive events ──────────────────────────────────────────────────────
+
+  _cognitiveFile(projectId) {
+    return path.join(this.forgeHome, 'cognitive', `${projectId}.json`)
+  }
+
+  getCognitiveEvents(projectId) {
+    return readJson(this._cognitiveFile(projectId), { events: [] }).events
+  }
+
+  upsertCognitiveEvent(event) {
+    const projectId = event.project_id
+    if (!projectId) return event
+    return this.addCognitiveEvent(projectId, event)
+  }
+
+  addCognitiveEvent(projectId, event) {
+    const file = this._cognitiveFile(projectId)
+    const data = readJson(file, { events: [] })
+    data.events.unshift({ ...event, timestamp: event.timestamp || nowIso() })
+    if (data.events.length > 500) data.events = data.events.slice(0, 500)
+    writeJson(file, data)
+    return data.events[0]
+  }
 }
 
 module.exports = { ForgeStore }

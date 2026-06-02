@@ -20,6 +20,7 @@ const { spawn, spawnSync } = require('child_process')
 const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforge/engine')
 const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
+const { ForgeLearningStore } = require('../services/forge_learning_store')
 const forgeWorkspace = require('../services/forge_workspace')
 const forgePath = require('../services/forge_path')
 const forgeDiff = require('../services/forge_diff')
@@ -88,7 +89,16 @@ const BLOCKED_CODE_PATTERNS = [
 const MAX_RUNS = 500
 const MAX_STAGED_COPY_FILES = 2500
 const MAX_STAGED_COPY_BYTES = 50 * 1024 * 1024
-const forgeRunStore = new ForgeStore({ forgeHome: FORGE_HOME, runsFile: RUNS_FILE, maxRuns: MAX_RUNS })
+const _forgeStore       = new ForgeStore({ forgeHome: FORGE_HOME, runsFile: RUNS_FILE, maxRuns: MAX_RUNS })
+const _forgeLearning    = new ForgeLearningStore(FORGE_HOME)
+// Unified proxy so all forgeRunStore.X calls resolve to the right store
+const forgeRunStore = new Proxy(_forgeStore, {
+  get(target, prop) {
+    if (prop in target) return typeof target[prop] === 'function' ? target[prop].bind(target) : target[prop]
+    if (prop in _forgeLearning) return typeof _forgeLearning[prop] === 'function' ? _forgeLearning[prop].bind(_forgeLearning) : _forgeLearning[prop]
+    return undefined
+  }
+})
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true })
