@@ -47,6 +47,7 @@ const ResearchPage      = lazy(() => import('./pages/ResearchPage'))
 const CognitionPage     = lazy(() => import('./pages/CognitionPage'))
 const ReconPage         = lazy(() => import('./pages/ReconPage'))
 const PromptInspectorPage = lazy(() => import('./pages/PromptInspectorPage'))
+const SalesPage         = lazy(() => import('./pages/sales/SalesPage'))
 import { API_URL } from '../config/api'
 import TopBar from './dashboard/TopBar'
 import BottomDrawer from './dock/BottomDrawer'
@@ -75,6 +76,7 @@ const PAGES = {
   'agents':         AgentsPage,
   'memory':         MemoryPage,
   'economy':        MoneyModePage,
+  'sales':          SalesPage,
   // OPERATIONS
   'tasks':          OperationsPage,
   'workflows':      WorkflowsPage,

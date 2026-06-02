@@ -199,6 +199,23 @@ else:
     }
   });
 
+  // POST /api/orders/:id/research-data — persist USER-EDITED research (real info only)
+  r.post('/:id/research-data', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const data = (req.body && typeof req.body.research_data === 'object') ? req.body.research_data : {};
+      const snippet = `
+from core.orders_store import research_data_opslaan
+result = research_data_opslaan(${JSON.stringify(id)}, ${JSON.stringify(data)})
+print(json.dumps(result))
+`;
+      const result = await pyCall(snippet, 10_000);
+      res.status(result.ok ? 200 : 404).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // POST /api/orders/:id/demo — generate demo website, set status ter_review
   r.post('/:id/demo', requireAuth, async (req, res) => {
     try {

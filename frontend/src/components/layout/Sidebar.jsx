@@ -86,6 +86,11 @@ const NAV_GROUPS = [
         label: 'Economy',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6-6-2.7-6-6z"/><path d="M8 5v6M6 7h4"/></svg>,
       },
+      {
+        id: 'sales',
+        label: 'Sales',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h2l1.2 7.2a1 1 0 0 0 1 .8h5.6a1 1 0 0 0 1-.8L14 5H5"/><circle cx="6.5" cy="13.5" r="1"/><circle cx="12" cy="13.5" r="1"/></svg>,
+      },
     ],
   },
   {

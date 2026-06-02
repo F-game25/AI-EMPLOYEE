@@ -165,3 +165,19 @@ def pitch_bijwerken(order_id: str, pitch_tekst: str) -> dict[str, Any]:
             return {"ok": False, "error": f"Order {order_id} niet gevonden"}
         conn.execute("UPDATE orders SET pitch_tekst=? WHERE id=?", (pitch_tekst, order_id))
     return {"ok": True, "order": order_ophalen(order_id)}
+
+
+def research_data_opslaan(order_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Persist user-edited research_data (real business info) on an order.
+
+    Only stores what the user supplied — empty fields stay empty, never fabricated.
+    Returns the updated order.
+    """
+    import json as _json
+    with _conn() as conn:
+        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+        payload = _json.dumps(data if isinstance(data, dict) else {}, ensure_ascii=False)
+        conn.execute("UPDATE orders SET research_data=? WHERE id=?", (payload, order_id))
+    return {"ok": True, "order": order_ophalen(order_id)}
