@@ -167,6 +167,28 @@ def pitch_bijwerken(order_id: str, pitch_tekst: str) -> dict[str, Any]:
     return {"ok": True, "order": order_ophalen(order_id)}
 
 
+_EDITABLE_VELDEN = ("bedrijfsnaam", "plaats", "branche", "contact", "prijs")
+
+
+def order_velden_bijwerken(order_id: str, velden: dict[str, Any]) -> dict[str, Any]:
+    """Update core order fields (bedrijfsnaam/plaats/branche/contact/prijs). Returns updated order."""
+    updates = {k: v for k, v in (velden or {}).items() if k in _EDITABLE_VELDEN}
+    if not updates:
+        return {"ok": False, "error": "Geen geldige velden om bij te werken"}
+    if "prijs" in updates:
+        try:
+            updates["prijs"] = float(updates["prijs"])
+        except (TypeError, ValueError):
+            del updates["prijs"]
+    with _conn() as conn:
+        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+        sets = ", ".join(f"{k}=?" for k in updates)
+        conn.execute(f"UPDATE orders SET {sets} WHERE id=?", (*updates.values(), order_id))  # nosec B608 — keys whitelisted
+    return {"ok": True, "order": order_ophalen(order_id)}
+
+
 def research_data_opslaan(order_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Persist user-edited research_data (real business info) on an order.
 

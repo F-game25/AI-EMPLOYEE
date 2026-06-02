@@ -9,6 +9,7 @@ const express = require('express');
 const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const RUNTIME_DIR = path.join(REPO_ROOT, 'runtime');
@@ -67,6 +68,30 @@ function demoUrlFromPad(demoPad, host) {
   if (base.endsWith('.html')) return `${host}/api/demos/${base}`;      // legacy single file
   return `${host}/api/demos/${base}/`;                                  // folder path
 }
+
+// Photo upload → demos/_assets/<orderId>/, served publicly at /api/demos/_assets/...
+const DEMOS_ASSETS_DIR = path.join(AI_HOME, 'state', 'artifacts', 'demos', '_assets');
+const _IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']);
+const photoUpload = require('multer')({
+  storage: require('multer').diskStorage({
+    destination: (req, _f, cb) => {
+      const d = path.join(DEMOS_ASSETS_DIR, path.basename(req.params.id));
+      fs.mkdirSync(d, { recursive: true });
+      cb(null, d);
+    },
+    filename: (_r, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60) || 'foto';
+      cb(null, `${Date.now()}-${base}${ext}`);
+    },
+  }),
+  fileFilter: (_r, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!_IMAGE_EXT.has(ext)) return cb(new Error(`Bestandstype '${ext}' niet toegestaan (alleen afbeeldingen)`));
+    cb(null, true);
+  },
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
+});
 
 module.exports = function createOrdersRouter(requireAuth) {
   const r = express.Router();
@@ -223,6 +248,36 @@ print(json.dumps(result))
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
+  });
+
+  // POST /api/orders/:id/update — edit core order fields (bedrijfsnaam/plaats/branche/contact/prijs)
+  r.post('/:id/update', requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const velden = {};
+      for (const k of ['bedrijfsnaam', 'plaats', 'branche', 'contact', 'prijs']) {
+        if (req.body && k in req.body) velden[k] = req.body[k];
+      }
+      const snippet = `
+from core.orders_store import order_velden_bijwerken
+result = order_velden_bijwerken(${JSON.stringify(id)}, ${JSON.stringify(velden)})
+print(json.dumps(result))
+`;
+      const result = await pyCall(snippet, 10_000);
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/orders/:id/photo — upload business photo(s) (multipart field 'photos')
+  r.post('/:id/photo', requireAuth, (req, res) => {
+    photoUpload.array('photos', 10)(req, res, (err) => {
+      if (err) return res.status(400).json({ ok: false, error: err.message });
+      const id = path.basename(req.params.id);
+      const urls = (req.files || []).map(f => `/api/demos/_assets/${id}/${f.filename}`);
+      res.json({ ok: true, urls });
+    });
   });
 
   // POST /api/orders/:id/demo — generate demo website, set status ter_review

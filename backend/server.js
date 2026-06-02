@@ -470,6 +470,9 @@ if (HAS_FRONTEND_DIST) {
 const WORKSPACE_DIR = path.join(os.homedir(), '.ai-employee', 'workspace');
 app.use('/workspace', express.static(WORKSPACE_DIR, { index: false }));
 
+// Serve uploaded/added business photos for demo sites (public — used in demo HTML).
+app.use('/api/demos/_assets', express.static(path.join(AI_HOME, 'state', 'artifacts', 'demos', '_assets'), { index: false }));
+
 // Serve AI-generated artifacts (summaries, code files) at /api/artifacts/:filename
 const ARTIFACTS_DIR = path.join(__dirname, '..', 'state', 'artifacts');
 // Preview HTML artifacts inline (no auth cookie needed — token in query param for iframe src)

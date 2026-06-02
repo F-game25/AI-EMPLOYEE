@@ -135,59 +135,147 @@ function ManualAdd({ onCreated }) {
   )
 }
 
+const _lines = (s) => s.split('\n').map(x => x.trim()).filter(Boolean)
+
+function _initRd(order) {
+  let s = {}; try { s = order.research_data ? JSON.parse(order.research_data) : {} } catch { s = {} }
+  return {
+    telefoon: s.telefoon || '', email: s.email || '', adres: s.adres || '', openingstijden: s.openingstijden || '',
+    website: s.website || '',
+    social: (s.social || []).join('\n'),
+    diensten: (s.diensten || []).map(d => typeof d === 'string' ? d : `${d.naam}${d.omschrijving ? `: ${d.omschrijving}` : ''}`).join('\n'),
+    reviews: (s.reviews || []).map(r => typeof r === 'string' ? r : `${r.tekst}${r.naam ? ` | ${r.naam}` : ''}`).join('\n'),
+    stats: (s.stats || []).map(st => typeof st === 'string' ? st : `${st.cijfer} | ${st.label}`).join('\n'),
+    fotos: s.fotos || [],
+  }
+}
+
 function ResearchEditor({ order, reload, onAdvance }) {
-  const init = (() => { try { return order.research_data ? JSON.parse(order.research_data) : {} } catch { return {} } })()
-  const [rd, setRd] = useState({ telefoon: init.telefoon || '', website: init.website || '', adres: init.adres || '', social: (init.social || []).join('\n') })
+  const [core, setCore] = useState({ bedrijfsnaam: order.bedrijfsnaam, plaats: order.plaats, branche: order.branche, contact: order.contact || '', prijs: String(order.prijs ?? 299) })
+  const [rd, setRd] = useState(() => _initRd(order))
+  const [fotos, setFotos] = useState(() => _initRd(order).fotos)
+  const [newFoto, setNewFoto] = useState('')
   const [busy, setBusy] = useState(false); const [autoBusy, setAutoBusy] = useState(false)
-  const [genBusy, setGenBusy] = useState(false); const [err, setErr] = useState(null); const [saved, setSaved] = useState(false)
+  const [upBusy, setUpBusy] = useState(false); const [genBusy, setGenBusy] = useState(false)
+  const [err, setErr] = useState(null); const [saved, setSaved] = useState(false)
+  const setC = (k, v) => { setCore(c => ({ ...c, [k]: v })); setSaved(false) }
   const set = (k, v) => { setRd(r => ({ ...r, [k]: v })); setSaved(false) }
 
   useEffect(() => {
-    let s = {}; try { s = order.research_data ? JSON.parse(order.research_data) : {} } catch { s = {} }
-    setRd({ telefoon: s.telefoon || '', website: s.website || '', adres: s.adres || '', social: (s.social || []).join('\n') })
+    setCore({ bedrijfsnaam: order.bedrijfsnaam, plaats: order.plaats, branche: order.branche, contact: order.contact || '', prijs: String(order.prijs ?? 299) })
+    const d = _initRd(order); setRd(d); setFotos(d.fotos)
   }, [order.id]) // eslint-disable-line
 
-  function payload() {
-    return { telefoon: rd.telefoon.trim(), website: rd.website.trim(), adres: rd.adres.trim(), social: rd.social.split('\n').map(s => s.trim()).filter(Boolean) }
+  function buildResearch() {
+    return {
+      telefoon: rd.telefoon.trim(), email: rd.email.trim(), adres: rd.adres.trim(), openingstijden: rd.openingstijden.trim(),
+      website: rd.website.trim(),
+      social: _lines(rd.social),
+      fotos,
+      diensten: _lines(rd.diensten).map(l => { const i = l.indexOf(':'); return i === -1 ? { naam: l, omschrijving: '' } : { naam: l.slice(0, i).trim(), omschrijving: l.slice(i + 1).trim() } }),
+      reviews: _lines(rd.reviews).map(l => { const [t, n] = l.split('|'); return { tekst: t.trim(), naam: (n || '').trim() } }),
+      stats: _lines(rd.stats).map(l => { const [c, lab] = l.split('|'); return { cijfer: c.trim(), label: (lab || '').trim() } }),
+    }
+  }
+  async function persist() {
+    await api.post(`/api/orders/${order.id}/update`, { ...core, prijs: parseFloat(core.prijs) || 299 })
+    await api.post(`/api/orders/${order.id}/research-data`, { research_data: buildResearch() })
   }
   async function autoResearch() {
     setAutoBusy(true); setErr(null)
     try {
       const res = await api.post(`/api/orders/${order.id}/research`, {})
-      if (res.ok && res.research_data) { const d = res.research_data; setRd({ telefoon: d.telefoon || '', website: d.website || '', adres: d.adres || '', social: (d.social || []).join('\n') }); setSaved(true); reload() }
-      else setErr(res.error || 'Research mislukt')
+      if (res.ok && res.research_data) {
+        const d = res.research_data
+        setRd(r => ({
+          ...r,
+          telefoon: r.telefoon || d.telefoon || '', email: r.email || d.email || '', adres: r.adres || d.adres || '',
+          openingstijden: r.openingstijden || d.openingstijden || '', website: r.website || d.website || '',
+          social: r.social || (d.social || []).join('\n'),
+        }))
+        if (d.fotos?.length) setFotos(f => [...new Set([...f, ...d.fotos])])
+        reload()
+      } else setErr(res.error || 'Research mislukt')
     } catch (e) { setErr(e.message) } finally { setAutoBusy(false) }
+  }
+  async function uploadFotos(files) {
+    if (!files?.length) return
+    setUpBusy(true); setErr(null)
+    try {
+      const fd = new FormData();[...files].forEach(f => fd.append('photos', f))
+      const token = sessionStorage.getItem('ai_jwt')
+      const res = await fetch(`/api/orders/${order.id}/photo`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd })
+      const data = await res.json()
+      if (data.ok) setFotos(f => [...f, ...data.urls]); else setErr(data.error || 'Upload mislukt')
+    } catch (e) { setErr(e.message) } finally { setUpBusy(false) }
   }
   async function save() {
     setBusy(true); setErr(null)
-    try {
-      const res = await api.post(`/api/orders/${order.id}/research-data`, { research_data: payload() })
-      if (res.ok) { setSaved(true); reload() } else setErr(res.error || 'Opslaan mislukt')
-    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+    try { await persist(); setSaved(true); reload() } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
   async function genereerDemo() {
     setGenBusy(true); setErr(null)
     try {
-      await api.post(`/api/orders/${order.id}/research-data`, { research_data: payload() }) // persist edits first
+      await persist()
       const res = await api.post(`/api/orders/${order.id}/demo`, {})
       if (res.ok) { reload(); onAdvance() } else setErr(res.error || 'Demo genereren mislukt')
     } catch (e) { setErr(e.message) } finally { setGenBusy(false) }
   }
 
   return (
-    <Panel title={`Research — ${order.bedrijfsnaam}`} sub={`${order.branche} in ${order.plaats}`} tone="gold"
+    <Panel title={`Gegevens — ${core.bedrijfsnaam}`} sub="research + handmatig aanvullen" tone="gold"
       actions={<button className="sl-btn" onClick={autoResearch} disabled={autoBusy}>{autoBusy ? 'Zoeken…' : '⟲ Auto-research'}</button>}>
-      <p className="sl-hint">Echte bedrijfsgegevens. Laat velden leeg als er niets gevonden is — nooit verzinnen. Deze info gebruikt de demo voor contact.</p>
+      <p className="sl-hint">Research vult voor wat het web vindt; vul jij de rest aan of corrigeer. Leeg laten = niet in de demo. Nooit verzinnen.</p>
+
+      <SectionLabel rule>Bedrijf</SectionLabel>
+      <div className="sl-form sl-form--grid">
+        <label>Bedrijfsnaam<input value={core.bedrijfsnaam} onChange={e => setC('bedrijfsnaam', e.target.value)} /></label>
+        <label>Branche<input value={core.branche} onChange={e => setC('branche', e.target.value)} /></label>
+        <label>Plaats<input value={core.plaats} onChange={e => setC('plaats', e.target.value)} /></label>
+        <label className="sl-form__narrow">Prijs €<input type="number" value={core.prijs} onChange={e => setC('prijs', e.target.value)} /></label>
+      </div>
+
+      <SectionLabel rule>Contact &amp; vindbaarheid</SectionLabel>
       <div className="sl-form sl-form--grid">
         <label>Telefoon<input value={rd.telefoon} onChange={e => set('telefoon', e.target.value)} placeholder="(leeg = niet tonen)" /></label>
-        <label>Website<input value={rd.website} onChange={e => set('website', e.target.value)} placeholder="(leeg = niet tonen)" /></label>
+        <label>E-mail<input value={rd.email} onChange={e => set('email', e.target.value)} placeholder="(leeg = niet tonen)" /></label>
         <label className="sl-form__full">Adres<input value={rd.adres} onChange={e => set('adres', e.target.value)} placeholder="(leeg = ‘plaats en omgeving’)" /></label>
+        <label>Website<input value={rd.website} onChange={e => set('website', e.target.value)} /></label>
+        <label>Openingstijden<input value={rd.openingstijden} onChange={e => set('openingstijden', e.target.value)} placeholder="Ma-vr 9-17" /></label>
         <label className="sl-form__full">Social media (één per regel)<textarea rows="2" value={rd.social} onChange={e => set('social', e.target.value)} placeholder="https://instagram.com/…" /></label>
       </div>
+
+      <SectionLabel rule>Diensten (één per regel — ‘Naam: korte omschrijving’)</SectionLabel>
+      <textarea className="sl-pitch" rows="4" value={rd.diensten} onChange={e => set('diensten', e.target.value)} placeholder={'Knippen: dames, heren en kinderen\nKleuren: balayage en highlights'} />
+
+      <SectionLabel rule>Foto's</SectionLabel>
+      <p className="sl-hint">Echte foto's van het bedrijf. Geen foto = neutraal kleurvlak in de demo (geen stockfoto).</p>
+      {fotos.length > 0 && (
+        <div className="sl-fotos">
+          {fotos.map((u, i) => (
+            <div className="sl-foto" key={i}>
+              <img src={u} alt="" loading="lazy" />
+              <button className="sl-foto__del" title="Verwijder" onClick={() => setFotos(f => f.filter((_, j) => j !== i))}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="sl-form sl-form--row">
+        <label className="sl-form__full">Foto-URL toevoegen<input value={newFoto} onChange={e => setNewFoto(e.target.value)} placeholder="https://… .jpg" /></label>
+        <button className="sl-btn" onClick={() => { if (newFoto.trim()) { setFotos(f => [...f, newFoto.trim()]); setNewFoto('') } }}>+ URL</button>
+        <label className="sl-btn sl-upload">{upBusy ? 'Uploaden…' : '⬆ Upload'}<input type="file" accept="image/*" multiple hidden onChange={e => uploadFotos(e.target.files)} /></label>
+      </div>
+
+      <SectionLabel rule>Reviews (één per regel — ‘tekst | naam’, alleen echte)</SectionLabel>
+      <textarea className="sl-pitch" rows="3" value={rd.reviews} onChange={e => set('reviews', e.target.value)} placeholder={'Snel en netjes geholpen, echt een aanrader! | Sandra'} />
+
+      <SectionLabel rule>Cijfers (één per regel — ‘cijfer | label’, alleen echte)</SectionLabel>
+      <textarea className="sl-pitch" rows="2" value={rd.stats} onChange={e => set('stats', e.target.value)} placeholder={'15+ | jaar ervaring\n4.8 | op Google'} />
+
       {err && <p className="sl-err">{err}</p>}
       <div className="sl-actions">
-        <button className="sl-btn" onClick={save} disabled={busy}>{busy ? 'Opslaan…' : saved ? '✓ Opgeslagen' : 'Research opslaan'}</button>
-        <button className="sl-btn sl-btn--primary" onClick={genereerDemo} disabled={genBusy}>{genBusy ? 'Demo genereren… (~30s)' : 'Genereer demo →'}</button>
+        <button className="sl-btn" onClick={save} disabled={busy}>{busy ? 'Opslaan…' : saved ? '✓ Opgeslagen' : 'Opslaan'}</button>
+        <button className="sl-btn sl-btn--primary" onClick={genereerDemo} disabled={genBusy}>{genBusy ? 'Demo genereren… (~30s)' : 'Opslaan + genereer demo →'}</button>
       </div>
     </Panel>
   )
