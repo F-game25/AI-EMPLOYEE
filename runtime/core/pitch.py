@@ -92,7 +92,16 @@ def genereer_pitch(order_id: str, *, demo_url: str = "") -> dict[str, Any]:
     demo    = demo_url or order.get("demo_pad", "")
     paypal  = f"{_PAYPAL_LINK}/{int(prijs)}" if not _PAYPAL_LINK.endswith(str(int(prijs))) else _PAYPAL_LINK
 
-    demo_link = demo if demo.startswith("http") else f"http://localhost:8787/api/demos/{Path(demo).name}"
+    if demo.startswith("http"):
+        demo_link = demo
+    else:
+        _p = Path(demo)
+        if _p.name == "index.html":              # multi-page folder demo
+            demo_link = f"http://localhost:8787/api/demos/{_p.parent.name}/"
+        elif _p.suffix == ".html":               # legacy single-file demo
+            demo_link = f"http://localhost:8787/api/demos/{_p.name}"
+        else:                                     # folder path
+            demo_link = f"http://localhost:8787/api/demos/{_p.name}/"
 
     prompt = (
         f"Schrijf een persoonlijk bericht (max 120 woorden) van Lars aan {naam} in {plaats}.\n"

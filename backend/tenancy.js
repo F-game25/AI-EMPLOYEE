@@ -58,6 +58,7 @@ function tenantMiddleware(secret = jwtSecret) {
       req.path.startsWith('/docs') ||
       req.path.startsWith('/assets/') ||
       req.path.startsWith('/workspace/') ||
+      req.path.startsWith('/api/demos/') ||   // public demo sites (multi-page folder + legacy files), shared with customers
       staticAssetRe.test(req.path)
     ) {
       return next();

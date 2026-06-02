@@ -124,17 +124,21 @@ module.exports = function createMediaRouter(deps) {
     });
   });
 
-  // GET /api/demos/:filename — serve generated demo HTML pages publicly (no auth).
-  // Uses res.send() instead of res.sendFile() to control every header explicitly.
-  // Helmet sets restrictive headers globally; demo pages need permissive inline CSP
-  // and no download-forcing headers so they open cleanly in a new browser tab.
-  router.get('/api/demos/:filename', (req, res) => {
-    const fname = path.basename(req.params.filename);
-    if (!fname.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
-    const demoPath = path.join(AI_HOME, 'state', 'artifacts', 'demos', fname);
-    if (!fs.existsSync(demoPath)) return res.status(404).send('Demo niet gevonden');
+  // ── Demo serving — publicly accessible (no auth), shared with customers ──────
+  // Demos are now multi-page sites in a per-business folder:
+  //   /api/demos/<slug>/            -> <slug>/index.html
+  //   /api/demos/<slug>/<page>.html -> <slug>/<page>.html
+  // Legacy single-file demos still work: /api/demos/<file>.html
+  // res.send() (not sendFile) lets us strip Helmet's restrictive headers and set
+  // a permissive CSP so the page (incl. Google Fonts) renders cleanly in a tab.
+  const DEMOS_DIR = path.join(AI_HOME, 'state', 'artifacts', 'demos');
+  const DEMOS_ROOT = path.resolve(DEMOS_DIR);
 
-    const html = fs.readFileSync(demoPath, 'utf8');
+  function _sendDemo(res, absPath) {
+    // Confine to the demos dir — defence in depth against path traversal.
+    if (!path.resolve(absPath).startsWith(DEMOS_ROOT)) return res.status(400).send('Ongeldig pad');
+    if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) return res.status(404).send('Demo niet gevonden');
+    const html = fs.readFileSync(absPath, 'utf8');
     res.removeHeader('X-Download-Options');
     res.removeHeader('Cross-Origin-Opener-Policy');
     res.removeHeader('Cross-Origin-Resource-Policy');
@@ -144,10 +148,30 @@ module.exports = function createMediaRouter(deps) {
       'Cache-Control': 'no-store',
       'Content-Security-Policy':
         "default-src 'self' data:; script-src 'self' 'unsafe-inline'; " +
-        "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; " +
-        "font-src 'self' data:; frame-ancestors 'self';",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; " +
+        "form-action 'self'; frame-ancestors 'self';",
     });
     res.send(html);
+  }
+
+  // Sub-page within a site folder: /api/demos/<slug>/<page>.html
+  router.get('/api/demos/:slug/:page', (req, res) => {
+    const slug = path.basename(req.params.slug);
+    const page = path.basename(req.params.page);
+    if (!page.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
+    _sendDemo(res, path.join(DEMOS_DIR, slug, page));
+  });
+
+  // Folder root or legacy single file: /api/demos/<slug>(/)  |  /api/demos/<file>.html
+  router.get('/api/demos/:slug', (req, res) => {
+    const slug = path.basename(req.params.slug);
+    if (slug.endsWith('.html')) return _sendDemo(res, path.join(DEMOS_DIR, slug)); // legacy
+    const dir = path.join(DEMOS_DIR, slug);
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return res.status(404).send('Demo niet gevonden');
+    // Relative links (over.html, …) only resolve correctly under a trailing slash.
+    if (!req.path.endsWith('/')) return res.redirect(301, req.path + '/');
+    _sendDemo(res, path.join(dir, 'index.html'));
   });
 
   return router;

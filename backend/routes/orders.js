@@ -53,6 +53,21 @@ ${snippet}
   });
 }
 
+// Build the public, clickable demo URL from a stored demo_pad.
+// Handles both multi-page folder demos (.../<slug>/index.html -> /api/demos/<slug>/)
+// and legacy single-file demos (.../<file>.html -> /api/demos/<file>.html).
+function demoUrlFromPad(demoPad, host) {
+  if (!demoPad) return '';
+  const parts = String(demoPad).split('/').filter(Boolean);
+  const base = parts[parts.length - 1] || '';
+  if (base === 'index.html') {
+    const slug = parts[parts.length - 2] || '';
+    return slug ? `${host}/api/demos/${slug}/` : '';
+  }
+  if (base.endsWith('.html')) return `${host}/api/demos/${base}`;      // legacy single file
+  return `${host}/api/demos/${base}/`;                                  // folder path
+}
+
 module.exports = function createOrdersRouter(requireAuth) {
   const r = express.Router();
 
@@ -195,16 +210,24 @@ order = order_ophalen(${JSON.stringify(id)})
 if not order:
   print(json.dumps({"ok": False, "error": "Order niet gevonden"}))
 else:
+  _rd = {}
+  try:
+    _rd = json.loads(order.get('research_data') or '{}')
+    if not isinstance(_rd, dict): _rd = {}
+  except Exception:
+    _rd = {}
   gen = genereer_demo(
     bedrijfsnaam=order['bedrijfsnaam'],
     plaats=order['plaats'],
     branche=order['branche'],
     diensten=None,
+    research_data=_rd,
+    job_id=order['id'],
   )
   if gen['status'] == 'ok':
     order = status_bijwerken(${JSON.stringify(id)}, 'demo_klaar', demo_pad=gen['path'])
     order = status_bijwerken(${JSON.stringify(id)}, 'ter_review')
-    print(json.dumps({"ok": True, "order": order, "demo_pad": gen['path'], "bytes": gen['bytes']}))
+    print(json.dumps({"ok": True, "order": order, "demo_pad": gen['path'], "pages": gen.get('pages'), "theme": gen.get('theme'), "bytes": gen['bytes']}))
   else:
     print(json.dumps({"ok": False, "error": gen.get('error', 'Generatie mislukt')}))
 `;
@@ -256,12 +279,9 @@ o = order_ophalen(${JSON.stringify(id)})
 import json; print(json.dumps(o or {}))
 `;
           const orderData = await pyCall(orderSnippet, 10_000);
-          const fname = (orderData.demo_pad || '').split('/').pop();
-          if (fname) {
-            // No token — demos are now publicly accessible so customers can open them
-            const host = BASE_URL || (req.protocol + '://' + req.get('host'));
-            demo_url = `${host}/api/demos/${fname}`;
-          }
+          // No token — demos are publicly accessible so customers can open them
+          const host = BASE_URL || (req.protocol + '://' + req.get('host'));
+          demo_url = demoUrlFromPad(orderData.demo_pad, host);
         } catch { /* fall through — demo_url stays empty */ }
       }
       const snippet = `
@@ -376,11 +396,9 @@ import json; print(json.dumps(o or {}))
       const order = await pyCall(snippet, 10_000);
       if (!order || !order.id) return res.status(404).json({ ok: false, error: 'Order niet gevonden' });
 
-      const fname = (order.demo_pad || '').split('/').pop();
-      if (!fname) return res.status(400).json({ ok: false, error: 'Nog geen demo gegenereerd voor dit order' });
-
       const host = BASE_URL || (req.protocol + '://' + req.get('host'));
-      const demo_url = `${host}/api/demos/${fname}`;
+      const demo_url = demoUrlFromPad(order.demo_pad, host);
+      if (!demo_url) return res.status(400).json({ ok: false, error: 'Nog geen demo gegenereerd voor dit order' });
       const bedrijf = order.bedrijfsnaam || 'uw bedrijf';
 
       const waText = `Goedemiddag,\n\nIk heb een gratis demo-website gemaakt voor ${bedrijf}. U kunt deze hier bekijken:\n${demo_url}\n\nIk hoor graag wat u ervan vindt!\n\nMet vriendelijke groet,\nLars`;
