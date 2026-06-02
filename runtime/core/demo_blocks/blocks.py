@@ -44,6 +44,11 @@ def nav(ctx, v=0):
 def hero(ctx, v=0):
     v %= VARIANTS["hero"]
     t, txt = ctx["hero_title"], ctx["hero_text"]
+    # Defensive: image variants need a photo, stats variant needs stats.
+    if v in (0, 1) and not ctx.get("hero_img"):
+        v = 2
+    if v == 5 and not ctx.get("stats"):
+        v = 0 if ctx.get("hero_img") else 2
     if v == 0:  # full image overlay
         return f"""<header class="hero hero--image"><div class="bg" style="background-image:url('{ctx['hero_img']}')"></div>
   <div class="container"><span class="eyebrow">{ctx['branche']} in {ctx['plaats']}</span>
@@ -97,9 +102,11 @@ def over(ctx, v=0, full=False):
     paras = ctx["over_lang"] if full else [ctx["over_kort"]]
     ptext = "".join(f"<p>{p}</p>" for p in paras)
     if v == 0:
+        shot = (f'<img src="{ctx["about_img"]}" alt="{ctx["naam"]}" loading="lazy">'
+                if ctx.get("about_img") else "")
         return f"""<section class="section section--alt about about--split"><div class="container grid">
-  <div class="shot"><img src="{ctx['about_img']}" alt="{ctx['naam']}" loading="lazy"></div>
-  <div><span class="eyebrow">Over ons</span><h2>Vakmanschap uit {ctx['plaats']}</h2>{ptext}
+  <div class="shot shot--neutral">{shot}</div>
+  <div><span class="eyebrow">Over ons</span><h2>Over {ctx['naam']}</h2>{ptext}
   <p style="margin-top:1.2rem"><a class="btn btn-accent" href="contact.html">Maak kennis</a></p></div></div></section>"""
     if v == 1:
         vals = "".join(f'<div class="value"><div class="svc-ico">{ic}</div><h3>{t}</h3><p>{d}</p></div>'
@@ -160,9 +167,33 @@ def _info_items(ctx):
     if ctx["email"]:
         out.append(("✉", "E-mail", ctx["email_link"]))
     out.append(("📍", "Werkgebied", ctx["adres"] or f'{ctx["plaats"]} en omgeving'))
+    if ctx.get("openingstijden"):
+        out.append(("🕒", "Openingstijden", ctx["openingstijden"]))
     if ctx["website"]:
         out.append(("🌐", "Website", ctx["website_link"]))
     return out
+
+
+# ── STAT STRIP (alleen bij echte cijfers) ──────────────────────────────────────
+def stat_strip(ctx):
+    stats = ctx.get("stats") or []
+    if not stats:
+        return ""
+    n = min(len(stats), 4)
+    cells = "".join(f'<div><div class="num">{c}</div><div class="lbl">{l}</div></div>' for c, l in stats[:4])
+    return (f'<section class="section"><div class="container"><div class="statband">'
+            f'<div class="grid" style="grid-template-columns:repeat({n},1fr)">{cells}</div></div></div></section>')
+
+
+# ── GALLERY (alleen bij echte foto's) ──────────────────────────────────────────
+def gallery(ctx, v=0):
+    fotos = ctx.get("gallery") or []
+    if not fotos:
+        return ""
+    imgs = "".join(f'<div class="gal-item"><img src="{u}" alt="{ctx["naam"]}" loading="lazy"></div>' for u in fotos)
+    return f"""<section class="section"><div class="container">
+  <div class="sec-head center"><span class="eyebrow">Galerij</span><h2>Een indruk van ons werk</h2></div>
+  <div class="gal-grid">{imgs}</div></div></section>"""
 
 
 def _form(ctx):
@@ -200,6 +231,8 @@ def footer(ctx, v=0):
     if ctx["email"]:
         contact_bits.append(f'<li>{ctx["email_link"]}</li>')
     contact_bits.append(f'<li>{ctx["plaats"]} en omgeving</li>')
+    if ctx.get("openingstijden"):
+        contact_bits.append(f'<li>{ctx["openingstijden"]}</li>')
     contact_html = "".join(contact_bits)
     if v == 0:
         return f"""<footer class="footer"><div class="container">

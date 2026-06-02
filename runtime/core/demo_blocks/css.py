@@ -171,6 +171,12 @@ form.card{background:var(--surface);border:1px solid var(--border);border-radius
 .footer .bottom{border-top:1px solid rgba(255,255,255,.12);padding-top:1.5rem;font-size:.85rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem}
 .footer--simple{text-align:center}
 .footer--simple .bottom{justify-content:center;border:none;padding-top:0}
+/* gallery + neutral (image-less) panels */
+.gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem}
+.gal-item{aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;background:var(--alt);box-shadow:var(--shadow)}
+.gal-item img{width:100%;height:100%;object-fit:cover;transition:transform .3s ease}
+.gal-item:hover img{transform:scale(1.05)}
+.shot--neutral:empty{background:linear-gradient(135deg,var(--primary),var(--primary-dark));min-height:300px}
 /* responsive */
 @media(max-width:860px){
   .nav-links{position:fixed;inset:72px 0 auto 0;flex-direction:column;background:var(--bg);border-bottom:1px solid var(--border);padding:1.2rem 1.5rem;gap:1.1rem;display:none;box-shadow:var(--shadow)}

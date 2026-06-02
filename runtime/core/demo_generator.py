@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import re
-import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -43,8 +42,10 @@ def _llm(prompt: str, max_tokens: int = 300) -> str:
         "prompt": prompt,
         "system": (
             "Je bent een professionele Nederlandse copywriter die website-teksten "
-            "schrijft voor lokale bedrijven. Schrijf beknopte, zakelijke teksten "
-            "in het Nederlands. Geen markdown, alleen platte tekst."
+            "schrijft voor lokale bedrijven. Schrijf beknopte, wervende teksten in "
+            "natuurlijk Nederlands. Geen markdown, geen Engels, alleen platte tekst. "
+            "Verzin GEEN feiten, namen, diensten, jaartallen of cijfers die niet in "
+            "de opdracht staan — schrijf alleen wervende, verbindende zinnen."
         ),
         "stream": False,
         "options": {"num_predict": max_tokens},
@@ -65,67 +66,23 @@ def _e(text: str) -> str:
     return _html.escape(str(text), quote=True)
 
 
-def _kleur_voor_branche(branche: str) -> tuple[str, str]:
-    b = branche.lower()
-    if any(w in b for w in ("loodgiet", "installat", "sanitair")):
-        return "#1a3a5c", "#e87b1e"
-    if any(w in b for w in ("bouw", "timmer", "aannem")):
-        return "#2d4a1e", "#f5a623"
-    if any(w in b for w in ("schoon", "onderhoud")):
-        return "#1a5c4a", "#27ae60"
-    if any(w in b for w in ("elektr",)):
-        return "#1c2e4a", "#e74c3c"
-    if any(w in b for w in ("schilder",)):
-        return "#4a1a5c", "#9b59b6"
-    if any(w in b for w in ("kapper", "haar", "schoonheid", "beauty")):
-        return "#5c1a3a", "#e91e8c"
-    if any(w in b for w in ("tuin", "groen", "hoveniers")):
-        return "#1a4a1e", "#4caf50"
-    if any(w in b for w in ("restaurant", "horeca", "eten", "café", "cafe")):
-        return "#3a1a0a", "#c0392b"
-    if any(w in b for w in ("bakker",)):
-        return "#5a3a1a", "#f39c12"
-    if any(w in b for w in ("auto", "garage", "reparatie")):
-        return "#1a1a3a", "#3498db"
-    return "#1a3a5c", "#e87b1e"
+def _norm_pairs(items, k1: str, k2: str) -> list[tuple[str, str]]:
+    """Normalize a list of dicts/strings/tuples into [(a, b)] pairs, dropping empties.
 
-
-# Unsplash Source keywords per branche — returns a stable landscape image
-_UNSPLASH_KEYWORDS: dict[str, str] = {
-    "loodgiet": "plumbing+tools",
-    "installat": "hvac+technician",
-    "sanitair": "bathroom+modern",
-    "bouw": "construction+site",
-    "timmer": "carpentry+wood",
-    "aannem": "construction+building",
-    "schoon": "cleaning+professional",
-    "elektr": "electrician+work",
-    "schilder": "painting+house",
-    "kapper": "hair+salon",
-    "haar": "hair+salon",
-    "schoonheid": "beauty+salon",
-    "beauty": "beauty+spa",
-    "tuin": "garden+landscaping",
-    "groen": "garden+green",
-    "hoveniers": "landscaping+garden",
-    "restaurant": "restaurant+interior",
-    "horeca": "restaurant+food",
-    "bakker": "bakery+bread",
-    "auto": "car+garage",
-    "garage": "auto+repair",
-}
-
-
-def _unsplash_url(branche: str, w: int = 1400, h: int = 600, sig: int = 1) -> str:
-    b = branche.lower()
-    keyword = "local+business+professional"
-    for k, v in _UNSPLASH_KEYWORDS.items():
-        if k in b:
-            keyword = v
-            break
-    # Unsplash Source — stable, no API key, delivers high-quality CC0 images.
-    # `sig` varies the image between hero and about so they are not identical.
-    return f"https://source.unsplash.com/featured/{w}x{h}/?{urllib.parse.quote(keyword)}&sig={sig}"
+    Only uses what's there — never fabricates. Used for diensten/reviews/stats from
+    the (Lars-confirmed) research data.
+    """
+    out: list[tuple[str, str]] = []
+    for it in (items or []):
+        if isinstance(it, dict):
+            a, b = str(it.get(k1, "")).strip(), str(it.get(k2, "")).strip()
+        elif isinstance(it, (list, tuple)) and len(it) >= 2:
+            a, b = str(it[0]).strip(), str(it[1]).strip()
+        else:
+            a, b = str(it).strip(), ""
+        if a:
+            out.append((a, b))
+    return out
 
 
 def _slugify(*parts: str) -> str:
@@ -145,41 +102,6 @@ def _swarm_or_llm(prompt: str, context: str, max_tokens: int = 120) -> str:
         except Exception as exc:  # noqa: BLE001 — best-effort, fall back to LLM
             logger.debug("demo swarm fallback: %s", exc)
     return _llm(prompt, max_tokens=max_tokens)
-
-
-def _diensten_uit_llm(bedrijfsnaam: str, branche: str, plaats: str) -> list[tuple[str, str]]:
-    """Ask for 4 services + one-line descriptions in a single call; parse safely."""
-    raw = _llm(
-        f"Noem 4 typische diensten van een {branche} bedrijf in Nederland. "
-        f"Geef elke dienst op een nieuwe regel in het formaat 'Dienst: korte omschrijving "
-        f"van max 12 woorden'. Geen nummers, geen markdown.",
-        max_tokens=160,
-    )
-    items: list[tuple[str, str]] = []
-    for line in raw.splitlines():
-        line = line.strip().lstrip("-•0123456789. ").strip()
-        if not line:
-            continue
-        if ":" in line:
-            naam, _, omschr = line.partition(":")
-        elif "—" in line:
-            naam, _, omschr = line.partition("—")
-        else:
-            naam, omschr = line, ""
-        naam = naam.strip().rstrip(".")
-        omschr = omschr.strip() or f"Vakkundig {naam.lower()} door {bedrijfsnaam}."
-        if naam:
-            items.append((naam, omschr))
-        if len(items) >= 4:
-            break
-    if not items:
-        items = [
-            ("Advies op maat", f"Persoonlijk advies voor uw situatie in {plaats}."),
-            ("Vakkundige uitvoering", "Net en volgens afspraak uitgevoerd."),
-            ("Onderhoud & service", "Wij blijven bereikbaar, ook na de klus."),
-            ("Spoedhulp", "Snel ter plaatse wanneer het nodig is."),
-        ]
-    return items
 
 
 def genereer_demo(
@@ -207,63 +129,57 @@ def genereer_demo(
     ctxname = f"{bedrijfsnaam}, {branche} in {plaats}"
     logger.info("demo_generator: genereren voor '%s' (%s, %s)", bedrijfsnaam, plaats, branche)
 
-    # ── Copy generation — batched in parallel threads ─────────────────────────
-    p_head = (f"Schrijf een korte, pakkende website-koptekst (H1, max 8 woorden) voor {bedrijfsnaam}, "
-              f"een {branche} bedrijf in {plaats}. Geen aanhalingstekens.")
-    p_hero = (f"Schrijf 1-2 wervende zinnen onder de koptekst voor {bedrijfsnaam}, {branche} in {plaats}. "
-              f"Spreek de bezoeker direct aan.")
-    p_meta = (f"Schrijf een Google meta-description (max 150 tekens) voor {bedrijfsnaam}, {branche} in {plaats}. "
-              f"Zakelijk met een call-to-action.")
-    p_over = (f"Schrijf een 'Over ons'-tekst van 4-5 zinnen voor {bedrijfsnaam}, een {branche} bedrijf "
-              f"dat actief is in {plaats} en omgeving. Nadruk op vakmanschap en betrouwbaarheid.")
-    p_cta = f"Schrijf één wervende zin die aanzet tot het aanvragen van een offerte bij {bedrijfsnaam}."
-    p_rev = [
-        f"Schrijf een korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. Positief en realistisch, zonder aanhalingstekens.",
-        f"Schrijf een andere korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. Andere toon, noem een concreet detail, zonder aanhalingstekens.",
-        f"Schrijf nog een korte klantreview (1-2 zinnen) voor {bedrijfsnaam}, {branche}. Kort en krachtig, zonder aanhalingstekens.",
-    ]
+    # ── Echte data uit research/Lars — diensten/reviews/stats/foto's: nooit verzonnen ──
+    diensten_items = _norm_pairs(rd.get("diensten"), "naam", "omschrijving")
+    review_items   = _norm_pairs(rd.get("reviews"), "tekst", "naam")
+    stat_items     = _norm_pairs(rd.get("stats"), "cijfer", "label")
+    fotos          = [f for f in (rd.get("fotos") or []) if isinstance(f, str) and f.strip()]
+    social         = [s for s in (rd.get("social") or []) if isinstance(s, str) and s.strip()]
+    telefoon       = (rd.get("telefoon") or "").strip()
+    email          = (rd.get("email") or "").strip()
+    adres          = (rd.get("adres") or "").strip()
+    openingstijden = (rd.get("openingstijden") or "").strip()
+    website        = (rd.get("website") or "").strip()
+    diensten_namen = ", ".join(n for n, _ in diensten_items) if diensten_items else ""
 
-    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="demo-copy") as pool:
+    # ── Copy: de LLM schrijft ALLEEN wervende/verbindende zinnen rond echte data ──
+    p_head = (f"Schrijf een korte, pakkende website-kop (H1, max 8 woorden) voor {bedrijfsnaam}, "
+              f"een {branche} in {plaats}. Alleen wervende tekst, geen aanhalingstekens, geen verzonnen cijfers.")
+    p_hero = (f"Schrijf 1-2 wervende zinnen onder de kop voor {bedrijfsnaam}, {branche} in {plaats}. "
+              f"Spreek de bezoeker direct aan. Verzin geen feiten of cijfers.")
+    p_meta = (f"Schrijf een Google meta-omschrijving (max 150 tekens) voor {bedrijfsnaam}, {branche} in {plaats}. "
+              f"Uitnodigend, met een call-to-action.")
+    _dienst_hint = f" Noem dat ze onder meer {diensten_namen} doen." if diensten_namen else ""
+    p_over = (f"Schrijf een warme, wervende 'Over ons'-tekst (3-4 zinnen) voor {bedrijfsnaam}, "
+              f"een {branche} in {plaats} en omgeving.{_dienst_hint} "
+              f"Alleen wervende tekst — verzin GEEN jaartallen, cijfers, namen of diensten die niet genoemd zijn.")
+    p_cta = f"Schrijf één wervende zin die aanzet tot contact opnemen met {bedrijfsnaam}. Geen prijs, geen cijfers."
+
+    with ThreadPoolExecutor(max_workers=5, thread_name_prefix="demo-copy") as pool:
         f_head = pool.submit(_llm, p_head, 30)
         f_hero = pool.submit(_swarm_or_llm, p_hero, ctxname, 80)
         f_meta = pool.submit(_llm, p_meta, 60)
         f_over = pool.submit(_swarm_or_llm, p_over, ctxname, 160)
-        f_cta = pool.submit(_llm, p_cta, 40)
-        f_dien = pool.submit(_diensten_uit_llm, bedrijfsnaam, branche, plaats)
-        f_rev = [pool.submit(_llm, pr, 60) for pr in p_rev]
+        f_cta  = pool.submit(_llm, p_cta, 40)
 
         def _safe(fut, fallback):
             try:
                 val = fut.result()
-                return val.strip() if val and val.strip() else fallback
+                return val.strip().strip('"“”') if val and val.strip() else fallback
             except Exception:  # noqa: BLE001
                 return fallback
 
-        head = _safe(f_head, f"Uw {branche} in {plaats}")
-        hero_text = _safe(f_hero, f"Vakwerk en persoonlijke service van {bedrijfsnaam} — in {plaats} en omgeving.")
-        meta = _safe(f_meta, f"{bedrijfsnaam} — {branche} in {plaats}. Vraag vrijblijvend een offerte aan.")
-        over_text = _safe(f_over, f"{bedrijfsnaam} is een betrouwbaar {branche} bedrijf in {plaats}. "
-                          f"Wij staan voor vakmanschap, eerlijk advies en netjes werk.")
-        cta_text = _safe(f_cta, f"Vraag vandaag nog vrijblijvend een offerte aan bij {bedrijfsnaam}.")
-        diensten_items = _safe_list(f_dien)
-        reviews = []
-        rev_fallbacks = [
-            f"Erg tevreden met {bedrijfsnaam}. Snel, netjes en een eerlijke prijs.",
-            f"Vakkundige service en goede communicatie. Ik raad {bedrijfsnaam} zeker aan.",
-            f"Keurig werk geleverd, helemaal volgens afspraak.",
-        ]
-        for fut, fb in zip(f_rev, rev_fallbacks):
-            reviews.append(_safe(fut, fb).strip('"“” '))
+        head = _safe(f_head, f"Welkom bij {bedrijfsnaam}")
+        hero_text = _safe(f_hero, f"{bedrijfsnaam} — uw {branche} in {plaats} en omgeving. Neem gerust contact op.")
+        meta = _safe(f_meta, f"{bedrijfsnaam} — {branche} in {plaats}. Neem vrijblijvend contact op.")
+        over_text = _safe(f_over, f"Bij {bedrijfsnaam} staat persoonlijke service voorop. Als {branche} in {plaats} "
+                          f"helpen we je graag verder met een duidelijke, eerlijke aanpak.")
+        cta_text = _safe(f_cta, f"Neem vandaag nog vrijblijvend contact op met {bedrijfsnaam}.")
 
-    # ── Real contact data only ────────────────────────────────────────────────
-    telefoon = rd.get("telefoon") or ""
-    adres = rd.get("adres") or ""
-    website = rd.get("website") or ""
-    if website:
-        domain = re.sub(r"https?://(www\.)?", "", website).rstrip("/")
-        email = f"info@{domain}"
-    else:
-        email = ""
+    # ── Foto's (echt of leeg) ─────────────────────────────────────────────────
+    hero_img  = fotos[0] if len(fotos) >= 1 else ""
+    about_img = fotos[1] if len(fotos) >= 2 else ""
+    gallery   = fotos[2:8]
 
     # ── Build escaped context for the block system ────────────────────────────
     over_paras = _split_paragraphs(over_text)
@@ -276,21 +192,23 @@ def genereer_demo(
         "over_kort": _e(over_paras[0]),
         "over_lang": [_e(p) for p in over_paras],
         "cta_text": _e(cta_text),
+        # Alleen echte, door Lars bevestigde data — leeg = sectie weg:
         "diensten": [(_e(n), _e(o)) for n, o in diensten_items],
-        "reviews": [(_e(t), w) for t, w in zip(reviews, ["Particuliere klant", f"Ondernemer uit {_e(plaats)}", "Vaste klant"])],
+        "reviews":  [(_e(t), _e(w)) for t, w in review_items if t],
+        "stats":    [(_e(c), _e(l)) for c, l in stat_items if c],
         "values": [
-            ("✓", "Betrouwbaar", "Afspraak is afspraak — op tijd en zonder verrassingen."),
-            ("★", "Vakkundig", "Jarenlange ervaring en oog voor detail in elke klus."),
-            ("⚡", "Snel ter plaatse", "Korte lijnen en snelle service, ook bij spoed."),
+            ("✓", "Persoonlijke aanpak", "Eén vast aanspreekpunt dat met je meedenkt."),
+            ("★", "Duidelijke afspraken", "Heldere afspraken vooraf, geen verrassingen achteraf."),
+            ("⚡", "Snel geregeld", "Korte lijnen — je hoeft nooit lang op antwoord te wachten."),
         ],
-        "stats": [("Gratis", "Offerte op maat"), ("1 dag", "Snelle reactie"),
-                  ("Lokaal", f"Actief in {_e(plaats)}"), ("Eerlijk", "Vaste prijzen")],
-        "hero_img": _unsplash_url(branche, sig=1),
-        "about_img": _unsplash_url(branche, 1000, 800, sig=2),
+        "hero_img": _e(hero_img), "about_img": _e(about_img),
+        "gallery": [_e(f) for f in gallery],
         "telefoon": _e(telefoon), "telefoon_raw": telefoon,
-        "adres": _e(adres),
         "email": _e(email),
         "email_link": (f'<a href="mailto:{_e(email)}">{_e(email)}</a>' if email else ""),
+        "adres": _e(adres),
+        "openingstijden": _e(openingstijden),
+        "social": [_e(s) for s in social],
         "website": _e(website), "website_raw": website,
         "website_link": (f'<a href="{_e(website)}" target="_blank" rel="noopener">{_e(website)}</a>' if website else ""),
         "form_name": "contact-" + re.sub(r"[^a-z0-9]", "-", bedrijfsnaam.lower())[:30],
@@ -334,16 +252,3 @@ def _split_paragraphs(text: str) -> list[str]:
         return [text]
     mid = (len(sentences) + 1) // 2
     return [" ".join(sentences[:mid]).strip(), " ".join(sentences[mid:]).strip()]
-
-
-def _safe_list(fut) -> list[tuple[str, str]]:
-    try:
-        val = fut.result()
-        return val if val else []
-    except Exception:  # noqa: BLE001
-        return [
-            ("Advies op maat", "Persoonlijk advies voor uw situatie."),
-            ("Vakkundige uitvoering", "Net en volgens afspraak uitgevoerd."),
-            ("Onderhoud & service", "Wij blijven bereikbaar, ook na de klus."),
-            ("Spoedhulp", "Snel ter plaatse wanneer het nodig is."),
-        ]

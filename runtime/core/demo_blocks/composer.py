@@ -77,32 +77,55 @@ def render_site(ctx: dict, theme: dict) -> dict[str, str]:
     meta = ctx["meta"]
     out: dict[str, str] = {}
 
+    # Availability of real, Lars-confirmed content — empty sections are skipped.
+    has_diensten = bool(ctx.get("diensten"))
+    has_reviews  = bool(ctx.get("reviews"))
+    has_gallery  = bool(ctx.get("gallery"))
+    has_stats    = bool(ctx.get("stats"))
+    # Stats are shown via a dedicated strip (when present), so keep the 'over'
+    # block visual — avoid its statband variant to prevent duplication.
+    ov_variant = 1 if vv["over"] == 2 else vv["over"]
+
     def nav_footer(active):
         ctx["active"] = active
         return blocks.nav(ctx, vv["nav"]), blocks.footer(ctx, vv["footer"])
 
+    def opt(cond, html):
+        return html if cond else ""
+
     # Home
     n, f = nav_footer("index.html")
-    home = n + blocks.hero(ctx, vv["hero"]) + blocks.diensten(ctx, vv["diensten"]) \
-        + blocks.over(ctx, vv["over"]) + blocks.reviews(ctx, vv["reviews"]) + blocks.cta(ctx, vv["cta"]) + f
+    home = (n + blocks.hero(ctx, vv["hero"])
+            + opt(has_stats, blocks.stat_strip(ctx))
+            + opt(has_diensten, blocks.diensten(ctx, vv["diensten"]))
+            + blocks.over(ctx, ov_variant)
+            + opt(has_gallery, blocks.gallery(ctx))
+            + opt(has_reviews, blocks.reviews(ctx, vv["reviews"]))
+            + blocks.cta(ctx, vv["cta"]) + f)
     out["index.html"] = _doc(title_base, meta, theme, home, ctx)
 
-    # Diensten
+    # Diensten — itemized list if we have real services, else a general intro.
     n, f = nav_footer("diensten.html")
-    dn = n + _pagehead(ctx, "Diensten", f"Alles wat {naam} voor u kan betekenen in {plaats} en omgeving.") \
-        + blocks.diensten(ctx, vv["diensten"], head=False) + blocks.cta(ctx, vv["cta"]) + f
+    dn = (n + _pagehead(ctx, "Diensten", f"Wat {naam} voor u kan betekenen in {plaats} en omgeving.")
+          + (blocks.diensten(ctx, vv["diensten"], head=False) if has_diensten
+             else blocks.over(ctx, 1, full=True))
+          + opt(has_gallery, blocks.gallery(ctx))
+          + blocks.cta(ctx, vv["cta"]) + f)
     out["diensten.html"] = _doc(f"Diensten — {naam}", meta, theme, dn, ctx)
 
     # Over ons
     n, f = nav_footer("over.html")
-    ov = n + _pagehead(ctx, "Over ons", f"Het verhaal achter {naam}.") \
-        + blocks.over(ctx, vv["over"], full=True) + blocks.reviews(ctx, vv["reviews"]) + blocks.cta(ctx, vv["cta"]) + f
+    ov = (n + _pagehead(ctx, "Over ons", f"Het verhaal achter {naam}.")
+          + blocks.over(ctx, ov_variant, full=True)
+          + opt(has_gallery, blocks.gallery(ctx))
+          + opt(has_reviews, blocks.reviews(ctx, vv["reviews"]))
+          + blocks.cta(ctx, vv["cta"]) + f)
     out["over.html"] = _doc(f"Over ons — {naam}", meta, theme, ov, ctx)
 
     # Contact
     n, f = nav_footer("contact.html")
-    cn = n + _pagehead(ctx, "Contact", f"Vraag vrijblijvend een offerte aan bij {naam}.") \
-        + blocks.contact(ctx, (vv["contact"]), head=False) + f
+    cn = (n + _pagehead(ctx, "Contact", f"Vraag vrijblijvend een offerte aan bij {naam}.")
+          + blocks.contact(ctx, vv["contact"], head=False) + f)
     out["contact.html"] = _doc(f"Contact — {naam}", meta, theme, cn, ctx)
 
     return out
