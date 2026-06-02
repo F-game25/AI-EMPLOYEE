@@ -1,18 +1,15 @@
 """Demo-website generator — one business at a time.
 
-Calls the local Ollama model to write Dutch copy for each section,
-then assembles a single-file HTML page that is production-ready:
-- Google Fonts (Inter)
-- Unsplash hero image matched to branche keyword
-- Working contact form via Netlify Forms (zero backend)
-- Hamburger menu on mobile
-- Schema.org LocalBusiness JSON-LD
-- Meta description + Open Graph tags
+Generates a UNIQUE, multi-page demo website (Home, Diensten, Over ons, Contact).
+The local Ollama model writes only the Dutch copy; layout, styling and structure
+come from the hand-built block design system in `core.demo_blocks`, so model
+output can never break the page. Every business gets a distinct palette, font
+pair, style theme and section-variant mix (deterministic per business), while the
+four pages stay coherent as one site.
+
+- All copy is HTML-escaped before insertion (see `_e`)
 - No fake phone/address/email — only real data from research_data
-- Reviews/testimonials section with LLM-generated Dutch reviews
-- Trust badges near CTA
-- Mobile floating call button
-- Dynamic copyright year
+- Output: a folder of HTML files under state/artifacts/demos/<slug>/
 """
 from __future__ import annotations
 
@@ -23,7 +20,10 @@ import os
 import re
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from core import demo_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -116,15 +116,70 @@ _UNSPLASH_KEYWORDS: dict[str, str] = {
 }
 
 
-def _unsplash_url(branche: str, w: int = 1400, h: int = 600) -> str:
+def _unsplash_url(branche: str, w: int = 1400, h: int = 600, sig: int = 1) -> str:
     b = branche.lower()
     keyword = "local+business+professional"
     for k, v in _UNSPLASH_KEYWORDS.items():
         if k in b:
             keyword = v
             break
-    # Unsplash Source — stable, no API key, delivers high-quality CC0 images
-    return f"https://source.unsplash.com/featured/{w}x{h}/?{urllib.parse.quote(keyword)}"
+    # Unsplash Source — stable, no API key, delivers high-quality CC0 images.
+    # `sig` varies the image between hero and about so they are not identical.
+    return f"https://source.unsplash.com/featured/{w}x{h}/?{urllib.parse.quote(keyword)}&sig={sig}"
+
+
+def _slugify(*parts: str) -> str:
+    raw = "_".join(p for p in parts if p)
+    slug = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    return slug[:60] or "demo"
+
+
+def _swarm_or_llm(prompt: str, context: str, max_tokens: int = 120) -> str:
+    """Run the swarm engine if available, otherwise a single LLM call."""
+    if os.environ.get("SWARM_DEMO", "1") != "0":
+        try:
+            from core.swarm_engine import swarm_pitch
+            result = swarm_pitch(prompt, context=context, n_agents=3)
+            if result.answer and result.confidence > 0.3:
+                return result.answer
+        except Exception as exc:  # noqa: BLE001 — best-effort, fall back to LLM
+            logger.debug("demo swarm fallback: %s", exc)
+    return _llm(prompt, max_tokens=max_tokens)
+
+
+def _diensten_uit_llm(bedrijfsnaam: str, branche: str, plaats: str) -> list[tuple[str, str]]:
+    """Ask for 4 services + one-line descriptions in a single call; parse safely."""
+    raw = _llm(
+        f"Noem 4 typische diensten van een {branche} bedrijf in Nederland. "
+        f"Geef elke dienst op een nieuwe regel in het formaat 'Dienst: korte omschrijving "
+        f"van max 12 woorden'. Geen nummers, geen markdown.",
+        max_tokens=160,
+    )
+    items: list[tuple[str, str]] = []
+    for line in raw.splitlines():
+        line = line.strip().lstrip("-•0123456789. ").strip()
+        if not line:
+            continue
+        if ":" in line:
+            naam, _, omschr = line.partition(":")
+        elif "—" in line:
+            naam, _, omschr = line.partition("—")
+        else:
+            naam, omschr = line, ""
+        naam = naam.strip().rstrip(".")
+        omschr = omschr.strip() or f"Vakkundig {naam.lower()} door {bedrijfsnaam}."
+        if naam:
+            items.append((naam, omschr))
+        if len(items) >= 4:
+            break
+    if not items:
+        items = [
+            ("Advies op maat", f"Persoonlijk advies voor uw situatie in {plaats}."),
+            ("Vakkundige uitvoering", "Net en volgens afspraak uitgevoerd."),
+            ("Onderhoud & service", "Wij blijven bereikbaar, ook na de klus."),
+            ("Spoedhulp", "Snel ter plaatse wanneer het nodig is."),
+        ]
+    return items
 
 
 def genereer_demo(
@@ -134,757 +189,161 @@ def genereer_demo(
     branche: str,
     diensten: list[str] | None = None,
     research_data: dict | None = None,
+    job_id: str | None = None,
 ) -> dict:
-    """Generate a demo website for ONE business.
+    """Generate a unique multi-page demo website for ONE business.
 
     Returns:
-        {"status": "ok", "path": "/abs/path/to/demo.html", "bytes": N}
+        {"status": "ok", "dir": "<abs dir>", "slug": "<slug>",
+         "pages": ["index.html", ...], "path": "<abs index.html>", "bytes": N}
     or  {"status": "error", "error": "..."}
     """
     if not bedrijfsnaam or not plaats or not branche:
         return {"status": "error", "error": "bedrijfsnaam, plaats en branche zijn verplicht"}
 
-    diensten = diensten or []
-    primary, accent = _kleur_voor_branche(branche)
     rd = research_data or {}
-
+    slug = _slugify(bedrijfsnaam, plaats)
+    seed = job_id or slug
+    ctxname = f"{bedrijfsnaam}, {branche} in {plaats}"
     logger.info("demo_generator: genereren voor '%s' (%s, %s)", bedrijfsnaam, plaats, branche)
 
-    # ── Swarm copy generation — hero + meta + over_ons + cta in parallel ────
-    # 3 agents write each section from a different angle; best is chosen by
-    # the swarm engine's belief propagation. Falls back to single LLM if swarm
-    # unavailable (Ollama offline / SWARM_DEMO=0).
-    _use_swarm = os.environ.get("SWARM_DEMO", "1") != "0"
+    # ── Copy generation — batched in parallel threads ─────────────────────────
+    p_head = (f"Schrijf een korte, pakkende website-koptekst (H1, max 8 woorden) voor {bedrijfsnaam}, "
+              f"een {branche} bedrijf in {plaats}. Geen aanhalingstekens.")
+    p_hero = (f"Schrijf 1-2 wervende zinnen onder de koptekst voor {bedrijfsnaam}, {branche} in {plaats}. "
+              f"Spreek de bezoeker direct aan.")
+    p_meta = (f"Schrijf een Google meta-description (max 150 tekens) voor {bedrijfsnaam}, {branche} in {plaats}. "
+              f"Zakelijk met een call-to-action.")
+    p_over = (f"Schrijf een 'Over ons'-tekst van 4-5 zinnen voor {bedrijfsnaam}, een {branche} bedrijf "
+              f"dat actief is in {plaats} en omgeving. Nadruk op vakmanschap en betrouwbaarheid.")
+    p_cta = f"Schrijf één wervende zin die aanzet tot het aanvragen van een offerte bij {bedrijfsnaam}."
+    p_rev = [
+        f"Schrijf een korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. Positief en realistisch, zonder aanhalingstekens.",
+        f"Schrijf een andere korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. Andere toon, noem een concreet detail, zonder aanhalingstekens.",
+        f"Schrijf nog een korte klantreview (1-2 zinnen) voor {bedrijfsnaam}, {branche}. Kort en krachtig, zonder aanhalingstekens.",
+    ]
 
-    def _swarm_or_llm(prompt: str, max_tokens: int = 300) -> str:
-        """Run swarm if available, fall back to single LLM call."""
-        if _use_swarm:
+    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="demo-copy") as pool:
+        f_head = pool.submit(_llm, p_head, 30)
+        f_hero = pool.submit(_swarm_or_llm, p_hero, ctxname, 80)
+        f_meta = pool.submit(_llm, p_meta, 60)
+        f_over = pool.submit(_swarm_or_llm, p_over, ctxname, 160)
+        f_cta = pool.submit(_llm, p_cta, 40)
+        f_dien = pool.submit(_diensten_uit_llm, bedrijfsnaam, branche, plaats)
+        f_rev = [pool.submit(_llm, pr, 60) for pr in p_rev]
+
+        def _safe(fut, fallback):
             try:
-                from core.swarm_engine import swarm_pitch
-                result = swarm_pitch(prompt, context=f"{bedrijfsnaam}, {branche} in {plaats}", n_agents=3)
-                if result.answer and result.confidence > 0.3:
-                    return result.answer
-            except Exception as exc:
-                logger.debug("demo swarm fallback: %s", exc)
-        return _llm(prompt, max_tokens=max_tokens)
+                val = fut.result()
+                return val.strip() if val and val.strip() else fallback
+            except Exception:  # noqa: BLE001
+                return fallback
 
-    # All heavy copy sections run via swarm in parallel threads
-    from concurrent.futures import ThreadPoolExecutor as _Pool
-    _hero_prompt = (
-        f"Schrijf een korte hero-tekst (2 zinnen) voor de website van {bedrijfsnaam}, "
-        f"een {branche} bedrijf in {plaats}. Spreek de bezoeker direct aan."
-    )
-    _meta_prompt = (
-        f"Schrijf een Google meta-description (max 155 tekens) voor {bedrijfsnaam}, "
-        f"{branche} in {plaats}. Zakelijk, met een duidelijke call-to-action."
-    )
-    with _Pool(max_workers=2, thread_name_prefix="demo-swarm") as _pool:
-        _hero_fut = _pool.submit(_swarm_or_llm, _hero_prompt, 80)
-        _meta_fut = _pool.submit(_llm, _meta_prompt, 60)  # meta is short, single call fine
-        _hero_raw  = _hero_fut.result()
-        _meta_raw  = _meta_fut.result()
+        head = _safe(f_head, f"Uw {branche} in {plaats}")
+        hero_text = _safe(f_hero, f"Vakwerk en persoonlijke service van {bedrijfsnaam} — in {plaats} en omgeving.")
+        meta = _safe(f_meta, f"{bedrijfsnaam} — {branche} in {plaats}. Vraag vrijblijvend een offerte aan.")
+        over_text = _safe(f_over, f"{bedrijfsnaam} is een betrouwbaar {branche} bedrijf in {plaats}. "
+                          f"Wij staan voor vakmanschap, eerlijk advies en netjes werk.")
+        cta_text = _safe(f_cta, f"Vraag vandaag nog vrijblijvend een offerte aan bij {bedrijfsnaam}.")
+        diensten_items = _safe_list(f_dien)
+        reviews = []
+        rev_fallbacks = [
+            f"Erg tevreden met {bedrijfsnaam}. Snel, netjes en een eerlijke prijs.",
+            f"Vakkundige service en goede communicatie. Ik raad {bedrijfsnaam} zeker aan.",
+            f"Keurig werk geleverd, helemaal volgens afspraak.",
+        ]
+        for fut, fb in zip(f_rev, rev_fallbacks):
+            reviews.append(_safe(fut, fb).strip('"“” '))
 
-    # ── LLM calls — all outputs html-escaped before template insertion ────────
-    hero_tekst = _e(_hero_raw)
-    meta_description = _e(_meta_raw)
-
-    diensten_items: list[tuple[str, str]] = []
-    if diensten:
-        for d in diensten[:4]:
-            omschr = _e(_llm(
-                f"Schrijf één zin (max 15 woorden) die de dienst '{d}' beschrijft "
-                f"voor {bedrijfsnaam} in {plaats}.",
-                max_tokens=40,
-            ))
-            diensten_items.append((_e(d), omschr))
+    # ── Real contact data only ────────────────────────────────────────────────
+    telefoon = rd.get("telefoon") or ""
+    adres = rd.get("adres") or ""
+    website = rd.get("website") or ""
+    if website:
+        domain = re.sub(r"https?://(www\.)?", "", website).rstrip("/")
+        email = f"info@{domain}"
     else:
-        raw = _llm(
-            f"Noem 3 typische diensten van een {branche} bedrijf in Nederland. "
-            f"Geef alleen een komma-gescheiden lijst, geen nummers.",
-            max_tokens=40,
-        )
-        for d in raw.split(",")[:3]:
-            d = d.strip().rstrip(".")
-            if d:
-                omschr = _e(_llm(
-                    f"Schrijf één zin (max 15 woorden) die '{d}' beschrijft voor {bedrijfsnaam}.",
-                    max_tokens=40,
-                ))
-                diensten_items.append((_e(d), omschr))
+        email = ""
 
-    # Over ons + CTA + reviews in parallel via swarm
-    _over_prompt = (
-        f"Schrijf een 'Over ons' alinea (3-4 zinnen) voor {bedrijfsnaam}, "
-        f"een {branche} bedrijf dat al jaren actief is in {plaats} en omgeving. "
-        f"Nadruk op vakmanschap en betrouwbaarheid."
-    )
-    _cta_prompt = (
-        f"Schrijf een uitnodigende call-to-action (1 zin) voor {bedrijfsnaam} "
-        f"om een offerte aan te vragen."
-    )
-    _review1_prompt = (
-        f"Schrijf een korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. "
-        f"Begin met aanhalingstekens. Schrijf vanuit klantperspectief, positief en realistisch."
-    )
-    _review2_prompt = (
-        f"Schrijf een andere korte klantreview (2 zinnen) voor {bedrijfsnaam}, {branche}. "
-        f"Begin met aanhalingstekens. Andere toon dan de eerste, noem een concreet detail."
-    )
-    with _Pool(max_workers=4, thread_name_prefix="demo-swarm") as _pool:
-        _over_fut    = _pool.submit(_swarm_or_llm, _over_prompt, 120)
-        _cta_fut     = _pool.submit(_llm, _cta_prompt, 40)
-        _review1_fut = _pool.submit(_llm, _review1_prompt, 60)
-        _review2_fut = _pool.submit(_llm, _review2_prompt, 60)
-        _over_raw    = _over_fut.result()
-        _cta_raw     = _cta_fut.result()
-        try:
-            _review1_raw = _review1_fut.result()
-        except Exception:
-            _review1_raw = f'"Erg tevreden met het werk van {bedrijfsnaam}. Snel, netjes en voor een eerlijke prijs."'
-        try:
-            _review2_raw = _review2_fut.result()
-        except Exception:
-            _review2_raw = f'"Vakkundige service en goede communicatie. Ik raad {bedrijfsnaam} zeker aan."'
-
-    over_ons  = _e(_over_raw)
-    cta_tekst = _e(_cta_raw)
-    review1   = _e(_review1_raw)
-    review2   = _e(_review2_raw)
-
-    # ── Contact info — only real data, never invented ─────────────────────────
-    telefoon     = rd.get("telefoon")
-    adres        = rd.get("adres")
-    website_url  = rd.get("website")
-
-    telefoon_html = f"<p><a href='tel:{_e(telefoon)}'>{_e(telefoon)}</a></p>" if telefoon else "<p>Bel ons voor een afspraak</p>"
-    adres_html    = f"<p>{_e(adres)}</p>" if adres else f"<p>{_e(plaats)} en omgeving</p>"
-    website_html  = (
-        f'<p><a href="{_e(website_url)}" target="_blank" rel="noopener">{_e(website_url)}</a></p>'
-        if website_url else ""
-    )
-
-    real_website = rd.get("website")
-    if real_website:
-        domain = re.sub(r"https?://(www\.)?", "", real_website).rstrip("/")
-        safe_email = _e(f"info@{domain}")
-        email_html = f'<a href="mailto:{safe_email}">{safe_email}</a>'
-    else:
-        safe_email = None
-        email_html = '<span style="color:#999">Vul het formulier in</span>'
-
-    # ── Mobile floating call button (only if phone number present) ────────────
-    mobile_call_btn = (
-        f'<a class="mobile-call-btn" href="tel:{_e(telefoon)}">📞 Bel ons</a>'
-        if telefoon else ""
-    )
-
-    # ── Services HTML ─────────────────────────────────────────────────────────
-    diensten_html = "\n".join(
-        f"""      <div class="svc-card">
-        <div class="svc-icon">✓</div>
-        <h3>{naam}</h3>
-        <p>{omschr}</p>
-      </div>"""
-        for naam, omschr in diensten_items
-    )
-
-    # ── Schema.org JSON-LD ────────────────────────────────────────────────────
-    schema: dict = {
-        "@context": "https://schema.org",
-        "@type": "LocalBusiness",
-        "name": bedrijfsnaam,
-        "description": branche,
-        "address": {
-            "@type": "PostalAddress",
-            "addressLocality": plaats,
-            "addressCountry": "NL",
-        },
+    # ── Build escaped context for the block system ────────────────────────────
+    over_paras = _split_paragraphs(over_text)
+    ctx = {
+        "naam": _e(bedrijfsnaam), "naam_raw": bedrijfsnaam,
+        "branche": _e(branche), "branche_raw": branche,
+        "plaats": _e(plaats), "plaats_raw": plaats,
+        "initial": _e(bedrijfsnaam.strip()[:1].upper() or "•"),
+        "hero_title": _e(head), "hero_text": _e(hero_text), "meta": _e(meta),
+        "over_kort": _e(over_paras[0]),
+        "over_lang": [_e(p) for p in over_paras],
+        "cta_text": _e(cta_text),
+        "diensten": [(_e(n), _e(o)) for n, o in diensten_items],
+        "reviews": [(_e(t), w) for t, w in zip(reviews, ["Particuliere klant", f"Ondernemer uit {_e(plaats)}", "Vaste klant"])],
+        "values": [
+            ("✓", "Betrouwbaar", "Afspraak is afspraak — op tijd en zonder verrassingen."),
+            ("★", "Vakkundig", "Jarenlange ervaring en oog voor detail in elke klus."),
+            ("⚡", "Snel ter plaatse", "Korte lijnen en snelle service, ook bij spoed."),
+        ],
+        "stats": [("Gratis", "Offerte op maat"), ("1 dag", "Snelle reactie"),
+                  ("Lokaal", f"Actief in {_e(plaats)}"), ("Eerlijk", "Vaste prijzen")],
+        "hero_img": _unsplash_url(branche, sig=1),
+        "about_img": _unsplash_url(branche, 1000, 800, sig=2),
+        "telefoon": _e(telefoon), "telefoon_raw": telefoon,
+        "adres": _e(adres),
+        "email": _e(email),
+        "email_link": (f'<a href="mailto:{_e(email)}">{_e(email)}</a>' if email else ""),
+        "website": _e(website), "website_raw": website,
+        "website_link": (f'<a href="{_e(website)}" target="_blank" rel="noopener">{_e(website)}</a>' if website else ""),
+        "form_name": "contact-" + re.sub(r"[^a-z0-9]", "-", bedrijfsnaam.lower())[:30],
+        "jaar": _e(str(__import__("datetime").datetime.now().year)),
     }
-    if telefoon:
-        schema["telephone"] = telefoon
-    if website_url:
-        schema["url"] = website_url
-    schema_json = json.dumps(schema, ensure_ascii=False)
 
-    # ── Unsplash hero image ───────────────────────────────────────────────────
-    hero_img = _unsplash_url(branche)
+    # ── Compose + write the multi-page site ───────────────────────────────────
+    theme = demo_blocks.build_theme(seed, branche)
+    pages = demo_blocks.render_site(ctx, theme)
 
-    # ── Netlify Forms endpoint name (safe ASCII slug) ─────────────────────────
-    form_name = "contact-" + re.sub(r"[^a-z0-9]", "-", bedrijfsnaam.lower())[:30]
-
-    # ── Full HTML ─────────────────────────────────────────────────────────────
-    html_out = f"""<!DOCTYPE html>
-<html lang="nl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{_e(bedrijfsnaam)} — {_e(branche)} in {_e(plaats)}</title>
-<meta name="description" content="{meta_description}">
-<meta property="og:title" content="{_e(bedrijfsnaam)} — {_e(branche)} in {_e(plaats)}">
-<meta property="og:description" content="{meta_description}">
-<meta property="og:type" content="website">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script type="application/ld+json">{schema_json}</script>
-<style>
-  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  html, body {{
-    width: 100%;
-    min-height: 100vh;
-    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-    color: #333;
-    background: #fff;
-    line-height: 1.6;
-  }}
-  :root {{
-    --primary: {primary};
-    --accent:  {accent};
-    --light:   #f4f6f8;
-    --text:    #333;
-    --radius:  6px;
-  }}
-  .inner {{ max-width: 1100px; margin: 0 auto; padding: 0 2rem; }}
-
-  /* NAV */
-  nav {{
-    width: 100%;
-    background: var(--primary);
-    color: #fff;
-    position: sticky;
-    top: 0;
-    z-index: 200;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-  }}
-  nav .inner {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 1rem;
-    padding-bottom: 1rem;
-  }}
-  .logo {{ font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; }}
-  .nav-links a {{
-    color: #fff;
-    text-decoration: none;
-    margin-left: 1.75rem;
-    font-size: 0.9rem;
-    font-weight: 500;
-    opacity: 0.88;
-    transition: opacity 0.15s;
-  }}
-  .nav-links a:hover {{ opacity: 1; }}
-  .hamburger {{
-    display: none;
-    flex-direction: column;
-    gap: 5px;
-    cursor: pointer;
-    padding: 4px;
-    background: none;
-    border: none;
-  }}
-  .hamburger span {{
-    display: block;
-    width: 24px;
-    height: 2px;
-    background: #fff;
-    border-radius: 2px;
-    transition: all 0.25s;
-  }}
-  .mobile-menu {{
-    display: none;
-    flex-direction: column;
-    background: var(--primary);
-    padding: 0.75rem 2rem 1rem;
-    border-top: 1px solid rgba(255,255,255,0.15);
-  }}
-  .mobile-menu.open {{ display: flex; }}
-  .mobile-menu a {{
-    color: #fff;
-    text-decoration: none;
-    padding: 0.6rem 0;
-    font-size: 1rem;
-    font-weight: 500;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    opacity: 0.9;
-  }}
-  .mobile-menu a:last-child {{ border-bottom: none; }}
-
-  /* HERO */
-  .hero {{
-    width: 100%;
-    min-height: 520px;
-    background:
-      linear-gradient(135deg, {primary}ee 0%, {primary}99 100%),
-      url('{hero_img}') center/cover no-repeat;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    padding: 5rem 0;
-  }}
-  .hero h1 {{ font-size: 2.8rem; font-weight: 700; margin-bottom: 1rem; line-height: 1.2; letter-spacing: -0.02em; }}
-  .hero p  {{ font-size: 1.15rem; max-width: 580px; margin: 0 auto 2rem; opacity: 0.92; }}
-  .hero .inner {{ text-align: center; }}
-  .btn {{
-    display: inline-block;
-    background: var(--accent);
-    color: #fff;
-    padding: 0.9rem 2.2rem;
-    border-radius: var(--radius);
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 1rem;
-    transition: filter 0.2s, transform 0.1s;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
-  }}
-  .btn:hover {{ filter: brightness(1.1); transform: translateY(-1px); }}
-  .btn:active {{ transform: translateY(0); }}
-
-  /* SERVICES */
-  .svc-strip {{ width: 100%; background: #fff; padding: 5rem 0; }}
-  .svc-strip h2 {{ font-size: 2rem; font-weight: 700; color: var(--primary); text-align: center; margin-bottom: 0.75rem; }}
-  .svc-intro {{ text-align: center; color: #666; margin-bottom: 3rem; font-size: 1.05rem; }}
-  .svc-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 1.5rem;
-  }}
-  .svc-card {{
-    background: var(--light);
-    border-radius: 10px;
-    padding: 2rem 1.5rem;
-    border-top: 4px solid var(--accent);
-    text-align: center;
-    transition: transform 0.2s, box-shadow 0.2s;
-  }}
-  .svc-card:hover {{ transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.1); }}
-  .svc-icon {{ font-size: 1.8rem; color: var(--accent); margin-bottom: 0.75rem; }}
-  .svc-card h3 {{ font-size: 1.05rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--primary); }}
-  .svc-card p  {{ font-size: 0.9rem; line-height: 1.55; color: #555; }}
-
-  /* ABOUT */
-  .about-strip {{ width: 100%; background: var(--light); padding: 5rem 0; }}
-  .about-strip .inner {{ display: flex; gap: 4rem; align-items: center; }}
-  .about-text {{ flex: 1; }}
-  .about-text h2 {{ font-size: 2rem; font-weight: 700; color: var(--primary); margin-bottom: 1rem; }}
-  .about-text p  {{ line-height: 1.75; font-size: 1rem; color: #555; }}
-  .about-badges {{ display: flex; flex-direction: column; gap: 1rem; flex: 0 0 auto; }}
-  .about-badge {{
-    background: var(--primary);
-    color: #fff;
-    border-radius: 10px;
-    width: 140px;
-    padding: 1.25rem 1rem;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 0.4rem;
-  }}
-  .badge-icon {{ font-size: 2rem; }}
-  .badge-label {{ font-size: 0.75rem; opacity: 0.85; line-height: 1.3; }}
-
-  /* REVIEWS */
-  .reviews-strip {{ width: 100%; background: #fff; padding: 5rem 0; }}
-  .reviews-strip h2 {{ font-size: 2rem; font-weight: 700; color: var(--primary); text-align: center; margin-bottom: 3rem; }}
-  .reviews-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.5rem;
-  }}
-  .review-card {{
-    background: var(--light);
-    border-radius: 10px;
-    padding: 2rem 1.75rem;
-    border-left: 4px solid var(--accent);
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }}
-  .stars {{ color: #f5a623; font-size: 1.1rem; letter-spacing: 2px; }}
-  .review-text {{ font-size: 0.97rem; line-height: 1.65; color: #444; font-style: italic; flex: 1; }}
-  .reviewer {{ font-size: 0.82rem; font-weight: 600; color: var(--primary); opacity: 0.8; }}
-
-  /* CTA */
-  .cta-strip {{
-    width: 100%;
-    background: linear-gradient(135deg, var(--primary) 0%, {primary}cc 100%);
-    color: #fff;
-    padding: 5rem 0;
-    text-align: center;
-  }}
-  .cta-strip h2 {{ font-size: 2.2rem; font-weight: 700; margin-bottom: 1rem; }}
-  .cta-strip p  {{ max-width: 520px; margin: 0 auto 2rem; opacity: 0.9; font-size: 1.1rem; }}
-
-  /* TRUST BADGES */
-  .trust-strip {{
-    width: 100%;
-    background: var(--light);
-    padding: 2rem 0;
-    border-top: 1px solid rgba(0,0,0,0.06);
-    border-bottom: 1px solid rgba(0,0,0,0.06);
-  }}
-  .trust-row {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1.5rem;
-    justify-content: center;
-    align-items: center;
-  }}
-  .trust-item {{
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: #444;
-  }}
-  .trust-item span:first-child {{ font-size: 1.1rem; }}
-
-  /* CONTACT */
-  .contact-strip {{ width: 100%; background: #fff; padding: 5rem 0; }}
-  .contact-strip h2 {{ font-size: 2rem; font-weight: 700; color: var(--primary); text-align: center; margin-bottom: 0.75rem; }}
-  .contact-intro {{ text-align: center; color: #666; margin-bottom: 3rem; font-size: 1rem; }}
-  .contact-layout {{ display: grid; grid-template-columns: 1fr 1.4fr; gap: 3rem; align-items: start; }}
-  .contact-info {{ display: flex; flex-direction: column; gap: 1.25rem; }}
-  .contact-item {{
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-    padding: 1.25rem;
-    background: var(--light);
-    border-radius: var(--radius);
-  }}
-  .contact-item .ci {{ font-size: 1.5rem; flex-shrink: 0; margin-top: 0.1rem; }}
-  .contact-item-body h4 {{ font-size: 0.85rem; font-weight: 600; color: var(--primary); margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em; }}
-  .contact-item-body p, .contact-item-body a {{ font-size: 0.95rem; color: #555; text-decoration: none; }}
-  .contact-item-body a:hover {{ color: var(--primary); text-decoration: underline; }}
-
-  /* CONTACT FORM */
-  .contact-form {{ background: var(--light); border-radius: 10px; padding: 2rem; }}
-  .contact-form h3 {{ font-size: 1.15rem; font-weight: 600; color: var(--primary); margin-bottom: 1.25rem; }}
-  .form-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }}
-  .form-group {{ display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }}
-  .form-group label {{ font-size: 0.82rem; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.04em; }}
-  .form-group input, .form-group textarea, .form-group select {{
-    padding: 0.65rem 0.9rem;
-    border: 1.5px solid #ddd;
-    border-radius: var(--radius);
-    font-size: 0.95rem;
-    font-family: inherit;
-    color: #333;
-    background: #fff;
-    transition: border-color 0.15s;
-    width: 100%;
-  }}
-  .form-group input:focus, .form-group textarea:focus, .form-group select:focus {{
-    outline: none;
-    border-color: var(--accent);
-  }}
-  .form-group textarea {{ resize: vertical; min-height: 110px; }}
-  .form-submit {{
-    width: 100%;
-    padding: 0.85rem;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: var(--radius);
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    font-family: inherit;
-    transition: filter 0.2s;
-  }}
-  .form-submit:hover {{ filter: brightness(1.1); }}
-  .form-notice {{ font-size: 0.78rem; color: #999; margin-top: 0.6rem; text-align: center; }}
-
-  /* MOBILE FLOATING CALL BUTTON */
-  .mobile-call-btn {{
-    display: none;
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
-    background: #25d366;
-    color: #fff;
-    border-radius: 50px;
-    padding: 0.9rem 1.4rem;
-    font-weight: 600;
-    text-decoration: none;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-    z-index: 1000;
-    gap: 0.5rem;
-    align-items: center;
-    font-size: 0.95rem;
-  }}
-
-  /* FOOTER */
-  footer {{
-    width: 100%;
-    background: #111;
-    color: rgba(255,255,255,0.65);
-    text-align: center;
-    padding: 2rem 1rem;
-    font-size: 0.85rem;
-  }}
-  footer a {{ color: rgba(255,255,255,0.65); text-decoration: none; }}
-  footer a:hover {{ color: #fff; }}
-  .footer-links {{ display: flex; gap: 1.5rem; justify-content: center; margin-top: 0.5rem; font-size: 0.8rem; }}
-  .footer-credit {{ margin-top: 0.75rem; font-size: 0.75rem; opacity: 0.45; }}
-
-  /* RESPONSIVE */
-  @media (max-width: 768px) {{
-    .hero h1 {{ font-size: 2rem; }}
-    .hero p  {{ font-size: 1rem; }}
-    .about-strip .inner {{ flex-direction: column; gap: 2rem; }}
-    .about-badges {{ flex-direction: row; }}
-    .nav-links {{ display: none; }}
-    .hamburger {{ display: flex; }}
-    .contact-layout {{ grid-template-columns: 1fr; }}
-    .form-row {{ grid-template-columns: 1fr; }}
-    .svc-grid, .contact-grid {{ grid-template-columns: 1fr; }}
-    .mobile-call-btn {{ display: flex; }}
-  }}
-</style>
-</head>
-<body>
-
-<!-- NAV -->
-<nav>
-  <div class="inner">
-    <div class="logo">{_e(bedrijfsnaam)}</div>
-    <div class="nav-links">
-      <a href="#diensten">Diensten</a>
-      <a href="#over-ons">Over ons</a>
-      <a href="#reviews">Reviews</a>
-      <a href="#contact">Contact</a>
-    </div>
-    <button class="hamburger" aria-label="Menu" onclick="toggleMenu()" aria-expanded="false" id="hamburger">
-      <span></span><span></span><span></span>
-    </button>
-  </div>
-  <div class="mobile-menu" id="mobile-menu">
-    <a href="#diensten" onclick="closeMenu()">Diensten</a>
-    <a href="#over-ons" onclick="closeMenu()">Over ons</a>
-    <a href="#reviews" onclick="closeMenu()">Reviews</a>
-    <a href="#contact" onclick="closeMenu()">Contact</a>
-  </div>
-</nav>
-
-<!-- HERO -->
-<div class="hero">
-  <div class="inner">
-    <h1>{_e(bedrijfsnaam)}</h1>
-    <p>{hero_tekst}</p>
-    <a href="#contact" class="btn">Vraag een offerte aan</a>
-  </div>
-</div>
-
-<!-- SERVICES -->
-<div class="svc-strip" id="diensten">
-  <div class="inner">
-    <h2>Onze Diensten</h2>
-    <p class="svc-intro">Wat wij voor u kunnen betekenen</p>
-    <div class="svc-grid">
-{diensten_html}
-    </div>
-  </div>
-</div>
-
-<!-- ABOUT -->
-<div class="about-strip" id="over-ons">
-  <div class="inner">
-    <div class="about-text">
-      <h2>Over {_e(bedrijfsnaam)}</h2>
-      <p>{over_ons}</p>
-    </div>
-    <div class="about-badges">
-      <div class="about-badge">
-        <span class="badge-icon">✓</span>
-        <span class="badge-label">Vakkundig &amp; betrouwbaar</span>
-      </div>
-      <div class="about-badge">
-        <span class="badge-icon">📍</span>
-        <span class="badge-label">Actief in {_e(plaats)}</span>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- REVIEWS -->
-<div class="reviews-strip" id="reviews">
-  <div class="inner">
-    <h2>Wat klanten zeggen</h2>
-    <div class="reviews-grid">
-      <div class="review-card">
-        <div class="stars">★★★★★</div>
-        <p class="review-text">{review1}</p>
-        <div class="reviewer">— M. van den Berg, {_e(plaats)}</div>
-      </div>
-      <div class="review-card">
-        <div class="stars">★★★★★</div>
-        <p class="review-text">{review2}</p>
-        <div class="reviewer">— J. de Vries, {_e(plaats)}</div>
-      </div>
-      <div class="review-card">
-        <div class="stars">★★★★★</div>
-        <p class="review-text">"Uitstekende service en nette afwerking. Zou {_e(bedrijfsnaam)} zeker aanraden aan vrienden en familie."</p>
-        <div class="reviewer">— P. Smit, regio {_e(plaats)}</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- CTA -->
-<div class="cta-strip">
-  <div class="inner">
-    <h2>Klaar voor uw project?</h2>
-    <p>{cta_tekst}</p>
-    <a href="#contact" class="btn">Neem contact op</a>
-  </div>
-</div>
-
-<!-- TRUST BADGES -->
-<div class="trust-strip">
-  <div class="inner">
-    <div class="trust-row">
-      <div class="trust-item"><span>✓</span><span>Vakkundig &amp; betrouwbaar</span></div>
-      <div class="trust-item"><span>📍</span><span>Lokaal actief in {_e(plaats)}</span></div>
-      <div class="trust-item"><span>💬</span><span>Snel bereikbaar</span></div>
-      <div class="trust-item"><span>⭐</span><span>Tevreden klanten</span></div>
-    </div>
-  </div>
-</div>
-
-<!-- CONTACT -->
-<div class="contact-strip" id="contact">
-  <div class="inner">
-    <h2>Contact</h2>
-    <p class="contact-intro">We reageren binnen één werkdag</p>
-    <div class="contact-layout">
-      <div class="contact-info">
-        <div class="contact-item">
-          <div class="ci">📞</div>
-          <div class="contact-item-body">
-            <h4>Telefoon</h4>
-            {telefoon_html}
-          </div>
-        </div>
-        <div class="contact-item">
-          <div class="ci">📧</div>
-          <div class="contact-item-body">
-            <h4>E-mail</h4>
-            <p>{email_html}</p>
-            {website_html}
-          </div>
-        </div>
-        <div class="contact-item">
-          <div class="ci">📍</div>
-          <div class="contact-item-body">
-            <h4>Locatie</h4>
-            {adres_html}
-          </div>
-        </div>
-      </div>
-
-      <!-- Netlify Forms — zero backend, works on any static host -->
-      <div class="contact-form">
-        <h3>Stuur ons een bericht</h3>
-        <form name="{_e(form_name)}" method="POST" data-netlify="true" netlify-honeypot="bot-field">
-          <input type="hidden" name="form-name" value="{_e(form_name)}">
-          <p style="display:none"><label>Bot field: <input name="bot-field"></label></p>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="naam">Naam *</label>
-              <input type="text" id="naam" name="naam" required placeholder="Jan de Vries">
-            </div>
-            <div class="form-group">
-              <label for="telefoon">Telefoon</label>
-              <input type="tel" id="telefoon" name="telefoon" placeholder="06-12345678">
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="email">E-mailadres *</label>
-            <input type="email" id="email" name="email" required placeholder="jan@voorbeeld.nl">
-          </div>
-          <div class="form-group">
-            <label for="onderwerp">Onderwerp</label>
-            <select id="onderwerp" name="onderwerp">
-              <option value="">Selecteer een onderwerp</option>
-              <option>Offerte aanvragen</option>
-              <option>Afspraak maken</option>
-              <option>Vraag stellen</option>
-              <option>Anders</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="bericht">Bericht *</label>
-            <textarea id="bericht" name="bericht" required placeholder="Vertel ons wat u nodig heeft…"></textarea>
-          </div>
-          <button type="submit" class="form-submit">Verstuur bericht →</button>
-          <p class="form-notice">Uw gegevens worden alleen gebruikt om contact op te nemen.</p>
-        </form>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- FOOTER -->
-<footer>
-  <p>&copy; <span id="year"></span> {_e(bedrijfsnaam)} · {_e(branche)} in {_e(plaats)}</p>
-  <div class="footer-links">
-    <a href="#diensten">Diensten</a>
-    <a href="#over-ons">Over ons</a>
-    <a href="#reviews">Reviews</a>
-    <a href="#contact">Contact</a>
-  </div>
-  <p class="footer-credit"><a href="#">Professionele website door AI Employee</a></p>
-</footer>
-
-<!-- MOBILE FLOATING CALL BUTTON -->
-{mobile_call_btn}
-
-<script>
-  document.getElementById('year').textContent = new Date().getFullYear();
-
-  function toggleMenu() {{
-    var m = document.getElementById('mobile-menu');
-    var h = document.getElementById('hamburger');
-    var open = m.classList.toggle('open');
-    h.setAttribute('aria-expanded', open ? 'true' : 'false');
-  }}
-  function closeMenu() {{
-    document.getElementById('mobile-menu').classList.remove('open');
-    document.getElementById('hamburger').setAttribute('aria-expanded', 'false');
-  }}
-  // Close mobile menu on outside click
-  document.addEventListener('click', function(e) {{
-    var nav = document.querySelector('nav');
-    if (!nav.contains(e.target)) closeMenu();
-  }});
-  // Smooth scroll for anchor links
-  document.querySelectorAll('a[href^="#"]').forEach(function(a) {{
-    a.addEventListener('click', function(e) {{
-      var target = document.querySelector(this.getAttribute('href'));
-      if (target) {{
-        e.preventDefault();
-        target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-      }}
-    }});
-  }});
-</script>
-
-</body>
-</html>"""
-
-    _DEMO_ROOT.mkdir(parents=True, exist_ok=True)
-    safe_naam = "".join(c if c.isalnum() or c in "-_" else "_" for c in bedrijfsnaam)
-    filename  = f"demo_{safe_naam}_{plaats.lower()}.html"
-    dest_path = _DEMO_ROOT / filename
-
+    dest_dir = _DEMO_ROOT / slug
     try:
-        dest_path.write_text(html_out, encoding="utf-8")
-    except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        total = 0
+        for fname, html_doc in pages.items():
+            (dest_dir / fname).write_text(html_doc, encoding="utf-8")
+            total += len(html_doc)
+    except OSError as exc:
+        return {"status": "error", "error": f"Kon demo niet wegschrijven: {exc}"}
 
-    logger.info("demo_generator: %s (%d bytes)", dest_path, len(html_out))
-    return {"status": "ok", "path": str(dest_path), "bytes": len(html_out)}
+    logger.info("demo_generator: %s (%d pagina's, %d bytes, thema %s)",
+                dest_dir, len(pages), total, theme["key"])
+    return {
+        "status": "ok",
+        "dir": str(dest_dir),
+        "slug": slug,
+        "pages": list(pages.keys()),
+        "path": str(dest_dir / "index.html"),  # backward compat
+        "theme": theme["key"],
+        "bytes": total,
+    }
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Split a copy block into 1-2 paragraphs for the about section."""
+    text = (text or "").strip()
+    if not text:
+        return [""]
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    if len(sentences) <= 2:
+        return [text]
+    mid = (len(sentences) + 1) // 2
+    return [" ".join(sentences[:mid]).strip(), " ".join(sentences[mid:]).strip()]
+
+
+def _safe_list(fut) -> list[tuple[str, str]]:
+    try:
+        val = fut.result()
+        return val if val else []
+    except Exception:  # noqa: BLE001
+        return [
+            ("Advies op maat", "Persoonlijk advies voor uw situatie."),
+            ("Vakkundige uitvoering", "Net en volgens afspraak uitgevoerd."),
+            ("Onderhoud & service", "Wij blijven bereikbaar, ook na de klus."),
+            ("Spoedhulp", "Snel ter plaatse wanneer het nodig is."),
+        ]
