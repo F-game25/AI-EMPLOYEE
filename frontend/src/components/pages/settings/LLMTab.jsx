@@ -3,9 +3,23 @@ import api from '../../../api/client'
 import { NxField, NxSaveBtn, NxSlider, useSave } from './controls'
 
 const LLM_MODELS = {
-  anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  ollama:    ['llama3.3', 'deepseek-r1', 'mistral'],
-  openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
+  anthropic:   ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  openrouter:  ['openai/gpt-4o', 'anthropic/claude-opus-4-5', 'google/gemini-2.5-pro',
+                'deepseek/deepseek-r1', 'meta-llama/llama-3.3-70b-instruct',
+                'mistralai/mistral-large-2407', 'qwen/qwen3-235b-a22b'],
+  ollama:      ['llama3.3', 'deepseek-r1', 'mistral'],
+}
+
+const PROVIDER_LABELS = {
+  anthropic:  'Anthropic',
+  openrouter: 'OpenRouter',
+  ollama:     'Ollama (Local)',
+}
+
+const KEY_PLACEHOLDERS = {
+  anthropic:  'sk-ant-…',
+  openrouter: 'sk-or-v1-…',
+  ollama:     'http://localhost:11434',
 }
 
 export default function LLMTab() {
@@ -58,7 +72,7 @@ export default function LLMTab() {
               className={`nx-radio-pill ${cfg.provider === p ? 'nx-radio-pill--active' : ''}`}
               onClick={() => handleProviderChange(p)}
             >
-              {p.toUpperCase()}
+              {PROVIDER_LABELS[p] || p.toUpperCase()}
             </button>
           ))}
         </div>
@@ -82,7 +96,7 @@ export default function LLMTab() {
                 type={showKey ? 'text' : 'password'}
                 value={cfg.api_key}
                 onChange={e => set('api_key', e.target.value)}
-                placeholder={cfg.provider === 'anthropic' ? 'sk-ant-…' : cfg.provider === 'openai' ? 'sk-…' : 'http://localhost:11434'}
+                placeholder={KEY_PLACEHOLDERS[cfg.provider] || '…'}
                 autoComplete="off"
               />
               <button type="button" className="nx-eye-btn" onClick={() => setShowKey(v => !v)} aria-label={showKey ? 'Hide' : 'Show'}>
@@ -100,6 +114,17 @@ export default function LLMTab() {
               </button>
             </div>
           </NxField>
+
+          {cfg.provider === 'openrouter' && (
+            <div style={{ fontSize: '11px', color: 'rgba(229,199,107,0.55)', marginTop: '-8px' }}>
+              Get your key at{' '}
+              <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer"
+                style={{ color: 'rgba(229,199,107,0.8)', textDecoration: 'underline' }}>
+                openrouter.ai/keys
+              </a>
+              {' '}— supports 200+ models from any provider.
+            </div>
+          )}
 
           <NxField label={`TEMPERATURE — ${cfg.temperature.toFixed(2)}`} full>
             <NxSlider value={cfg.temperature} min={0} max={1} step={0.01} onChange={v => set('temperature', v)} format={v => v.toFixed(2)} />

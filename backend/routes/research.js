@@ -88,8 +88,8 @@ function makeRateLimit(max, windowMs = 60_000) {
     next()
   }
 }
-const _rl_discover = makeRateLimit(10)  // 10/min per IP
-const _rl_execute  = makeRateLimit(10)  // 10/min per IP (execute is heavier but same policy tier)
+const _rl_discover = makeRateLimit(60)  // 60/min per IP — enough for interactive use
+const _rl_execute  = makeRateLimit(30)  // 30/min per IP — execute is heavier so slightly lower
 
 // ── Router ────────────────────────────────────────────────────────────────────
 module.exports = function createResearchRouter(requireAuth) {

@@ -38,9 +38,9 @@ function ModelBadge({ model, registryData }) {
 /* ── Tab 1: PROVIDERS ──────────────────────────────────────────────────── */
 
 const PROVIDERS = [
-  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', keyPrefix: 'sk-ant-', capabilityId: 'anthropic_llm' },
-  { id: 'openai',    name: 'OpenAI',    defaultModel: 'gpt-4o',            keyPrefix: 'sk-',     capabilityId: 'openai_llm' },
-  { id: 'ollama',    name: 'Ollama',    defaultModel: 'llama3.2',          keyPrefix: 'http://', capabilityId: 'ollama_local_model' },
+  { id: 'anthropic',  name: 'Anthropic',  defaultModel: 'claude-sonnet-4-6',             keyPrefix: 'sk-ant-', capabilityId: 'anthropic_llm' },
+  { id: 'openrouter', name: 'OpenRouter', defaultModel: 'openai/gpt-4o',                 keyPrefix: 'sk-or-',  capabilityId: 'openrouter_llm' },
+  { id: 'ollama',     name: 'Ollama',     defaultModel: 'llama3.2',                      keyPrefix: 'http://', capabilityId: 'ollama_local_model' },
 ]
 
 function capabilityForProvider(provider, capabilitiesById) {

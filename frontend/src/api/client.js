@@ -18,6 +18,10 @@ async function _fetch(method, path, body, opts = {}) {
   });
 
   if (!res.ok) {
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get('Retry-After') || '60', 10)
+      window.dispatchEvent(new CustomEvent('nx:rate-limit', { detail: { seconds: retryAfter } }))
+    }
     const text = await res.text().catch(() => '');
     let detail = text;
     try { detail = JSON.parse(text)?.error ?? text; } catch { /* ignore */ }

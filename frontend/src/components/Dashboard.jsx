@@ -130,6 +130,62 @@ function DashboardMountedSignal({ section }) {
   return null
 }
 
+function SystemBanner() {
+  const [rateLimitSecs, setRateLimitSecs] = useState(0)
+  const [pythonOffline, setPythonOffline] = useState(false)
+
+  // Rate limit countdown
+  useEffect(() => {
+    const handler = e => setRateLimitSecs(e.detail?.seconds || 60)
+    window.addEventListener('nx:rate-limit', handler)
+    return () => window.removeEventListener('nx:rate-limit', handler)
+  }, [])
+  useEffect(() => {
+    if (rateLimitSecs <= 0) return
+    const t = setTimeout(() => setRateLimitSecs(s => Math.max(0, s - 1)), 1000)
+    return () => clearTimeout(t)
+  }, [rateLimitSecs])
+
+  // Python backend health check (every 30s)
+  useEffect(() => {
+    const check = () => fetch('/api/health', { signal: AbortSignal.timeout(4000) })
+      .then(r => r.json())
+      .then(d => setPythonOffline(d?.python === false || d?.services?.python === 'offline'))
+      .catch(() => {})
+    check()
+    const t = setInterval(check, 30000)
+    return () => clearInterval(t)
+  }, [])
+
+  if (!rateLimitSecs && !pythonOffline) return null
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+      display: 'flex', flexDirection: 'column', gap: 0,
+      fontFamily: 'var(--nx-font-mono, monospace)', fontSize: 12,
+    }}>
+      {rateLimitSecs > 0 && (
+        <div style={{
+          background: 'rgba(229,150,0,0.92)', color: '#000',
+          padding: '6px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>⚡ Rate limit reached — retry in {rateLimitSecs}s</span>
+          <button onClick={() => setRateLimitSecs(0)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+      {pythonOffline && (
+        <div style={{
+          background: 'rgba(180,30,30,0.92)', color: '#fff',
+          padding: '6px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>⚠ AI backend offline — run <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: 3 }}>bash start.sh</code> to enable full AI features</span>
+          <button onClick={() => setPythonOffline(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const isMobile = useMediaQuery('(max-width: 768px)')
@@ -236,6 +292,7 @@ export default function Dashboard() {
       className="fixed inset-0 flex scanlines"
       style={{ background: 'var(--bg-base)' }}
     >
+      <SystemBanner />
       <a href="#main-content" className="skip-link">Skip to content</a>
       <Sidebar />
 

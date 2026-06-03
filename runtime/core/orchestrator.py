@@ -247,7 +247,14 @@ class LLMClient:
             "model": model,
         }
 
-    def _call_openrouter(self, *, prompt: str, system: str, model: str = "deepseek/deepseek-coder-v2") -> dict[str, Any]:
+    def _call_openrouter(self, *, prompt: str, system: str, model: str = "") -> dict[str, Any]:
+        if not model:
+            try:
+                import json as _json
+                _rp = os.path.join(os.path.dirname(__file__), "..", "..", "state", "model-routing.json")
+                model = _json.load(open(_rp)).get("openrouter_model", "openai/gpt-4o")
+            except Exception:
+                model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o")
         key = os.environ.get("OPENROUTER_API_KEY", "").strip()
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY is not set")
