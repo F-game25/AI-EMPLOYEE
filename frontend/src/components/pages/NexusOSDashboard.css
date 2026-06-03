@@ -78,8 +78,8 @@
 
 /* ── The stage — orb arena with corner panels ───────────────────────────────*/
 .nxd__stage {
-  flex: 0 0 clamp(420px, 54vh, 640px);
-  min-height: 420px;
+  flex: 0 0 clamp(500px, 62vh, 760px);
+  min-height: 500px;
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(229,199,107,0.12);
@@ -745,4 +745,20 @@
   .nxd__eye-state--error {
     animation: none;
   }
+}
+
+/* Medium-tier: kill the most expensive effects, keep the core visual */
+html[data-perf="medium"] .nxd__sparkbit {
+  display: none;
+}
+html[data-perf="medium"] .nxd__ring--4,
+html[data-perf="medium"] .nxd__ring--5 {
+  display: none;
+}
+html[data-perf="medium"] .nxd__field::before {
+  animation: none;
+}
+html[data-perf="medium"] .snode {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }

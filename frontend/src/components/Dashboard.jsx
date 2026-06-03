@@ -141,7 +141,9 @@ export default function Dashboard() {
 
   // Expose the performance tier as a root attribute so CSS can drop expensive
   // compositing (backdrop blurs, scanlines, animations) on low/Lite mode.
-  useEffect(() => { document.documentElement.dataset.perf = tier }, [tier])
+  useEffect(() => {
+    document.documentElement.dataset.perf = (tier === 'high') ? 'high' : 'low'
+  }, [tier])
 
   // Sync URL → store when user navigates with browser back/forward
   useEffect(() => {

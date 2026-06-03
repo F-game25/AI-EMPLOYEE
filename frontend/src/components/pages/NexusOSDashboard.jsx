@@ -263,6 +263,12 @@ export default function NexusOSDashboard() {
     fetchCapabilityStatus?.()
   }, [fetchCapabilityStatus])
 
+  // Wire orchestrator state → avatar eye color/energy
+  useEffect(() => {
+    const stateMap = { idle: 'idle', thinking: 'thinking', executing: 'executing', error: 'alert', busy: 'listening' }
+    window.NX?.setState?.(stateMap[orchestratorState?.toLowerCase()] || 'idle')
+  }, [orchestratorState])
+
   const cpu      = systemHealth.cpu_percent ?? systemStatus.cpu ?? systemStatus.cpu_usage ?? 0
   const ram      = systemHealth.memory_percent ?? systemStatus.memory ?? 0
   const gpu      = systemHealth.gpu_percent ?? systemStatus.gpu_usage ?? 0
@@ -351,7 +357,7 @@ export default function NexusOSDashboard() {
           </div>
           <div className="nxd__orbwrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <CognitiveEye
-              size={420}
+              size={560}
               mode="dashboard"
               onClick={() => window.dispatchEvent(new CustomEvent('nx:companion:open'))}
             />

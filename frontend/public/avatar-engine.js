@@ -290,6 +290,7 @@
 
   /* ── main frame ───────────────────────────────────────────────── */
   function frame() {
+   if (NX._paused) { if (!useInterval) raf = requestAnimationFrame(frame); return; }
    NX._f = (NX._f || 0) + 1;
    loopStarted = true;
    try {
