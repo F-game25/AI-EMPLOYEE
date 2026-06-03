@@ -1,22 +1,18 @@
-/**
- * CognitiveEye — the single system companion avatar.
- *
- * Works at any size: 400px on the dashboard, 32px in the toolbar.
- * The pupil follows the global mouse cursor with NO React state updates
- * (direct DOM ref mutation) → zero re-renders per frame → zero lag.
- *
- * Props:
- *   size       number   — diameter in px (default 400)
- *   mode       string   — 'dashboard' | 'toolbar' (affects max pupil travel)
- *   onClick    fn       — called on click (opens companion/chat)
- *   className  string
- *   style      object
- */
 import { useEffect, useRef } from 'react'
-import { useRouteTheme } from '../../theme/routeThemes'
 import { subscribeGlobalMouse } from '../../hooks/useGlobalMouse'
 import './CognitiveEye.css'
 
+/**
+ * CognitiveEye — single companion avatar component.
+ * Design exactly matches the "Cognitive Core Avatar (standalone).html" reference:
+ *   - Gold radial iris (#FFE89A → #E5C76B → #A87432 → #1a1306)
+ *   - Gold iris rim stroke
+ *   - Two flat orbital ellipses (ring1: rx/ry ≈ 1.39/0.39, ring2: ≈ 1.26/0.65)
+ *   - Triangle glyph pointing up, center dot slightly below center
+ *   - Black pupil that slides toward cursor (no React state — direct DOM ref)
+ *
+ * Props: size, mode ('dashboard'|'toolbar'), onClick, className, style
+ */
 export default function CognitiveEye({
   size = 400,
   mode = 'dashboard',
@@ -24,60 +20,58 @@ export default function CognitiveEye({
   className = '',
   style,
 }) {
-  const theme = useRouteTheme()
   const wrapRef  = useRef(null)
   const pupilRef = useRef(null)
-  const idSuffix = useRef(Math.random().toString(36).slice(2, 7))
-  const id = idSuffix.current
+  const id = useRef(Math.random().toString(36).slice(2, 7)).current
 
-  // Iris radius in SVG units (viewBox is -1 -1 2 2 → unit circle)
-  const IRIS_R     = 0.72
-  const PUPIL_R    = mode === 'toolbar' ? 0.22 : 0.18
-  // Max distance the pupil center can move from the iris center (in SVG units)
-  const MAX_TRAVEL = mode === 'toolbar' ? 0.30 : 0.38
+  // SVG unit space: viewBox "-1 -1 2 2", iris = unit circle (r=1)
+  // These match the reference proportions: iris r=230, ring1 rx=320 ry=90, ring2 rx=290 ry=150
+  const IRIS_R     = 0.74
+  const RIM_W      = mode === 'toolbar' ? 0.022 : 0.013   // iris rim stroke width
+  const RING1_RX   = IRIS_R * (320 / 230)                 // ≈ 1.031 → very flat
+  const RING1_RY   = IRIS_R * (90 / 230)                  // ≈ 0.290
+  const RING2_RX   = IRIS_R * (290 / 230)                 // ≈ 0.934
+  const RING2_RY   = IRIS_R * (150 / 230)                 // ≈ 0.483
+  const PUPIL_R    = mode === 'toolbar' ? 0.20 : 0.155
+  const MAX_TRAVEL = mode === 'toolbar' ? 0.28 : 0.36
 
-  // Pupil tracking — direct DOM mutation, no state
+  // Triangle pointing up — reference: top (600,320), base corners (532,452) (668,452)
+  // In unit space relative to iris r=230: top = -80/230, base_y = +52/230, half_w = 68/230
+  const TRI_SCALE = IRIS_R / 1.0
+  const triTopY   = TRI_SCALE * (-80 / 230)              // ≈ -0.257
+  const triBaseY  = TRI_SCALE * ( 52 / 230)              // ≈ +0.168
+  const triHalfW  = TRI_SCALE * ( 68 / 230)              // ≈ +0.219
+  const triPts    = `0,${triTopY.toFixed(4)} ${triHalfW.toFixed(4)},${triBaseY.toFixed(4)} ${(-triHalfW).toFixed(4)},${triBaseY.toFixed(4)}`
+
+  // Center dot — reference: 18px below center → 18/230 in unit coords
+  const dotY = TRI_SCALE * (18 / 230)                    // ≈ +0.058
+  const dotR = TRI_SCALE * (9 / 230)                     // ≈ 0.029
+  // Clamp dotR to something visible at toolbar size
+  const dotRFinal = mode === 'toolbar' ? Math.max(dotR, 0.042) : Math.max(dotR, 0.030)
+
+  // Pupil tracking — zero React re-renders, direct SVG transform mutation
   useEffect(() => {
-    const el = pupilRef.current
+    const el   = pupilRef.current
     const wrap = wrapRef.current
     if (!el || !wrap) return
 
     const unsub = subscribeGlobalMouse((mx, my) => {
       const rect = wrap.getBoundingClientRect()
-      const cx = rect.left + rect.width / 2
+      const cx = rect.left + rect.width  / 2
       const cy = rect.top  + rect.height / 2
       const dx = mx - cx
       const dy = my - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      // Convert screen pixels to SVG units (size px = 2 SVG units)
-      const scale = 2 / size
-      const rawX = dx * scale
-      const rawY = dy * scale
+      const scale = 2 / size                             // px → SVG units
       const rawDist = dist * scale
-      const travel = Math.min(rawDist, MAX_TRAVEL)
-      const angle = Math.atan2(rawY, rawX)
-      const ox = rawDist > 0.001 ? (Math.cos(angle) * travel) : 0
-      const oy = rawDist > 0.001 ? (Math.sin(angle) * travel) : 0
-      el.setAttribute('transform', `translate(${ox.toFixed(4)}, ${oy.toFixed(4)})`)
+      const travel  = Math.min(rawDist, MAX_TRAVEL)
+      const angle   = Math.atan2(dy, dx)
+      const ox = rawDist > 0.001 ? Math.cos(angle) * travel : 0
+      const oy = rawDist > 0.001 ? Math.sin(angle) * travel : 0
+      el.setAttribute('transform', `translate(${ox.toFixed(4)},${oy.toFixed(4)})`)
     })
     return unsub
-  }, [size, mode, MAX_TRAVEL])
-
-  const iris  = theme?.iris  || '#E5C76B'
-  const halo  = theme?.halo  || '#fbbf24'
-
-  // Triangle glyph points (centered, pointing up)
-  const triR = IRIS_R * 0.42
-  const triPts = [
-    [0, -triR],
-    [triR * 0.86,  triR * 0.5],
-    [-triR * 0.86, triR * 0.5],
-  ].map(([x, y]) => `${x.toFixed(4)},${y.toFixed(4)}`).join(' ')
-
-  const outerRingRx = IRIS_R * 1.30
-  const outerRingRy = IRIS_R * 0.52
-  const innerRingRx = IRIS_R * 1.15
-  const innerRingRy = IRIS_R * 0.62
+  }, [size, MAX_TRAVEL])
 
   return (
     <div
@@ -87,127 +81,119 @@ export default function CognitiveEye({
       onClick={onClick}
       role="button"
       tabIndex={0}
-      aria-label="Companion — click to open conversation"
+      aria-label="Cognitive Core — click to open companion"
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onClick?.() }}
     >
       <svg
         viewBox="-1 -1 2 2"
         width={size}
         height={size}
-        style={{ overflow: 'visible' }}
+        style={{ overflow: 'visible', display: 'block' }}
         aria-hidden="true"
       >
         <defs>
-          {/* Iris fill gradient */}
+          {/* Iris gradient — exact reference colors */}
           <radialGradient id={`ce-iris-${id}`} cx="50%" cy="50%" r="50%">
-            <stop offset="0%"   stopColor="#fff8e7" stopOpacity="0.95" />
-            <stop offset="28%"  stopColor={iris} />
-            <stop offset="68%"  stopColor={iris} stopOpacity="0.75" />
+            <stop offset="0%"   stopColor="#FFE89A" />
+            <stop offset="35%"  stopColor="#E5C76B" />
+            <stop offset="70%"  stopColor="#A87432" />
             <stop offset="100%" stopColor="#1a1306" />
           </radialGradient>
 
-          {/* Outer glow filter */}
-          <filter id={`ce-glow-${id}`} x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="0.06" result="blur" />
+          {/* Soft outer glow for rim */}
+          <filter id={`ce-glow-${id}`} x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="0.04" result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
 
-          {/* Specular highlight on cornea */}
-          <radialGradient id={`ce-spec-${id}`} cx="35%" cy="28%" r="45%">
-            <stop offset="0%"   stopColor="rgba(200,230,255,0.6)" />
-            <stop offset="100%" stopColor="transparent" />
-          </radialGradient>
-
-          {/* Background deep glow */}
-          <radialGradient id={`ce-bg-${id}`} cx="50%" cy="50%" r="50%">
-            <stop offset="0%"   stopColor={halo} stopOpacity="0.12" />
-            <stop offset="100%" stopColor="transparent" />
+          {/* Pupil inner shine */}
+          <radialGradient id={`ce-pupil-${id}`} cx="38%" cy="32%" r="55%">
+            <stop offset="0%"   stopColor="#1a1830" />
+            <stop offset="100%" stopColor="#050508" />
           </radialGradient>
         </defs>
 
-        {/* Layer 0 — ambient glow background */}
-        <circle cx="0" cy="0" r="0.98" fill={`url(#ce-bg-${id})`} />
-
-        {/* Layer 1 — outer orbital ring (CSS-animated) */}
-        {mode === 'dashboard' && (
-          <g className="ce-ring-outer">
-            <ellipse cx="0" cy="0" rx={outerRingRx} ry={outerRingRy}
-              fill="none" stroke={iris} strokeWidth="0.008" opacity="0.25" />
-          </g>
-        )}
-
-        {/* Layer 2 — inner orbital ring (CSS-animated, opposite direction) */}
-        {mode === 'dashboard' && (
-          <g className="ce-ring-inner">
-            <ellipse cx="0" cy="0" rx={innerRingRx} ry={innerRingRy}
-              fill="none" stroke={halo} strokeWidth="0.006" opacity="0.18" />
-          </g>
-        )}
-
-        {/* Layer 3 — iris fill */}
-        <circle cx="0" cy="0" r={IRIS_R} fill={`url(#ce-iris-${id})`} />
-
-        {/* Layer 4 — iris fiber lines (static radial spokes) */}
-        {Array.from({ length: 16 }, (_, i) => {
-          const a = (i / 16) * Math.PI * 2
-          const cos = Math.cos(a)
-          const sin = Math.sin(a)
-          return (
-            <line key={i}
-              x1={(cos * 0.12).toFixed(4)} y1={(sin * 0.12).toFixed(4)}
-              x2={(cos * IRIS_R).toFixed(4)} y2={(sin * IRIS_R).toFixed(4)}
-              stroke={iris} strokeWidth="0.006" opacity="0.20"
-            />
-          )
-        })}
-
-        {/* Layer 5 — triangle glyph */}
-        <polygon points={triPts}
-          fill="none"
-          stroke="#fff8dc"
-          strokeWidth={mode === 'toolbar' ? 0.04 : 0.028}
-          strokeLinejoin="round"
-          opacity="0.88"
-        />
-
-        {/* Layer 6 — center dot */}
-        <circle cx="0" cy="0" r={mode === 'toolbar' ? 0.055 : 0.038}
-          fill="#fff8dc" opacity="0.92"
-        />
-
-        {/* Layer 7 — cornea specular */}
-        <ellipse cx="-0.18" cy="-0.22" rx="0.30" ry="0.18"
-          fill={`url(#ce-spec-${id})`}
-          style={{ mixBlendMode: 'screen' }}
-        />
-
-        {/* Layer 8 — pupil (moved by rAF, DOM ref) */}
-        <g ref={pupilRef}>
-          <circle cx="0" cy="0" r={PUPIL_R}
-            fill="#080810" opacity="0.94"
-          />
-          {/* Tiny highlight in pupil */}
-          <circle cx={(-PUPIL_R * 0.32).toFixed(4)} cy={(-PUPIL_R * 0.32).toFixed(4)}
-            r={(PUPIL_R * 0.22).toFixed(4)}
-            fill="white" opacity="0.18"
+        {/* ── Ring 1 — wide flat orbit (reference: rx=320 ry=90 @ iris=230) ── */}
+        <g className="ce-ring-outer">
+          <ellipse
+            cx="0" cy="0"
+            rx={RING1_RX.toFixed(4)} ry={RING1_RY.toFixed(4)}
+            fill="none"
+            stroke="#E5C76B"
+            strokeWidth={mode === 'toolbar' ? '0.018' : '0.010'}
+            opacity={mode === 'toolbar' ? '0.55' : '0.50'}
           />
         </g>
 
-        {/* Layer 9 — outer rim glow */}
-        <circle cx="0" cy="0" r={IRIS_R}
+        {/* ── Ring 2 — rounder inner orbit (reference: rx=290 ry=150 @ iris=230) ── */}
+        <g className="ce-ring-inner">
+          <ellipse
+            cx="0" cy="0"
+            rx={RING2_RX.toFixed(4)} ry={RING2_RY.toFixed(4)}
+            fill="none"
+            stroke="#E5C76B"
+            strokeWidth={mode === 'toolbar' ? '0.015' : '0.008'}
+            opacity={mode === 'toolbar' ? '0.40' : '0.35'}
+          />
+        </g>
+
+        {/* ── Iris fill ── */}
+        <circle
+          cx="0" cy="0" r={IRIS_R}
+          fill={`url(#ce-iris-${id})`}
+        />
+
+        {/* ── Iris rim stroke (reference: explicit gold stroke around iris circle) ── */}
+        <circle
+          cx="0" cy="0" r={IRIS_R}
           fill="none"
-          stroke={halo}
-          strokeWidth="0.022"
-          opacity="0.50"
+          stroke="#E5C76B"
+          strokeWidth={RIM_W}
+          opacity="0.90"
           filter={`url(#ce-glow-${id})`}
           className="ce-rim"
         />
 
-        {/* Eyelid blink overlay */}
-        <ellipse cx="0" cy="0" rx={IRIS_R + 0.02} ry={IRIS_R + 0.02}
+        {/* ── Triangle glyph — pointing up, reference exact proportions ── */}
+        <polygon
+          points={triPts}
+          fill="none"
+          stroke="#fff8dc"
+          strokeWidth={mode === 'toolbar' ? '0.045' : '0.026'}
+          strokeLinejoin="round"
+          opacity="0.92"
+        />
+
+        {/* ── Center dot — slightly below center per reference ── */}
+        <circle
+          cx="0" cy={dotY.toFixed(4)} r={dotRFinal.toFixed(4)}
+          fill="#fff8dc"
+          opacity="0.95"
+        />
+
+        {/* ── Pupil — black circle that slides toward cursor ── */}
+        <g ref={pupilRef}>
+          <circle
+            cx="0" cy="0" r={PUPIL_R}
+            fill={`url(#ce-pupil-${id})`}
+          />
+          {/* Tiny specular catch-light in pupil */}
+          <ellipse
+            cx={(-PUPIL_R * 0.28).toFixed(4)}
+            cy={(-PUPIL_R * 0.30).toFixed(4)}
+            rx={(PUPIL_R * 0.20).toFixed(4)}
+            ry={(PUPIL_R * 0.14).toFixed(4)}
+            fill="white" opacity="0.22"
+          />
+        </g>
+
+        {/* ── Eyelid blink overlay (CSS-driven) ── */}
+        <ellipse
+          cx="0" cy="0"
+          rx={IRIS_R + 0.015} ry={IRIS_R + 0.015}
           fill="#07080F"
           className="ce-eyelid"
           style={{ pointerEvents: 'none' }}

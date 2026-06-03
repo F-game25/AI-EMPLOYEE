@@ -12,21 +12,21 @@
   display: block;
 }
 
-/* Ring CSS-only rotations — cheap compositor layer, no JS */
+/* ── Ring rotations — compositor-only, no JS cost ── */
 .ce-ring-outer {
-  transform-origin: center;
-  animation: ce-spin 110s linear infinite;
+  transform-origin: 0px 0px;
+  animation: ce-spin 90s linear infinite;
 }
 .ce-ring-inner {
-  transform-origin: center;
-  animation: ce-spin 72s linear infinite reverse;
+  transform-origin: 0px 0px;
+  animation: ce-spin 60s linear infinite reverse;
 }
 
 @keyframes ce-spin {
   to { transform: rotate(360deg); }
 }
 
-/* Lite mode + reduced motion: freeze rings, keep pupil active */
+/* Lite mode + reduced motion: freeze rings, pupil tracking still runs */
 @media (prefers-reduced-motion: reduce) {
   .ce-ring-outer, .ce-ring-inner { animation: none; }
 }
@@ -35,37 +35,38 @@ html[data-perf="low"] .ce-ring-inner {
   animation: none;
 }
 
-/* Blink overlay — triggered by JS setting data-blink on the svg */
+/* ── Blink overlay ── */
 .ce-eyelid {
-  transform-origin: 0% 50%;
+  transform-origin: 0px 50%;
   transform: scaleY(0);
   transition: transform 60ms ease-in;
 }
 .ce-wrap[data-blink="1"] .ce-eyelid {
   transform: scaleY(1);
-  transition: transform 50ms ease-in;
+  transition: transform 45ms ease-in;
 }
 
-/* Toolbar mode: tighter click target */
+/* ── Toolbar mode ── */
 .ce-wrap--toolbar {
   border-radius: 50%;
-  padding: 4px;
+  padding: 3px;
 }
 .ce-wrap--toolbar:hover {
-  background: rgba(229, 199, 107, 0.08);
+  background: rgba(229, 199, 107, 0.10);
 }
 
-/* Dashboard mode: subtle hover pulse */
+/* ── Dashboard mode: rim pulses on hover ── */
 .ce-wrap--dashboard:hover .ce-rim {
-  opacity: 0.9;
+  opacity: 1;
+  transition: opacity 0.3s ease;
 }
 
-/* Pulse animation for critical/thinking state */
+/* ── Thinking / critical state: rim pulses continuously ── */
 @keyframes ce-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+  0%, 100% { opacity: 0.65; }
+  50%       { opacity: 1.00; }
 }
 .ce-wrap[data-state="thinking"] .ce-rim,
 .ce-wrap[data-state="critical"] .ce-rim {
-  animation: ce-pulse 1.2s ease-in-out infinite;
+  animation: ce-pulse 1.4s ease-in-out infinite;
 }
