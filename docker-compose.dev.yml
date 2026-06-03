@@ -1,0 +1,44 @@
+version: '3.9'
+# AI Employee — Development / Windows-friendly Docker Compose
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+# Then open http://localhost:8787
+#
+# No Postgres, no Nginx, no Jaeger — just the core app.
+# State persists in the named volume ai-state-dev.
+
+services:
+  ai-employee:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-employee-dev:latest
+    container_name: ai-employee-dev
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+      PYTHON_BACKEND_PORT: 18790
+      AI_HOME: /app/data
+      LLM_BACKEND: ${LLM_BACKEND:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o}
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-dot-env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      EVOLUTION_MODE: ${EVOLUTION_MODE:-SAFE}
+    volumes:
+      - ai-state-dev:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8787/health"]
+      interval: 20s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  ai-state-dev:
+    driver: local

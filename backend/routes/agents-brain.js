@@ -318,7 +318,38 @@ module.exports = function createAgentsBrainRouter(deps) {
     const depth = Number(req.query.depth) || 2;
     const limit = Number(req.query.limit) || 200;
     const data  = await proxyNeuralBrain(`/api/neural-brain/graph?depth=${depth}&limit=${limit}`, { nodes: [], links: [] });
-    res.json(normalizeDashboardGraph(data));
+    const normalized = normalizeDashboardGraph(data);
+
+    // If Python backend returned no nodes, synthesize a graph from the agent catalog
+    if (!normalized.nodes || normalized.nodes.length === 0) {
+      try {
+        const path = require('path');
+        const fs   = require('fs');
+        const catalogPath = path.join(REPO_ROOT, 'runtime', 'config', 'agent_capabilities.json');
+        const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+        const agents  = Array.isArray(catalog) ? catalog : (catalog.agents || []);
+        const skillSet = new Set();
+        const nodes = [];
+        const links = [];
+
+        agents.slice(0, limit).forEach((a, i) => {
+          const agentId = `agent_${i}`;
+          nodes.push({ id: agentId, label: a.name || a.id || agentId, type: 'agent', group: a.category || 'agent', size: 6 });
+          (a.skills || []).slice(0, 5).forEach(skill => {
+            const skillId = `skill_${skill}`;
+            if (!skillSet.has(skillId)) {
+              skillSet.add(skillId);
+              nodes.push({ id: skillId, label: skill, type: 'skill', group: 'skill', size: 3 });
+            }
+            links.push({ source: agentId, target: skillId, weight: 1 });
+          });
+        });
+
+        return res.json({ nodes, links, stats: { node_count: nodes.length, edge_count: links.length }, synthetic: true, updated_at: new Date().toISOString() });
+      } catch (_) { /* fall through to empty */ }
+    }
+
+    res.json(normalized);
   });
 
   router.get('/api/neural-brain/memory/status', requireAuth, async (req, res) => {
