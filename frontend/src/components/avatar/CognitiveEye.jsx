@@ -81,6 +81,9 @@ export default function CognitiveEye({
       const rect = canvas.getBoundingClientRect()
       const sz = Math.max(320, Math.min(rect.width, rect.height) || size)
 
+      // Pin container size so resize events don't inflate canvas to window size
+      window.NX._containerSize = sz
+
       // Seed tweaks before init
       window.__avatarTweaks = {
         accentIdle: { hue: 43, sat: 0.88 },

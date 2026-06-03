@@ -109,15 +109,20 @@
   /* synthetic envelopes */
   function listenLevel() { return 0.5 + 0.5 * (0.6 * Math.sin(t * 3.1) + 0.4 * Math.sin(t * 7.3 + 1.2)); }
 
-  /* ── setup ────────────────────────────────────────────────────── */
-  function setup() {
+  /* ── resize (geometry only — no particle regen) ──────────────── */
+  function resize() {
+    const sz = NX._containerSize || Math.max(320, Math.min(window.innerWidth, window.innerHeight));
+    S = sz; RB = S * 0.300;
+    cx = S / 2; cy = S / 2;
     dpr = window.devicePixelRatio || 1;
-    S = Math.max(320, Math.min(window.innerWidth, window.innerHeight));
-    cx = S / 2; cy = S / 2; RB = S * 0.300;
-    canvas.style.width = S + 'px'; canvas.style.height = S + 'px';
-    canvas.width = Math.round(S * dpr); canvas.height = Math.round(S * dpr);
+    canvas.style.width  = S + 'px'; canvas.style.height = S + 'px';
+    canvas.width  = Math.round(S * dpr); canvas.height = Math.round(S * dpr);
     ctx = canvas.getContext('2d');
+  }
 
+  /* ── setup (full init — particles + geometry) ─────────────────── */
+  function setup() {
+    resize();
     stars = Array.from({ length: 300 }, () => ({
       x: Math.random() * S, y: Math.random() * S, r: Math.random() * 1.3 + .2,
       o: Math.random() * .24 + .04, ph: Math.random() * Math.PI * 2, sp: Math.random() * .5 + .2,
@@ -463,7 +468,7 @@
   NX.init = function (cv) {
     canvas = cv; setup();
     let timer;
-    window.addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(() => { cancelAnimationFrame(raf); clearInterval(raf); setup(); startLoop(); }, 80); });
+    window.addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(resize, 150); });
     startLoop();
   };
 })();
