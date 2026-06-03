@@ -224,6 +224,174 @@ def generate_ads(product: str) -> str:
     return f"Ad Copy — {product}:\n\n{result}"
 
 
+def _parse_listing_output(raw: str) -> dict:
+    """Extract structured fields from generate_listing() LLM output (sections 1-6).
+
+    Returns: {titel, beschrijving, bullets, tags, prijs, aankoopprijs}
+    Falls back to storing raw text in beschrijving on parse failure.
+    """
+    import re
+    result = {
+        "titel": "",
+        "beschrijving": raw,  # safe fallback
+        "bullets": [],
+        "tags": [],
+        "prijs": 0.0,
+        "aankoopprijs": 0.0,
+    }
+    try:
+        # Section 1: SEO Title
+        m = re.search(r"1\.\s*SEO Title[^\n]*\n(.+?)(?=\n\s*2\.|\Z)", raw, re.IGNORECASE | re.DOTALL)
+        if m:
+            result["titel"] = m.group(1).strip().strip("*").strip()[:80]
+
+        # Section 2: Description
+        m = re.search(r"2\.\s*Description[^\n]*\n(.+?)(?=\n\s*3\.|\Z)", raw, re.IGNORECASE | re.DOTALL)
+        if m:
+            result["beschrijving"] = m.group(1).strip()
+
+        # Section 3: Bullet Points — each line starting with - or * or number
+        m = re.search(r"3\.\s*Bullet Points[^\n]*\n(.+?)(?=\n\s*4\.|\Z)", raw, re.IGNORECASE | re.DOTALL)
+        if m:
+            bullets_raw = m.group(1)
+            bullets = [
+                re.sub(r"^[-*\d.)\s]+", "", line).strip()
+                for line in bullets_raw.splitlines()
+                if line.strip() and re.match(r"^\s*[-*\d]", line)
+            ]
+            result["bullets"] = [b for b in bullets if b][:10]
+
+        # Section 4: Tags/Keywords — comma or newline separated
+        m = re.search(r"4\.\s*Tags[^\n]*\n(.+?)(?=\n\s*5\.|\Z)", raw, re.IGNORECASE | re.DOTALL)
+        if m:
+            tags_raw = m.group(1).strip()
+            tags = [t.strip().strip("*-").strip() for t in re.split(r"[,\n]", tags_raw) if t.strip()]
+            result["tags"] = [t for t in tags if t][:20]
+
+        # Section 5: Suggested Price — first $ or number followed by currency
+        m = re.search(r"5\.\s*Suggested Price[^\n]*\n(.+?)(?=\n\s*6\.|\Z)", raw, re.IGNORECASE | re.DOTALL)
+        if m:
+            price_text = m.group(1)
+            pm = re.search(r"\$?\s*(\d+(?:\.\d+)?)", price_text)
+            if pm:
+                result["prijs"] = float(pm.group(1))
+                # Rough cost estimate: price / (1 + margin/100)
+                margin = TARGET_MARGIN / 100
+                result["aankoopprijs"] = round(result["prijs"] / (1 + margin), 2)
+    except Exception:
+        pass  # keep fallback values
+    return result
+
+
+def genereer_en_sla_op(product_naam: str, platform: str = "shopify") -> dict:
+    """Generate a listing via LLM and persist it to SQLite. Returns listing dict."""
+    import sys
+    import os as _os
+    # Ensure runtime is on path for store import
+    _repo = str(Path(__file__).resolve().parents[3])
+    _runtime = _os.path.join(_repo, "runtime")
+    for p in (_runtime, _repo):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    try:
+        from core.ecom_listing_store import listing_aanmaken
+    except ImportError as exc:
+        return {"ok": False, "error": f"Import ecom_listing_store mislukt: {exc}"}
+
+    # generate_listing() returns "Product Listing — <name>:\n\n<body>"
+    raw_output = generate_listing(product_naam)
+    body = raw_output.split("\n\n", 1)[-1] if "\n\n" in raw_output else raw_output
+    parsed = _parse_listing_output(body)
+
+    result = listing_aanmaken(
+        product_naam=product_naam,
+        platform=platform,
+        titel=parsed["titel"] or product_naam,
+        beschrijving=parsed["beschrijving"],
+        bullets=parsed["bullets"],
+        tags=parsed["tags"],
+        prijs=parsed["prijs"],
+        aankoopprijs=parsed["aankoopprijs"],
+    )
+    return result
+
+
+def genereer_email_flow_en_sla_op(listing_id: str, email_type: str) -> dict:
+    """Generate an email flow for a listing and persist it. Returns email dict."""
+    import sys
+    import os as _os
+    _repo = str(Path(__file__).resolve().parents[3])
+    _runtime = _os.path.join(_repo, "runtime")
+    for p in (_runtime, _repo):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    try:
+        from core.ecom_listing_store import listing_ophalen, email_aanmaken
+    except ImportError as exc:
+        return {"ok": False, "error": f"Import mislukt: {exc}"}
+
+    listing = listing_ophalen(listing_id)
+    if not listing or (isinstance(listing, dict) and not listing.get("id")):
+        return {"ok": False, "error": f"Listing {listing_id} niet gevonden"}
+
+    product_naam = listing.get("product_naam", "")
+    raw = generate_email(email_type, product_naam)
+
+    # Extract subject and body (look for "Subject line:" in output)
+    import re
+    onderwerp = ""
+    body = raw
+    m = re.search(r"Subject(?:\s+line)?:\s*(.+)", raw, re.IGNORECASE)
+    if m:
+        onderwerp = m.group(1).strip().strip("*")
+    # Body: everything after the first blank line following subject
+    body_m = re.search(r"Subject(?:\s+line)?:[^\n]*\n+(.+)", raw, re.IGNORECASE | re.DOTALL)
+    if body_m:
+        body = body_m.group(1).strip()
+
+    return email_aanmaken(listing_id=listing_id, type=email_type, onderwerp=onderwerp, body=body)
+
+
+def genereer_ads_en_sla_op(listing_id: str) -> dict:
+    """Generate ads for a listing and persist them. Returns {ok, facebook, google, raw}."""
+    import sys
+    import os as _os
+    _repo = str(Path(__file__).resolve().parents[3])
+    _runtime = _os.path.join(_repo, "runtime")
+    for p in (_runtime, _repo):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    try:
+        from core.ecom_listing_store import listing_ophalen, ad_aanmaken
+    except ImportError as exc:
+        return {"ok": False, "error": f"Import mislukt: {exc}"}
+
+    listing = listing_ophalen(listing_id)
+    if not listing or (isinstance(listing, dict) and not listing.get("id")):
+        return {"ok": False, "error": f"Listing {listing_id} niet gevonden"}
+
+    product_naam = listing.get("product_naam", "")
+    raw = generate_ads(product_naam)
+
+    # Split into Facebook / Google sections
+    import re
+    fb_copy = raw
+    gg_copy = ""
+    fb_m = re.search(r"FACEBOOK AD:(.+?)(?=GOOGLE AD:|\Z)", raw, re.IGNORECASE | re.DOTALL)
+    gg_m = re.search(r"GOOGLE AD:(.+)", raw, re.IGNORECASE | re.DOTALL)
+    if fb_m:
+        fb_copy = fb_m.group(1).strip()
+    if gg_m:
+        gg_copy = gg_m.group(1).strip()
+
+    fb = ad_aanmaken(listing_id=listing_id, platform="facebook", copy_text=fb_copy)
+    gg = ad_aanmaken(listing_id=listing_id, platform="google", copy_text=gg_copy) if gg_copy else {}
+    return {"ok": True, "facebook": fb, "google": gg, "raw": raw}
+
+
 def show_status() -> str:
     data = load_listings()
     return (

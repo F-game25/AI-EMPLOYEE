@@ -1068,6 +1068,7 @@ const ADMIN_SAFETY_ACTIONS      = { // pre-declared
   app.use('/', require('./routes/security-ops')(_deps));
   app.use('/', require('./routes/business-ops')(_deps));
   app.use('/api', require('./routes/forge-ops')(_deps));
+  app.use('/api', require('./routes/ecom-ops')(_deps));
   app.use('/', require('./routes/tasks-chat')(_deps));
   app.use('/', require('./routes/media')(_deps));
 }
