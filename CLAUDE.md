@@ -74,7 +74,7 @@ runtime/agents/<name>/
 
 `run.sh` files source `~/.ai-employee/.env` and `runtime/config/<name>.env` before exec-ing the Python module. The agent catalog is loaded from `runtime/config/agent_capabilities.json` by the Node backend (`backend/agents/index.js`). Agent behavior templates live in `runtime/config/agent_behavior_templates.json`.
 
-Operating modes activate different agent counts: Starter (3), Business (15), Power (56).
+All 110+ agents run at full capacity. No tier restrictions.
 
 ### Environment
 
@@ -110,7 +110,7 @@ Future: Postgres migration recommended for horizontal scaling (see Week 4 plan).
 - Each agent is a directory with `<name>.py` (BaseAgent subclass), `run.sh`, `requirements.txt`
 - Registered in `runtime/config/agent_capabilities.json`
 - Discovered and loaded by `backend/agents/index.js` on startup
-- Modes: Starter (3 agents), Business (15), Power (56+)
+- Capacity: all agents active at full capacity (no tiers)
 
 **Ghost Agents** (config entries with no directory) have been eliminated as of Week 1.
 
