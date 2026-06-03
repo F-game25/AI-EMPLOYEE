@@ -15,7 +15,11 @@ set UI_URL=http://localhost:%UI_PORT%
 
 echo.
 echo  ======================================================
-echo    AI Employee -- Windows Launcher
+echo.
+echo      A I   E M P L O Y E E
+echo      Autonomous AI Workforce Platform
+echo      v0.1  --  github.com/F-game25/AI-EMPLOYEE
+echo.
 echo  ======================================================
 echo.
 

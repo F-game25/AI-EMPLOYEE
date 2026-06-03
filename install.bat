@@ -41,6 +41,15 @@ goto :done
 
 :done
 echo.
-echo Installation finished. Press any key to exit.
+echo Creating desktop shortcut...
+set SHORTCUT_PATH=%USERPROFILE%\Desktop\AI Employee.lnk
+set TARGET=%~dp0start.bat
+powershell -ExecutionPolicy Bypass -Command ^
+  "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = 'cmd.exe'; $s.Arguments = '/c \"%TARGET%\"'; $s.WorkingDirectory = '%~dp0'; $s.Description = 'AI Employee — Autonomous AI Workforce Platform'; $s.IconLocation = '%~dp0src-tauri\icons\icon.ico,0'; $s.Save(); Write-Host 'Desktop shortcut created.' -ForegroundColor Green" 2>nul || (
+  echo Desktop shortcut creation skipped.
+)
+echo.
+echo Installation finished. Double-click "AI Employee" on your Desktop to launch.
+echo.
 pause >nul
 endlocal
