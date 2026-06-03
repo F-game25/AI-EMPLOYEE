@@ -263,12 +263,6 @@ export default function NexusOSDashboard() {
     fetchCapabilityStatus?.()
   }, [fetchCapabilityStatus])
 
-  // Wire orchestrator state → avatar eye color/energy
-  useEffect(() => {
-    const stateMap = { idle: 'idle', thinking: 'thinking', executing: 'executing', error: 'alert', busy: 'listening' }
-    window.NX?.setState?.(stateMap[orchestratorState?.toLowerCase()] || 'idle')
-  }, [orchestratorState])
-
   const cpu      = systemHealth.cpu_percent ?? systemStatus.cpu ?? systemStatus.cpu_usage ?? 0
   const ram      = systemHealth.memory_percent ?? systemStatus.memory ?? 0
   const gpu      = systemHealth.gpu_percent ?? systemStatus.gpu_usage ?? 0
@@ -297,6 +291,13 @@ export default function NexusOSDashboard() {
     errorCount,
     busyLoad: load,
   })
+
+  // Wire orchestrator state → avatar eye color/energy (declared after orchestratorState)
+  useEffect(() => {
+    const stateMap = { idle: 'idle', thinking: 'thinking', executing: 'executing', error: 'alert', busy: 'listening' }
+    window.NX?.setState?.(stateMap[orchestratorState?.toLowerCase()] || 'idle')
+  }, [orchestratorState])
+
   const focusKeyword = currentStep?.description?.split(' ')[0] || currentStep?.task?.split(' ')[0] || 'NEXUS'
 
   // Per-channel freshness states
