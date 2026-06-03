@@ -38,9 +38,11 @@ function ModelBadge({ model, registryData }) {
 /* ── Tab 1: PROVIDERS ──────────────────────────────────────────────────── */
 
 const PROVIDERS = [
-  { id: 'anthropic',  name: 'Anthropic',  defaultModel: 'claude-sonnet-4-6',             keyPrefix: 'sk-ant-', capabilityId: 'anthropic_llm' },
-  { id: 'openrouter', name: 'OpenRouter', defaultModel: 'openai/gpt-4o',                 keyPrefix: 'sk-or-',  capabilityId: 'openrouter_llm' },
-  { id: 'ollama',     name: 'Ollama',     defaultModel: 'llama3.2',                      keyPrefix: 'http://', capabilityId: 'ollama_local_model' },
+  { id: 'anthropic',      name: 'Anthropic',       defaultModel: 'claude-sonnet-4-6',              keyPrefix: 'sk-ant-',   capabilityId: 'anthropic_llm',      color: '#d4a96a' },
+  { id: 'openrouter',     name: 'OpenRouter',      defaultModel: 'openai/gpt-4o',                  keyPrefix: 'sk-or-',    capabilityId: 'openrouter_llm',     color: '#6366f1' },
+  { id: 'ollama',         name: 'Ollama (Local)',   defaultModel: 'llama3.3',                       keyPrefix: 'http://',   capabilityId: 'ollama_local_model',  color: '#22c55e' },
+  { id: 'nvidia_nim',     name: 'NVIDIA NIM',      defaultModel: 'meta/llama-3.3-70b-instruct',    keyPrefix: 'nvapi-',    capabilityId: 'nvidia_nim_llm',     color: '#76b900' },
+  { id: 'remote_compute', name: 'Remote Compute',  defaultModel: 'llama3.3',                       keyPrefix: 'http://',   capabilityId: 'remote_compute_llm', color: '#06b6d4' },
 ]
 
 function capabilityForProvider(provider, capabilitiesById) {
@@ -171,7 +173,7 @@ function MainBrainPicker({ registryData }) {
   const modelOptions = buildModelOptions(registryData).filter(m => m.provider === provider)
   const providerKeys = registryData?.providers
     ? Object.keys(registryData.providers)
-    : ['anthropic', 'openai', 'ollama', 'openrouter']
+    : ['anthropic', 'openrouter', 'ollama', 'nvidia_nim', 'remote_compute']
 
   return (
     <div className="mp-mainbrain">

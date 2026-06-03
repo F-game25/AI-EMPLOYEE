@@ -456,6 +456,36 @@ router.post('/test/:provider', async (req, res) => {
       } catch (e) {
         message = `Connection failed: ${e.message}`
       }
+    } else if (provider === 'nvidia_nim') {
+      const { key, endpoint, model } = req.body
+      const nimEndpoint = (endpoint || settings.apiKeys?.nim_endpoint || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '')
+      const nimKey = key || settings.apiKeys?.nim_key || ''
+      try {
+        const fetch = (await import('node-fetch')).default
+        const headers = { 'content-type': 'application/json' }
+        if (nimKey) headers['authorization'] = `Bearer ${nimKey}`
+        const response = await fetch(`${nimEndpoint}/models`, { headers, timeout: 8000 })
+        success = response.status === 200 || response.status === 401 // 401 = endpoint reachable
+        message = response.status === 200
+          ? `Connected to NIM at ${nimEndpoint}`
+          : response.status === 401
+            ? `NIM endpoint reachable — check API key`
+            : `Failed: ${response.statusText}`
+      } catch (e) {
+        message = `NIM connection failed: ${e.message}`
+      }
+    } else if (provider === 'remote_compute') {
+      const { endpoint } = req.body
+      const remoteHost = (endpoint || '').replace(/\/$/, '')
+      if (!remoteHost) return res.status(400).json({ error: 'No endpoint provided' })
+      try {
+        const fetch = (await import('node-fetch')).default
+        const response = await fetch(`${remoteHost}/api/tags`, { timeout: 8000 })
+        success = response.status === 200
+        message = success ? `Remote Ollama reachable at ${remoteHost}` : `Failed: ${response.statusText}`
+      } catch (e) {
+        message = `Remote compute connection failed: ${e.message}`
+      }
     }
 
     if (success) {
@@ -466,6 +496,59 @@ router.post('/test/:provider', async (req, res) => {
   } catch (e) {
     console.error(`POST /api/settings/test/:provider error:`, e)
     res.status(500).json({ error: 'Test failed' })
+  }
+})
+
+// POST /api/settings/llm/swap — hot-swap LLM backend without losing context
+router.post('/llm/swap', async (req, res) => {
+  try {
+    const { backend, model, endpoint } = req.body
+    const allowed = ['anthropic', 'openrouter', 'ollama', 'nvidia_nim', 'remote_compute']
+    if (!allowed.includes(backend)) return res.status(400).json({ error: `Unknown backend: ${backend}` })
+
+    // Persist new config to settings file
+    const tenantId = req.tenant?.id || 'default'
+    const settings = await loadSettingsForTenant(tenantId)
+    settings.llmSettings = { ...settings.llmSettings, provider: backend, model: model || settings.llmSettings?.model }
+    if (endpoint) {
+      if (backend === 'nvidia_nim') settings.apiKeys = { ...settings.apiKeys, nim_endpoint: endpoint }
+      else if (backend === 'remote_compute') settings.apiKeys = { ...settings.apiKeys, remote_compute_endpoint: endpoint }
+      else if (backend === 'ollama') settings.apiKeys = { ...settings.apiKeys, ollama_endpoint: endpoint }
+    }
+    settings.updatedAt = new Date().toISOString()
+    const settingsPath = getSettingsPath(tenantId)
+    const dir = path.dirname(settingsPath)
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
+
+    // Update live process env (Python backend picks this up on next call via env)
+    process.env.LLM_BACKEND = backend
+    if (model) {
+      if (backend === 'ollama' || backend === 'remote_compute') process.env.OLLAMA_MODEL = model
+      else if (backend === 'nvidia_nim') process.env.NIM_MODEL = model
+      else if (backend === 'openrouter') process.env.OPENROUTER_MODEL = model
+    }
+    if (endpoint) {
+      if (backend === 'nvidia_nim') process.env.NIM_ENDPOINT = endpoint
+      else if (backend === 'remote_compute') process.env.OLLAMA_HOST = endpoint
+      else if (backend === 'ollama') process.env.OLLAMA_HOST = endpoint
+    }
+
+    // Signal Python backend to hot-swap (best-effort — Python resets singleton on next request)
+    try {
+      const fetch = (await import('node-fetch')).default
+      await fetch('http://127.0.0.1:18790/internal/swap-backend', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ backend, model, endpoint }),
+        timeout: 3000,
+      })
+    } catch (_) { /* Python may not have this endpoint — fallback: env var pick-up on next request */ }
+
+    res.json({ ok: true, backend, model: model || 'default', swapped_at: new Date().toISOString() })
+  } catch (e) {
+    console.error('POST /api/settings/llm/swap error:', e)
+    res.status(500).json({ error: 'Swap failed' })
   }
 })
 

@@ -43,6 +43,59 @@ logger = logging.getLogger("task_orchestrator_core")
 
 _OLLAMA_REACHABLE: bool | None = None
 
+# --- Context snapshot for hot-swap without losing conversation progress ---
+_context_snapshot: dict[str, Any] = {}
+
+
+def save_context_snapshot(ctx: dict[str, Any]) -> None:
+    """Persist the current conversation/task context so a backend swap is lossless."""
+    global _context_snapshot
+    _context_snapshot = {**ctx, "_saved_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        snap_path = canonical_state_dir() / "context_snapshot.json"
+        snap_path.write_text(json.dumps(_context_snapshot, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_context_snapshot() -> dict[str, Any]:
+    global _context_snapshot
+    if _context_snapshot:
+        return _context_snapshot
+    try:
+        snap_path = canonical_state_dir() / "context_snapshot.json"
+        _context_snapshot = json.loads(snap_path.read_text(encoding="utf-8"))
+    except Exception:
+        _context_snapshot = {}
+    return _context_snapshot
+
+
+def hot_swap_backend(new_backend: str, *, new_model: str = "", endpoint: str = "") -> dict[str, Any]:
+    """Switch the active LLM backend at runtime without losing context.
+    Returns the previous backend info so callers can roll back."""
+    global _client_instance
+    prev = {"backend": get_llm_client().backend}
+    # Snapshot current context
+    save_context_snapshot(load_context_snapshot())
+    # Apply new env
+    os.environ["LLM_BACKEND"] = new_backend
+    if new_model:
+        if new_backend == "ollama":
+            os.environ["OLLAMA_MODEL"] = new_model
+        elif new_backend == "nvidia_nim":
+            os.environ["NIM_MODEL"] = new_model
+        elif new_backend == "openrouter":
+            os.environ["OPENROUTER_MODEL"] = new_model
+    if endpoint:
+        if new_backend in ("ollama", "remote_compute"):
+            os.environ["OLLAMA_HOST"] = endpoint
+        elif new_backend == "nvidia_nim":
+            os.environ["NIM_ENDPOINT"] = endpoint
+    # Reset singleton so next call picks up new settings
+    _client_instance = None
+    logger.info("Hot-swap: %s → %s (model=%s)", prev["backend"], new_backend, new_model or "default")
+    return prev
+
 
 def _ollama_reachable() -> bool:
     """1s HTTP check to the Ollama tags endpoint. Result cached for the process."""
@@ -66,9 +119,11 @@ def _resolve_backend() -> str:
         if os.environ.get("OLLAMA_HOST") or _ollama_reachable():
             logger.warning("ANTHROPIC_API_KEY not set — falling back to local Ollama backend")
             backend = "ollama"
-    elif backend == "openai" and not os.environ.get("OPENAI_API_KEY", "").strip():
+    elif backend in ("openai", "openrouter") and not (
+        os.environ.get("OPENAI_API_KEY", "").strip() or os.environ.get("OPENROUTER_API_KEY", "").strip()
+    ):
         if os.environ.get("OLLAMA_HOST") or _ollama_reachable():
-            logger.warning("OPENAI_API_KEY not set — falling back to local Ollama backend")
+            logger.warning("No cloud key set — falling back to local Ollama backend")
             backend = "ollama"
     return backend
 
@@ -131,10 +186,12 @@ class LLMClient:
         for attempt in range(1, attempts + 1):
             started = time.time()
             try:
-                if self.backend == "ollama":
+                if self.backend == "ollama" or self.backend == "remote_compute":
                     response = self._call_ollama(prompt=prompt, system=system)
                 elif self.backend == "openrouter":
                     response = self._call_openrouter(prompt=prompt, system=system)
+                elif self.backend == "nvidia_nim":
+                    response = self._call_nvidia_nim(prompt=prompt, system=system)
                 else:
                     response = self._call_anthropic(prompt=prompt, system=system)
                 self._log_call(
@@ -290,6 +347,43 @@ class LLMClient:
             "tokens_used": in_tok + out_tok,
             "input_tokens": in_tok,
             "output_tokens": out_tok,
+            "model": model,
+        }
+
+    def _call_nvidia_nim(self, *, prompt: str, system: str, model: str = "") -> dict[str, Any]:
+        """NVIDIA NIM — OpenAI-compatible endpoint. Supports local NIM containers and nim.ai cloud."""
+        endpoint = os.environ.get("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1").rstrip("/")
+        api_key = os.environ.get("NIM_API_KEY", "")
+        if not model:
+            model = os.environ.get("NIM_MODEL", "meta/llama-3.3-70b-instruct")
+        payload = {
+            "model": model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+            "max_tokens": 4096,
+            "stream": False,
+        }
+        headers = {"content-type": "application/json"}
+        if api_key:
+            headers["authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(
+            f"{endpoint}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"NIM HTTP {exc.code}: {body}") from exc
+        text = body["choices"][0]["message"]["content"].strip()
+        usage = body.get("usage", {})
+        return {
+            "output": text,
+            "tokens_used": usage.get("total_tokens", 0),
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
             "model": model,
         }
 

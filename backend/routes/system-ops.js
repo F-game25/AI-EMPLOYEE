@@ -465,5 +465,46 @@ module.exports = function createSystemOpsRouter(deps) {
     res.json(autoUpdateWatchdog.getStatus().watchdog);
   });
 
+  // GET /api/system/hw-profile — detect hardware and recommend optimal LLM
+  router.get('/api/system/hw-profile', requireAuth, (_req, res) => {
+    try {
+      const os = require('os');
+      const cpuCores = os.cpus().length;
+      const ramGb = Math.round(os.totalmem() / (1024 ** 3));
+      // GPU detection via env hint or child_process (best-effort, non-blocking)
+      let gpu = null, vramGb = 0;
+      try {
+        const { execSync } = require('child_process');
+        const out = execSync('nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>/dev/null', { timeout: 2000 }).toString().trim();
+        if (out) {
+          const [name, mem] = out.split(',');
+          gpu = name.trim();
+          vramGb = Math.round(parseInt(mem) / 1024);
+        }
+      } catch (_) { /* no GPU or nvidia-smi not available */ }
+
+      // Recommend based on available resources
+      let recommended_provider, recommended_model, notes;
+      if (gpu && vramGb >= 24) {
+        recommended_provider = 'ollama'; recommended_model = 'llama3.3';
+        notes = `${gpu} with ${vramGb}GB VRAM — can run 70B models locally`;
+      } else if (gpu && vramGb >= 8) {
+        recommended_provider = 'ollama'; recommended_model = 'phi4';
+        notes = `${gpu} with ${vramGb}GB VRAM — 7B/14B models run well`;
+      } else if (ramGb >= 32 && cpuCores >= 8) {
+        recommended_provider = 'ollama'; recommended_model = 'deepseek-r1';
+        notes = `No GPU — CPU inference possible on ${cpuCores}c/${ramGb}GB`;
+      } else {
+        recommended_provider = 'openrouter'; recommended_model = 'openai/gpt-4o';
+        notes = `Low local resources — cloud inference recommended`;
+      }
+
+      res.json({ cpu_cores: cpuCores, ram_gb: ramGb, gpu, vram_gb: vramGb,
+                 recommended_provider, recommended_model, notes });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   return router;
 };

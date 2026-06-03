@@ -13810,6 +13810,20 @@ async def skill_execute(name: str, req: dict, _auth=Depends(require_auth)):
     return {"ok": ok, "skill": name, "status": "executed" if ok else "execution_failed"}
 
 
+class _SwapPayload(BaseModel):
+    backend: str
+    model: str = ""
+    endpoint: str = ""
+
+
+@app.post("/internal/swap-backend", tags=["internal"])
+async def internal_swap_backend(payload: _SwapPayload):
+    """Hot-swap the LLM backend without restarting. Called by Node server on model switch."""
+    from core.orchestrator import hot_swap_backend
+    prev = hot_swap_backend(payload.backend, new_model=payload.model, endpoint=payload.endpoint)
+    return {"ok": True, "prev_backend": prev.get("backend"), "new_backend": payload.backend}
+
+
 @app.on_event("startup")
 async def _start_knowledge_scheduler():
     try:
