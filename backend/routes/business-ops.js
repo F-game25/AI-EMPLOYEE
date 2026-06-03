@@ -413,6 +413,19 @@ module.exports = function createBusinessOpsRouter(deps) {
     });
   });
 
+  router.get('/api/fairness/status', requireAuth, (req, res) => {
+    const total_actions = (_auditLog || []).length;
+    const high_risk = (_auditLog || []).filter((e) => e.risk_score >= 0.7).length;
+    res.json({
+      ok: true,
+      status: high_risk > 0 ? 'alert' : 'ok',
+      agents_monitored: Object.keys(runtimeState.objectiveState || {}).length,
+      total_actions,
+      high_risk_actions: high_risk,
+      risk_rate: total_actions ? (high_risk / total_actions).toFixed(3) : '0.000',
+    });
+  });
+
   router.get('/api/governance/digest', requireAuth, async (req, res) => {
     const limit = Math.min(50, parseInt((req.query || {}).limit) || 25);
     const events = (_auditLog || []).slice(0, limit);

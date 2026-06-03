@@ -543,12 +543,36 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   r.post('/intelligence/ask', requireAuth, async (req, res) => {
     const { question } = req.body || {}
     if (!question) return res.status(400).json({ error: 'question required' })
-    // Return a structured insight stub — production would hit LLM
+    const PYTHON_URL = `http://${process.env.PYTHON_BACKEND_HOST || '127.0.0.1'}:${process.env.PYTHON_BACKEND_PORT || 18790}`
+    try {
+      const pyRes = await fetch(`${PYTHON_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: question, context: 'intelligence_analysis' }),
+        signal: AbortSignal.timeout(20000),
+      })
+      if (pyRes.ok) {
+        const data = await pyRes.json()
+        const reply = data.response || data.message || data.reply || ''
+        return res.json({
+          insight: {
+            id: `ins_${Date.now()}`,
+            title: `Analysis: ${question.slice(0, 60)}`,
+            detail: reply,
+            severity: 'low',
+            category: 'analysis',
+            actions: ['View detail', 'Dismiss'],
+            created_at: new Date().toISOString(),
+          }
+        })
+      }
+    } catch { /* fall through to fallback */ }
+    // Fallback when Python backend unavailable
     res.json({
       insight: {
         id: `ins_${Date.now()}`,
         title: `Analysis: ${question.slice(0, 60)}`,
-        detail: 'Based on available data, the system recommends reviewing recent activity patterns. No critical issues detected at this time.',
+        detail: 'AI backend unavailable. Start the Python backend to get live analysis.',
         severity: 'low',
         category: 'analysis',
         actions: ['View detail', 'Dismiss'],

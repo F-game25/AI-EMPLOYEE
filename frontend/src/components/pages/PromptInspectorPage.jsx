@@ -1,23 +1,62 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { Panel, Badge, StatCard, MiniBar, DataRow } from '../ui/primitives'
+import api from '../../api/client'
 
-const FALLBACK_TRACES = [
-  { id:'pt-001', agent:'Orchestrator Prime', prompt:'Analyze revenue pathways for Q2 — rank by ROI, identify top 3 with rationale.', output:'Ranked 12 pathways. Top 3: SaaS upsell (3.2×), API licensing (2.8×), Data resale (1.9×).', tokens:{ in:284, out:412 }, latency:'1.4s', score:94, flags:[] },
-  { id:'pt-002', agent:'Data Harvester',     prompt:'Scrape competitor pricing from 12 SaaS vendors. Return structured JSON.',           output:'{"vendors":12,"records":2413,"avg_price":"$89/mo","range":"$29-$499"}',             tokens:{ in:156, out:320 }, latency:'3.8s', score:88, flags:[] },
-  { id:'pt-003', agent:'Strategy Engine',    prompt:'Compare our pricing to competitor data. Suggest 3 tactical moves.',                  output:'1. Launch $49 tier. 2. Bundle API access. 3. Annual discount 20%.',                  tokens:{ in:490, out:280 }, latency:'2.1s', score:79, flags:['generic_output'] },
-  { id:'pt-004', agent:'Code Synthesizer',   prompt:'Generate Stripe webhook handler for subscription events.',                            output:'[48 lines of Python — 4 routes, auth, retry, idempotency]',                         tokens:{ in:320, out:890 }, latency:'4.2s', score:97, flags:[] },
-  { id:'pt-005', agent:'Memory Indexer',     prompt:'',                                                                                    output:'',                                                                                   tokens:{ in:0,   out:0   }, latency:'—',    score:0,  flags:['empty_prompt','empty_output'] },
-]
 const FLAG_C = { empty_prompt:'#EF4444', empty_output:'#EF4444', generic_output:'#F59E0B', missing_context:'#F59E0B', error:'#EF4444' }
 const QUALITY = [['Structure','94','var(--gold-bright,#FFD97A)'],['Clarity','88','var(--teal,#20D6C7)'],['Specificity','82','#22C55E'],['Token Eff.','91','#8B8B9E']]
 
+// Map an LLM call log entry → trace shape
+function llmCallToTrace(c, i) {
+  const durationMs = c.duration_ms || c.duration || 0
+  const latency = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : '—'
+  const tokIn = c.input_tokens || c.tokens_in || 0
+  const tokOut = c.output_tokens || c.tokens_out || 0
+  const flags = []
+  if (!c.prompt && !c.request?.prompt) flags.push('empty_prompt')
+  if (!c.response) flags.push('empty_output')
+  const score = c.error ? 0 : Math.min(100, Math.round(70 + (tokOut > 50 ? 15 : 0) + (durationMs < 3000 ? 15 : 0)))
+  return {
+    id: c.id || `llm-${i}`,
+    agent: c.agent || c.model || c.backend || 'LLM',
+    prompt: c.prompt || c.request?.prompt || c.request?.messages?.[0]?.content || '',
+    output: c.response || c.completion || '',
+    tokens: { in: tokIn, out: tokOut },
+    latency,
+    score,
+    flags,
+    ts: c.timestamp || c.created_at,
+  }
+}
+
 export default function PromptInspectorPage() {
   const promptTraces = useAppStore(s => s.promptTraces)
+  const setPromptTraces = useAppStore(s => s.setPromptTraces)
   const [sel, setSel] = useState(null)
   const [editText, setEditText] = useState('')
+  const [loading, setLoading] = useState(true)
 
-  const traces = (promptTraces?.length ? promptTraces : FALLBACK_TRACES)
+  // Load live traces on mount: prefer /api/prompt-traces, fall back to llm-calls log
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const pt = await api.get('/api/prompt-traces')
+        const raw = pt?.traces || []
+        if (raw.length && !cancelled) { setPromptTraces(raw); setLoading(false); return }
+        // Fall back to LLM call log shaped into traces
+        const lc = await api.get('/api/intelligence/llm-calls')
+        const shaped = (lc?.calls || []).map(llmCallToTrace)
+        if (!cancelled) setPromptTraces(shaped.length ? shaped : [])
+      } catch { /* keep existing store data */ } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line
+
+  const traces = promptTraces?.length ? promptTraces : []
   const selT = sel ?? traces[0]
 
   const avgScore = Math.round(traces.filter(t=>t.score>0).reduce((a,t)=>a+t.score,0) / traces.filter(t=>t.score>0).length || 0)
