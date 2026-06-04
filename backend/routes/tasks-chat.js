@@ -78,7 +78,6 @@ module.exports = function createTasksChatRouter(deps) {
     _forgeQueueUpdate,
     _forgeRiskLabel,
     _forgeRiskScore,
-    _forgeQueue,
     // audit
     auditService,
     recordAuditEvent,

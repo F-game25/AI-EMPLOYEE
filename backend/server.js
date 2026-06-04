@@ -587,6 +587,158 @@ app.use('/api/deployment',  requireAuth, deploymentRoutes);
 app.use('/api/simulation',  requireAuth, simulationRoutes);
 app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
 
+// ── Declarations hoisted before route extraction (deps required at factory-call time) ──
+// These consts are read by route factories at call time (not inside request handlers),
+// so they must be declared before the route extraction block at line ~690.
+const _srvStartMs = Date.now();
+const auditService = require('./services/audit_service');
+const recordAuditEvent = auditService.recordAuditEvent;
+const _auditLog = auditService.log;
+const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline — Python backend not running.' };
+const conversations = require('./conversations');
+const ADMIN_SAFETY_ACTIONS = {
+  'reset-state': { label: 'RESET ALL STATE', endpoint: 'POST /api/admin/reset-state', confirmation: 'RESET ALL STATE', external_effect: 'Would reset runtime state files. This action is staged only from Settings safety center.' },
+  'wipe-memory': { label: 'WIPE MEM0 MEMORY', endpoint: 'DELETE /api/neural-brain/memory/all', confirmation: 'WIPE MEM0 MEMORY', external_effect: 'Would permanently remove memory records. This action is staged only from Settings safety center.' },
+  'factory-reset': { label: 'FACTORY RESET', endpoint: 'POST /api/admin/factory-reset', confirmation: 'FACTORY RESET', external_effect: 'Would reset the full system. This action is staged only from Settings safety center.' },
+  'evolution-rollback': { label: 'EVOLUTION ROLLBACK', endpoint: 'POST /api/evolution/rollback', confirmation: 'EVOLUTION ROLLBACK', external_effect: 'Would roll back applied evolution patches. This action is staged only from Settings safety center.' },
+  'invalidate-sessions': { label: 'INVALIDATE SESSIONS', endpoint: 'POST /api/admin/sessions/invalidate-all', confirmation: 'INVALIDATE SESSIONS', external_effect: 'Would log out active users. This action is staged only from Settings safety center.' },
+  'flush-telemetry': { label: 'FLUSH TELEMETRY', endpoint: 'POST /api/neural-brain/telemetry/flush', confirmation: 'FLUSH TELEMETRY', external_effect: 'Would clear queued telemetry data. This action is staged only from Settings safety center.' },
+};
+// Blacklight + recon consts — depend only on STATE_DIR (line 195) and function declarations
+const _BL_POLICY_FILE = path.join(STATE_DIR, 'blacklight_policy.json');
+const _BL_STATE_FILE = path.join(STATE_DIR, 'blacklight_state.json');
+const _blSaved = (() => { try { return JSON.parse(require('fs').readFileSync(_BL_STATE_FILE, 'utf8')); } catch { return null; } })();
+const _blacklightState = _blSaved || { active: false, alerts: [], last_scan: null };
+const _RECON_CASES_FILE = path.join(STATE_DIR, 'recon_cases.json');
+const _RECON_FINDINGS_FILE = path.join(STATE_DIR, 'recon_findings.json');
+const _RECON_AUDIT_FILE = path.join(STATE_DIR, 'recon_audit.json');
+const walletSnapshot = () => economyService.walletSnapshot();
+const buildEconomySnapshot = () => economyService.buildEconomySnapshot();
+const taskStore = new Map();
+const _sseTaskListeners = new Map();
+const promptTraceStore = [];
+const MAX_TRACES = 500;
+let promptInspectorConfig = { enabled: true, capture_context: true, capture_output: true, min_flag_level: 'info' };
+let heartbeatCounter = 0;
+const turnRunner = createTurnRunner({
+  broadcaster,
+  orchestrator,
+  createWorkflowRun,
+  appendDecision,
+  attachWorkflowNode,
+  addActivity,
+  collectHybridMemoryContext,
+  compactMemoryTraceForModel,
+  runPythonExecution,
+  isPythonBackendUp,
+  requestPythonJSON,
+  requestPythonChatPayload,
+  requestOllamaChat,
+  applyStructuredFormat,
+  buildLocalFallbackReply,
+});
+const reliabilityState = {
+  forgeFrozen: false,
+  freezeReason: '',
+  stabilityScore: 1.0,
+  checkpoints: [],
+  throttledAgents: [],
+  lastEvaluated: null,
+};
+const OBJECTIVE_STATUS = {
+  INACTIVE: 'inactive',
+  WAITING: 'waiting',
+  RUNNING: 'running',
+  COMPLETED: 'completed',
+};
+const runtimeState = {
+  automationRunning: false,
+  tasksExecuted: 0,
+  successfulTasks: 0,
+  failedTasks: 0,
+  valueGenerated: 0,
+  revenueCents: 0,
+  pipelineRuns: [],
+  pipelineRoiTotal: 0,
+  activityFeed: [],
+  executionLogs: [],
+  workflowRuns: [],
+  workflowIndex: {},
+  workflowTaskMeta: {},
+  workflowSequencers: {},
+  selectedWorkflowRun: null,
+  skillStats: {},
+  objectives: [],
+  objectiveState: {
+    money_mode: {
+      active: false,
+      status: OBJECTIVE_STATUS.INACTIVE,
+      current_objective: null,
+      active_tasks: [],
+      progress: 0,
+      agents_used: [],
+      performance: { leads_generated: 0, emails_sent: 0, conversion_pct: 0 },
+      result: null,
+    },
+    ascend_forge: {
+      active: false,
+      status: OBJECTIVE_STATUS.INACTIVE,
+      current_objective: null,
+      plan: [],
+      active_tasks: [],
+      progress: 0,
+      agents_used: [],
+      results: [],
+      result: null,
+    },
+  },
+  objectiveTaskMeta: {},
+  observability: {
+    events: [],
+    autoFixLog: [],
+    traces: {},
+    _traceSeq: 0,
+  },
+  _seq: 0,
+};
+economyService.init(runtimeState, STATE_DIR);
+
+const secretStore = new SecretStore();
+const securitySyncPolicy = createOfflineSecuritySyncPolicy({
+  queueFile: statePath('security_sync_queue.json'),
+  historyFile: statePath('security_sync_history.log'),
+});
+const apiGatewayProtector = createApiGatewayProtector({
+  secretStore,
+  syncPolicy: securitySyncPolicy,
+  emitObservabilityEvent,
+});
+app.use('/api', apiGatewayProtector.middleware);
+const anomalyResponder = createAnomalyResponder({
+  sampleSnapshot: buildObservabilitySnapshot,
+  getMode,
+  setMode,
+  stopAllAgents,
+  addActivity,
+  appendAutoFixLog,
+  emitObservabilityEvent,
+  gatewayProtector: apiGatewayProtector,
+  syncPolicy: securitySyncPolicy,
+});
+setInterval(() => {
+  try {
+    anomalyResponder.evaluate();
+  } catch (error) {
+    console.warn('[SECURITY] anomaly responder evaluate failed:', error);
+  }
+}, 15000).unref();
+
+const _readiness = { phase: 'BOOTING', pythonReady: false, subsystemsReady: false };
+const _systemReady = { python_ok: false, llm_ok: false, node_ok: true };
+function _updateSystemReady(patch) {
+  Object.assign(_systemReady, patch);
+}
+
 // ── Phase 1 Route Extraction — extracted inline routes ────────────────────────
 // These routers replace inline app.get/post/delete handlers that lived in
 // server.js. The inline handlers remain temporarily (and are now dead code)
@@ -636,8 +788,6 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
     addActivity, runPipeline, readJsonSafe, readJsonlSafe, sampleSystemStatus,
     normalizeDashboardGraph, proxyNeuralBrain, checkNeuralGraphReady,
     requestPythonJSON,
-    apiGatewayProtector, anomalyResponder, securitySyncPolicy, secretStore,
-    runtimeState, _readiness, _systemReady,
     // TTL caches
     _cache_grades,
     // Graph delta state (wraps let scalars)
@@ -750,6 +900,13 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
         case 'recordAuditEvent':            return recordAuditEvent;
         case '_auditLog':                   return _auditLog;
         case 'blacklightTools':             return blacklightTools;
+        case 'apiGatewayProtector':         return apiGatewayProtector;
+        case 'anomalyResponder':            return anomalyResponder;
+        case 'securitySyncPolicy':          return securitySyncPolicy;
+        case 'secretStore':                 return secretStore;
+        case 'runtimeState':               return runtimeState;
+        case '_readiness':                  return _readiness;
+        case '_systemReady':               return _systemReady;
         default: return Reflect.get(target, prop);
       }
     },
@@ -784,8 +941,7 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
   app.use('/', createMediaRouter(_lazyRouteDeps));
 }
 
-// Incremented by broadcaster heartbeat loop; sampled into system status.
-let heartbeatCounter = 0;
+// heartbeatCounter hoisted above route extraction block
 
 const GPU_RANDOM_SWING = 8;
 const GPU_SWING_OFFSET = 4;
@@ -810,69 +966,11 @@ const EXPERIENCE_TASK_THRESHOLD = 20;
 const MAX_EXPERIENCE_MULTIPLIER = 1.5;
 // Deterministic variation seed for pipeline ROI (avoids Math.random).
 const VARIATION_SEED = 41;
-const OBJECTIVE_STATUS = {
-  INACTIVE: 'inactive',
-  WAITING: 'waiting',
-  RUNNING: 'running',
-  COMPLETED: 'completed',
-};
 const MONEY_MODE_AGENTS = ['lead_hunter', 'email_ninja', 'intel_agent', 'social_guru'];
 const ASCEND_FORGE_AGENTS = ['intel_agent', 'email_ninja', 'social_guru'];
 const OBJECTIVES_FILE = statePath('objectives.json');
 const MONEY_LEADS_PER_TASK = 5;
 const MONEY_EMAILS_PER_TASK = 10;
-
-const runtimeState = {
-  automationRunning: false,
-  tasksExecuted: 0,
-  successfulTasks: 0,
-  failedTasks: 0,
-  valueGenerated: 0,
-  revenueCents: 0,
-  pipelineRuns: [],
-  pipelineRoiTotal: 0,
-  activityFeed: [],
-  executionLogs: [],
-  workflowRuns: [],
-  workflowIndex: {},
-  workflowTaskMeta: {},
-  workflowSequencers: {},
-  selectedWorkflowRun: null,
-  skillStats: {},
-  objectives: [],
-  objectiveState: {
-    money_mode: {
-      active: false,
-      status: OBJECTIVE_STATUS.INACTIVE,
-      current_objective: null,
-      active_tasks: [],
-      progress: 0,
-      agents_used: [],
-      performance: { leads_generated: 0, emails_sent: 0, conversion_pct: 0 },
-      result: null,
-    },
-    ascend_forge: {
-      active: false,
-      status: OBJECTIVE_STATUS.INACTIVE,
-      current_objective: null,
-      plan: [],
-      active_tasks: [],
-      progress: 0,
-      agents_used: [],
-      results: [],
-      result: null,
-    },
-  },
-  objectiveTaskMeta: {},
-  observability: {
-    events: [],
-    autoFixLog: [],
-    traces: {},
-    _traceSeq: 0,
-  },
-  _seq: 0,
-};
-economyService.init(runtimeState, STATE_DIR);
 
 const bootVoiceState = {
   system_init: false,
@@ -925,36 +1023,6 @@ function markBootEvent(name) {
   bootVoiceState[name] = true;
   void maybeSpeakBootGreeting();
 }
-
-const secretStore = new SecretStore();
-const securitySyncPolicy = createOfflineSecuritySyncPolicy({
-  queueFile: statePath('security_sync_queue.json'),
-  historyFile: statePath('security_sync_history.log'),
-});
-const apiGatewayProtector = createApiGatewayProtector({
-  secretStore,
-  syncPolicy: securitySyncPolicy,
-  emitObservabilityEvent,
-});
-app.use('/api', apiGatewayProtector.middleware);
-const anomalyResponder = createAnomalyResponder({
-  sampleSnapshot: buildObservabilitySnapshot,
-  getMode,
-  setMode,
-  stopAllAgents,
-  addActivity,
-  appendAutoFixLog,
-  emitObservabilityEvent,
-  gatewayProtector: apiGatewayProtector,
-  syncPolicy: securitySyncPolicy,
-});
-setInterval(() => {
-  try {
-    anomalyResponder.evaluate();
-  } catch (error) {
-    console.warn('[SECURITY] anomaly responder evaluate failed:', error);
-  }
-}, 15000).unref();
 
 // ── Restore persisted state on startup ────────────────────────────────────────
 const _savedState = persistence.loadRuntimeState();
@@ -1180,8 +1248,7 @@ function readJsonlSafe(file, limit = 500) {
   }
 }
 
-const walletSnapshot = () => economyService.walletSnapshot();
-const buildEconomySnapshot = () => economyService.buildEconomySnapshot();
+// walletSnapshot + buildEconomySnapshot hoisted above route extraction block
 
 function cpuUsagePercent() {
   const cpus = os.cpus().length || 1;
@@ -1531,7 +1598,7 @@ async function proxyModelFabric(path, { method = 'GET', body, timeout = 120000 }
   return { ok: r?.ok, status: r?.status, data: await r.json() };
 }
 
-const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline — Python backend not running.' };
+// MODEL_FABRIC_OFFLINE hoisted above route extraction block
 
 // GET endpoints (fast; never trigger a model load)
 ['models', 'health', 'status', 'lifecycle/status', 'quantization/status',
@@ -1832,8 +1899,7 @@ for (const ep of ['tools', 'skills']) {
 }
 
 
-// ── Conversations JSONL endpoint ──────────────────────────────────────────────
-const conversations = require('./conversations');
+// ── Conversations JSONL endpoint — hoisted above route extraction block ──────
 
 
 // ── Autonomy daemon endpoints ─────────────────────────────────────────────────
@@ -2250,23 +2316,7 @@ function requestOllamaChat(message, memoryTrace) {
   ]));
 }
 
-const turnRunner = createTurnRunner({
-  broadcaster,
-  orchestrator,
-  createWorkflowRun,
-  appendDecision,
-  attachWorkflowNode,
-  addActivity,
-  collectHybridMemoryContext,
-  compactMemoryTraceForModel,
-  runPythonExecution,
-  isPythonBackendUp,
-  requestPythonJSON,
-  requestPythonChatPayload,
-  requestOllamaChat,
-  applyStructuredFormat,
-  buildLocalFallbackReply,
-});
+// turnRunner hoisted above route extraction block
 
 
 // ── Business-building money workflows (proxy to Python) ──────────────────────
@@ -2286,61 +2336,11 @@ const turnRunner = createTurnRunner({
 
 // ── Enterprise: Audit, Reliability, Forge-queue endpoints ────────────────────
 
-// Audit service — owns SQLite persistence + in-memory mirror.
-const auditService = require('./services/audit_service');
-const recordAuditEvent = auditService.recordAuditEvent;
-// Live reference to the in-memory array (auditService mutates it, never reassigns).
-const _auditLog = auditService.log;
+// Audit service — hoisted above route extraction block.
 
-const ADMIN_SAFETY_ACTIONS = {
-  'reset-state': {
-    label: 'RESET ALL STATE',
-    endpoint: 'POST /api/admin/reset-state',
-    confirmation: 'RESET ALL STATE',
-    external_effect: 'Would reset runtime state files. This action is staged only from Settings safety center.',
-  },
-  'wipe-memory': {
-    label: 'WIPE MEM0 MEMORY',
-    endpoint: 'DELETE /api/neural-brain/memory/all',
-    confirmation: 'WIPE MEM0 MEMORY',
-    external_effect: 'Would permanently remove memory records. This action is staged only from Settings safety center.',
-  },
-  'factory-reset': {
-    label: 'FACTORY RESET',
-    endpoint: 'POST /api/admin/factory-reset',
-    confirmation: 'FACTORY RESET',
-    external_effect: 'Would reset the full system. This action is staged only from Settings safety center.',
-  },
-  'evolution-rollback': {
-    label: 'EVOLUTION ROLLBACK',
-    endpoint: 'POST /api/evolution/rollback',
-    confirmation: 'EVOLUTION ROLLBACK',
-    external_effect: 'Would roll back applied evolution patches. This action is staged only from Settings safety center.',
-  },
-  'invalidate-sessions': {
-    label: 'INVALIDATE SESSIONS',
-    endpoint: 'POST /api/admin/sessions/invalidate-all',
-    confirmation: 'INVALIDATE SESSIONS',
-    external_effect: 'Would log out active users. This action is staged only from Settings safety center.',
-  },
-  'flush-telemetry': {
-    label: 'FLUSH TELEMETRY',
-    endpoint: 'POST /api/neural-brain/telemetry/flush',
-    confirmation: 'FLUSH TELEMETRY',
-    external_effect: 'Would clear queued telemetry data. This action is staged only from Settings safety center.',
-  },
-};
+// ADMIN_SAFETY_ACTIONS — hoisted above route extraction block
 
-
-// Reliability state
-const reliabilityState = {
-  forgeFrozen: false,
-  freezeReason: '',
-  stabilityScore: 1.0,
-  checkpoints: [],
-  throttledAgents: [],
-  lastEvaluated: null,
-};
+// Reliability state — hoisted above route extraction block
 
 function updateStabilityScore() {
   const snap = buildObservabilitySnapshot();
@@ -2684,9 +2684,7 @@ function runForgePython(payload, timeoutMs = 90000) {
 
 // ── Doctor (diagnostics) ──────────────────────────────────────────────────────
 
-// Policy / state persistence helpers (Change 1)
-const _BL_POLICY_FILE = path.join(STATE_DIR, 'blacklight_policy.json');
-const _BL_STATE_FILE = path.join(STATE_DIR, 'blacklight_state.json');
+// Policy / state persistence helpers (consts hoisted above route extraction block)
 
 function _loadBlPolicy() {
   try { return JSON.parse(fs.readFileSync(_BL_POLICY_FILE, 'utf8')); } catch { return { network_osint_enabled: false }; }
@@ -2704,13 +2702,7 @@ function _saveBlState() {
   } catch {}
 }
 
-const _blSaved = _loadBlState();
-const _blacklightState = _blSaved || { active: false, alerts: [], last_scan: null };
-
 // ── Recon (safe OSINT + defensive local analysis) ────────────────────────────
-const _RECON_CASES_FILE = path.join(STATE_DIR, 'recon_cases.json');
-const _RECON_FINDINGS_FILE = path.join(STATE_DIR, 'recon_findings.json');
-const _RECON_AUDIT_FILE = path.join(STATE_DIR, 'recon_audit.json');
 
 const RECON_ALLOWED_CATEGORIES = new Set(['osint', 'defensive_review', 'phishing', 'special']);
 const RECON_SAFE_OFFENSIVE_CATEGORY_IDS = new Set([
@@ -2909,14 +2901,11 @@ let systemHalted = false;
 
 
 // ── System health ─────────────────────────────────────────────────────────────
-const _srvStartMs = Date.now()
+// _srvStartMs hoisted above route extraction block
 
 
 // ── Prompt Inspector endpoints ────────────────────────────────────────────────
-
-const promptTraceStore = [];
-const MAX_TRACES = 500;
-let promptInspectorConfig = { enabled: true, capture_context: true, capture_output: true, min_flag_level: 'info' };
+// promptTraceStore, MAX_TRACES, promptInspectorConfig hoisted above route extraction block
 
 function addPromptTrace(raw) {
   const trace = {
@@ -3031,7 +3020,7 @@ let _updateRunning = false;
 // ── Task Tracking System ──────────────────────────────────────────────────────
 // Stores live task progress; in-memory with TTL cleanup (use Redis for production)
 
-const taskStore = new Map(); // taskId → {task, steps, connections}
+// taskStore hoisted above route extraction block
 const taskConnections = new Map(); // taskId → Set of WebSocket connections
 
 function initTask(taskId, title = 'Task') {
@@ -3470,17 +3459,6 @@ try {
   console.warn('[PyBridge] startup failed:', e && e.message);
 }
 
-// ── Readiness state machine ──────────────────────────────────────────────────
-const _readiness = { phase: 'BOOTING', pythonReady: false, subsystemsReady: false };
-
-// Cached system:ready snapshot — sent to new WS clients on connect so the
-// dashboard banner flips to OPERATIONAL immediately instead of waiting for the
-// next broadcast. Updated everywhere we already broadcast `system:ready`.
-const _systemReady = { python_ok: false, llm_ok: false, node_ok: true };
-function _updateSystemReady(patch) {
-  Object.assign(_systemReady, patch);
-}
-
 // FIX-3: 2026-05-12 — Optimized probeUntilReady: 12s max, 200ms poll intervals, graceful degradation
 async function probeUntilReady() {
   const PYTHON_URL = `http://127.0.0.1:${process.env.PYTHON_BACKEND_PORT || 18790}`;
@@ -3823,8 +3801,7 @@ setInterval(() => {
 
 // ── Task Progress API ─────────────────────────────────────────────────────────
 
-// SSE listener registry: taskId → Set<res>
-const _sseTaskListeners = new Map();
+// _sseTaskListeners hoisted above route extraction block
 
 function _notifySSEListeners(taskId, data) {
   const set = _sseTaskListeners.get(taskId);

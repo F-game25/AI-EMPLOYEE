@@ -11,7 +11,7 @@
  *   requireAuth, validate, SCHEMAS, loadSystemManifest, buildModelRoutePlan,
  *   readJsonSafe, statePath, requestPythonJSON, ollamaAdmin, subsystems,
  *   getAgents, addActivity, recordAuditEvent,
- *   _forgeQueue, _forgeQueuePush, _forgeQueueUpdate,
+ *   getForgeQueue(), _forgeQueuePush, _forgeQueueUpdate,
  *   _forgeRiskScore, _forgeRiskLabel,
  *   reliabilityState, _auditLog,
  *   _rl_forge, _rl_ollama_pull,
@@ -38,7 +38,6 @@ module.exports = function createForgeOpsRouter(deps) {
     getAgents,
     addActivity,
     recordAuditEvent,
-    _forgeQueue,
     _forgeQueuePush,
     _forgeQueueUpdate,
     _forgeRiskScore,
@@ -52,6 +51,10 @@ module.exports = function createForgeOpsRouter(deps) {
     spawn,
     http,
   } = deps;
+
+  // getForgeQueue() is a const declared late in server.js (depends on SQLite IIFE)
+  // Access via deps at request time to avoid TDZ at factory-call time
+  const getForgeQueue = () => deps._forgeQueue;
 
   // ── Internal: Forge Python bridge ────────────────────────────────────────────
 
@@ -95,7 +98,7 @@ module.exports = function createForgeOpsRouter(deps) {
   // ── GET /api/execution/queue ─────────────────────────────────────────────────
 
   router.get('/execution/queue', requireAuth, async (req, res) => {
-    const nodeItems = Array.isArray(_forgeQueue) ? _forgeQueue : [];
+    const nodeItems = Array.isArray(getForgeQueue()) ? getForgeQueue() : [];
     const count = (status) => nodeItems.filter((i) => i.status === status).length;
     const base = {
       items: nodeItems,
@@ -159,12 +162,13 @@ module.exports = function createForgeOpsRouter(deps) {
   router.get('/models/providers', requireAuth, (req, res) => {
     const anthropicOk = !!(process.env.ANTHROPIC_API_KEY);
     const openaiOk    = !!(process.env.OPENAI_API_KEY);
-    ollamaAdmin.isOllamaRunning().then(running => {
+    ollamaAdmin.getRuntimeStatus().then(runtime => {
+      const running = !!runtime.running;
       res.json({
         providers: {
           anthropic: { configured: anthropicOk, status: anthropicOk ? 'configured' : 'missing_key' },
           openai:    { configured: openaiOk,    status: openaiOk    ? 'configured' : 'missing_key' },
-          ollama:    { configured: running,     status: running     ? 'running'    : 'not_running'  },
+          ollama:    { configured: runtime.ok,  status: runtime.status, running, runtime },
         },
       });
     }).catch(() => res.json({ providers: { anthropic: { configured: anthropicOk }, openai: { configured: openaiOk }, ollama: { configured: false } } }));
@@ -173,9 +177,20 @@ module.exports = function createForgeOpsRouter(deps) {
   // ── GET /api/ollama/status ───────────────────────────────────────────────────
 
   router.get('/ollama/status', requireAuth, async (req, res) => {
-    const running = await ollamaAdmin.isOllamaRunning().catch(() => false);
-    const models  = running ? await ollamaAdmin.listModels().catch(() => []) : [];
-    res.json({ running, models });
+    const runtime = await ollamaAdmin.getRuntimeStatus().catch((error) => ({ ok: false, status: 'error', error: error.message }));
+    res.json(runtime);
+  });
+
+  router.post('/ollama/start', requireAuth, async (req, res) => {
+    const result = await ollamaAdmin.startManaged({ waitMs: 20000 }).catch((error) => ({ ok: false, error: error.message }));
+    res.status(result.ok ? 200 : 503).json(result);
+  });
+
+  // ── GET /api/ollama/recommendation ───────────────────────────────────────────
+
+  router.get('/ollama/recommendation', requireAuth, async (req, res) => {
+    const recommendation = await Promise.resolve(ollamaAdmin.getModelRecommendation()).catch((error) => ({ error: error.message }));
+    res.status(recommendation.error ? 502 : 200).json(recommendation.error ? { ok: false, error: recommendation.error } : { ok: true, recommendation });
   });
 
   // ── GET /api/ollama/models ───────────────────────────────────────────────────
@@ -203,6 +218,26 @@ module.exports = function createForgeOpsRouter(deps) {
       res.write(`data: ${JSON.stringify({ status: 'complete' })}\n\n`);
     } catch (e) {
       res.write(`data: ${JSON.stringify({ status: 'error', error: e.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  // ── POST /api/ollama/pull-recommended ───────────────────────────────────────
+
+  router.post('/ollama/pull-recommended', requireAuth, _rl_ollama_pull, async (req, res) => {
+    const recommendation = ollamaAdmin.getModelRecommendation();
+    const name = recommendation.model;
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    try {
+      res.write(`data: ${JSON.stringify({ status: 'recommendation', recommendation, name })}\n\n`);
+      for await (const chunk of ollamaAdmin.pullModelStream(name)) {
+        res.write(`data: ${JSON.stringify({ ...chunk, recommendation, name })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ status: 'complete', complete: true, recommendation, name })}\n\n`);
+    } catch (e) {
+      res.write(`data: ${JSON.stringify({ status: 'error', error: e.message, recommendation, name })}\n\n`);
     }
     res.end();
   });
@@ -280,8 +315,8 @@ module.exports = function createForgeOpsRouter(deps) {
   // GET /api/forge/queue
   router.get('/forge/queue', requireAuth, (req, res) => {
     const status = (req.query || {}).status || '';
-    const items = status ? _forgeQueue.filter((r) => r.status === status) : _forgeQueue;
-    res.json({ items, total: _forgeQueue.length });
+    const items = status ? getForgeQueue().filter((r) => r.status === status) : getForgeQueue();
+    res.json({ items, total: getForgeQueue().length });
   });
 
   // POST /api/forge/submit
@@ -315,7 +350,7 @@ module.exports = function createForgeOpsRouter(deps) {
   router.post('/forge/approve/:id', requireAuth, (req, res) => {
     const _bodyForgeApprove = validate(SCHEMAS.forgeApproveItem, req, res);
     if (!_bodyForgeApprove) return;
-    const item = _forgeQueue.find((r) => r.id === req.params.id);
+    const item = getForgeQueue().find((r) => r.id === req.params.id);
     if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
     if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
     const patch = { status: 'approved', decided_at: new Date().toISOString(), decided_by: _bodyForgeApprove.approved_by || 'operator' };
@@ -328,7 +363,7 @@ module.exports = function createForgeOpsRouter(deps) {
   router.post('/forge/reject/:id', requireAuth, (req, res) => {
     const _bodyForgeReject = validate(SCHEMAS.forgeRejectItem, req, res);
     if (!_bodyForgeReject) return;
-    const item = _forgeQueue.find((r) => r.id === req.params.id);
+    const item = getForgeQueue().find((r) => r.id === req.params.id);
     if (!item) return res.status(404).json({ ok: false, error: 'request not found' });
     if (item.status !== 'pending') return res.status(409).json({ ok: false, error: `request is already ${item.status}` });
     const patch = { status: 'rejected', decided_at: new Date().toISOString(), decided_by: _bodyForgeReject.rejected_by || 'operator' };
@@ -383,7 +418,7 @@ module.exports = function createForgeOpsRouter(deps) {
       active: _forgeTaskState.active,
       last_action: _forgeTaskState.last_action,
       frozen: reliabilityState.forgeFrozen,
-      queue_depth: _forgeQueue.length,
+      queue_depth: getForgeQueue().length,
       stability_score: reliabilityState.stabilityScore,
     });
   });

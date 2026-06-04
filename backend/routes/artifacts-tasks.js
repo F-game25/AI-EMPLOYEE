@@ -52,13 +52,13 @@ module.exports = function createArtifactsTasksRouter(deps) {
     proxyModelFabric,
     MODEL_FABRIC_OFFLINE,
     reliabilityState,
-    _forgeQueue,
     addActivity,
     runPipeline,
     taskHistory,
   } = deps;
 
-  // Late-declared deps — accessed via getters to avoid undefined at factory time
+  // Late-declared deps — accessed via getters to avoid TDZ at factory time
+  const getForgeQueue       = () => deps._forgeQueue;
   const getTaskStore        = () => deps.getTaskStore ? deps.getTaskStore() : deps.taskStore;
   const getSseListeners     = () => deps.getSseTaskListeners ? deps.getSseTaskListeners() : deps._sseTaskListeners;
   const getInitTask         = () => deps.initTask;
@@ -209,7 +209,7 @@ module.exports = function createArtifactsTasksRouter(deps) {
       active: _forgeTaskState.active,
       last_action: _forgeTaskState.last_action,
       frozen: reliabilityState.forgeFrozen,
-      queue_depth: _forgeQueue.length,
+      queue_depth: getForgeQueue().length,
       stability_score: reliabilityState.stabilityScore,
     });
   });
