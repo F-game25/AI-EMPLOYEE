@@ -1001,7 +1001,7 @@ module.exports = function createHealthRouter(deps) {
     const now = Date.now();
     const uptime = now - startTime;
     const activeAgents = getAgents().length;
-    const metrics = [
+    let metrics = [
       `# HELP ai_employee_uptime_ms Application uptime in milliseconds`,
       `# TYPE ai_employee_uptime_ms gauge`,
       `ai_employee_uptime_ms ${uptime}`,
@@ -1024,6 +1024,26 @@ module.exports = function createHealthRouter(deps) {
       `# TYPE ai_employee_api_calls_total counter`,
       `ai_employee_api_calls_total ${getApiCallCounter()}`,
     ].join('\n');
+
+    // QCE metrics — read from quantum_feedback.jsonl
+    try {
+      const feedbackPath = path.join(STATE_DIR, 'quantum_feedback.jsonl');
+      const lines = fs.existsSync(feedbackPath)
+        ? fs.readFileSync(feedbackPath, 'utf8').trim().split('\n').filter(Boolean)
+        : [];
+      const records = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const total = records.length;
+      const success = records.filter(r => r.outcome === 'success').length;
+      const failure = records.filter(r => r.outcome === 'failure').length;
+      const confidences = records.map(r => r.confidence).filter(v => typeof v === 'number');
+      const avgConf = confidences.length ? (confidences.reduce((a, b) => a + b, 0) / confidences.length).toFixed(4) : 0;
+      metrics += `\n# HELP qce_reflections_total Total QCE reflection events\n`;
+      metrics += `# TYPE qce_reflections_total counter\n`;
+      metrics += `qce_reflections_total ${total}\n`;
+      metrics += `qce_reflections_success_total ${success}\n`;
+      metrics += `qce_reflections_failure_total ${failure}\n`;
+      metrics += `qce_avg_confidence ${avgConf}\n`;
+    } catch {}
 
     res.type('text/plain; version=0.0.4').send(metrics + '\n');
   });

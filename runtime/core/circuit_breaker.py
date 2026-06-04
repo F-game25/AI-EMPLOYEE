@@ -369,3 +369,20 @@ def get_circuit_registry() -> CircuitBreakerRegistry:
             _registry_instance = CircuitBreakerRegistry()
             _registry_instance.pre_populate()
     return _registry_instance
+
+
+def get_provider_health_signal(provider_name: str) -> float:
+    """Return 1.0 (CLOSED), 0.5 (HALF_OPEN), or 0.0 (OPEN) for QCE oracle weighting.
+
+    Tries both bare name and 'llm:<name>' prefixed form.
+    Returns 1.0 on any error (assume healthy).
+    """
+    try:
+        registry = get_circuit_registry()
+        # Try prefixed name first, then bare name
+        for candidate in (f"llm:{provider_name}", provider_name):
+            breaker = registry.get(candidate)
+            state = breaker.state
+            return {CBState.CLOSED: 1.0, CBState.HALF_OPEN: 0.5, CBState.OPEN: 0.0}.get(state, 1.0)
+    except Exception:
+        return 1.0

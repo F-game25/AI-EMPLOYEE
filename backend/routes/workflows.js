@@ -6,6 +6,26 @@ const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
 
+// QCE confidence scoring for workflow nodes
+async function getNodeConfidence(node, priorOutputs) {
+  try {
+    const body = {
+      query: `${node.type || ''} ${node.label || ''} ${JSON.stringify(priorOutputs || {}).slice(0, 200)}`,
+      complexity: 'simple',
+      task_type: 'execution',
+    }
+    const r = await fetch('http://localhost:18790/api/search/context-pack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(1500),
+    }).catch(() => null)
+    if (!r?.ok) return 0.7
+    const data = await r.json()
+    return data.confidence ?? 0.7
+  } catch { return 0.7 }
+}
+
 const STATE_DIR = path.resolve(process.env.STATE_DIR || process.env.AI_EMPLOYEE_STATE_DIR || path.join(os.homedir(), '.ai-employee', 'state'))
 const WORKFLOWS_FILE = path.join(STATE_DIR, 'workflow_definitions.json')
 const WORKFLOW_RUNS_FILE = path.join(STATE_DIR, 'workflow_template_runs.json')
@@ -231,13 +251,28 @@ module.exports = function createWorkflowsRouter(requireAuth) {
     res.status(201).json({ ok: true, state: 'live', source: 'node_workflow_store', workflow: definition })
   })
 
-  router.post('/:id/run', requireAuth, (req, res) => {
+  router.post('/:id/run', requireAuth, async (req, res) => {
     const definitions = loadDefinitions().map(normalizeDefinition)
     const definition = definitions.find((item) => item.id === req.params.id || item.template_id === req.params.id)
       || normalizeDefinition(TEMPLATE_LIBRARY.find((item) => item.id === req.params.id) || {})
     if (!definition.id || definition.name === 'Workflow draft') return res.status(404).json({ ok: false, state: 'empty', error: 'workflow not found' })
     const runs = loadRuns()
     const run = makeRun(definition, req.body || {})
+
+    // QCE confidence scoring: score each node and gate low-confidence nodes
+    const priorOutputs = {}
+    for (const node of run.nodes) {
+      try {
+        const confidence = await getNodeConfidence(node, priorOutputs)
+        node.confidence = confidence
+        if (confidence < 0.4) {
+          node.status = 'waiting_approval'
+          node.confidence_gate = true
+        }
+        priorOutputs[node.id] = { label: node.label, confidence }
+      } catch { node.confidence = 0.7 }
+    }
+
     runs.unshift(run)
     saveRuns(runs)
     const nextDefinitions = definitions.map((item) => item.id === definition.id ? { ...item, last_run: run.created_at, runs_today: (item.runs_today || 0) + 1, updated_at: run.created_at } : item)

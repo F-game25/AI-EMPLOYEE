@@ -356,6 +356,34 @@ class EconomyEngine:
         return suggestions[:limit]
 
     # ------------------------------------------------------------------
+    # QCE pipeline routing
+    # ------------------------------------------------------------------
+
+    async def select_pipeline_qce(self, context: dict | None = None) -> str:
+        """Use AmplitudeRouter to select the highest-amplitude revenue pipeline."""
+        _PIPELINES = [
+            'content_publish_track',
+            'data_scrape_filter_store',
+            'outreach_response_conversion',
+        ]
+        try:
+            from core.quantum.engine import get_qce
+            goal = (context or {}).get('goal', 'maximize revenue')
+            pack = await get_qce().process(goal=goal, task_type='execution')
+            candidates = [
+                c for c in pack.candidates
+                if any(p in c.content for p in _PIPELINES)
+            ]
+            if candidates:
+                best = max(candidates, key=lambda c: c.amplitude)
+                for p in _PIPELINES:
+                    if p in best.content:
+                        return p
+        except Exception:
+            pass
+        return 'content_publish_track'
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

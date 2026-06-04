@@ -1,4 +1,4 @@
-import { useCallback, useEffect, lazy, Suspense, useState } from 'react'
+import { useCallback, useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useAppStore } from './store/appStore'
@@ -7,9 +7,9 @@ import ErrorScreen from './components/ErrorScreen'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useWebSocket, bootstrapWsStore } from './hooks/useWebSocket'
 import Toaster from './components/nexus-ui/Toaster'
+import SearchOmnibar from './components/ui/SearchOmnibar'
 
 const Dashboard = lazy(() => import('./components/Dashboard'))
-const OnboardingPage = lazy(() => import('./components/pages/OnboardingPage'))
 import ContextCheckModal from './components/dashboard/ContextCheckModal'
 let localAuthPromise = null
 const READINESS_POLL_MS = 1500
@@ -89,7 +89,7 @@ function AppLoadingFallback() {
   )
 }
 
-function AppMain() {
+function AppContent() {
   const appState = useAppStore(s => s.appState)
   const setAppState = useAppStore(s => s.setAppState)
   const setPythonBackendReady = useAppStore(s => s.setPythonBackendReady)
@@ -209,24 +209,6 @@ function AppMain() {
   )
 }
 
-function AppContent() {
-  const [onboardingDone, setOnboardingDone] = useState(() => {
-    try { return !!localStorage.getItem('nx_onboarding_complete') } catch { return true }
-  })
-  const finish = () => {
-    try { localStorage.setItem('nx_onboarding_complete', '1') } catch {}
-    setOnboardingDone(true)
-  }
-  if (!onboardingDone) {
-    return (
-      <Suspense fallback={null}>
-        <OnboardingPage onComplete={finish} />
-      </Suspense>
-    )
-  }
-  return <AppMain />
-}
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -234,6 +216,7 @@ export default function App() {
         <div className="app">
           <AppContent />
           <Toaster />
+          <SearchOmnibar />
         </div>
       </ErrorBoundary>
     </BrowserRouter>

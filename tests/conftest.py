@@ -6,6 +6,7 @@ live installation is required.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import importlib
@@ -111,6 +112,24 @@ for _module_name in (
     "task_engine",
 ):
     _pin_runtime_core_module(_module_name)
+
+
+@pytest.fixture(autouse=True)
+def fresh_event_loop():
+    """Ensure each test has a fresh asyncio event loop set as the current loop.
+
+    Python 3.10+ deprecates asyncio.get_event_loop() when no loop is running,
+    and asyncio.run() closes and discards the loop when it finishes. Without
+    this fixture, tests that use asyncio.run() followed by tests that call
+    asyncio.get_event_loop().run_until_complete() will raise RuntimeError.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield loop
+    try:
+        loop.close()
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)

@@ -86,11 +86,6 @@ const NAV_GROUPS = [
         label: 'Economy',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6-6-2.7-6-6z"/><path d="M8 5v6M6 7h4"/></svg>,
       },
-      {
-        id: 'sales',
-        label: 'Sales',
-        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h2l1.2 7.2a1 1 0 0 0 1 .8h5.6a1 1 0 0 0 1-.8L14 5H5"/><circle cx="6.5" cy="13.5" r="1"/><circle cx="12" cy="13.5" r="1"/></svg>,
-      },
     ],
   },
   {
@@ -127,6 +122,11 @@ const NAV_GROUPS = [
         id: 'neural-graph',
         label: 'Neural Graph',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="3" cy="3" r="1"/><circle cx="13" cy="3" r="1"/><circle cx="3" cy="13" r="1"/><circle cx="13" cy="13" r="1"/><circle cx="8" cy="8" r="1"/><path d="M4 4l4 4M12 4l-4 4M4 12l4-4M12 12l-4-4"/></svg>,
+      },
+      {
+        id: 'quantum-brain',
+        label: 'Quantum Brain',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="1" fill="currentColor"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M12.95 3.05l-1.42 1.42M4.47 11.53l-1.42 1.42"/></svg>,
       },
       {
         id: 'graphs',

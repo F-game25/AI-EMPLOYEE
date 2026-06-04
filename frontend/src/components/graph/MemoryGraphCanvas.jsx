@@ -12,9 +12,12 @@ const GROUP_COLORS = {
 }
 const colorFor = (g) => GROUP_COLORS[g] || GROUP_COLORS.system
 
-export default function MemoryGraphCanvas({ data, emptyHint = 'No nodes yet.' }) {
+export default function MemoryGraphCanvas({ data, emptyHint = 'No nodes yet.', nodeAmplitudes }) {
   const canvasRef = useRef(null)
   const stateRef = useRef({ nodes: [], links: [], raf: 0, hover: null, t: 0 })
+  // Keep amplitudes accessible inside the RAF loop without restarting it
+  const amplRef = useRef(nodeAmplitudes)
+  useEffect(() => { amplRef.current = nodeAmplitudes }, [nodeAmplitudes])
 
   // Merge incoming data into the live simulation (preserve positions of kept nodes)
   useEffect(() => {
@@ -93,11 +96,15 @@ export default function MemoryGraphCanvas({ data, emptyHint = 'No nodes yet.' })
       // Draw
       ctx.clearRect(0, 0, W, H)
       ctx.lineWidth = 1
+      const ampMap = amplRef.current
       links.forEach(l => {
         const s = typeof l.source === 'object' ? l.source : byId(l.source)
         const t = typeof l.target === 'object' ? l.target : byId(l.target)
         if (!s || !t) return
-        ctx.strokeStyle = 'rgba(229,199,107,0.13)'
+        const sAmp = ampMap?.get?.(s.id) ?? 0
+        const tAmp = ampMap?.get?.(t.id) ?? 0
+        const bothHigh = sAmp > 0.7 && tAmp > 0.7
+        ctx.strokeStyle = bothHigh ? 'rgba(6,182,212,0.45)' : 'rgba(229,199,107,0.13)'
         ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(t.x, t.y); ctx.stroke()
       })
       const pulse = 0.5 + 0.5 * Math.sin(sim.t * 0.08)
@@ -107,12 +114,19 @@ export default function MemoryGraphCanvas({ data, emptyHint = 'No nodes yet.' })
         const r = Math.max(2.5, base) * (1 - decay * 0.5)
         const alpha = 1 - decay * 0.65
         const col = colorFor(n.group)
+        const qceAmp = ampMap?.get?.(n.id)
+        // QCE glow: proportional to amplitude when available
+        if (qceAmp != null && qceAmp > 0) {
+          ctx.shadowColor = '#06b6d4'
+          ctx.shadowBlur = qceAmp * 30
+        }
         if (n.active) {
           ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 + pulse * 4, 0, Math.PI * 2)
           ctx.fillStyle = hexA(col, 0.18 * pulse); ctx.fill()
         }
         ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
         ctx.fillStyle = hexA(col, alpha); ctx.fill()
+        ctx.shadowBlur = 0
         ctx.strokeStyle = hexA(col, alpha); ctx.lineWidth = 1.2; ctx.stroke()
         if (sim.hover === n.id || nodes.length <= 60) {
           ctx.fillStyle = `rgba(236,234,216,${0.4 + 0.6 * alpha})`

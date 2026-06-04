@@ -185,6 +185,16 @@ class ReliabilityEngine:
         with self._lock:
             return agent_id in self._throttled_agents
 
+    # ── QCE oracle signal ─────────────────────────────────────────────────────
+
+    def get_health_signal(self) -> float:
+        """Return current system health 0-1 for QCE oracle (1.0=healthy, 0.0=critical)."""
+        try:
+            with self._lock:
+                return max(0.0, min(1.0, self._stability_score))
+        except Exception:
+            return 1.0
+
     # ── status ────────────────────────────────────────────────────────────────
 
     def status(self) -> dict[str, Any]:

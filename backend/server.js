@@ -498,12 +498,9 @@ const createTasksRouter = require('./routes/tasks');
 app.use('/api/tasks', requireAuth, createTasksRouter(taskGateway, broadcaster));
 app.use('/api/schedules', requireAuth, createTasksRouter.createSchedulesRouter(taskGateway, broadcaster));
 
-// Web Search API — QCE unified search + legacy CloakBrowser passthrough
+// Web Search API — proxies to Python /search with CloakBrowser support
 const createSearchRouter = require('./routes/search');
 app.use('/api/search', createSearchRouter(requireAuth));
-
-// Quantum-Inspired Cognitive Engine — amplitude routing, feedback, calibration stats
-app.use('/api/quantum', requireAuth, require('./routes/quantum'));
 
 // Research v2 API — 2-phase discover → execute on selected sources
 const createResearchRouter = require('./routes/research');
@@ -3439,6 +3436,15 @@ wss.on('connection', (ws, req) => {
 });
 
 broadcaster.init(wss);
+
+// QCE WebSocket event broadcaster — used by quantum.js and other QCE integrations
+function broadcastQCEEvent(type, data) {
+  try {
+    broadcaster.broadcast(type, { ...data, ts: Date.now() });
+  } catch {}
+}
+module.exports.broadcastQCEEvent = broadcastQCEEvent;
+
 subsystems.startPolling(5000);
 broadcaster.startHeartbeat({
   intervalMs: 1800,

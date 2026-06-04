@@ -79,3 +79,30 @@ def reload() -> None:
         _CACHE = None
         _COMPILED = []
     _load()
+
+
+class SourceTrust:
+    """Thin class wrapper around module-level trust functions for QCE integration."""
+
+    def get_trust_signal(self, source: str) -> float:
+        """Return trust score 0-1 for a source URL or engine name. Default 0.5."""
+        if not source:
+            return 0.5
+        # If bare engine name (no scheme), synthesize a URL for pattern matching.
+        url = source if '://' in source else f"https://{source}/"
+        score = trust_for_url(url)
+        return max(0.0, min(1.0, score))
+
+
+def apply_trust_to_pool(pool: list, trust=None) -> list:
+    """Multiply each result's score by its source trust. Returns modified pool."""
+    try:
+        st = trust or SourceTrust()
+        for r in pool:
+            source = getattr(r, 'engine', None) or getattr(r, 'url', None) or ''
+            signal = st.get_trust_signal(str(source))
+            current = getattr(r, 'score', 0.5) or 0.5
+            r.score = min(1.0, current * (0.5 + signal * 0.5))
+    except Exception:
+        pass
+    return pool

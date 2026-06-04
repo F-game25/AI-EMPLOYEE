@@ -11,6 +11,15 @@ const fs      = require('fs');
 const http    = require('http');
 const express = require('express');
 
+// Lazy broadcast helper — avoids circular require; server.js exports broadcastQCEEvent after init.
+function _broadcastQCE(type, data) {
+  try {
+    // Use the broadcaster module directly to avoid circular-require with server.js
+    const broadcaster = require('../events/broadcaster');
+    broadcaster.broadcast(type, { ...data, ts: Date.now() });
+  } catch {}
+}
+
 const PYTHON_HOST = '127.0.0.1';
 const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || 18790;
 const TIMEOUT_MS  = 5000;
@@ -122,6 +131,9 @@ router.post('/feedback', async (req, res) => {
   } catch (err) {
     return res.status(500).json({ ok: false, error: `Failed to write feedback: ${err.message}` });
   }
+
+  // Broadcast QCE feedback event to all connected WebSocket clients
+  _broadcastQCE('qce:feedback_recorded', { task_id, outcome, search_id });
 
   // Forward to Python — best-effort, don't await for client response.
   _httpPost('/api/quantum/feedback', record).catch(() => {});

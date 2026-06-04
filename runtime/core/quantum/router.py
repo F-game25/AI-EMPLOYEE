@@ -55,6 +55,22 @@ class AmplitudeRouter:
                 if not provider_health.get(provider, {}).get('circuit_open', False):
                     if cplx == complexity or model == candidate:
                         return candidate
+
+        # Circuit breaker health check — demote if provider is OPEN
+        try:
+            from core.circuit_breaker import get_provider_health_signal
+            provider = model.split('/')[0] if '/' in model else model.split('-')[0]
+            health = get_provider_health_signal(provider)
+            if health == 0.0:
+                _fallback = {
+                    'claude-opus-4-8': 'claude-sonnet-4-6',
+                    'claude-sonnet-4-6': 'claude-haiku-4-5',
+                    'claude-haiku-4-5': 'claude-haiku-4-5',
+                }
+                model = _fallback.get(model, model)
+        except Exception:
+            pass
+
         return model
 
     def route_research_sources(self, context_pack: ContextPack) -> list[str]:

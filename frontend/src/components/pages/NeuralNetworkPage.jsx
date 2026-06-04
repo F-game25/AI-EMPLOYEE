@@ -185,6 +185,7 @@ export default function NeuralNetworkPage() {
   const readiness = useSystemStore(s => s.readiness)
   const setReadiness = useSystemStore(s => s.setReadiness)
 
+  const [nodeAmplitudes, setNodeAmplitudes] = useState(new Map())
   const [hydrated, setHydrated] = useState(false)
   const [webglOK] = useState(webglAvailable)
   const [isStaleFallback, setIsStaleFallback] = useState(false)
@@ -212,6 +213,22 @@ export default function NeuralNetworkPage() {
   const [mergeConfirm, setMergeConfirm] = useState('')
   const [selectedBackup, setSelectedBackup] = useState('')
   const retryCount = useRef(0)
+
+  // ── QCE context-pack glow listener ───────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      const { type, data } = e.detail || {}
+      if (type !== 'qce:context_pack_ready') return
+      const candidates = Array.isArray(data?.candidates) ? data.candidates : []
+      const map = new Map()
+      candidates.forEach(c => {
+        if (c.source_type === 'agent' && c.id) map.set(c.id, c.amplitude || 0)
+      })
+      setNodeAmplitudes(map)
+    }
+    window.addEventListener('ws:event', handler)
+    return () => window.removeEventListener('ws:event', handler)
+  }, [])
 
   // ── brain:graph_updated WebSocket listener ───────────────────────────────
   useEffect(() => {
@@ -536,12 +553,12 @@ export default function NeuralNetworkPage() {
             <>
               {hasData ? (
                 use2D ? (
-                  <MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." />
+                  <MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." nodeAmplitudes={nodeAmplitudes} />
                 ) : (
                   <ErrorBoundary
                     label="neural-graph"
                     severity="widget"
-                    fallback={<MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." />}
+                    fallback={<MemoryGraphCanvas data={toCanvasData(nodes, edges)} emptyHint="No nodes yet." nodeAmplitudes={nodeAmplitudes} />}
                   >
                     <UnifiedBrain
                       showKnowledgeNodes={showKnowledgeNodes}

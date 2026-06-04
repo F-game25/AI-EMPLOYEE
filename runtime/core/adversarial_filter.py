@@ -494,3 +494,24 @@ def get_adversarial_filter() -> AdversarialFilter:
         if _filter_instance is None:
             _filter_instance = AdversarialFilter()
     return _filter_instance
+
+
+def flag_request_if_adversarial(request, raw_input: str):
+    """Run adversarial check on raw_input; set metadata flags and return (request, threat_level).
+
+    BLOCKED → sets metadata['adversarial']=True.
+    High risk (>= warn_threshold) → sets metadata['adversarial_warn']=True.
+    Never raises.
+    """
+    try:
+        filt = get_adversarial_filter()
+        assessment = filt.assess(raw_input)
+        if not hasattr(request, 'metadata') or request.metadata is None:
+            request.metadata = {}
+        if assessment.blocked:
+            request.metadata['adversarial'] = True
+        elif assessment.risk_score >= filt.warn_threshold:
+            request.metadata['adversarial_warn'] = True
+        return request, assessment.threat_level
+    except Exception:
+        return request, None

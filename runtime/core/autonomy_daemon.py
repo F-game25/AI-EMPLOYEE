@@ -116,6 +116,16 @@ class AutonomyDaemon:
                     time.sleep(_CYCLE_SLEEP_S)
                     continue
 
+                # QCE rerank queued tasks before selection
+                try:
+                    queued = list(self._queue.list()) if hasattr(self._queue, 'list') else []
+                    if queued:
+                        ranked = self._rank_tasks_qce(queued)
+                        if ranked and hasattr(self._queue, 'reorder'):
+                            self._queue.reorder(ranked)
+                except Exception:
+                    pass
+
                 # Check for queued tasks
                 task = self._queue.peek()
                 if task is None:
@@ -188,6 +198,29 @@ class AutonomyDaemon:
 
             # Normal cycle sleep
             time.sleep(_CYCLE_SLEEP_S)
+
+    # ── QCE task ranking ──────────────────────────────────────────────────────
+
+    def _rank_tasks_qce(self, tasks: list[dict]) -> list[dict]:
+        """Use QCE to score and reorder queued tasks by expected value."""
+        try:
+            import asyncio
+            from core.quantum.engine import get_qce
+            qce = get_qce()
+            if hasattr(qce, 'rank_queued_tasks'):
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Can't await from sync thread — return as-is
+                        return tasks
+                    return loop.run_until_complete(
+                        asyncio.coroutine(lambda: qce.rank_queued_tasks(tasks))()
+                    ) if asyncio.iscoroutinefunction(qce.rank_queued_tasks) else qce.rank_queued_tasks(tasks)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return tasks
 
     # ── Status ────────────────────────────────────────────────────────────────
 
