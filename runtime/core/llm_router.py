@@ -256,3 +256,18 @@ def set_model_for_task(task_type: str, provider: str, model: str) -> None:
 
 def set_model_for_agent(agent_id: str, provider: str, model: str) -> None:
     get_router().set_model_for_agent(agent_id, provider, model)
+
+
+def route_model_qce(goal: str = '', complexity: str = 'medium',
+                    provider_health: dict | None = None) -> str:
+    """Use AmplitudeRouter.route_model() when QCE is available; fall back to existing routing."""
+    try:
+        from core.quantum.router import AmplitudeRouter
+        router = AmplitudeRouter()
+        return router.route_model(complexity=complexity, provider_health=provider_health)
+    except Exception:
+        pass
+    # Fallback: existing LLMRouter logic
+    r = get_router()
+    task_cfg = r.get_model_for_task(complexity if complexity in _TASK_DEFAULTS else 'general')
+    return task_cfg.get('model', 'claude-sonnet-4-6')

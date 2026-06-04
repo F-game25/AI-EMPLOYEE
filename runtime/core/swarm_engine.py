@@ -388,6 +388,18 @@ class SwarmEngine:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.run_sync, task)
 
+    async def select_agents_qce(self, goal: str, n: int = 3,
+                                available: list[str] | None = None) -> list[str]:
+        """Use AmplitudeRouter.route_swarm() for diversity-constrained agent selection."""
+        try:
+            from core.quantum.engine import get_qce
+            qce = get_qce()
+            pack = await qce.process(goal=goal, task_type='execution')
+            return qce._router.route_swarm(pack, n=n)
+        except Exception:
+            pass
+        return (available or [])[:n]
+
 
 # ── Convenience functions ─────────────────────────────────────────────────────
 

@@ -147,13 +147,228 @@ class RealExecutionEngine:
         logger.info("[ENGINE] Done: goal_id=%s %d/%d steps success=%s", goal_id, completed, len(task_plan), success)
         return summary
 
-    def extract_proof(self, execution_result: dict) -> list[dict]:
-        """Return user-facing proof records from real tool outputs.
+    # ── QCE-aware async loop ──────────────────────────────────────────────────
 
-        Proof is deliberately factual: saved paths, provider IDs, counts,
-        explicit not_configured failures, and source URLs. It never claims an
-        action happened unless a tool returned that evidence.
+    async def run_qce(
+        self,
+        task_plan: list[dict],
+        *,
+        goal: str = '',
+        context_pack=None,       # ContextPack | None
+        goal_type: str = 'general',
+    ) -> dict[str, Any]:
+        """QCE-aware async execution loop. Falls back to run() behaviour when context_pack is None.
+
+        For each step:
+        1. score_step() → StepScore → gate
+        2. Apply gate: direct / sandbox / hitl / reject
+        3. Store result with confidence and gate fields
+        4. Reflect on outcome
+        5. Break on error unless continue_on_error
+
+        Returns same summary structure as run() with extra 'qce': True field.
         """
+        if context_pack is None:
+            # Sync fallback — run() is unchanged
+            result = self.run(task_plan, goal=goal, goal_type=goal_type)
+            result['qce'] = True
+            return result
+
+        from core.quantum.step_score import score_step
+
+        try:
+            from core.goal_store import get_goal_store
+            store = get_goal_store()
+            goal_id = store.create(goal or 'unnamed', goal_type, task_plan)
+            store.start(goal_id)
+        except Exception:
+            goal_id = 'qce-no-store'
+
+        state = ExecutionState()
+        results: list[dict] = []
+        completed = 0
+        failed_at: int | None = None
+        prior_success = 0.5
+
+        logger.info("[QCE] Starting: steps=%d goal=%r", len(task_plan), goal[:80])
+
+        for task in sorted(task_plan, key=lambda t: int(t.get("id", 0))):
+            task_id = int(task.get("id", 0))
+            action = task.get("action", "")
+            continue_on_error = bool(task.get("continue_on_error", False))
+
+            # 1. Score the step
+            try:
+                sandbox_avail = _sandbox_available()
+                step_score = score_step(
+                    task, context_pack,
+                    prior_success=prior_success,
+                    sandbox_available=sandbox_avail,
+                )
+                gate = step_score.gate
+                step_confidence = step_score.confidence
+            except Exception as exc:
+                logger.warning("[QCE] score_step failed for step %d: %s", task_id, exc)
+                gate, step_confidence = 'direct', 0.5
+
+            logger.info("[QCE] Step %d: action=%s gate=%s confidence=%.3f", task_id, action, gate, step_confidence)
+
+            state.start(task_id)
+
+            # 2. Apply gate
+            if gate == 'reject':
+                result = {
+                    'status': 'error',
+                    'error': f'qce_rejected:confidence_too_low',
+                    'task_id': task_id,
+                    'action': action,
+                    'gate': gate,
+                    'confidence': step_confidence,
+                }
+            elif gate == 'direct':
+                result = await self._execute_step_direct(task, state)
+                result['gate'] = gate
+                result['confidence'] = step_confidence
+            elif gate == 'sandbox':
+                result = await self._execute_step_sandbox(task, state)
+                result['gate'] = gate
+                result['confidence'] = step_confidence
+                if result.get('status') == 'error':
+                    # Sandbox failed — retry via hitl
+                    hitl_result = await self._execute_step_hitl(task, state)
+                    hitl_result['gate'] = 'hitl'
+                    hitl_result['confidence'] = step_confidence
+                    result = hitl_result
+            else:  # 'hitl'
+                result = await self._execute_step_hitl(task, state)
+                result['gate'] = gate
+                result['confidence'] = step_confidence
+
+            result.setdefault('task_id', task_id)
+            result.setdefault('action', action)
+
+            state.finish(task_id, result)
+            results.append(result)
+
+            # 3. Update prior_success signal
+            if result.get('status') == 'success':
+                completed += 1
+                prior_success = 1.0
+            else:
+                prior_success = 0.0
+                logger.warning("[QCE] Step %d ERROR — %s", task_id, result.get('error', 'unknown'))
+                if not continue_on_error:
+                    failed_at = task_id
+
+            # 4. Reflect
+            self._after_step_reflect(task, result, context_pack, step_score if gate != 'reject' else None)
+
+            if failed_at is not None:
+                break
+
+        success = failed_at is None
+        summary = {
+            'goal': goal,
+            'goal_id': goal_id,
+            'total_steps': len(task_plan),
+            'completed': completed,
+            'failed_at_step': failed_at,
+            'success': success,
+            'steps': state.snapshot(),
+            'results': results,
+            'qce': True,
+        }
+        summary['proof'] = self.extract_proof(summary)
+
+        try:
+            if success:
+                store.complete(goal_id, {'completed': completed, 'total': len(task_plan)})
+            else:
+                store.fail(goal_id, f'failed_at_step:{failed_at}')
+        except Exception:
+            pass
+
+        logger.info("[QCE] Done: %d/%d steps success=%s", completed, len(task_plan), success)
+        return summary
+
+    # ── QCE step helpers ──────────────────────────────────────────────────────
+
+    async def _execute_step_direct(self, task: dict, state: ExecutionState) -> dict:
+        """Resolve $step_N refs, dispatch tool, return result dict."""
+        resolved = _resolve_refs(task.get('params', {}), state)
+        tool = self._get_tool(task.get('action', ''))
+        if tool is None:
+            return {
+                'status': 'error',
+                'error': f"no_tool:{task.get('action')}",
+                'task_id': task.get('id'),
+            }
+        result = tool.run(resolved)
+        if not isinstance(result, dict) or result.get('status') not in ('success', 'error'):
+            result = {'status': 'error', 'error': f'contract_violation:{result!r}'}
+        result['task_id'] = task.get('id')
+        result['action'] = task.get('action')
+        return result
+
+    async def _execute_step_sandbox(self, task: dict, state: ExecutionState) -> dict:
+        """Run in sandbox if SandboxManager available, else fall back to direct."""
+        try:
+            from core.sandbox_manager import SandboxManager
+            resolved = _resolve_refs(task.get('params', {}), state)
+            sb_result = SandboxManager().execute_safe(task.get('action', ''), resolved)
+            return {
+                'status': 'success' if sb_result.get('ok') else 'error',
+                'output': sb_result.get('result'),
+                'error': sb_result.get('error', ''),
+                'task_id': task.get('id'),
+                'action': task.get('action'),
+                'sandboxed': True,
+            }
+        except Exception:
+            return await self._execute_step_direct(task, state)
+
+    async def _execute_step_hitl(self, task: dict, state: ExecutionState) -> dict:
+        """Request human approval; if approved, run direct; else return error."""
+        try:
+            from core.hitl_gate import get_hitl_gate
+            hitl = get_hitl_gate().require_approval(
+                agent=task.get('agent_id', 'system'),
+                action=task.get('action', ''),
+                payload={**task.get('params', {}), '_qce': True},
+                submitted_by=task.get('agent_id', 'system'),
+                blocking=False,
+            )
+            if hitl.get('approved'):
+                return await self._execute_step_direct(task, state)
+            return {
+                'status': 'error',
+                'error': 'qce_hitl_pending',
+                'task_id': task.get('id'),
+                'action': task.get('action'),
+            }
+        except Exception as exc:
+            logger.warning("[QCE] hitl_gate failed: %s", exc)
+            return await self._execute_step_direct(task, state)
+
+    def _after_step_reflect(self, task: dict, result: dict, context_pack, step_score) -> None:
+        """Call ReflectionEngine.reflect() for this step outcome. Never raises."""
+        try:
+            from core.quantum.reflection import ReflectionEngine
+            ReflectionEngine().reflect(
+                task_id=str(task.get('id', '')),
+                outcome='success' if result.get('status') == 'success' else 'failure',
+                context_pack=context_pack,
+                scope='step',
+                step_action=task.get('action', ''),
+                agent_id=task.get('agent_id', ''),
+            )
+        except Exception:
+            pass
+
+    # ── Output/proof extraction (unchanged) ───────────────────────────────────
+
+    def extract_proof(self, execution_result: dict) -> list[dict]:
+        """Return user-facing proof records from real tool outputs."""
         proof: list[dict] = []
         for step in execution_result.get("results", []):
             if not isinstance(step, dict):
@@ -343,7 +558,6 @@ def _output_to_str(output: Any) -> Any:
     if isinstance(output, str):
         return output
     if isinstance(output, dict):
-        # If it's a web search result, stringify the snippets for downstream LLM
         if "results" in output:
             snippets = [r.get("snippet", "") for r in output["results"] if isinstance(r, dict)]
             return "\n".join(snippets)
@@ -359,3 +573,11 @@ def _output_to_str(output: Any) -> Any:
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _sandbox_available() -> bool:
+    try:
+        from core.sandbox_manager import SandboxManager  # noqa: F401
+        return True
+    except Exception:
+        return False

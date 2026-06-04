@@ -234,6 +234,30 @@ class HITLGate:
             ),
         }
 
+    def require_approval_qce(
+        self,
+        agent: str,
+        action: str,
+        payload: dict,
+        confidence: float = 0.5,
+        submitted_by: str = 'system',
+    ) -> dict:
+        """Confidence-graduated HITL gating.
+
+        confidence > 0.85 → auto-approve (no HITL needed)
+        confidence > 0.60 → sandbox flag in response (caller handles sandbox)
+        confidence > 0.40 → call existing require_approval()
+        else              → reject with low-confidence message
+        """
+        if confidence > 0.85:
+            return {'approved': True, 'auto': True, 'gate': 'direct'}
+        if confidence > 0.60:
+            return {'approved': True, 'auto': True, 'gate': 'sandbox'}
+        if confidence > 0.40:
+            return self.require_approval(agent=agent, action=action, payload=payload,
+                                         submitted_by=submitted_by, blocking=False)
+        return {'approved': False, 'gate': 'reject', 'message': 'qce_rejected_low_confidence'}
+
     # ── Dashboard-facing ──────────────────────────────────────────────────────
 
     def pending_requests(self) -> list[dict[str, Any]]:

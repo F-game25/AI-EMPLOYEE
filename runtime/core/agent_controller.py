@@ -113,16 +113,34 @@ class AgentController:
         )
         return self._planner.plan(goal=goal, run_id=run_id, best_strategies=best)
 
+    async def _qce_route_agent(self, goal: str, preferred_agent_id: str | None = None) -> str | None:
+        try:
+            from core.quantum.engine import get_qce
+            qce = get_qce()
+            pack = await qce.process(goal=goal, task_type='execution')
+            agents = qce._router.route_agents(pack, preferred_agent_id=preferred_agent_id)
+            return agents[0] if agents else None
+        except Exception:
+            return None
+
     def run_goal(
         self,
         goal: str,
         *,
         persist_task: Callable[[str, TaskNode], None] | None = None,
         max_retry: int = 2,
+        preferred_agent_id: str | None = None,
     ) -> dict:
         run_id = str(uuid.uuid4())[:8]
         start = time.perf_counter()
         self._learn_from_conversation(goal)
+
+        # QCE agent routing — attempt amplitude-based selection, fall back to planner
+        _qce_agent: str | None = None
+        try:
+            _qce_agent = asyncio.run(self._qce_route_agent(goal, preferred_agent_id))
+        except Exception:
+            _qce_agent = preferred_agent_id
 
         if self._research.is_learn_command(goal):
             return self._run_learn_topic_goal(goal=goal, run_id=run_id, start=start, persist_task=persist_task)

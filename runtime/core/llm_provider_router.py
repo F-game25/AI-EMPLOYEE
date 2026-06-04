@@ -124,6 +124,24 @@ class LLMProviderRouter:
 
         raise Exception("No LLM provider available for streaming")
 
+def route_model_qce(goal: str = '', complexity: str = 'medium',
+                    provider_health: dict | None = None) -> str:
+    """Use AmplitudeRouter.route_model() when QCE is available; fall back to env default."""
+    try:
+        from core.quantum.router import AmplitudeRouter
+        router = AmplitudeRouter()
+        return router.route_model(complexity=complexity, provider_health=provider_health)
+    except Exception:
+        pass
+    # Fallback: env-configured primary provider model
+    provider = os.getenv('LLM_PROVIDER', 'anthropic')
+    if provider == 'ollama':
+        return os.getenv('OLLAMA_MODEL', 'llama2')
+    if provider == 'openrouter':
+        return os.getenv('OPENROUTER_MODEL', 'auto')
+    return os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
+
+
 _router = None
 
 def get_router() -> LLMProviderRouter:

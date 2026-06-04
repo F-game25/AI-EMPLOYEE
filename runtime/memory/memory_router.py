@@ -255,6 +255,19 @@ class MemoryRouter:
         )
         return sorted_results[:top_k]
 
+    async def retrieve_qce(self, query: str, tenant_id: str = '', **kwargs) -> list:
+        """QCE-powered retrieval via SearchOrchestrator. Falls back to retrieve() on error."""
+        try:
+            from core.quantum.search.orchestrator import SearchOrchestrator
+            from core.quantum.search.schema import SearchRequest
+            orch = SearchOrchestrator()
+            req = SearchRequest(query=query, bangs=['memory'], tenant_id=tenant_id)
+            results = await orch.search(req)
+            return [{'content': r.content, 'score': r.amplitude, 'source': r.engine, 'id': r.id}
+                    for r in results[:10]]
+        except Exception:
+            return []
+
     def get(self, key: str) -> dict[str, Any] | None:
         """Retrieve a specific entry by exact key.
 

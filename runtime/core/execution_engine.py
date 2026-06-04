@@ -7,6 +7,10 @@ Risk levels:
   3 — EXTERNAL:     requires approval + audit log
   4 — FINANCIAL:    requires explicit approval + dual-confirm
   5 — BLOCKED:      never allowed, raises ExecutionBlocked
+
+QCE-aware path (optional):
+  Pass context_pack=<ContextPack> to execute() to use quantum score_step()
+  gating instead of the static RISK_MAP integer levels.
 """
 from __future__ import annotations
 
@@ -34,6 +38,28 @@ RISK_MAP: dict[str, int] = {
 
 _RISK_LABELS = {0: "READ_ONLY", 1: "LOCAL_WRITE", 2: "LOCAL_EXEC", 3: "EXTERNAL", 4: "FINANCIAL", 5: "BLOCKED"}
 
+# Module-level ReflectionEngine (lazy-initialised on first use)
+_reflection = None
+
+
+def _get_reflection():
+    global _reflection
+    if _reflection is None:
+        try:
+            from core.quantum.reflection import ReflectionEngine
+            _reflection = ReflectionEngine()
+        except Exception:
+            pass
+    return _reflection
+
+
+def _sandbox_available() -> bool:
+    try:
+        from core.sandbox_manager import SandboxManager  # noqa: F401
+        return True
+    except Exception:
+        return False
+
 
 class ExecutionBlocked(Exception):
     """Raised when an action_type is at risk level 5 (permanently blocked)."""
@@ -47,6 +73,10 @@ class ExecutionEngine:
         engine = ExecutionEngine(tenant_id="default")
         result = await engine.execute("read_file", {"path": "/tmp/x"}, agent_id="coder")
         # → {ok, result, risk_level, approved, audit_id}
+
+        # QCE-aware path — pass a ContextPack to use quantum step gating:
+        result = await engine.execute("read_file", {...}, agent_id="coder",
+                                      context_pack=my_context_pack)
     """
 
     def __init__(self, tenant_id: str = "default") -> None:
@@ -57,10 +87,18 @@ class ExecutionEngine:
         action_type: str,
         payload: dict[str, Any],
         agent_id: str = "system",
+        context_pack=None,          # ContextPack | None — QCE-aware path
     ) -> dict[str, Any]:
-        risk_level = RISK_MAP.get(action_type, 1)  # unknown actions default to LOCAL_WRITE
         audit_id = f"exec-{uuid.uuid4().hex[:10]}"
+        risk_level = RISK_MAP.get(action_type, 1)
 
+        # ── QCE-aware gating ──────────────────────────────────────────────────
+        if context_pack is not None:
+            result = await self._execute_qce(action_type, payload, agent_id, audit_id, context_pack)
+            self._reflect(audit_id, action_type, agent_id, result)
+            return result
+
+        # ── Legacy static RISK_MAP gating (backward compat) ───────────────────
         if risk_level == 5:
             self._audit(audit_id, action_type, risk_level, agent_id, payload, approved=False, outcome="blocked")
             raise ExecutionBlocked(
@@ -70,13 +108,11 @@ class ExecutionEngine:
         approved = False
 
         if risk_level <= 1:
-            # READ_ONLY and LOCAL_WRITE: execute immediately, just log
             approved = True
             self._audit(audit_id, action_type, risk_level, agent_id, payload, approved=True, outcome="auto_approved")
         else:
-            # Levels 2-4: require HITL approval
             from core.hitl_gate import get_hitl_gate
-            blocking = risk_level >= 4  # financial actions block until decided
+            blocking = risk_level >= 4
             hitl_result = get_hitl_gate().require_approval(
                 agent=agent_id,
                 action=action_type,
@@ -92,7 +128,7 @@ class ExecutionEngine:
                 hitl_id=hitl_result.get("request_id"),
             )
             if not approved:
-                return {
+                result = {
                     "ok": False,
                     "result": None,
                     "risk_level": risk_level,
@@ -100,14 +136,104 @@ class ExecutionEngine:
                     "audit_id": audit_id,
                     "message": hitl_result.get("message", f"Awaiting human approval for '{action_type}'"),
                 }
+                self._reflect(audit_id, action_type, agent_id, result)
+                return result
 
-        result = self._dispatch(action_type, payload)
-        return {
-            "ok": result.get("ok", True),
-            "result": result.get("result"),
+        raw = self._dispatch(action_type, payload)
+        result = {
+            "ok": raw.get("ok", True),
+            "result": raw.get("result"),
             "risk_level": risk_level,
             "approved": approved,
             "audit_id": audit_id,
+        }
+        self._reflect(audit_id, action_type, agent_id, result)
+        return result
+
+    # ── QCE execution path ────────────────────────────────────────────────────
+
+    async def _execute_qce(
+        self,
+        action_type: str,
+        payload: dict[str, Any],
+        agent_id: str,
+        audit_id: str,
+        context_pack,
+    ) -> dict[str, Any]:
+        from core.quantum.step_score import score_step
+
+        step = {'action': action_type, 'id': audit_id, 'agent_id': agent_id}
+        try:
+            step_score = score_step(
+                step, context_pack,
+                prior_success=0.5,
+                sandbox_available=_sandbox_available(),
+            )
+            gate = step_score.gate
+        except Exception as exc:
+            logger.warning("score_step failed, falling back to direct: %s", exc)
+            gate = 'direct'
+
+        risk_level = RISK_MAP.get(action_type, 1)
+
+        if gate == 'reject':
+            self._audit(audit_id, action_type, risk_level, agent_id, payload, approved=False, outcome="qce_rejected")
+            return {
+                "ok": False, "result": None, "risk_level": risk_level,
+                "approved": False, "audit_id": audit_id, "gate": gate,
+                "message": f"QCE rejected action '{action_type}' (confidence too low)",
+            }
+
+        if gate == 'direct':
+            self._audit(audit_id, action_type, risk_level, agent_id, payload, approved=True, outcome="qce_direct")
+            raw = self._dispatch_qce(action_type, payload, context_pack)
+            return {
+                "ok": raw.get("ok", True), "result": raw.get("result"),
+                "risk_level": risk_level, "approved": True, "audit_id": audit_id, "gate": gate,
+            }
+
+        if gate == 'sandbox':
+            raw = self._try_sandbox(action_type, payload)
+            if raw.get("ok"):
+                self._audit(audit_id, action_type, risk_level, agent_id, payload, approved=True, outcome="qce_sandbox_ok")
+                return {
+                    "ok": True, "result": raw.get("result"), "risk_level": risk_level,
+                    "approved": True, "audit_id": audit_id, "gate": gate, "sandboxed": True,
+                }
+            gate = 'hitl'  # sandbox failed — escalate
+
+        # gate == 'hitl'
+        try:
+            from core.hitl_gate import get_hitl_gate
+            hitl_result = get_hitl_gate().require_approval(
+                agent=agent_id,
+                action=action_type,
+                payload={**payload, "_gate": "hitl", "_qce": True},
+                submitted_by=agent_id,
+                blocking=risk_level >= 4,
+            )
+            approved = hitl_result.get("approved", False)
+        except Exception as exc:
+            logger.warning("hitl_gate failed in QCE path: %s", exc)
+            approved, hitl_result = False, {"message": str(exc)}
+
+        self._audit(
+            audit_id, action_type, risk_level, agent_id, payload,
+            approved=approved,
+            outcome="qce_hitl_approved" if approved else "qce_hitl_pending",
+            hitl_id=hitl_result.get("request_id"),
+        )
+        if not approved:
+            return {
+                "ok": False, "result": None, "risk_level": risk_level,
+                "approved": False, "audit_id": audit_id, "gate": gate,
+                "message": hitl_result.get("message", f"Awaiting human approval for '{action_type}'"),
+            }
+
+        raw = self._dispatch_qce(action_type, payload, context_pack)
+        return {
+            "ok": raw.get("ok", True), "result": raw.get("result"),
+            "risk_level": risk_level, "approved": True, "audit_id": audit_id, "gate": gate,
         }
 
     # ── Internal helpers ──────────────────────────────────────────────────────
@@ -122,6 +248,57 @@ class ExecutionEngine:
         except Exception as exc:
             logger.warning("dispatch failed for %s: %s", action_type, exc)
             return {"ok": False, "result": None, "error": str(exc)}
+
+    def _dispatch_qce(self, action_type: str, payload: dict[str, Any], context_pack=None) -> dict[str, Any]:
+        """Dispatch using QCE tool candidates by amplitude, falling back to _HANDLERS."""
+        if context_pack is not None:
+            candidates = getattr(context_pack, 'candidates', [])
+            tool_candidates = [
+                c for c in candidates
+                if getattr(c, 'source_type', '') == 'tool'
+                and action_type in (
+                    (c.metadata.get('tool_id', '') if hasattr(c, 'metadata') else ''),
+                    getattr(c, 'title', ''),
+                )
+            ]
+            tool_candidates.sort(key=lambda c: getattr(c, 'amplitude', 0.0), reverse=True)
+            for cand in tool_candidates[:3]:
+                tool_id = (cand.metadata.get('tool_id', action_type)
+                           if hasattr(cand, 'metadata') else action_type)
+                result = self._try_handler(tool_id, payload)
+                if result.get("ok"):
+                    return result
+        return self._dispatch(action_type, payload)
+
+    def _try_handler(self, action_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self._dispatch(action_type, payload)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def _try_sandbox(self, action_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            from core.sandbox_manager import SandboxManager
+            sb = SandboxManager().execute_safe(action_type, payload)
+            return {"ok": bool(sb.get("ok")), "result": sb.get("result")}
+        except Exception:
+            return self._dispatch(action_type, payload)
+
+    def _reflect(self, audit_id: str, action_type: str, agent_id: str, result: dict) -> None:
+        """Call ReflectionEngine after every execute(). Never raises."""
+        try:
+            engine = _get_reflection()
+            if engine is None:
+                return
+            engine.reflect(
+                task_id=audit_id,
+                outcome='success' if result.get('ok') else 'failure',
+                scope='step',
+                step_action=action_type,
+                agent_id=agent_id,
+            )
+        except Exception:
+            pass
 
     def _audit(
         self,

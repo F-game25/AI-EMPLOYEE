@@ -470,9 +470,6 @@ if (HAS_FRONTEND_DIST) {
 const WORKSPACE_DIR = path.join(os.homedir(), '.ai-employee', 'workspace');
 app.use('/workspace', express.static(WORKSPACE_DIR, { index: false }));
 
-// Serve uploaded/added business photos for demo sites (public — used in demo HTML).
-app.use('/api/demos/_assets', express.static(path.join(AI_HOME, 'state', 'artifacts', 'demos', '_assets'), { index: false }));
-
 // Serve AI-generated artifacts (summaries, code files) at /api/artifacts/:filename
 const ARTIFACTS_DIR = path.join(__dirname, '..', 'state', 'artifacts');
 // Preview HTML artifacts inline (no auth cookie needed — token in query param for iframe src)
@@ -501,9 +498,12 @@ const createTasksRouter = require('./routes/tasks');
 app.use('/api/tasks', requireAuth, createTasksRouter(taskGateway, broadcaster));
 app.use('/api/schedules', requireAuth, createTasksRouter.createSchedulesRouter(taskGateway, broadcaster));
 
-// Web Search API — proxies to Python /search with CloakBrowser support
+// Web Search API — QCE unified search + legacy CloakBrowser passthrough
 const createSearchRouter = require('./routes/search');
 app.use('/api/search', createSearchRouter(requireAuth));
+
+// Quantum-Inspired Cognitive Engine — amplitude routing, feedback, calibration stats
+app.use('/api/quantum', requireAuth, require('./routes/quantum'));
 
 // Research v2 API — 2-phase discover → execute on selected sources
 const createResearchRouter = require('./routes/research');
@@ -639,7 +639,8 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
     addActivity, runPipeline, readJsonSafe, readJsonlSafe, sampleSystemStatus,
     normalizeDashboardGraph, proxyNeuralBrain, checkNeuralGraphReady,
     requestPythonJSON,
-    // These are declared after this block — resolved lazily via the Proxy below
+    apiGatewayProtector, anomalyResponder, securitySyncPolicy, secretStore,
+    runtimeState, _readiness, _systemReady,
     // TTL caches
     _cache_grades,
     // Graph delta state (wraps let scalars)
@@ -752,21 +753,38 @@ app.use('/api/cognitive',   requireAuth, cognitiveRoutes);
         case 'recordAuditEvent':            return recordAuditEvent;
         case '_auditLog':                   return _auditLog;
         case 'blacklightTools':             return blacklightTools;
-        case 'apiGatewayProtector':         return apiGatewayProtector;
-        case 'anomalyResponder':            return anomalyResponder;
-        case 'securitySyncPolicy':          return securitySyncPolicy;
-        case 'secretStore':                 return secretStore;
-        case 'runtimeState':                return runtimeState;
-        case '_readiness':                  return _readiness;
-        case '_systemReady':                return _systemReady;
-        case '_cache_grades':               return _cache_grades;
         default: return Reflect.get(target, prop);
       }
     },
   });
-  global._lazyRouteDeps = _lazyRouteDeps;
 
-  // Route mounts are deferred — see "Deferred route mount" block below (after runtimeState init)
+  // Mount extracted route groups (Phase 1)
+  const createHealthRouter         = require('./routes/health');
+  const createAuthIdentityRouter   = require('./routes/auth-identity');
+  const createAgentsBrainRouter    = require('./routes/agents-brain');
+  const createSystemOpsRouter      = require('./routes/system-ops');
+  const createArtifactsTasksRouter = require('./routes/artifacts-tasks');
+
+  app.use('/', createHealthRouter(_lazyRouteDeps));
+  app.use('/', createAuthIdentityRouter(_lazyRouteDeps));
+  app.use('/', createAgentsBrainRouter(_lazyRouteDeps));
+  app.use('/', createSystemOpsRouter(_lazyRouteDeps));
+  app.use('/', createArtifactsTasksRouter(_lazyRouteDeps));
+
+  // Mount extracted route groups (Phase 1c — remaining 129 inline routes)
+  const createIntelligenceRouter   = require('./routes/intelligence');
+  const createSecurityOpsRouter    = require('./routes/security-ops');
+  const createBusinessOpsRouter    = require('./routes/business-ops');
+  const createForgeOpsRouter       = require('./routes/forge-ops');
+  const createTasksChatRouter      = require('./routes/tasks-chat');
+  const createMediaRouter          = require('./routes/media');
+
+  app.use('/', createIntelligenceRouter(_lazyRouteDeps));
+  app.use('/', createSecurityOpsRouter(_lazyRouteDeps));
+  app.use('/', createBusinessOpsRouter(_lazyRouteDeps));
+  app.use('/', createForgeOpsRouter(_lazyRouteDeps));
+  app.use('/', createTasksChatRouter(_lazyRouteDeps));
+  app.use('/', createMediaRouter(_lazyRouteDeps));
 }
 
 // Incremented by broadcaster heartbeat loop; sampled into system status.
@@ -991,88 +1009,6 @@ if (_savedBrain) {
 }
 markBootEvent('system_init');
 
-// Pre-declare late-initialized objects so route factories can access them via Proxy without TDZ.
-// These are mutated in-place throughout startup — references stay live.
-const _readiness    = { phase: 'BOOTING', pythonReady: false, subsystemsReady: false };
-const _systemReady  = { python_ok: false, llm_ok: false, node_ok: true };
-const _srvStartMs   = Date.now(); // pre-declared to avoid TDZ in deferred route factories
-const auditService          = require('./services/audit_service'); // pre-declared
-const _auditLog             = auditService.log; // pre-declared — same live array ref
-const MODEL_FABRIC_OFFLINE  = { status: 'offline', error: 'Model Fabric offline — Python backend not running.' }; // pre-declared
-const reliabilityState      = { forgeFrozen: false, freezeReason: '', stabilityScore: 1.0, checkpoints: [], throttledAgents: [], lastEvaluated: null }; // pre-declared
-const MAX_FORGE_QUEUE       = 200; // pre-declared
-const _forgeDb              = (() => { // pre-declared — needs statePath + getDatabase (both available here)
-  const dbPath = statePath('forge_queue.db');
-  const db = new (getDatabase())(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS forge_queue (
-      id TEXT PRIMARY KEY,
-      priority INTEGER DEFAULT 5,
-      payload TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      created_at INTEGER DEFAULT (strftime('%s','now'))
-    );
-    CREATE TABLE IF NOT EXISTS workflow_runs (
-      run_id TEXT PRIMARY KEY,
-      payload TEXT NOT NULL,
-      updated_at INTEGER DEFAULT (strftime('%s','now'))
-    );
-  `);
-  return db;
-})();
-const _forgeQueue           = _forgeDb.prepare( // pre-declared — load persisted queue
-  `SELECT payload FROM forge_queue ORDER BY priority DESC, created_at DESC LIMIT ?`
-).all(MAX_FORGE_QUEUE).map((r) => JSON.parse(r.payload));
-const conversations         = require('./conversations'); // pre-declared
-const recordAuditEvent      = auditService.recordAuditEvent; // pre-declared
-const _BL_POLICY_FILE       = path.join(STATE_DIR, 'blacklight_policy.json'); // pre-declared
-const _BL_STATE_FILE        = path.join(STATE_DIR, 'blacklight_state.json');  // pre-declared
-// _blacklightState: load persisted state if available, else default (function is hoisted)
-const _blacklightState          = (() => { try { return JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'blacklight_state.json'), 'utf8')); } catch { return { active: false, alerts: [], last_scan: null }; } })(); // pre-declared
-const _RECON_CASES_FILE         = path.join(STATE_DIR, 'recon_cases.json'); // pre-declared
-const _RECON_FINDINGS_FILE      = path.join(STATE_DIR, 'recon_findings.json'); // pre-declared
-const _RECON_AUDIT_FILE         = path.join(STATE_DIR, 'recon_audit.json'); // pre-declared
-const RECON_ALLOWED_CATEGORIES  = new Set(['osint', 'defensive_review', 'phishing', 'special']); // pre-declared
-const RECON_SAFE_OFFENSIVE_CATEGORY_IDS = new Set(['cors-misconfiguration-scanner','jwt-analyzer','clickjacking-tester','insecure-cookie-checker','csrf-token-analyzer','supabase-rls-auditor']); // pre-declared
-const RECON_BANNED_IDS          = new Set(['sql-injection-tester','xss-scanner-reflected','directory-file-bruteforcer','open-redirect-scanner','lfi-path-traversal-tester','subdomain-takeover-check','reverse-shell-generator','cms-vulnerability-scanner','payload-encoder-decoder','crlf-injection-tester','ssrf-tester','xee-tester','command-injection-tester','host-header-injection','prototype-pollution-scanner','http-flood','slowloris','slow-post-rudy','tcp-connection-flood','udp-flood','icmp-ping-flood','http-slow-read','goldeneye-keep-alive-flood','dns-flood','websocket-flood','credential-harvester-gen','url-obfuscator','idn-homograph-attack-gen','stealth-mode-config','botnet-coordinated-ddos','botnet-zombies-world-map']); // pre-declared
-const RECON_BANNED_CATEGORY     = new Set(['exploitation', 'stress']); // pre-declared
-const walletSnapshot            = () => economyService.walletSnapshot(); // pre-declared
-const buildEconomySnapshot      = () => economyService.buildEconomySnapshot(); // pre-declared
-const _sseTaskListeners         = new Map(); // pre-declared — SSE listener registry: taskId → Set<res>
-const taskStore                 = new Map(); // pre-declared — taskId → {task, steps, connections}
-const taskConnections           = new Map(); // pre-declared — taskId → Set of WebSocket connections
-// turnRunner: all args are hoisted function declarations or early requires — safe to init here
-const turnRunner                = createTurnRunner({ broadcaster, orchestrator, createWorkflowRun, appendDecision, attachWorkflowNode, addActivity, collectHybridMemoryContext, compactMemoryTraceForModel, runPythonExecution, isPythonBackendUp, requestPythonJSON, requestPythonChatPayload, requestOllamaChat, applyStructuredFormat, buildLocalFallbackReply }); // pre-declared
-const promptTraceStore          = []; // pre-declared
-const MAX_TRACES                = 500; // pre-declared
-let   promptInspectorConfig     = { enabled: true, capture_context: true, capture_output: true, min_flag_level: 'info' }; // pre-declared (let — gets overwritten by admin routes)
-const ADMIN_SAFETY_ACTIONS      = { // pre-declared
-  'reset-state':        { label: 'RESET ALL STATE',      endpoint: 'POST /api/admin/reset-state',             confirmation: 'RESET ALL STATE',      external_effect: 'Would reset runtime state files. This action is staged only from Settings safety center.' },
-  'wipe-memory':        { label: 'WIPE MEM0 MEMORY',     endpoint: 'DELETE /api/neural-brain/memory/all',     confirmation: 'WIPE MEM0 MEMORY',     external_effect: 'Would permanently remove memory records. This action is staged only from Settings safety center.' },
-  'factory-reset':      { label: 'FACTORY RESET',        endpoint: 'POST /api/admin/factory-reset',           confirmation: 'FACTORY RESET',        external_effect: 'Would reset the full system. This action is staged only from Settings safety center.' },
-  'evolution-rollback': { label: 'EVOLUTION ROLLBACK',   endpoint: 'POST /api/evolution/rollback',            confirmation: 'EVOLUTION ROLLBACK',   external_effect: 'Would roll back applied evolution patches. This action is staged only from Settings safety center.' },
-  'invalidate-sessions':{ label: 'INVALIDATE SESSIONS',  endpoint: 'POST /api/admin/sessions/invalidate-all', confirmation: 'INVALIDATE SESSIONS',  external_effect: 'Would log out active users. This action is staged only from Settings safety center.' },
-  'flush-telemetry':    { label: 'FLUSH TELEMETRY',      endpoint: 'POST /api/neural-brain/telemetry/flush',  confirmation: 'FLUSH TELEMETRY',      external_effect: 'Would clear queued telemetry data. This action is staged only from Settings safety center.' },
-};
-
-// ── Deferred route mount — all deps (runtimeState, securitySyncPolicy, etc.) now declared ──
-{
-  const _deps = global._lazyRouteDeps;
-  app.use('/', require('./routes/health')(_deps));
-  app.use('/', require('./routes/auth-identity')(_deps));
-  app.use('/', require('./routes/agents-brain')(_deps));
-  app.use('/', require('./routes/system-ops')(_deps));
-  app.use('/', require('./routes/artifacts-tasks')(_deps));
-  app.use('/', require('./routes/intelligence')(_deps));
-  app.use('/', require('./routes/security-ops')(_deps));
-  app.use('/', require('./routes/business-ops')(_deps));
-  app.use('/api', require('./routes/forge-ops')(_deps));
-  app.use('/api', require('./routes/ecom-ops')(_deps));
-  app.use('/', require('./routes/tasks-chat')(_deps));
-  app.use('/', require('./routes/media')(_deps));
-}
-
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
 }
@@ -1247,7 +1183,8 @@ function readJsonlSafe(file, limit = 500) {
   }
 }
 
-// walletSnapshot + buildEconomySnapshot pre-declared above near the deferred route mount block.
+const walletSnapshot = () => economyService.walletSnapshot();
+const buildEconomySnapshot = () => economyService.buildEconomySnapshot();
 
 function cpuUsagePercent() {
   const cpus = os.cpus().length || 1;
@@ -1597,7 +1534,7 @@ async function proxyModelFabric(path, { method = 'GET', body, timeout = 120000 }
   return { ok: r?.ok, status: r?.status, data: await r.json() };
 }
 
-// MODEL_FABRIC_OFFLINE pre-declared above near the deferred route mount block.
+const MODEL_FABRIC_OFFLINE = { status: 'offline', error: 'Model Fabric offline — Python backend not running.' };
 
 // GET endpoints (fast; never trigger a model load)
 ['models', 'health', 'status', 'lifecycle/status', 'quantization/status',
@@ -1899,7 +1836,7 @@ for (const ep of ['tools', 'skills']) {
 
 
 // ── Conversations JSONL endpoint ──────────────────────────────────────────────
-// conversations pre-declared above near the deferred route mount block.
+const conversations = require('./conversations');
 
 
 // ── Autonomy daemon endpoints ─────────────────────────────────────────────────
@@ -2316,7 +2253,23 @@ function requestOllamaChat(message, memoryTrace) {
   ]));
 }
 
-// turnRunner pre-declared above near the deferred route mount block.
+const turnRunner = createTurnRunner({
+  broadcaster,
+  orchestrator,
+  createWorkflowRun,
+  appendDecision,
+  attachWorkflowNode,
+  addActivity,
+  collectHybridMemoryContext,
+  compactMemoryTraceForModel,
+  runPythonExecution,
+  isPythonBackendUp,
+  requestPythonJSON,
+  requestPythonChatPayload,
+  requestOllamaChat,
+  applyStructuredFormat,
+  buildLocalFallbackReply,
+});
 
 
 // ── Business-building money workflows (proxy to Python) ──────────────────────
@@ -2336,12 +2289,61 @@ function requestOllamaChat(message, memoryTrace) {
 
 // ── Enterprise: Audit, Reliability, Forge-queue endpoints ────────────────────
 
-// Audit service — auditService, recordAuditEvent, _auditLog pre-declared above near the deferred route mount block.
+// Audit service — owns SQLite persistence + in-memory mirror.
+const auditService = require('./services/audit_service');
+const recordAuditEvent = auditService.recordAuditEvent;
+// Live reference to the in-memory array (auditService mutates it, never reassigns).
+const _auditLog = auditService.log;
 
-// ADMIN_SAFETY_ACTIONS pre-declared above near the deferred route mount block.
+const ADMIN_SAFETY_ACTIONS = {
+  'reset-state': {
+    label: 'RESET ALL STATE',
+    endpoint: 'POST /api/admin/reset-state',
+    confirmation: 'RESET ALL STATE',
+    external_effect: 'Would reset runtime state files. This action is staged only from Settings safety center.',
+  },
+  'wipe-memory': {
+    label: 'WIPE MEM0 MEMORY',
+    endpoint: 'DELETE /api/neural-brain/memory/all',
+    confirmation: 'WIPE MEM0 MEMORY',
+    external_effect: 'Would permanently remove memory records. This action is staged only from Settings safety center.',
+  },
+  'factory-reset': {
+    label: 'FACTORY RESET',
+    endpoint: 'POST /api/admin/factory-reset',
+    confirmation: 'FACTORY RESET',
+    external_effect: 'Would reset the full system. This action is staged only from Settings safety center.',
+  },
+  'evolution-rollback': {
+    label: 'EVOLUTION ROLLBACK',
+    endpoint: 'POST /api/evolution/rollback',
+    confirmation: 'EVOLUTION ROLLBACK',
+    external_effect: 'Would roll back applied evolution patches. This action is staged only from Settings safety center.',
+  },
+  'invalidate-sessions': {
+    label: 'INVALIDATE SESSIONS',
+    endpoint: 'POST /api/admin/sessions/invalidate-all',
+    confirmation: 'INVALIDATE SESSIONS',
+    external_effect: 'Would log out active users. This action is staged only from Settings safety center.',
+  },
+  'flush-telemetry': {
+    label: 'FLUSH TELEMETRY',
+    endpoint: 'POST /api/neural-brain/telemetry/flush',
+    confirmation: 'FLUSH TELEMETRY',
+    external_effect: 'Would clear queued telemetry data. This action is staged only from Settings safety center.',
+  },
+};
 
 
-// Reliability state — pre-declared above near the deferred route mount block.
+// Reliability state
+const reliabilityState = {
+  forgeFrozen: false,
+  freezeReason: '',
+  stabilityScore: 1.0,
+  checkpoints: [],
+  throttledAgents: [],
+  lastEvaluated: null,
+};
 
 function updateStabilityScore() {
   const snap = buildObservabilitySnapshot();
@@ -2359,7 +2361,33 @@ function updateStabilityScore() {
 
 setInterval(updateStabilityScore, 10000);
 
-// Forge approval queue — MAX_FORGE_QUEUE, _forgeDb, _forgeQueue pre-declared above near the deferred route mount block.
+// Forge approval queue — persisted to SQLite so restarts don't lose pending jobs
+const MAX_FORGE_QUEUE = 200;
+const _forgeDb = (() => {
+  const dbPath = statePath('forge_queue.db');
+  const db = new (getDatabase())(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS forge_queue (
+      id TEXT PRIMARY KEY,
+      priority INTEGER DEFAULT 5,
+      payload TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    );
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      run_id TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      updated_at INTEGER DEFAULT (strftime('%s','now'))
+    );
+  `);
+  return db;
+})();
+
+// Load persisted queue on startup (most recent first, capped at MAX_FORGE_QUEUE)
+const _forgeQueue = _forgeDb.prepare(
+  `SELECT payload FROM forge_queue ORDER BY priority DESC, created_at DESC LIMIT ?`
+).all(MAX_FORGE_QUEUE).map((r) => JSON.parse(r.payload));
 
 // Restore workflow runs from SQLite into runtimeState (most recent 50)
 {
@@ -2659,7 +2687,9 @@ function runForgePython(payload, timeoutMs = 90000) {
 
 // ── Doctor (diagnostics) ──────────────────────────────────────────────────────
 
-// Policy / state persistence helpers — _BL_POLICY_FILE, _BL_STATE_FILE, _blacklightState pre-declared above near the deferred route mount block.
+// Policy / state persistence helpers (Change 1)
+const _BL_POLICY_FILE = path.join(STATE_DIR, 'blacklight_policy.json');
+const _BL_STATE_FILE = path.join(STATE_DIR, 'blacklight_state.json');
 
 function _loadBlPolicy() {
   try { return JSON.parse(fs.readFileSync(_BL_POLICY_FILE, 'utf8')); } catch { return { network_osint_enabled: false }; }
@@ -2677,11 +2707,57 @@ function _saveBlState() {
   } catch {}
 }
 
-// _blSaved / _blacklightState pre-declared above near the deferred route mount block.
+const _blSaved = _loadBlState();
+const _blacklightState = _blSaved || { active: false, alerts: [], last_scan: null };
 
 // ── Recon (safe OSINT + defensive local analysis) ────────────────────────────
-// _RECON_CASES_FILE, _RECON_FINDINGS_FILE, _RECON_AUDIT_FILE, RECON_ALLOWED_CATEGORIES,
-// RECON_SAFE_OFFENSIVE_CATEGORY_IDS, RECON_BANNED_IDS, RECON_BANNED_CATEGORY — pre-declared above.
+const _RECON_CASES_FILE = path.join(STATE_DIR, 'recon_cases.json');
+const _RECON_FINDINGS_FILE = path.join(STATE_DIR, 'recon_findings.json');
+const _RECON_AUDIT_FILE = path.join(STATE_DIR, 'recon_audit.json');
+
+const RECON_ALLOWED_CATEGORIES = new Set(['osint', 'defensive_review', 'phishing', 'special']);
+const RECON_SAFE_OFFENSIVE_CATEGORY_IDS = new Set([
+  'cors-misconfiguration-scanner',
+  'jwt-analyzer',
+  'clickjacking-tester',
+  'insecure-cookie-checker',
+  'csrf-token-analyzer',
+  'supabase-rls-auditor',
+]);
+const RECON_BANNED_IDS = new Set([
+  'sql-injection-tester',
+  'xss-scanner-reflected',
+  'directory-file-bruteforcer',
+  'open-redirect-scanner',
+  'lfi-path-traversal-tester',
+  'subdomain-takeover-check',
+  'reverse-shell-generator',
+  'cms-vulnerability-scanner',
+  'payload-encoder-decoder',
+  'crlf-injection-tester',
+  'ssrf-tester',
+  'xee-tester',
+  'command-injection-tester',
+  'host-header-injection',
+  'prototype-pollution-scanner',
+  'http-flood',
+  'slowloris',
+  'slow-post-rudy',
+  'tcp-connection-flood',
+  'udp-flood',
+  'icmp-ping-flood',
+  'http-slow-read',
+  'goldeneye-keep-alive-flood',
+  'dns-flood',
+  'websocket-flood',
+  'credential-harvester-gen',
+  'url-obfuscator',
+  'idn-homograph-attack-gen',
+  'stealth-mode-config',
+  'botnet-coordinated-ddos',
+  'botnet-zombies-world-map',
+]);
+const RECON_BANNED_CATEGORY = new Set(['exploitation', 'stress']);
 
 function _readReconJson(file, fallback = []) {
   try {
@@ -2836,12 +2912,14 @@ let systemHalted = false;
 
 
 // ── System health ─────────────────────────────────────────────────────────────
-// _srvStartMs pre-declared above near the deferred route mount block.
+const _srvStartMs = Date.now()
 
 
 // ── Prompt Inspector endpoints ────────────────────────────────────────────────
 
-// promptTraceStore, MAX_TRACES, promptInspectorConfig pre-declared above near the deferred route mount block.
+const promptTraceStore = [];
+const MAX_TRACES = 500;
+let promptInspectorConfig = { enabled: true, capture_context: true, capture_output: true, min_flag_level: 'info' };
 
 function addPromptTrace(raw) {
   const trace = {
@@ -2955,7 +3033,9 @@ let _updateRunning = false;
 
 // ── Task Tracking System ──────────────────────────────────────────────────────
 // Stores live task progress; in-memory with TTL cleanup (use Redis for production)
-// taskStore + taskConnections pre-declared above near the deferred route mount block.
+
+const taskStore = new Map(); // taskId → {task, steps, connections}
+const taskConnections = new Map(); // taskId → Set of WebSocket connections
 
 function initTask(taskId, title = 'Task') {
   const task = {
@@ -3385,13 +3465,12 @@ try {
 }
 
 // ── Readiness state machine ──────────────────────────────────────────────────
-// _readiness is pre-declared near the deferred route mount block so routes can
-// access it via _lazyRouteDeps Proxy without hitting the temporal dead zone.
+const _readiness = { phase: 'BOOTING', pythonReady: false, subsystemsReady: false };
 
 // Cached system:ready snapshot — sent to new WS clients on connect so the
 // dashboard banner flips to OPERATIONAL immediately instead of waiting for the
 // next broadcast. Updated everywhere we already broadcast `system:ready`.
-// _systemReady is pre-declared near the deferred route mount block.
+const _systemReady = { python_ok: false, llm_ok: false, node_ok: true };
 function _updateSystemReady(patch) {
   Object.assign(_systemReady, patch);
 }
@@ -3738,7 +3817,8 @@ setInterval(() => {
 
 // ── Task Progress API ─────────────────────────────────────────────────────────
 
-// SSE listener registry — _sseTaskListeners pre-declared above near the deferred route mount block.
+// SSE listener registry: taskId → Set<res>
+const _sseTaskListeners = new Map();
 
 function _notifySSEListeners(taskId, data) {
   const set = _sseTaskListeners.get(taskId);

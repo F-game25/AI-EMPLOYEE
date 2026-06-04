@@ -86,6 +86,29 @@ class Planner:
             )
         return graph
 
+    async def plan_qce(self, goal: str, context_pack=None,
+                       complexity: str = 'medium') -> list[dict]:
+        """QCE strategy superposition path for complex/critical tasks.
+
+        For complex/critical tasks: use StrategySuperposer to get multiple strategies,
+        select the best, return its steps as a task plan.
+        For simple/medium: fall back to existing plan generation.
+        """
+        if complexity in ('complex', 'critical') and context_pack is not None:
+            try:
+                from core.quantum.strategy_superposer import StrategySuperposer
+                ss = StrategySuperposer()
+                strategies = ss.generate(goal, context_pack, complexity)
+                best = ss.select(strategies)
+                return best.steps
+            except Exception:
+                pass
+        # Fallback: delegate to synchronous plan() and extract task steps
+        import uuid
+        graph = self.plan(goal=goal, run_id=str(uuid.uuid4())[:8])
+        return [{'action': 'agent_task', 'agent_id': t.skill, 'description': goal}
+                for t in graph.tasks]
+
     @staticmethod
     def _build_context(goal: str) -> dict[str, Any]:
         store = get_knowledge_store()

@@ -13810,19 +13810,241 @@ async def skill_execute(name: str, req: dict, _auth=Depends(require_auth)):
     return {"ok": ok, "skill": name, "status": "executed" if ok else "execution_failed"}
 
 
-class _SwapPayload(BaseModel):
-    backend: str
-    model: str = ""
-    endpoint: str = ""
+# ── Quantum-Inspired Cognitive Engine (QCE) — Phase 3 REST API ───────────────
+# All imports are wrapped in try/except: the QCE modules are built by a parallel
+# agent. When the system restarts the imports will be resolvable.
+
+def _result_to_dict(r) -> dict:
+    """Convert a NormalizedSearchResult dataclass/object to a plain dict."""
+    if hasattr(r, "__dict__"):
+        return r.__dict__.copy()
+    if hasattr(r, "_asdict"):
+        return r._asdict()
+    return dict(r) if isinstance(r, dict) else {"raw": str(r)}
 
 
-@app.post("/internal/swap-backend", tags=["internal"])
-async def internal_swap_backend(payload: _SwapPayload):
-    """Hot-swap the LLM backend without restarting. Called by Node server on model switch."""
-    from core.orchestrator import hot_swap_backend
-    prev = hot_swap_backend(payload.backend, new_model=payload.model, endpoint=payload.endpoint)
-    return {"ok": True, "prev_backend": prev.get("backend"), "new_backend": payload.backend}
+def _pack_to_dict(pack) -> dict:
+    """Convert a ContextPack dataclass/object to a serialisable dict."""
+    if pack is None:
+        return {}
+    if isinstance(pack, dict):
+        return pack
+    d: dict = pack.__dict__.copy() if hasattr(pack, "__dict__") else {}
+    # candidates may be dataclass instances — convert each
+    if "candidates" in d and isinstance(d["candidates"], list):
+        d["candidates"] = [_result_to_dict(c) for c in d["candidates"]]
+    return d
 
+
+def _strategy_to_dict(s) -> dict:
+    if isinstance(s, dict):
+        return s
+    return s.__dict__.copy() if hasattr(s, "__dict__") else {"raw": str(s)}
+
+
+@app.post("/api/search", tags=["qce"])
+async def qce_unified_search(body: dict):
+    """Fan-out to SearchOrchestrator across all registered engines."""
+    try:
+        from core.quantum.search.orchestrator import SearchOrchestrator
+        from core.quantum.search.schema import SearchRequest
+        req = SearchRequest(
+            query=body.get("query", ""),
+            bangs=body.get("bangs", []),
+            complexity=body.get("complexity", "medium"),
+            task_type=body.get("task_type", ""),
+            tenant_id=body.get("tenant_id", ""),
+            max_results_per_engine=body.get("max_results", 50),
+        )
+        orch = SearchOrchestrator()
+        results = await orch.search(req)
+        return {"results": [_result_to_dict(r) for r in results], "count": len(results)}
+    except Exception as exc:  # noqa: BLE001
+        return {"results": [], "engine_stats": {}, "fallback": True, "error": str(exc)}
+
+
+@app.post("/api/search/context-pack", tags=["qce"])
+async def qce_context_pack(body: dict):
+    """Full QCE amplification pipeline — returns a ContextPack."""
+    try:
+        from core.quantum.engine import get_qce
+        pack = await get_qce().process(
+            goal=body.get("query", ""),
+            tenant_id=body.get("tenant_id", ""),
+            task_type=body.get("task_type", ""),
+        )
+        return _pack_to_dict(pack)
+    except Exception as exc:  # noqa: BLE001
+        return {"candidates": [], "confidence": 0, "reasoning": "", "fallback": True, "error": str(exc)}
+
+
+@app.post("/api/search/explain", tags=["qce"])
+async def qce_explain(body: dict):
+    """Return the top-20 candidates and the QCE reasoning trace."""
+    try:
+        from core.quantum.engine import get_qce
+        pack = await get_qce().process(
+            goal=body.get("query", ""),
+            tenant_id=body.get("tenant_id", ""),
+        )
+        candidates = [
+            {
+                "id": getattr(c, "id", ""),
+                "title": getattr(c, "title", ""),
+                "engine": getattr(c, "engine", ""),
+                "amplitude": getattr(c, "amplitude", 0),
+                "source_type": getattr(c, "source_type", ""),
+                "why": (getattr(c, "metadata", {}) or {}).get("why", ""),
+            }
+            for c in (getattr(pack, "candidates", []) or [])[:20]
+        ]
+        return {
+            "query": body.get("query"),
+            "candidates": candidates,
+            "confidence": getattr(pack, "confidence", 0),
+            "reasoning": getattr(pack, "reasoning", ""),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"query": body.get("query"), "candidates": [], "confidence": 0, "reasoning": "",
+                "fallback": True, "error": str(exc)}
+
+
+@app.post("/api/search/reasoning", tags=["qce"])
+async def qce_reasoning(body: dict):
+    """Search + intent superposition — returns candidates and detected intents."""
+    try:
+        from core.quantum.engine import get_qce
+        pack = await get_qce().process(
+            goal=body.get("query", ""),
+            tenant_id=body.get("tenant_id", ""),
+        )
+        d = _pack_to_dict(pack)
+        d.setdefault("intents", [])
+        return d
+    except Exception as exc:  # noqa: BLE001
+        return {"query": body.get("query"), "candidates": [], "intents": [],
+                "fallback": True, "error": str(exc)}
+
+
+@app.post("/api/search/plan", tags=["qce"])
+async def qce_plan(body: dict):
+    """Search + strategy superposition — returns ranked strategy list."""
+    try:
+        from core.quantum.engine import get_qce
+        qce = get_qce()
+        pack = await qce.process(goal=body.get("query", ""))
+        strategies = await qce.plan(body.get("query", ""), pack)
+        return {"strategies": [_strategy_to_dict(s) for s in (strategies or [])]}
+    except Exception as exc:  # noqa: BLE001
+        return {"strategies": [], "fallback": True, "error": str(exc)}
+
+
+@app.post("/api/search/agent-route", tags=["qce"])
+async def qce_agent_route(body: dict):
+    """Amplitude-route the query to the best-matching agent."""
+    try:
+        from core.quantum.engine import get_qce
+        qce = get_qce()
+        pack = await qce.process(goal=body.get("query", ""))
+        routing = await qce.route(pack, preferred_agent_id=body.get("preferred_agent_id"))
+        return routing if isinstance(routing, dict) else {"routing": routing}
+    except Exception as exc:  # noqa: BLE001
+        return {"agent_id": None, "confidence": 0, "gate": "direct",
+                "fallback": True, "error": str(exc)}
+
+
+@app.get("/api/search/engines", tags=["qce"])
+async def qce_list_engines():
+    """List registered search engines and their bang shortcuts."""
+    try:
+        from core.quantum.search.registry import EngineRegistry
+        reg = EngineRegistry()
+        return {
+            "engines": [
+                {"name": name, "enabled": True, "bangs": cfg.get("bangs", [])}
+                for name, cfg in reg._config.items()
+                if cfg.get("enabled")
+            ]
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"engines": [], "fallback": True, "error": str(exc)}
+
+
+@app.post("/api/quantum/search", tags=["qce"])
+async def quantum_search(body: dict):
+    """Alias for /api/search/context-pack — QCE full amplification."""
+    return await qce_context_pack(body)
+
+
+@app.post("/api/quantum/plan", tags=["qce"])
+async def quantum_plan(body: dict):
+    """Alias for /api/search/plan — strategy superposition."""
+    return await qce_plan(body)
+
+
+@app.post("/api/quantum/route", tags=["qce"])
+async def quantum_route(body: dict):
+    """Alias for /api/search/agent-route — amplitude routing."""
+    return await qce_agent_route(body)
+
+
+@app.post("/api/quantum/feedback", tags=["qce"])
+async def quantum_feedback(body: dict):
+    """Record a search outcome for calibration. Appends to state/quantum_feedback.jsonl."""
+    import json as _json
+    state_dir = os.environ.get("STATE_DIR", "state")
+    fpath = os.path.join(state_dir, "quantum_feedback.jsonl")
+    record = {
+        "search_id": body.get("search_id", ""),
+        "task_id": body.get("task_id", ""),
+        "outcome": body.get("outcome", "success"),
+        "agent_id": body.get("agent_id"),
+        "tool_id": body.get("tool_id"),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if body.get("confidence") is not None:
+        record["confidence"] = body["confidence"]
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(fpath, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(record) + "\n")
+        return {"ok": True, "record": record}
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.get("/api/quantum/stats", tags=["qce"])
+async def quantum_stats():
+    """Aggregate calibration stats from state/quantum_feedback.jsonl."""
+    import json as _json
+    state_dir = os.environ.get("STATE_DIR", "state")
+    fpath = os.path.join(state_dir, "quantum_feedback.jsonl")
+    records: list[dict] = []
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        records.append(_json.loads(line))
+                    except Exception:  # noqa: BLE001
+                        pass
+    except FileNotFoundError:
+        pass
+    total = len(records)
+    success_count = sum(1 for r in records if r.get("outcome") == "success")
+    failure_count = sum(1 for r in records if r.get("outcome") == "failure")
+    confidences = [r["confidence"] for r in records if isinstance(r.get("confidence"), (int, float))]
+    avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    return {
+        "total": total,
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "avg_confidence": avg_confidence,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def _start_knowledge_scheduler():

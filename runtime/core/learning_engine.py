@@ -205,6 +205,30 @@ class LearningEngine:
                 },
             }
 
+    def record_outcome_qce(self, task_id: str, agent_id: str, outcome: str,
+                           context_pack=None) -> None:
+        """Record outcome in both LearningEngine AND ReflectionEngine."""
+        try:
+            self.record_task(
+                task_input=task_id,
+                chosen_agent=agent_id,
+                strategy_used=f'{agent_id}:default',
+                result={'outcome': outcome},
+                success_score=1.0 if outcome == 'success' else 0.0,
+            )
+        except Exception:
+            pass
+        try:
+            from core.quantum.reflection import ReflectionEngine
+            ReflectionEngine().reflect(
+                task_id=task_id,
+                outcome=outcome,
+                context_pack=context_pack,
+                agent_id=agent_id,
+            )
+        except Exception:
+            pass
+
     def metrics(self) -> dict[str, Any]:
         with _LOCK:
             strategies = list(self._state.get("strategy_weights", {}).values())

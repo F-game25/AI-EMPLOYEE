@@ -119,6 +119,38 @@ class DecisionEngine:
         with self._lock:
             self._weights = dict(_BLACKLIGHT_WEIGHTS if enabled else _DEFAULT_WEIGHTS)
 
+    def decide_qce(self, options: list[dict], context: dict | None = None) -> dict:
+        """Score options via QCE oracle, return highest-amplitude option.
+
+        Falls back to returning options[0] (or {}) on any error.
+        options: list of {id, description, ...}
+        """
+        try:
+            from core.quantum.search.schema import NormalizedSearchResult
+            from core.quantum.oracle import OracleScorer
+            from core.quantum.candidate import Candidate
+            query = context.get('goal', '') if context else ''
+            task_type = context.get('task_type', '') if context else ''
+            scorer = OracleScorer()
+            candidates: list[tuple] = []
+            for opt in options:
+                r = NormalizedSearchResult(
+                    id=str(opt.get('id', '')),
+                    title=opt.get('name', opt.get('id', '')),
+                    content=opt.get('description', ''),
+                    source_type='agent',
+                )
+                c = Candidate(result=r)
+                scorer.score(c, query, task_type=task_type)
+                c.amplitude = c.oracle_score
+                candidates.append((c, opt))
+            if candidates:
+                candidates.sort(key=lambda x: x[0].amplitude, reverse=True)
+                return candidates[0][1]
+        except Exception:
+            pass
+        return options[0] if options else {}
+
     @property
     def weights(self) -> dict[str, float]:
         with self._lock:
