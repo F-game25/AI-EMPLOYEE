@@ -198,3 +198,46 @@
   padding: 0 0.25em;
   border-radius: 3px;
 }
+
+/* Website kwaliteit badges — zoekresultaten */
+.op-zoeker__item { display: flex; justify-content: space-between; align-items: flex-start; padding: 0.6rem 0; border-bottom: 1px solid var(--border, #333); gap: 0.5rem; }
+.op-zoeker__item--skip { opacity: 0.5; }
+.op-zoeker__skip-hint { font-size: 0.75rem; color: #ef4444; margin-left: 0.5rem; }
+.op-ws-badge { display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.72rem; font-weight: 600; vertical-align: middle; }
+.op-ws-badge--ws-geen    { background: rgba(34,197,94,0.15);  color: #22c55e; border: 1px solid rgba(34,197,94,0.4); }
+.op-ws-badge--ws-slecht  { background: rgba(234,179,8,0.15);  color: #eab308; border: 1px solid rgba(234,179,8,0.4); }
+.op-ws-badge--ws-matig   { background: rgba(249,115,22,0.15); color: #f97316; border: 1px solid rgba(249,115,22,0.4); }
+.op-ws-badge--ws-goed    { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.4); }
+.op-ws-badge--ws-onbekend { background: rgba(156,163,175,0.15); color: #9ca3af; border: 1px solid rgba(156,163,175,0.3); }
+
+/* Website status in research paneel */
+.op-ws-status { padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 0.6rem; }
+.op-ws-status--ws-geen    { background: rgba(34,197,94,0.1);  border: 1px solid rgba(34,197,94,0.35);  color: #4ade80; }
+.op-ws-status--ws-slecht  { background: rgba(234,179,8,0.1);  border: 1px solid rgba(234,179,8,0.35);  color: #fbbf24; }
+.op-ws-status--ws-goed    { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.35);  color: #f87171; }
+.op-ws-status--ws-onbekend { background: rgba(156,163,175,0.1); border: 1px solid rgba(156,163,175,0.3); color: #9ca3af; }
+
+/* Betaalbevestiging invoerveld */
+.op-betaald-check { margin-top: 1rem; padding: 0.9rem; background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.25); border-radius: 6px; }
+.op-betaald-check__hint { font-size: 0.78rem; color: var(--muted, #9ca3af); margin: 0.2rem 0 0.6rem; }
+.op-betaald-check__row { display: flex; gap: 0.5rem; align-items: center; }
+.op-betaald-check__input { flex: 1; padding: 0.4rem 0.6rem; border: 1px solid var(--border, #444); background: var(--bg, #111); color: var(--text, #eee); border-radius: 4px; font-size: 0.9rem; font-family: monospace; }
+
+/* MiroFish prijsadvies badge */
+.op-prijs-advies {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  margin-bottom: 0.6rem;
+  line-height: 1.4;
+}
+.op-prijs-advies--warn {
+  background: rgba(234,179,8,0.1);
+  border: 1px solid rgba(234,179,8,0.35);
+  color: #fbbf24;
+}
+.op-prijs-advies--ok {
+  background: rgba(34,197,94,0.08);
+  border: 1px solid rgba(34,197,94,0.3);
+  color: #4ade80;
+}
