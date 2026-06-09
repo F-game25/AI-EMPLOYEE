@@ -2,7 +2,7 @@
   "_meta": {
     "version": "2.1",
     "description": "All 110 agents at full capacity — no tier restrictions",
-    "total_agents": 59,
+    "total_agents": 113,
     "updated_at": "2026-06-03T00:00:00Z",
     "model_routing": {
       "sales": {
