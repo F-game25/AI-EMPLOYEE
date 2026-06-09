@@ -79,8 +79,11 @@ P6  Capability Adapters           (Forge, Memory, Money, Security, System, Resea
 P7  Evolution Engine              (trace→score→reflect→candidate→replay→promote; distillation as adapter)
 P8  UX Overhaul & Modes           (information architecture, progressive disclosure, design system)
 P9  Remote/Voice/PC Control Layer (real remote workers, sync-back, service control, compute routing UX)
+P9.5 Hybrid Rust Performance       (profile-driven native rewrite of proven hot paths; keep Tauri shell)
 P10 AI Company-Builder (CompanyOS)(full design now; build as final major phase)
 ```
+
+> **Profiling starts early:** P2 (Frontend Perf) and P9 (compute layer) instrument the hot paths. P9.5 only rewrites what profiling proves is a bottleneck — no premature Rust.
 
 ---
 
@@ -230,6 +233,24 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 - **Data sync panel:** which outputs are local vs pending sync, snapshots, rollback points, failed-sync warnings.
 
 **DoD:** user sees local vs remote at a glance; can start/stop remote safely w/ kill switch; remote outputs sync back; service control works; costs/privacy shown before execution.
+
+---
+
+### P9.5 — Hybrid Rust Performance
+
+**Goal:** Recode the proven-hot paths in Rust for native speed, keeping Python/Node for everything else. **Evidence-driven — never rewrite what isn't a measured bottleneck.**
+
+**Status today (audit):** `src-tauri/` (Tauri desktop shell — `lib.rs`, `main.rs`, `Cargo.toml`) is REAL and shipping. The broader "hybrid Rust optimisation/recode" was started conceptually (Tauri app) but the *hot-path native modules* were never built. `research.md` references `vix` (C++ runtime) and native modules (`native/vector_search_service/`, `audio_processing_service/`, `browser_orchestration_service/`) as deferred. This phase makes it explicit.
+
+**Approach (in order):**
+1. **Profile first** — use the instrumentation from P2 (frontend) + P9 (compute) + add Python/Node timing on: vector search/RAG retrieval, embedding, browser orchestration, audio/TTS processing, JSON state I/O under load. Produce a ranked bottleneck list with real numbers.
+2. **Rewrite only proven-hot paths** as native Rust modules behind a stable FFI/IPC boundary (PyO3 for Python-callable, or a local service the Node/Python side calls). Candidates, by likelihood: local vector index/search (turbovec-style), browser orchestration service, audio processing. Keep the Python/Node API identical so callers don't change.
+3. **Keep the Tauri shell as-is** — don't rewrite the desktop launcher; extend it only if it owns a hot path.
+4. **Each rewrite is reversible** — feature-flag the native path, fall back to the Python/Node implementation, A/B the latency, promote only if it's faster AND passes the same tests.
+
+**Reference (patterns only, no copy):** `turbovec`/TurboQuant (vector index), `vix` (native runtime structure), `agent-browser` (Rust browser CLI). Rebuilt natively per the no-copy rule.
+
+**DoD:** a ranked bottleneck report exists; at least the top bottleneck has a native module behind a flag that beats the Python/Node version on latency with equal correctness (same tests pass); fallback works; no caller API changed.
 
 ---
 
