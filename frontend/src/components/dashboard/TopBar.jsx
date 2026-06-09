@@ -8,7 +8,7 @@ import { useEconomyStore } from '../../store/economyStore'
 import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useUpdateCheck } from '../../hooks/useUpdateCheck'
 import { CommandPill, ClockModule, StatusPill, HexButton } from '../nexus-ui'
-import MiniEye from '../core/MiniEye'
+import CognitiveEye from '../avatar/CognitiveEye'
 import './TopBar.css'
 
 const PAGE_LABELS = {
@@ -316,7 +316,7 @@ export default function TopBar() {
           <span className="nx-topbar__divider" />
 
           {/* Route-aware mini-eye */}
-          <MiniEye size={22} className="nx-topbar__mini-eye" />
+          <CognitiveEye size={22} mode="toolbar" className="nx-topbar__mini-eye" />
 
           <span className="nx-topbar__divider" />
 

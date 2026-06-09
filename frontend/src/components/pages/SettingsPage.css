@@ -1509,6 +1509,8 @@ select.nx-input option { background: var(--nx-surface-3); color: var(--nx-text);
   .cl-pool-stats { grid-template-columns: 1fr 1fr; }
   .cl-nodes-grid { grid-template-columns: 1fr; }
   .cl-header { flex-direction: column; }
+}
+
 /* ── Hardware Profile card ─────────────────────────────────────────────────── */
 
 .nx-hw-profile-card { display: flex; flex-direction: column; gap: 16px; padding: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
