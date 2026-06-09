@@ -1,0 +1,200 @@
+{
+  "schema": 1,
+  "bundle_id": "voice-core-local-2026-06-06",
+  "platform": "linux-x64",
+  "install_mode": "bundled",
+  "requires_network": false,
+  "requires_gpu": false,
+  "generated_at": "2026-06-06T15:43:56.813Z",
+  "default_voice": {
+    "provider": "voice_core_local",
+    "language": "en",
+    "voice": "female",
+    "gender": "female",
+    "model_voice": "en_US-lessac-high",
+    "alternate_voice": "male",
+    "emotion": "warm_confident"
+  },
+  "components": [
+    {
+      "id": "piper_cli",
+      "role": "runtime",
+      "engine": "piper_onnx_cpu",
+      "language": "multi",
+      "path": "runtimes/linux-x64/piper/piper",
+      "required": true,
+      "license": "MIT",
+      "source": "https://github.com/rhasspy/piper",
+      "url": "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz",
+      "executable": true,
+      "size": 4999768,
+      "sha256": "12672a94ca6716e5a8f335cfa68bf43bd9a33284960e3f9d16b85090bf7aab6b"
+    },
+    {
+      "id": "piper_en_model",
+      "role": "model",
+      "engine": "piper_onnx_cpu",
+      "language": "en",
+      "path": "models/tts/piper-en/en_US-lessac-high.onnx",
+      "required": true,
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/high/en_US-lessac-high.onnx",
+      "size": 113895201,
+      "sha256": "4cabf7c3a638017137f34a1516522032d4fe3f38228a843cc9b764ddcbcd9e09"
+    },
+    {
+      "id": "piper_en_config",
+      "role": "config",
+      "engine": "piper_onnx_cpu",
+      "language": "en",
+      "path": "models/tts/piper-en/en_US-lessac-high.onnx.json",
+      "required": true,
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/high/en_US-lessac-high.onnx.json",
+      "size": 4883,
+      "sha256": "db42b97d9859f257bc1561b8ed980e7fb2398402050a74ddd6cbec931a92412f"
+    },
+    {
+      "id": "piper_en_male_model",
+      "role": "model",
+      "engine": "piper_onnx_cpu",
+      "language": "en",
+      "path": "models/tts/piper-en/en_US-ryan-high.onnx",
+      "required": true,
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx",
+      "size": 120786792,
+      "sha256": "b3990d7606e183ec8dbfba70a4607074f162de1a0c412e0180d1ff60bb154eca"
+    },
+    {
+      "id": "piper_en_male_config",
+      "role": "config",
+      "engine": "piper_onnx_cpu",
+      "language": "en",
+      "path": "models/tts/piper-en/en_US-ryan-high.onnx.json",
+      "required": true,
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx.json",
+      "size": 4166,
+      "sha256": "c6d3b98f08315cb4bebf0d49d50fc4ff491b503c64b940cd3d5ca28543b48011"
+    },
+    {
+      "id": "piper_nl_model",
+      "role": "model",
+      "engine": "piper_onnx_cpu",
+      "language": "nl",
+      "path": "models/tts/piper-nl/nl_NL-mls-medium.onnx",
+      "required": true,
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/nl/nl_NL/mls/medium/nl_NL-mls-medium.onnx",
+      "size": 76584246,
+      "sha256": "88312e0fbf505b87caf2373d94c1384892e86b1bf2ee482cf65dc8ba179cc7d3"
+    },
+    {
+      "id": "piper_nl_config",
+      "role": "config",
+      "engine": "piper_onnx_cpu",
+      "language": "nl",
+      "path": "models/tts/piper-nl/nl_NL-mls-medium.onnx.json",
+      "required": true,
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/nl/nl_NL/mls/medium/nl_NL-mls-medium.onnx.json",
+      "size": 5856,
+      "sha256": "6ddb215d38f1392ab935ad45441b82ada1eeae0452a2d6849ed71ea4f2e0aa63"
+    },
+    {
+      "id": "kokoro_cli",
+      "role": "runtime",
+      "engine": "kokoro_onnx_cli",
+      "language": "en",
+      "path": "runtimes/linux-x64/kokoro/kokoro-tts",
+      "required": false,
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/hexgrad/Kokoro-82M",
+      "url": null,
+      "executable": true
+    },
+    {
+      "id": "kokoro_en_model",
+      "role": "model",
+      "engine": "kokoro_onnx",
+      "language": "en",
+      "path": "models/tts/kokoro-en/kokoro-v1.0.onnx",
+      "required": false,
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/hexgrad/Kokoro-82M",
+      "url": null
+    },
+    {
+      "id": "kokoro_en_voices",
+      "role": "voice_pack",
+      "engine": "kokoro_onnx",
+      "language": "en",
+      "path": "models/tts/kokoro-en/voices-v1.0.bin",
+      "required": false,
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md",
+      "url": null
+    },
+    {
+      "id": "whisper_cli",
+      "role": "runtime",
+      "engine": "whisper.cpp",
+      "language": "en",
+      "path": "runtimes/linux-x64/whisper/whisper.cpp/main",
+      "required": true,
+      "license": "MIT",
+      "source": "https://github.com/ggml-org/whisper.cpp",
+      "url": "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.5.4.tar.gz",
+      "executable": true,
+      "size": 1146536,
+      "sha256": "26fc3a91a2eae73d4b6263ac89ad08f513ec7c07d764ff81adffb651986cd4cd"
+    },
+    {
+      "id": "whisper_base_en",
+      "role": "model",
+      "engine": "whisper.cpp",
+      "language": "en",
+      "path": "models/stt/whisper/ggml-base.en.bin",
+      "required": true,
+      "license": "MIT",
+      "source": "https://github.com/ggml-org/whisper.cpp",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+      "size": 147964211,
+      "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+    },
+    {
+      "id": "silero_vad",
+      "role": "model",
+      "engine": "silero_vad_onnx",
+      "language": "multi",
+      "path": "models/vad/silero-vad.onnx",
+      "required": true,
+      "license": "MIT",
+      "source": "https://github.com/snakers4/silero-vad",
+      "url": "https://huggingface.co/deepghs/silero-vad-onnx/resolve/main/silero_vad.onnx",
+      "size": 2327524,
+      "sha256": "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f"
+    }
+  ],
+  "samples": [
+    {
+      "id": "en_default",
+      "language": "en",
+      "emotion": "warm_confident",
+      "path": "samples/en-default.wav"
+    },
+    {
+      "id": "nl_default",
+      "language": "nl",
+      "emotion": "calm",
+      "path": "samples/nl-default.wav"
+    }
+  ]
+}
