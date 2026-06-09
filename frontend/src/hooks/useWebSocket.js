@@ -29,6 +29,33 @@ let _storeBootstrapped = false
 let _nbBatch = []
 let _nbFlushTimer = null
 
+// Snapshot-style telemetry throttle — coalesce high-frequency full-snapshot streams
+// to ~4Hz (one store write per 250ms). Last-wins: only the latest payload in the
+// window is written, since each message is a complete snapshot. DOM CustomEvents
+// (ws:event / ws:any) still fire immediately in dispatchWsMessage for visualisers —
+// only the store write is throttled here.
+const TELEMETRY_THROTTLE_MS = 250
+const _telemetryLatest = {}   // event name → latest data payload
+const _telemetryTimers = {}   // event name → pending flush timer
+
+function scheduleTelemetryFlush(event, data, apply) {
+  _telemetryLatest[event] = data
+  if (_telemetryTimers[event]) return
+  _telemetryTimers[event] = setTimeout(() => {
+    _telemetryTimers[event] = null
+    const latest = _telemetryLatest[event]
+    delete _telemetryLatest[event]
+    apply(latest)
+  }, TELEMETRY_THROTTLE_MS)
+}
+
+function clearTelemetryTimers() {
+  for (const k in _telemetryTimers) {
+    clearTimeout(_telemetryTimers[k])
+    _telemetryTimers[k] = null
+  }
+}
+
 export function bootstrapWsStore() {
   if (_storeBootstrapped) return
   _storeBootstrapped = true
@@ -55,6 +82,7 @@ if (import.meta.hot) {
     _preStoreQueue = []
     clearTimeout(_reconnectTimer)
     clearTimeout(_nbFlushTimer)
+    clearTelemetryTimers()
   })
 }
 
@@ -141,6 +169,7 @@ function connectSingleton() {
     // ws_connected → false; keep python_ok / llm_ok at last known (STALE not OFFLINE on brief reconnect)
     sys.setBackendStatus?.({ ws_connected: false })
     clearTimeout(_typingTimeout)
+    clearTelemetryTimers()
     task.setTyping(false)
     _wsInstance = null
     _initialized = false
@@ -334,21 +363,26 @@ function dispatchSystemEvent(event, data) {
   const task = getTaskStore()
   switch (event) {
     case 'system:status':
-      sys.setSystemStatus(data)
-      // Populate systemHealth so CPU/RAM meters and dashboard panels receive live values.
-      // The server broadcasts system:status with cpu/memory fields; system:health is an alias.
-      sys.setSystemHealth?.({
-        cpu_percent: data.cpu ?? data.cpu_usage ?? 0,
-        memory_percent: data.memory ?? 0,
-        gpu_percent: data.gpu_usage ?? 0,
-        uptime: data.uptime ?? 0,
-        running_agents: data.running_agents ?? 0,
-        total_agents: data.total_agents ?? 0,
-        status: 'live',
+      // High-frequency full snapshot — coalesce store writes to ~4Hz (last-wins).
+      scheduleTelemetryFlush('system:status', data, (d) => {
+        const s = getSysStore()
+        s.setSystemStatus(d)
+        // Populate systemHealth so CPU/RAM meters and dashboard panels receive live values.
+        // The server broadcasts system:status with cpu/memory fields; system:health is an alias.
+        s.setSystemHealth?.({
+          cpu_percent: d.cpu ?? d.cpu_usage ?? 0,
+          memory_percent: d.memory ?? 0,
+          gpu_percent: d.gpu_usage ?? 0,
+          uptime: d.uptime ?? 0,
+          running_agents: d.running_agents ?? 0,
+          total_agents: d.total_agents ?? 0,
+          status: 'live',
+        })
       })
       break
     case 'system:health':
-      sys.setSystemHealth?.(data)
+      // High-frequency CPU/RAM/GPU meter snapshot — coalesce to ~4Hz (last-wins).
+      scheduleTelemetryFlush('system:health', data, (d) => getSysStore().setSystemHealth?.(d))
       break
     case 'system:degraded':
       sys.addHeartbeatLog({
@@ -445,7 +479,8 @@ function dispatchCognitiveEvent(event, data) {
       cog.setBrainInsights(data)
       break
     case 'brain:activity':
-      cog.setBrainActivity(data)
+      // High-frequency brain activity snapshot — coalesce to ~4Hz (last-wins).
+      scheduleTelemetryFlush('brain:activity', data, (d) => getCogStore().setBrainActivity(d))
       break
     case 'brain:graph':
       if (data?.nodes && data?.links) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, lazy, Suspense, useState } from 'react'
+import { useCallback, useEffect, lazy, Suspense, useState, useTransition } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../store/appStore'
@@ -201,6 +201,17 @@ export default function Dashboard() {
   const location = useLocation()
   const { tier } = usePerformanceMode()
 
+  // Non-blocking page swaps: `activeSection` (store) updates instantly so URL sync,
+  // sidebar highlight and the click feel immediate; the heavy page mount is deferred
+  // into a transition via `renderedSection`, keeping the previous page on screen until
+  // the new one is ready. `isPending` drives a subtle loading affordance.
+  const [renderedSection, setRenderedSection] = useState(activeSection)
+  const [isPending, startTransition] = useTransition()
+  useEffect(() => {
+    if (activeSection === renderedSection) return
+    startTransition(() => setRenderedSection(activeSection))
+  }, [activeSection, renderedSection])
+
   // Expose the performance tier as a root attribute so CSS can drop expensive
   // compositing (backdrop blurs, scanlines, animations) on low/Lite mode.
   useEffect(() => {
@@ -287,8 +298,10 @@ export default function Dashboard() {
     return () => window.removeEventListener('nx:companion:open', openCompanion)
   }, [])
 
-  const PageComponent = PAGES[activeSection] || DashboardPage
-  const isFullscreen = activeSection === 'dashboard' || activeSection === 'nexus'
+  // Page-coupled bits follow `renderedSection` so the boundary/container stay paired
+  // with the page that is actually mounted during a pending transition.
+  const PageComponent = PAGES[renderedSection] || DashboardPage
+  const isFullscreen = renderedSection === 'dashboard' || renderedSection === 'nexus'
   const showCommandDock = true
 
   return (
@@ -321,7 +334,7 @@ export default function Dashboard() {
           flexDirection: 'column',
           padding: isFullscreen ? 0 : 'var(--space-2) var(--space-3)',
         }}>
-          <ErrorBoundary key={activeSection} label={activeSection} severity="page">
+          <ErrorBoundary key={renderedSection} label={renderedSection} severity="page">
             <Suspense fallback={
               <div style={{ flex: 1, minHeight: 0, padding: 32, color: 'var(--text-dim, #888)', fontFamily: 'var(--nx-font-mono, monospace)', fontSize: 13 }}>
                 Loading…
@@ -329,10 +342,20 @@ export default function Dashboard() {
             }>
               {/* Always a flex column with a definite height: full-height pages (Forge,
                   graphs) fill it; long pages scroll inside it. Scroll lives here, not on
-                  the parent, so height:100% pages don't collapse in non-fullscreen. */}
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: isFullscreen ? 'hidden' : 'auto' }}>
+                  the parent, so height:100% pages don't collapse in non-fullscreen.
+                  During a pending page transition the previous page stays mounted but is
+                  dimmed slightly so the swap reads as intentional, not janky. */}
+              <div style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                overflowY: isFullscreen ? 'hidden' : 'auto',
+                opacity: isPending ? 0.6 : 1,
+                transition: 'opacity 0.15s ease',
+              }}>
                 <PageComponent />
-                <DashboardMountedSignal section={activeSection} />
+                <DashboardMountedSignal section={renderedSection} />
               </div>
             </Suspense>
           </ErrorBoundary>

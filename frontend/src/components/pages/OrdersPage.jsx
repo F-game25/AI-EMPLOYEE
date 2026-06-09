@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import api from '../../api/client'
 import './OrdersPage.css'
 
@@ -487,6 +488,17 @@ export default function OrdersPage() {
   const [err, setErr] = useState(null)
   const [panel, setPanel] = useState(null)
 
+  // Virtualize the (unbounded) order list — cards are heavy and their heights vary
+  // a lot (pitch/research/deploy panels expand), so we use dynamic measurement.
+  const scrollRef = useRef(null)
+  const rowVirtualizer = useVirtualizer({
+    count: orders.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 220,
+    overscan: 6,
+    getItemKey: (i) => orders[i].id,
+  })
+
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
     try {
@@ -532,14 +544,36 @@ export default function OrdersPage() {
       {err && <p className="op-err op-err--page">{err}</p>}
       {loading && <p className="op-loading">Laden…</p>}
 
-      <div className="op-list">
-        {orders.map(o => (
-          <OrderCard key={o.id} order={o} onRefresh={load} onDelete={handleDelete} />
-        ))}
-        {!loading && orders.length === 0 && (
-          <p className="op-empty">Nog geen orders. Gebruik "Zoek bedrijven" of "+ Handmatig".</p>
-        )}
-      </div>
+      {!loading && orders.length === 0 ? (
+        <p className="op-empty">Nog geen orders. Gebruik "Zoek bedrijven" of "+ Handmatig".</p>
+      ) : (
+        <div className="op-list" ref={scrollRef}>
+          <div
+            className="op-list__sizer"
+            style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+          >
+            {rowVirtualizer.getVirtualItems().map(vi => {
+              const o = orders[vi.index]
+              return (
+                <div
+                  key={vi.key}
+                  data-index={vi.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                >
+                  <OrderCard order={o} onRefresh={load} onDelete={handleDelete} />
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

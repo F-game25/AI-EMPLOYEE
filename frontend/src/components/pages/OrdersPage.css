@@ -30,7 +30,11 @@
 .op-form button { padding: 0.45rem 1.1rem; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
 .op-form button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.op-list { display: flex; flex-direction: column; gap: 1rem; }
+/* Virtualized scroll container — bounded height lets the virtualizer compute its
+   window; absolutely-positioned rows can't use flex gap, so spacing is applied as
+   bottom padding on each measured row wrapper instead. */
+.op-list { max-height: calc(100vh - 220px); overflow-y: auto; }
+.op-list__sizer > * { padding-bottom: 1rem; }
 
 .op-card { background: var(--surface, #1e1e1e); border: 1px solid var(--border, #444); border-radius: 8px; padding: 1rem; }
 .op-card--live { border-color: #22c55e; }
