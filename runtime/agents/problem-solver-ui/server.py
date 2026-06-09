@@ -3875,19 +3875,24 @@ def get_system_resources():
         gpu_pct = None
         gpu_temp = None
         gpu_name = None
+        vram_free_mb = None
+        vram_total_mb = None
         try:
             import csv as _csv
             res = subprocess.run(
-                ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,name",
+                ["nvidia-smi",
+                 "--query-gpu=utilization.gpu,temperature.gpu,memory.free,memory.total,name",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=2,
             )
             if res.returncode == 0:
                 rows = list(_csv.reader([res.stdout.strip()]))
-                if rows and len(rows[0]) >= 3:
+                if rows and len(rows[0]) >= 5:
                     gpu_pct = int(rows[0][0].strip())
                     gpu_temp = int(rows[0][1].strip())
-                    gpu_name = rows[0][2].strip()
+                    vram_free_mb = int(rows[0][2].strip())
+                    vram_total_mb = int(rows[0][3].strip())
+                    gpu_name = rows[0][4].strip()
         except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
             pass
         except Exception:
@@ -3909,6 +3914,8 @@ def get_system_resources():
             "gpu_pct": gpu_pct,
             "gpu_temp": gpu_temp,
             "gpu_name": gpu_name,
+            "vram_free_mb": vram_free_mb,
+            "vram_total_mb": vram_total_mb,
         }
     except Exception as exc:
         logging.getLogger(__name__).warning("system/resources collection failed: %s", exc)

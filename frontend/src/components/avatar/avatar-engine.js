@@ -55,15 +55,20 @@
     alert:     { hue: 2,   sat: 0.86, scanSp: .0170, ringMul:1.45, rayInt:1.35, coreBri:1.22, pulseRate: 5.2, pulseAmp: .090, partMul:1.35, jitter: .50 },
   };
 
-  /* ── ring definitions (8 rings — trimmed from 13 for perf) ───── */
+  /* ── ring definitions (13 rings — full orbital structure) ─────── */
   const RINGS = [
+    { r: 1.42, ys: .38, sp: -.034, a: .15, w: 0.7, tk: 14, gl: 0 },
     { r: 1.30, ys: .44, sp: -.040, a: .20, w: 0.8, tk: 12, gl: 0 },
+    { r: 1.24, ys: .26, sp:  .050, a: .24, w: 0.9, tk: 11, gl: 0 },
     { r: 1.18, ys: .30, sp:  .060, a: .28, w: 1.0, tk: 10, gl: 0, bright: true },
+    { r: 1.12, ys: .56, sp: -.066, a: .34, w: 1.2, tk: 10, gl: 0 },
     { r: 1.06, ys: .50, sp: -.078, a: .42, w: 1.4, tk:  9, gl: 0, bright: true },
     { r: .980, ys: .072,sp: -.028, a: .90, w: 3.0, tk:  8, dt: 6, gl: 6, bright: true, prime: true },
     { r: .910, ys: .44, sp:  .058, a: .70, w: 2.0, tk:  8, dt: 5, gl: 0, bright: true },
+    { r: .870, ys: .60, sp:  .070, a: .50, w: 1.3, tk:  7, gl: 0 },
     { r: .840, ys: .32, sp: -.076, a: .55, w: 1.5, tk:  8, gl: 0 },
     { r: .770, ys: .58, sp:  .092, a: .48, w: 1.2, tk:  6, gl: 0 },
+    { r: .730, ys: .40, sp:  .104, a: .44, w: 1.1, tk:  6, gl: 0 },
     { r: .700, ys: .24, sp: -.112, a: .42, w: 1.0, tk:  6, gl: 0 },
   ];
   RINGS.forEach((r, i) => { r._keep = (i*0.137+0.05)%1; });
@@ -193,8 +198,8 @@
     ctx.beginPath(); ctx.arc(ex, ey, R*.97, 0, Math.PI*2);
     ctx.fillStyle = ig; ctx.fill();
 
-    // 40 fibers (was 64) — no per-fiber createLinearGradient, use flat colour
-    const numFib = 40;
+    // 64 fibers — flat colour only (no per-fiber createLinearGradient, keeps perf)
+    const numFib = 64;
     for (let i = 0; i < numFib; i++) {
       const ang = (i/numFib)*Math.PI*2 + t*.003;
       const ir = R*.12, or = R*(.55+Math.sin(i*2.17+1.3)*.06+Math.cos(i*3.7+.5)*.03);
@@ -205,9 +210,9 @@
       ctx.strokeStyle = C('deep', al); ctx.lineWidth = .45; ctx.stroke();
     }
 
-    // 12 concentric iris rings (was 18)
-    for (let i = 0; i < 12; i++) {
-      const frac = .14+(i/12)*.78, al = .022+(i%4===0?.022:.006)+Math.abs(Math.sin(i*.75))*.008;
+    // 18 concentric iris rings — detailed iris
+    for (let i = 0; i < 18; i++) {
+      const frac = .14+(i/18)*.78, al = .022+(i%4===0?.022:.006)+Math.abs(Math.sin(i*.75))*.008;
       ctx.beginPath(); ctx.arc(ex, ey, R*frac, 0, Math.PI*2);
       ctx.strokeStyle = C('deep', al); ctx.lineWidth = i%4===0?.65:.28; ctx.stroke();
     }
@@ -371,8 +376,8 @@
       g.addColorStop(1,   'transparent');
       ctx.beginPath(); ctx.arc(ex, ey, R*.18, 0, Math.PI*2); ctx.fillStyle = g; ctx.fill();
 
-      /* 8. energy rays — 10 (was 16), no per-ray createLinearGradient */
-      const rays = 10;
+      /* 8. energy rays — 16, flat stroke only (no per-ray createLinearGradient) */
+      const rays = 16;
       for (let i = 0; i < rays; i++) {
         const a = i/rays*Math.PI*2 + t*.040;
         const ln = R*(.28+Math.sin(t*1.38+i*.68)*.045)*(0.7+CUR.rayInt*.45);
