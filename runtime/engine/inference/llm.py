@@ -191,9 +191,30 @@ def _build_ollama_options(model: str) -> dict:
 
 _CORE_MODELS = [DEFAULT_MODEL, DEFAULT_EMBED_MODEL]
 
+
+def _warm_targets() -> list[str]:
+    """Embed model + the always-hot lane models (FAST/DEFAULT), deduped.
+
+    Lanes are resolved hardware-aware; if model_lanes is unavailable we fall back
+    to the static core list so warmup never breaks startup.
+    """
+    targets = [DEFAULT_EMBED_MODEL]
+    try:
+        from core.model_lanes import hot_lane_models
+        for m in hot_lane_models():
+            if m not in targets:
+                targets.append(m)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("warm_core_models: lane resolution unavailable: %s", exc)
+        for m in _CORE_MODELS:
+            if m not in targets:
+                targets.append(m)
+    return targets
+
+
 def warm_core_models() -> None:
-    """Send keep_alive=-1 to core models so Ollama never evicts them between calls."""
-    for m in _CORE_MODELS:
+    """Send keep_alive=-1 to core/hot-lane models so Ollama never evicts them between calls."""
+    for m in _warm_targets():
         try:
             _ollama_post("/api/generate", {"model": m, "prompt": " ", "keep_alive": -1, "stream": False}, 30)
             logger.info("model_warm model=%s keep_alive=-1", m)
