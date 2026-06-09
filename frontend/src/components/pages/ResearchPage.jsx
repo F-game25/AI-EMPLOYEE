@@ -19,9 +19,11 @@ const DEPTHS = [
 ]
 
 const authHeaders = () => {
-  const t = sessionStorage.getItem('ai_jwt') || ''
+  const t = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || ''
   return { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) }
 }
+
+const STALL_TIMEOUT_MS = 90_000   // auto-resolve executing phase if no WS event in 90s
 
 // ── Reusable bits kept from prior version ─────────────────────────────────────
 function ScreenshotThumb({ b64 }) {
@@ -49,6 +51,48 @@ function RelevanceBar({ value }) {
         <div className="rp-relevance__fill" style={{ width: `${value}%`, background: color }} />
       </div>
       <span className="rp-relevance__label" style={{ color }}>{value}%</span>
+    </div>
+  )
+}
+
+// ── Sessions sidebar ──────────────────────────────────────────────────────────
+function RPSessionsList({ sessions, budget, onSelect }) {
+  const used    = budget?.pages_today ?? 0
+  const limit   = budget?.daily_limit ?? 200
+  const pct     = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
+  const barColor = pct > 80 ? '#ef4444' : pct > 50 ? '#f59e0b' : '#22c55e'
+
+  return (
+    <div className="rp-sessions-col">
+      <div className="rp-sessions-budget">
+        <div className="rp-sessions-budget__label">
+          RESEARCH BUDGET
+          <span className="rp-sessions-budget__num">{used}/{limit} pages</span>
+        </div>
+        <div className="rp-sessions-budget__bar">
+          <div className="rp-sessions-budget__fill" style={{ width: `${pct}%`, background: barColor }} />
+        </div>
+      </div>
+      <div className="rp-sessions-list">
+        {sessions.length === 0
+          ? <div className="rp-empty">No past sessions</div>
+          : sessions.slice(0, 20).map((s, i) => (
+              <button
+                key={i}
+                className="rp-session-pill"
+                onClick={() => onSelect(s.goal || s.topic || s.query || '')}
+                title={s.goal || s.topic || s.query || ''}
+              >
+                <span className="rp-session-pill__text">{s.goal || s.topic || s.query || 'Untitled'}</span>
+                {s.stored_at && (
+                  <span className="rp-session-pill__age">
+                    {new Date(s.stored_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </span>
+                )}
+              </button>
+            ))
+        }
+      </div>
     </div>
   )
 }
@@ -268,10 +312,11 @@ function RPResultsPanel({ results }) {
   return (
     <div className="rp-results">
       <SectionLabel>RESULTS</SectionLabel>
-      {(wordCount !== null || sources.length > 0) && (
+      {(wordCount !== null || sources.length > 0 || results?.mock) && (
         <div className="rp-results-meta">
           {wordCount !== null && <span className="rp-results-badge rp-results-badge--words">{wordCount} words</span>}
           {sources.length > 0 && <span className="rp-results-badge rp-results-badge--sources">{sources.length} sources</span>}
+          {results?.mock && <span className="rp-results-badge rp-results-badge--simulated">SIMULATED RESULT</span>}
         </div>
       )}
       {summary && (
@@ -359,7 +404,7 @@ function RPExecutePanel({ depth, setDepth, selectedCount, totalCount, onExecute,
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function ResearchPage() {
   const setActiveSection = useAppStore(s => s.setActiveSection)
-  const [phase, setPhase]             = useState('query')      // 'query' | 'select' | 'executing' | 'done'
+  const [phase, setPhase]             = useState('query')
   const [query, setQuery]             = useState('')
   const [candidates, setCandidates]   = useState([])
   const [selected, setSelected]       = useState(new Set())
@@ -370,6 +415,20 @@ export default function ResearchPage() {
   const [results, setResults]         = useState(null)
   const [progressLog, setProgressLog] = useState([])
   const [error, setError]             = useState('')
+  const [sessions, setSessions]       = useState([])
+  const [budget, setBudget]           = useState({})
+
+  // Fetch past sessions + budget on mount
+  useEffect(() => {
+    fetch('/api/research/sessions', { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) return
+        setSessions(Array.isArray(d.sessions) ? d.sessions : [])
+        setBudget(d.budget || {})
+      })
+      .catch(() => {})
+  }, [])
 
   const onDiscover = async () => {
     if (!query.trim()) return
@@ -385,10 +444,9 @@ export default function ResearchPage() {
       if (!res.ok || r.error) throw new Error(r.error || r.message || 'Research discovery failed')
       const sources = r.sources || []
       setCandidates(sources)
-      setSelected(new Set(sources.map(s => s.id)))   // default: all selected
+      setSelected(new Set(sources.map(s => s.id)))
       setPhase('select')
     } catch (e) {
-      console.error('discover failed', e)
       setError(e.message || 'Research discovery failed')
     } finally {
       setExecuting(false)
@@ -398,7 +456,6 @@ export default function ResearchPage() {
   const onExecute = async () => {
     if (selected.size === 0) return
     const selectedSources = candidates.filter(s => selected.has(s.id))
-    setExecuting(true)
     setProgressLog([])
     setError('')
     try {
@@ -416,10 +473,13 @@ export default function ResearchPage() {
       if (!res.ok || r.error) throw new Error(r.error || r.message || 'Research execution failed')
       setSessionId(r.session_id)
       setPhase('executing')
+      // If mock fallback was used (Python offline) the result may already be inline
+      if (r.mock && r.results) {
+        setResults({ summary: `[MOCK] Python backend offline. ${r.results.length} source(s) queued.`, sources: selectedSources })
+        setPhase('done')
+      }
     } catch (e) {
-      console.error('execute failed', e)
       setError(e.message || 'Research execution failed')
-      setExecuting(false)
     }
   }
 
@@ -437,75 +497,120 @@ export default function ResearchPage() {
 
   // WS listener for task:research_* events
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId || phase !== 'executing') return
+    let stallTimer = setTimeout(() => {
+      // WS never arrived — surface a degraded-mode result so UI isn't stuck
+      setProgressLog(prev => [...prev, { type: 'task:research_stalled', message: 'No events received — WebSocket may be unavailable. Check the Activity panel for results.' }])
+      setPhase('done')
+    }, STALL_TIMEOUT_MS)
+
     const handler = (e) => {
+      clearTimeout(stallTimer)
+      stallTimer = setTimeout(() => {
+        setPhase('done')
+      }, STALL_TIMEOUT_MS)
       const msg = e.detail || {}
       if (msg.session_id && msg.session_id !== sessionId) return
       setProgressLog(prev => [...prev, msg])
       if (msg.type === 'task:research_completed') {
         setResults(msg.result || null)
         setPhase('done')
-        setExecuting(false)
+        clearTimeout(stallTimer)
       } else if (msg.type === 'task:research_failed') {
+        setError(msg.error || 'Research failed')
         setPhase('done')
-        setExecuting(false)
+        clearTimeout(stallTimer)
       }
     }
     window.addEventListener('ws:research', handler)
-    return () => window.removeEventListener('ws:research', handler)
-  }, [sessionId])
+    return () => {
+      clearTimeout(stallTimer)
+      window.removeEventListener('ws:research', handler)
+    }
+  }, [sessionId, phase])
+
+  const showWorkArea = phase === 'select' || phase === 'executing' || phase === 'done'
 
   return (
     <div className="rp-page">
       <RPHeader phase={phase} onReset={onReset} />
-      <RPQueryPanel
-        query={query} setQuery={setQuery}
-        onSubmit={onDiscover}
-        loading={executing && phase === 'query'}
-        locked={phase !== 'query'}
-        suggested={SUGGESTED}
-      />
-      {error && (
-        <ResearchGuidance
-          title="Research is blocked or degraded"
-          detail={error}
-          primary="Open Setup"
-          onPrimary={() => setActiveSection('setup')}
-          secondary="Check Proof"
-          onSecondary={() => setActiveSection('proof')}
-        />
-      )}
-      {(phase === 'select' || phase === 'executing' || phase === 'done') && (
-        <RPSourceSelection
-          candidates={candidates}
-          selected={selected} setSelected={setSelected}
-          filterType={filterType} setFilterType={setFilterType}
-          locked={phase !== 'select'}
-        />
-      )}
-      {phase === 'select' && candidates.length === 0 && !error && (
-        <ResearchGuidance
-          title="No sources were discovered"
-          detail="Try a broader query or check integrations/model setup before relying on research output."
-          primary="Open Setup"
-          onPrimary={() => setActiveSection('setup')}
-          secondary="New Research"
-          onSecondary={onReset}
-        />
-      )}
-      {(phase === 'select' || phase === 'executing' || phase === 'done') && (
-        <RPExecutePanel
-          depth={depth} setDepth={setDepth}
-          selectedCount={selected.size}
-          totalCount={candidates.length}
-          onExecute={onExecute}
-          phase={phase}
-          sessionId={sessionId}
-          progressLog={progressLog}
-          results={results}
-        />
-      )}
-      <ResearchActivityPanel />
+
+      <div className="rp-3col">
+        {/* LEFT: query + past sessions */}
+        <div className="rp-col-left">
+          <RPQueryPanel
+            query={query} setQuery={setQuery}
+            onSubmit={onDiscover}
+            loading={executing && phase === 'query'}
+            locked={phase !== 'query'}
+            suggested={SUGGESTED}
+          />
+          <RPSessionsList sessions={sessions} budget={budget} onSelect={q => { onReset(); setTimeout(() => setQuery(q), 0) }} />
+        </div>
+
+        {/* MIDDLE: source selection */}
+        <div className="rp-col-mid">
+          {error && (
+            <ResearchGuidance
+              title="Research blocked or degraded"
+              detail={error}
+              primary="Open Setup"
+              onPrimary={() => setActiveSection('setup')}
+              secondary="New Research"
+              onSecondary={onReset}
+            />
+          )}
+          {showWorkArea
+            ? (
+              <RPSourceSelection
+                candidates={candidates}
+                selected={selected} setSelected={setSelected}
+                filterType={filterType} setFilterType={setFilterType}
+                locked={phase !== 'select'}
+              />
+            )
+            : !error && (
+              <div className="rp-col-placeholder">
+                <div className="rp-col-placeholder__text">Discover sources to begin</div>
+              </div>
+            )
+          }
+          {phase === 'select' && candidates.length === 0 && !error && (
+            <ResearchGuidance
+              title="No sources discovered"
+              detail="Try a broader query or check model/integration setup."
+              primary="Open Setup"
+              onPrimary={() => setActiveSection('setup')}
+              secondary="New Research"
+              onSecondary={onReset}
+            />
+          )}
+        </div>
+
+        {/* RIGHT: execute + live log + results */}
+        <div className="rp-col-right">
+          {showWorkArea
+            ? (
+              <RPExecutePanel
+                depth={depth} setDepth={setDepth}
+                selectedCount={selected.size}
+                totalCount={candidates.length}
+                onExecute={onExecute}
+                phase={phase}
+                sessionId={sessionId}
+                progressLog={progressLog}
+                results={results}
+              />
+            )
+            : (
+              <div className="rp-col-placeholder">
+                <div className="rp-col-placeholder__text">Results will appear here</div>
+              </div>
+            )
+          }
+          <ResearchActivityPanel />
+        </div>
+      </div>
     </div>
   )
 }

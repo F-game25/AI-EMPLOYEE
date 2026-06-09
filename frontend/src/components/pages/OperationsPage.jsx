@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Panel, SectionLabel, StatusPill, EmptyState, ErrorState } from '../nexus-ui'
+import { Panel, SectionLabel, StatusPill, EmptyState, ErrorState, NxButton } from '../nexus-ui'
 import { useLiveData } from '../../hooks/useLiveData'
 import { useAppStore } from '../../store/appStore'
 import { toastSuccess, toastError, toastWarn } from '../nexus-ui/Toaster'
+import { fmtDate } from '../../utils/format'
 import './OperationsPage.css'
 
 const TASK_API = '/api/tasks'
@@ -19,12 +20,14 @@ const COLUMNS = [
 
 const tabs = [
   ['board', 'Board'],
+  ['live', 'Live Progress'],
   ['list', 'List'],
   ['create', 'Create Task'],
   ['scheduler', 'Scheduler'],
   ['history', 'History'],
 ]
 
+// elapsed_s is in seconds; fmtDuration in utils expects ms — keep local adapter
 function fmtDuration(s = 0) {
   const v = Number(s) || 0
   if (v < 60) return `${v}s`
@@ -78,10 +81,10 @@ function TaskCard({ task, onInspect, onRefresh }) {
         <span>{fmtDuration(task.elapsed_s)}</span>
         <div className="ops-card__actions">
           {!['completed', 'failed', 'cancelled'].includes(task.status) && (
-            <button className="ops-btn ops-btn--xs" onClick={cancelTask}>Cancel</button>
+            <NxButton variant="ghost" size="sm" onClick={cancelTask}>Cancel</NxButton>
           )}
-          {task.status === 'failed' && <button className="ops-btn ops-btn--xs ops-btn--warn" onClick={retryTask}>Retry</button>}
-          <button className="ops-btn ops-btn--xs" onClick={() => onInspect(task)}>Inspect</button>
+          {task.status === 'failed' && <NxButton variant="warn" size="sm" onClick={retryTask}>Retry</NxButton>}
+          <NxButton variant="ghost" size="sm" onClick={() => onInspect(task)}>Inspect</NxButton>
         </div>
       </div>
     </div>
@@ -99,9 +102,9 @@ function GuidedTaskEmpty({ onCreate, onSetup, onProof }) {
         onAction={onCreate}
       />
       <div className="ops-guided-empty__actions" aria-label="Task setup actions">
-        <button className="ops-btn ops-btn--primary" onClick={onCreate}>Create Task</button>
-        <button className="ops-btn" onClick={onSetup}>Run Setup Check</button>
-        <button className="ops-btn" onClick={onProof}>View Proof Center</button>
+        <NxButton variant="primary" onClick={onCreate}>Create Task</NxButton>
+        <NxButton variant="ghost" onClick={onSetup}>Run Setup Check</NxButton>
+        <NxButton variant="ghost" onClick={onProof}>View Proof Center</NxButton>
       </div>
     </div>
   )
@@ -157,8 +160,8 @@ function TaskTable({ tasks, onInspect, onCreate }) {
           <span>{task.agent || task.owner || 'main-ai'}</span>
           <StatusPill label={(task.status || 'unknown').toUpperCase()} tone={task.status === 'failed' ? 'alert' : task.status === 'completed' ? 'success' : 'idle'} size="sm" />
           <span>{task.priority ?? '-'}</span>
-          <span>{task.updated_at ? new Date(task.updated_at).toLocaleString() : '-'}</span>
-          <button className="ops-btn ops-btn--xs" onClick={() => onInspect(task)}>Inspect</button>
+          <span>{fmtDate(task.updated_at, { time: true })}</span>
+          <NxButton variant="ghost" size="sm" onClick={() => onInspect(task)}>Inspect</NxButton>
         </div>
       ))}
     </Panel>
@@ -193,7 +196,7 @@ function CreateTask({ onCreated }) {
         <input className="ops-input" placeholder="Intent" value={form.intent} onChange={(e) => setForm({ ...form, intent: e.target.value })} />
         <textarea className="ops-input" rows={4} placeholder="Goal, constraints, expected output" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         <input className="ops-input" type="number" min="0" max="3" value={form.priority} onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })} />
-        <button className="ops-btn ops-btn--primary" disabled={busy}>{busy ? 'Queueing...' : 'Queue Task'}</button>
+        <NxButton variant="primary" type="submit" loading={busy} disabled={busy}>Queue Task</NxButton>
       </form>
     </Panel>
   )
@@ -253,7 +256,7 @@ function Scheduler() {
           <input className="ops-input ops-input--mono" placeholder="Cron" value={form.cron} onChange={(e) => setForm({ ...form, cron: e.target.value })} />
           <input className="ops-input" placeholder="Agent" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })} />
           <input className="ops-input" placeholder="Task goal" value={form.task} onChange={(e) => setForm({ ...form, task: e.target.value })} />
-          <button className="ops-btn ops-btn--primary">Save Schedule</button>
+          <NxButton variant="primary" type="submit">Save Schedule</NxButton>
         </form>
       </Panel>
       <Panel title="Scheduled Tasks">
@@ -271,11 +274,11 @@ function Scheduler() {
                 <span>{job.agent}</span>
                 <code className="ops-sched-cron">{job.cron}</code>
                 <StatusPill label={job.paused ? 'PAUSED' : 'ACTIVE'} tone={job.paused ? 'idle' : 'success'} size="sm" />
-                <span>{job.last_run_at ? new Date(job.last_run_at).toLocaleString() : '-'}</span>
+                <span>{fmtDate(job.last_run_at, { time: true })}</span>
                 <div className="ops-sched-actions">
-                  <button className="ops-btn ops-btn--xs" onClick={() => scheduleAction(job.id, 'run')}>Run</button>
-                  <button className="ops-btn ops-btn--xs" onClick={() => scheduleAction(job.id, job.paused ? 'resume' : 'pause')}>{job.paused ? 'Resume' : 'Pause'}</button>
-                  <button className="ops-btn ops-btn--xs ops-btn--danger" onClick={() => deleteSchedule(job.id)}>Del</button>
+                  <NxButton variant="ghost" size="sm" onClick={() => scheduleAction(job.id, 'run')}>Run</NxButton>
+                  <NxButton variant="ghost" size="sm" onClick={() => scheduleAction(job.id, job.paused ? 'resume' : 'pause')}>{job.paused ? 'Resume' : 'Pause'}</NxButton>
+                  <NxButton variant="danger" size="sm" onClick={() => deleteSchedule(job.id)}>Del</NxButton>
                 </div>
               </div>
             ))}
@@ -302,8 +305,8 @@ function InspectModal({ task, onClose }) {
             ['Status', task.status],
             ['Progress', `${task.progress || 0}%`],
             ['Approval', task.approval_state || 'not_required'],
-            ['Created', task.created_at ? new Date(task.created_at).toLocaleString() : '-'],
-            ['Updated', task.updated_at ? new Date(task.updated_at).toLocaleString() : '-'],
+            ['Created', fmtDate(task.created_at, { time: true })],
+            ['Updated', fmtDate(task.updated_at, { time: true })],
           ].map(([key, value]) => (
             <div key={key} className="ops-modal__row">
               <span className="ops-modal__key">{key}</span>
@@ -322,6 +325,44 @@ function InspectModal({ task, onClose }) {
   )
 }
 
+// ── Live Progress Panel ───────────────────────────────────────────────────────
+// Lazy-loads TaskProgressBlock to avoid pulling framer-motion into the initial bundle.
+function LiveProgressPanel({ tasks }) {
+  const [Block, setBlock] = useState(null)
+  useEffect(() => {
+    import('../ui/TaskProgressBlock').then(m => setBlock(() => m.default)).catch(() => {})
+  }, [])
+
+  const running = (tasks || []).filter(t => {
+    const s = (t.status || '').toLowerCase()
+    return s === 'running' || s === 'in_progress' || s === 'active'
+  })
+
+  return (
+    <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', flex: 1 }}>
+      <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'var(--nx-gold,#e5c76b)', fontFamily: 'monospace', textTransform: 'uppercase', marginBottom: 4 }}>
+        Live Task Progress · {running.length} running
+      </div>
+      {running.length === 0 && (
+        <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, fontFamily: 'monospace', padding: '20px 0' }}>
+          No tasks currently running — start a task from the Board tab
+        </div>
+      )}
+      {Block && running.map(task => (
+        <Block
+          key={task.id}
+          taskId={task.id}
+          title={task.intent || task.title || task.description || task.id}
+          steps={task.steps || []}
+        />
+      ))}
+      {!Block && running.length > 0 && (
+        <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily: 'monospace' }}>Loading…</div>
+      )}
+    </div>
+  )
+}
+
 export default function OperationsPage() {
   const setActiveSection = useAppStore(s => s.setActiveSection)
   const [tab, setTab] = useState('board')
@@ -335,7 +376,7 @@ export default function OperationsPage() {
   const { data, loading, error, refresh } = useLiveData({
     endpoint: '/api/tasks/list',
     wsEvent: 'task:update',
-    pollMs: 5000,
+    pollMs: 15000,
     transform: (d) => d.tasks || [],
   })
 
@@ -384,8 +425,8 @@ export default function OperationsPage() {
           ))}
         </div>
         <div className="ops-header__actions">
-          <button className="ops-btn ops-btn--primary" onClick={() => setShowForm(v => !v)}>+ NEW TASK</button>
-          <button className="ops-btn ops-btn--sm" onClick={refresh}>Refresh</button>
+          <NxButton variant="primary" onClick={() => setShowForm(v => !v)}>+ NEW TASK</NxButton>
+          <NxButton variant="ghost" size="sm" onClick={refresh}>Refresh</NxButton>
         </div>
       </div>
 
@@ -412,10 +453,8 @@ export default function OperationsPage() {
             </select>
           </div>
           <div className="ops-form-actions">
-            <button className="ops-btn ops-btn--primary" onClick={submitTask} disabled={!goal.trim() || submitting}>
-              {submitting ? 'Submitting…' : 'Run Task'}
-            </button>
-            <button className="ops-btn ops-btn--ghost" onClick={() => setShowForm(false)}>Cancel</button>
+            <NxButton variant="primary" onClick={submitTask} loading={submitting} disabled={!goal.trim() || submitting}>Run Task</NxButton>
+            <NxButton variant="ghost" onClick={() => setShowForm(false)}>Cancel</NxButton>
           </div>
           {submitError && <div className="ops-form-error">{submitError}</div>}
         </div>
@@ -447,6 +486,7 @@ export default function OperationsPage() {
           onProof={() => setActiveSection('proof')}
         />
       )}
+      {tab === 'live' && <LiveProgressPanel tasks={tasks} />}
       {!loading && !error && tab === 'list' && <TaskTable tasks={tasks} onInspect={setInspecting} onCreate={openCreateTask} />}
       {tab === 'create' && <CreateTask onCreated={refresh} />}
       {tab === 'scheduler' && <Scheduler />}

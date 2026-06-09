@@ -1274,3 +1274,15 @@ button:focus-visible, a:focus-visible, [role="tab"]:focus-visible,
 input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--gold, #e5c76b); outline-offset: 2px; border-radius: 4px;
 }
+
+/* ── Performance kill switches ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+.perf-reduced *, .perf-reduced *::before, .perf-reduced *::after {
+  animation-play-state: paused !important;
+}

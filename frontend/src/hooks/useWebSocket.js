@@ -115,6 +115,8 @@ function connectSingleton() {
   ws.onmessage = (evt) => {
     try {
       const msg = JSON.parse(evt.data)
+      // Track last WS event timestamp for LIVE badge
+      window.__lastWsEvent = Date.now()
       if (!_storeBootstrapped) {
         _preStoreQueue.push(msg)
         return
@@ -333,6 +335,20 @@ function dispatchSystemEvent(event, data) {
   switch (event) {
     case 'system:status':
       sys.setSystemStatus(data)
+      // Populate systemHealth so CPU/RAM meters and dashboard panels receive live values.
+      // The server broadcasts system:status with cpu/memory fields; system:health is an alias.
+      sys.setSystemHealth?.({
+        cpu_percent: data.cpu ?? data.cpu_usage ?? 0,
+        memory_percent: data.memory ?? 0,
+        gpu_percent: data.gpu_usage ?? 0,
+        uptime: data.uptime ?? 0,
+        running_agents: data.running_agents ?? 0,
+        total_agents: data.total_agents ?? 0,
+        status: 'live',
+      })
+      break
+    case 'system:health':
+      sys.setSystemHealth?.(data)
       break
     case 'system:degraded':
       sys.addHeartbeatLog({

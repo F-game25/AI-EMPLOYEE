@@ -1009,3 +1009,294 @@ textarea.rp-query-input:focus {
   word-break: break-word;
   margin: 0;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   3-COLUMN LAYOUT (Phase 2B additions)
+   ════════════════════════════════════════════════════════════════════ */
+
+.rp-3col {
+  display: grid;
+  grid-template-columns: 320px 1fr 380px;
+  gap: var(--nx-s-3);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rp-col-left,
+.rp-col-mid,
+.rp-col-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-3);
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nx-border) transparent;
+}
+
+.rp-col-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--nx-border);
+  border-radius: var(--nx-r);
+  min-height: 120px;
+}
+
+.rp-col-placeholder__text {
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  letter-spacing: var(--nx-tracking-cap);
+  color: var(--nx-text-dim);
+  text-align: center;
+}
+
+/* ── Sessions sidebar ────────────────────────────────────────────── */
+.rp-sessions-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-2);
+  flex: 1;
+  min-height: 0;
+}
+
+.rp-sessions-budget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-2);
+  padding: var(--nx-s-3);
+  background: rgba(229, 199, 107, 0.03);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-r);
+  flex-shrink: 0;
+}
+
+.rp-sessions-budget__label {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: var(--nx-tracking-cap);
+  color: var(--nx-text-dim);
+}
+
+.rp-sessions-budget__num {
+  color: var(--nx-text-muted);
+}
+
+.rp-sessions-budget__bar {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.rp-sessions-budget__fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width var(--nx-dur) var(--nx-ease-out);
+}
+
+.rp-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-1);
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nx-border) transparent;
+}
+
+.rp-session-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-s-2);
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-r);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--nx-dur-fast) var(--nx-ease);
+  width: 100%;
+}
+.rp-session-pill:hover {
+  border-color: var(--nx-gold);
+  background: rgba(229, 199, 107, 0.05);
+}
+
+.rp-session-pill__text {
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  color: var(--nx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.rp-session-pill__age {
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  color: var(--nx-text-dim);
+  flex-shrink: 0;
+}
+
+/* ── Pipeline steps ──────────────────────────────────────────────── */
+.rp-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: var(--nx-s-2) 0;
+}
+
+.rp-step {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2);
+  flex-shrink: 0;
+}
+
+.rp-step__icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.rp-step__check {
+  font-size: 12px;
+  color: #22c55e;
+}
+
+.rp-step__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nx-border);
+  display: block;
+}
+
+.rp-step__label {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: var(--nx-tracking-cap);
+  color: var(--nx-text-dim);
+  white-space: nowrap;
+}
+
+.rp-step--active .rp-step__label { color: var(--nx-gold); }
+.rp-step--done .rp-step__label   { color: #22c55e; }
+
+.rp-step__line {
+  flex: 1;
+  height: 1px;
+  background: var(--nx-border);
+  min-width: 16px;
+}
+.rp-step__line--done { background: #22c55e; }
+
+@keyframes rp-spin {
+  to { transform: rotate(360deg); }
+}
+.rp-step__spinner {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(229, 199, 107, 0.2);
+  border-top-color: var(--nx-gold);
+  border-radius: 50%;
+  animation: rp-spin 0.8s linear infinite;
+}
+
+/* ── Results panel extras ────────────────────────────────────────── */
+.rp-results-meta {
+  display: flex;
+  gap: var(--nx-s-2);
+  flex-wrap: wrap;
+}
+
+.rp-results-badge {
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--nx-tracking-cap);
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--nx-border);
+  color: var(--nx-text-dim);
+}
+.rp-results-badge--words      { border-color: rgba(229, 199, 107, 0.3); color: var(--nx-gold); }
+.rp-results-badge--sources    { border-color: rgba(96, 165, 250, 0.3);  color: #60a5fa; }
+.rp-results-badge--simulated  { border-color: rgba(251, 146, 60, 0.4);  color: #fb923c; background: rgba(251, 146, 60, 0.08); font-weight: 700; }
+
+.rp-results-summary {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--nx-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rp-results-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-1);
+  margin-top: var(--nx-s-2);
+}
+
+.rp-results-sources-title {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: var(--nx-tracking-cap);
+  color: var(--nx-text-dim);
+  border-bottom: 1px solid var(--nx-border-faint);
+  padding-bottom: var(--nx-s-1);
+  margin-bottom: var(--nx-s-1);
+}
+
+.rp-results-source-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--nx-s-2);
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+}
+
+.rp-results-source-num {
+  color: var(--nx-text-dim);
+  flex-shrink: 0;
+}
+
+.rp-results-source-link {
+  color: #60a5fa;
+  text-decoration: none;
+  word-break: break-all;
+}
+.rp-results-source-link:hover { text-decoration: underline; }
+
+/* ── Responsive overrides for 3-col ─────────────────────────────── */
+@media (max-width: 1300px) {
+  .rp-3col { grid-template-columns: 280px 1fr 320px; }
+}
+
+@media (max-width: 1000px) {
+  .rp-3col {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+  .rp-col-left  { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .rp-3col { grid-template-columns: 1fr; }
+}

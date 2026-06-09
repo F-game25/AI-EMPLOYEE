@@ -729,6 +729,14 @@
   .swarm-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
 }
 
+@media (max-width: 1024px) {
+  .swarm-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .swarm-grid { grid-template-columns: 1fr; }
+}
+
 /* ── Training Actions in Detail Drawer ──────────────────────────── */
 .drawer-training {
   display: grid;

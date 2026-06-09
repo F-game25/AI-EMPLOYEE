@@ -84,7 +84,7 @@
   justify-content: flex-end;
   min-width: 0;
   flex-wrap: nowrap;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Progressive disclosure: hide non-essential stats as space tightens */
@@ -128,9 +128,9 @@
 }
 .nx-topbar__stat-value {
   font-family: var(--nx-font-mono);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--nx-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--nx-text);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   line-height: 1.05;
@@ -398,4 +398,66 @@
     justify-content: flex-end;
     gap: 6px;
   }
+}
+
+/* ── LIVE data badge ──────────────────────────────────────────────── */
+.nx-topbar__live {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.nx-topbar__live--live {
+  border-color: rgba(0, 255, 136, 0.25);
+  background: rgba(0, 255, 136, 0.06);
+}
+
+.nx-topbar__live--standby {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.nx-topbar__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.nx-topbar__live--live .nx-topbar__live-dot {
+  background: #00ff88;
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.6);
+  animation: nx-live-pulse 2s ease-in-out infinite;
+}
+
+.nx-topbar__live--standby .nx-topbar__live-dot {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.nx-topbar__live-label {
+  font-family: var(--nx-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nx-topbar__live--live .nx-topbar__live-label { color: #00ff88; }
+.nx-topbar__live--standby .nx-topbar__live-label { color: rgba(255, 255, 255, 0.3); }
+
+@keyframes nx-live-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(0, 255, 136, 0.6); }
+  50%       { opacity: 0.6; box-shadow: 0 0 4px rgba(0, 255, 136, 0.3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-topbar__live--live .nx-topbar__live-dot { animation: none; }
+}
+
+@media (max-width: 1400px) {
+  .nx-topbar__live { display: none; }
 }

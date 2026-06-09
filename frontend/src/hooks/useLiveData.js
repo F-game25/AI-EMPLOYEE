@@ -18,8 +18,11 @@ export function useLiveData({ endpoint, wsEvent, pollMs, transform, skip = false
   const [loading, setLoading] = useState(!skip)
   const [error, setError]     = useState(null)
   const [lastTick, setTick]   = useState(null)
-  const abortRef  = useRef(null)
-  const mountedRef = useRef(true)
+  const abortRef    = useRef(null)
+  const mountedRef  = useRef(true)
+  const transformRef = useRef(transform)
+  // Keep transformRef current without it being a dep of refresh
+  transformRef.current = transform
 
   const refresh = useCallback(async () => {
     if (!endpoint || skip) return
@@ -29,11 +32,14 @@ export function useLiveData({ endpoint, wsEvent, pollMs, transform, skip = false
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, { signal: ctrl.signal, credentials: 'include' })
+      const token = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt')
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(`${API_BASE}${endpoint}`, { signal: ctrl.signal, credentials: 'include', headers })
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
       const raw = await res.json()
       if (!mountedRef.current) return
-      setData(transform ? transform(raw) : raw)
+      const fn = transformRef.current
+      setData(fn ? fn(raw) : raw)
       setTick(Date.now())
     } catch (e) {
       if (e.name === 'AbortError') return
@@ -42,7 +48,7 @@ export function useLiveData({ endpoint, wsEvent, pollMs, transform, skip = false
     } finally {
       if (mountedRef.current) setLoading(false)
     }
-  }, [endpoint, skip, transform])
+  }, [endpoint, skip])  // transform intentionally excluded — read via ref
 
   // Initial fetch
   useEffect(() => {

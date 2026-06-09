@@ -46,6 +46,28 @@ def _classify_source_type(url: str) -> str:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BUDGET = int(os.getenv("RESEARCH_MAX_PAGES_PER_DAY", "200"))
+
+
+def _broadcast_ws(event: str, data: dict) -> None:
+    """Fire-and-forget WS broadcast to all connected dashboard clients.
+
+    Uses the server module's _ws_broadcast coroutine if the event loop is
+    already running (normal FastAPI context).  Never raises — broadcast
+    failures must not affect the research loop.
+    """
+    try:
+        from agents.problem_solver_ui import server as _srv  # type: ignore
+        coro = _srv._ws_broadcast(event, data)
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(coro)
+            else:
+                loop.run_until_complete(coro)
+        except RuntimeError:
+            pass  # no event loop available — skip silently
+    except Exception:
+        pass  # import failure or any other error — never propagate
 _DEPTH_PLAN = {0: 3, 1: 6, 2: 10}
 _SCREENSHOT_DIR = Path(__file__).resolve().parents[2] / "state" / "research_screenshots"
 _BUDGET_FILE = Path(__file__).resolve().parents[2] / "state" / "research_budget.json"
@@ -181,8 +203,12 @@ class AutoResearchAgent:
         if not gaps:
             return {"hop": hop, "gaps_researched": [], "findings_count": 0, "sources": []}
 
+        session_id = f"research-{task_id or 'auto'}-hop{hop}"
         self._broadcast("task:research_started", {
             "task_id": task_id, "goal": goal, "hop": hop, "gaps": gaps,
+        })
+        _broadcast_ws("learning:started", {
+            "session_id": session_id, "topic": gaps[0] if gaps else goal, "depth": hop,
         })
 
         all_findings: list[dict] = []
@@ -214,6 +240,10 @@ class AutoResearchAgent:
             "sources": sources,
         }
         self._broadcast("task:research_completed", {"task_id": task_id, "goal": goal, **result})
+        _broadcast_ws("learning:completed", {
+            "session_id": session_id, "topic": gaps[0] if gaps else goal,
+            "new_memories": len(all_findings),
+        })
         return result
 
     # ── Research v2: 2-phase API ─────────────────────────────────────────
@@ -437,6 +467,11 @@ class AutoResearchAgent:
                         "(confidence=%s) url=%s",
                         verification_dict.get("confidence"), url,
                     )
+                    _broadcast_ws("memory:pending_review", {
+                        "id": url_hash,
+                        "claim": summary_text[:100],
+                        "confidence": verification_dict.get("confidence", 0),
+                    })
                 except Exception as e:
                     logger.debug("pending_queue add failed: %s", e)
                 # Skip vector + graph stores until human approves
@@ -462,6 +497,11 @@ class AutoResearchAgent:
                         "verification": verification_dict or None,
                     },
                 )
+                _broadcast_ws("memory:added", {
+                    "id": url_hash,
+                    "topic": gap[:80],
+                    "confidence": float(verification_dict.get("confidence", f.get("trust", 0.5)) or 0.5),
+                })
             except Exception as e:
                 logger.debug("memory store failed: %s", e)
 

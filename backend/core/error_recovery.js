@@ -173,6 +173,10 @@ class ErrorRecoveryManager {
   getRecentErrors(limit = 10) {
     return this.errorLog.slice(-limit).reverse();
   }
+
+  getTotalErrors() {
+    return this.errorLog.length;
+  }
 }
 
 module.exports = ErrorRecoveryManager;

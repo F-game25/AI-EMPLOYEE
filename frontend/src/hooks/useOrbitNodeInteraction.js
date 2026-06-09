@@ -12,7 +12,7 @@ import gsap from 'gsap';
  */
 
 export const useOrbitNodeInteraction = () => {
-  const { setActiveSection } = useAppStore();
+  const setActiveSection = useAppStore(s => s.setActiveSection);
   const cameraRef = useRef(null);
 
   const nodePageMap = {

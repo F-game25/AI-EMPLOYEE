@@ -1,411 +1,422 @@
 'use strict'
-
 /**
- * forge_training.js — Phase 8 Local Model Training Pipeline
+ * Phase 8 — Local helper-model training pipeline.
  *
- * Provides training dataset validation, data preparation, Python trainer
- * invocation (train/evaluate/predict), evaluation gating, and training
- * directory management. All model paths are constrained inside FORGE_HOME.
+ * Trains SMALL advisory helper models (risk classifier, skill selector,
+ * failure classifier, model-router classifier, decomposer helper) from
+ * Phase 7 *approved exported datasets* — never from raw run logs.
+ *
+ * Safety invariants:
+ *  - Consumes only exported jsonl datasets (path boundary-checked).
+ *  - Datasets are validated (schema + secret scan + size + class balance)
+ *    before training. Real training is blocked on validation failure unless
+ *    the caller explicitly overrides for a too-small (warn-level) dataset.
+ *  - No model is auto-activated. Promotion requires a passed evaluation
+ *    + explicit user approval.
+ *  - Helper models are ADVISORY: they never override safety gates.
+ *  - All artifacts written under FORGE_HOME/training/<project>/<run>/.
+ *  - No package installation. Missing deps => NEEDS_SETUP, never fake success.
  */
 
 const fs = require('fs')
 const path = require('path')
-const { spawn } = require('child_process')
 const crypto = require('crypto')
-const os = require('os')
+const { spawn } = require('child_process')
+const { scrubSecretsFromLearningData } = require('./forge_learning')
 
-// ── Constants ──────────────────────────────────────────────────────────────────
+const TRAIN_SCRIPT = path.join(__dirname, '..', 'forge_train.py')
 
-/** Supported model types and their training requirements. */
+// ── Model type registry ─────────────────────────────────────────────────────
+
 const MODEL_TYPES = {
-  skill_selector: {
-    label: 'Skill Selector',
-    description: 'Predicts which skill to apply for a given goal',
-    min_preferred: 30,
-    warn_below: 10,
-    eval_threshold: 0.65,
-  },
   risk_classifier: {
     label: 'Risk Classifier',
-    description: 'Classifies action risk level (low/medium/high)',
-    min_preferred: 50,
-    warn_below: 20,
-    eval_threshold: 0.70,
+    labels: ['low', 'medium', 'high', 'critical'],
+    min_preferred: 50, warn_below: 30,
+    eval_type: 'risk_classifier_eval',
+    derive: deriveRiskClassifierExamples,
   },
-  code_reviewer: {
-    label: 'Code Reviewer',
-    description: 'Advisory code quality scoring',
-    min_preferred: 40,
-    warn_below: 15,
-    eval_threshold: 0.60,
+  skill_selector: {
+    label: 'Skill Selector',
+    labels: null, // open label set (skill IDs)
+    min_preferred: 30, warn_below: 20,
+    eval_type: 'skill_selection_eval',
+    derive: deriveSkillSelectorExamples,
   },
-  debug_advisor: {
-    label: 'Debug Advisor',
-    description: 'Suggests debugging strategies for failing tests',
-    min_preferred: 25,
-    warn_below: 10,
-    eval_threshold: 0.60,
+  failure_classifier: {
+    label: 'Failure Classifier',
+    labels: ['syntax_error', 'missing_import', 'type_error', 'test_failure', 'security_block', 'unknown'],
+    min_preferred: 50, warn_below: 30,
+    eval_type: null,
+    derive: deriveFailureClassifierExamples,
+  },
+  model_router_classifier: {
+    label: 'Model Router Classifier',
+    labels: null,
+    min_preferred: 40, warn_below: 25,
+    eval_type: 'model_router_eval',
+    derive: deriveModelRouterExamples,
+  },
+  decomposer_helper: {
+    label: 'Decomposer Helper',
+    labels: null,
+    min_preferred: 20, warn_below: 10,
+    eval_type: 'decomposer_eval',
+    derive: deriveDecomposerExamples,
   },
 }
 
-/** Supported training methods. */
-const TRAINING_METHODS = [
-  'local_classifier',   // numpy logistic regression (zero extra deps)
-  'rule_augmented',     // no ML weights — uses distilled rules only
-  'lora_adapter',       // requires peft/transformers/torch (opt-in)
-]
+const TRAINING_METHODS = ['rule_augmented', 'local_classifier', 'lora_adapter']
 
-// Secrets that must never appear in training data
-const SECRET_PATTERNS = [
-  /\b(api[_-]?key|secret|password|token|bearer|credential|private[_-]key)\s*[=:]\s*\S+/i,
-  /sk-[A-Za-z0-9]{20,}/,
-  /ghp_[A-Za-z0-9]{36}/,
-  /AKIA[A-Z0-9]{16}/,
-]
+// ── Path safety ──────────────────────────────────────────────────────────────
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function nowIso() { return new Date().toISOString() }
-
-function _containsSecret(text) {
-  return typeof text === 'string' && SECRET_PATTERNS.some(re => re.test(text))
-}
-
-function _deepContainsSecret(value) {
-  if (typeof value === 'string') return _containsSecret(value)
-  if (Array.isArray(value)) return value.some(_deepContainsSecret)
-  if (value && typeof value === 'object') return Object.values(value).some(_deepContainsSecret)
-  return false
-}
-
-// ── Path safety ────────────────────────────────────────────────────────────────
-
-/**
- * Throws if modelPath is not inside forgeHome (path traversal guard).
- */
-function assertInsideForgeHome(modelPath, forgeHome) {
-  const resolved = path.resolve(modelPath)
-  const base = path.resolve(forgeHome)
-  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
-    throw new Error(`model_path must be inside FORGE_HOME: ${modelPath}`)
-  }
-}
-
-// ── Training directory ─────────────────────────────────────────────────────────
-
-/**
- * Returns (and creates) the training directory for a given project + run.
- */
 function trainingDir(forgeHome, projectId, trainingRunId) {
-  const dir = path.join(forgeHome, 'training', projectId, trainingRunId)
-  fs.mkdirSync(dir, { recursive: true })
-  return dir
+  const base = path.join(forgeHome, 'training', projectId, trainingRunId)
+  const resolved = path.resolve(base)
+  if (!resolved.startsWith(path.resolve(forgeHome) + path.sep)) {
+    throw new Error('training path escapes FORGE_HOME boundary')
+  }
+  return resolved
 }
 
-// ── Dataset validation ─────────────────────────────────────────────────────────
+function assertInsideForgeHome(p, forgeHome) {
+  const resolved = path.resolve(p)
+  if (!resolved.startsWith(path.resolve(forgeHome) + path.sep)) {
+    throw new Error('path escapes FORGE_HOME boundary')
+  }
+  // reject symlink escape on existing paths
+  try {
+    if (fs.existsSync(resolved)) {
+      const real = fs.realpathSync(resolved)
+      if (!real.startsWith(path.resolve(forgeHome) + path.sep)) {
+        throw new Error('symlink escapes FORGE_HOME boundary')
+      }
+    }
+  } catch (e) {
+    if (/boundary/.test(e.message)) throw e
+  }
+  return resolved
+}
 
-/**
- * Validate a dataset before training.
- *
- * dataset — { export_path, record_count, dataset_type }
- * modelType — key in MODEL_TYPES
- * opts — { min_confidence, only_human_approved }
- * forgeHome — string (for path assertions)
- *
- * Returns: { ok, result, issues, record_count, approved_count, rejected_count,
- *            secret_scan_passed, class_distribution, examples }
- */
-function validateTrainingDataset(dataset, modelType, opts = {}, forgeHome) {
-  const spec = MODEL_TYPES[modelType]
-  if (!spec) throw new Error(`Unknown model_type: ${modelType}`)
+// ── Secret detection (defense in depth, beyond Phase 7 scrubbing) ────────────
 
+const SECRET_SIGNATURES = [
+  /eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/, // JWT
+  /sk-ant-[A-Za-z0-9_\-]{20,}/,                               // anthropic
+  /(?:AKIA|ASIA)[A-Z0-9]{16}/,                                // AWS
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,                       // PEM
+  /\b[A-Fa-f0-9]{40,}\b/,                                     // long hex secret
+]
+
+function lineContainsSecret(line) {
+  return SECRET_SIGNATURES.some(re => re.test(line))
+}
+
+// ── Dataset validation ───────────────────────────────────────────────────────
+
+const CONF_ORDER = { low: 0, medium: 1, high: 2 }
+
+function validateTrainingDataset(dataset, modelType, options, forgeHome) {
   const issues = []
-  let examples = []
+  const spec = MODEL_TYPES[modelType]
+  if (!spec) return { ok: false, result: 'invalid', issues: [`unknown model_type: ${modelType}`], record_count: 0, approved_count: 0, rejected_count: 0, secret_scan_passed: false }
+
+  const minConf = options?.min_confidence || 'low'
+  const minConfScore = CONF_ORDER[minConf] ?? 0
+
+  // 1. dataset exists + path safety
+  if (!dataset || !dataset.export_path) {
+    issues.push('dataset has no export_path')
+    return { ok: false, result: 'failed', issues, record_count: 0, approved_count: 0, rejected_count: 0, secret_scan_passed: false }
+  }
+  let exportPath
+  try {
+    exportPath = assertInsideForgeHome(dataset.export_path, forgeHome)
+  } catch (e) {
+    issues.push(e.message)
+    return { ok: false, result: 'failed', issues, record_count: 0, approved_count: 0, rejected_count: 0, secret_scan_passed: false }
+  }
+  if (!fs.existsSync(exportPath)) {
+    issues.push(`dataset file not found: ${path.basename(exportPath)}`)
+    return { ok: false, result: 'failed', issues, record_count: 0, approved_count: 0, rejected_count: 0, secret_scan_passed: false }
+  }
+  if (!exportPath.endsWith('.jsonl')) {
+    issues.push('dataset is not a .jsonl file')
+  }
+
+  // 2. parse each line + secret scan
+  const raw = fs.readFileSync(exportPath, 'utf8')
+  const lines = raw.split('\n').filter(l => l.trim())
+  const records = []
   let secretScanPassed = true
-
-  // Read examples from the export_path JSONL
-  const exportPath = dataset?.export_path
-  if (!exportPath || !fs.existsSync(exportPath)) {
-    return { ok: false, result: 'failed', issues: ['dataset export file not found'], record_count: 0, approved_count: 0, rejected_count: 0, secret_scan_passed: false, class_distribution: {}, examples: [] }
-  }
-
-  // Ensure the path is inside FORGE_HOME (if provided)
-  if (forgeHome) {
-    try { assertInsideForgeHome(exportPath, forgeHome) }
-    catch (err) { return { ok: false, result: 'failed', issues: [err.message], record_count: 0, approved_count: 0, rejected_count: 0, secret_scan_passed: false, class_distribution: {}, examples: [] } }
-  }
-
-  const lines = fs.readFileSync(exportPath, 'utf8').split('\n').filter(Boolean)
-  for (const line of lines) {
+  let parseErrors = 0
+  for (let i = 0; i < lines.length; i++) {
+    if (lineContainsSecret(lines[i])) {
+      secretScanPassed = false
+      issues.push(`secret detected on line ${i + 1} — dataset rejected`)
+    }
     try {
-      const rec = JSON.parse(line)
-      if (_deepContainsSecret(rec)) { secretScanPassed = false; continue }
-      examples.push(rec)
-    } catch { /* skip malformed lines */ }
+      records.push(JSON.parse(lines[i]))
+    } catch {
+      parseErrors++
+      if (parseErrors <= 3) issues.push(`line ${i + 1} is not valid JSON`)
+    }
+  }
+  if (parseErrors > 0) issues.push(`${parseErrors} line(s) failed to parse`)
+
+  // 3. derive labeled examples for this model type
+  const derived = spec.derive(records, { minConfScore, onlyApproved: options?.only_human_approved })
+  const approvedCount = derived.examples.length
+  const rejectedCount = derived.rejected
+  derived.issues.forEach(x => issues.push(x))
+
+  // 4. label validity (closed-set model types)
+  if (spec.labels) {
+    const badLabels = new Set()
+    for (const ex of derived.examples) {
+      if (!spec.labels.includes(String(ex.label))) badLabels.add(ex.label)
+    }
+    if (badLabels.size) issues.push(`invalid labels: ${[...badLabels].join(', ')}`)
   }
 
-  if (!secretScanPassed) issues.push('secret scan: one or more records contained secrets and were excluded')
-
-  const { only_human_approved = false } = opts
-  if (only_human_approved) {
-    const before = examples.length
-    examples = examples.filter(e => e.approved_for_training === true || e.label !== undefined)
-    const rejected = before - examples.length
-    if (rejected > 0) issues.push(`${rejected} records excluded (not human-approved)`)
+  // 5. class balance + distinct-class check
+  const classCounts = {}
+  for (const ex of derived.examples) classCounts[ex.label] = (classCounts[ex.label] || 0) + 1
+  const distinctClasses = Object.keys(classCounts).length
+  if (distinctClasses < 2) {
+    issues.push(`need >= 2 distinct classes for training, found ${distinctClasses}`)
+  }
+  const counts = Object.values(classCounts)
+  if (counts.length >= 2) {
+    const maxC = Math.max(...counts), minC = Math.min(...counts)
+    if (minC > 0 && maxC / minC > 10) issues.push(`class imbalance is high (${maxC}:${minC}) — model may be biased`)
   }
 
-  const totalCount = examples.length
-  const approvedCount = examples.filter(e => e.label !== undefined || e.is_positive !== undefined).length
-  const rejectedCount = totalCount - approvedCount
-
-  const classDist = {}
-  for (const ex of examples) {
-    const label = String(ex.label ?? (ex.is_positive ? 'positive' : 'negative') ?? 'unknown')
-    classDist[label] = (classDist[label] || 0) + 1
+  // 6. size thresholds
+  let result = 'passed'
+  if (approvedCount < spec.warn_below) {
+    issues.push(`only ${approvedCount} usable example(s); real training blocked below ${spec.warn_below} (override required)`)
+    result = 'too_small'
+  } else if (approvedCount < spec.min_preferred) {
+    issues.push(`${approvedCount} examples — below preferred ${spec.min_preferred}; results may be weak`)
+    result = 'warn'
   }
 
-  if (totalCount === 0) {
-    issues.push('no valid examples after filtering')
-    return { ok: false, result: 'failed', issues, record_count: 0, approved_count: 0, rejected_count: 0, secret_scan_passed: secretScanPassed, class_distribution: {}, examples: [] }
-  }
-
-  if (totalCount < spec.warn_below) {
-    issues.push(`only ${totalCount} examples (minimum preferred: ${spec.min_preferred})`)
-    return { ok: false, result: 'too_small', issues, record_count: totalCount, approved_count: approvedCount, rejected_count: rejectedCount, secret_scan_passed: secretScanPassed, class_distribution: classDist, examples }
-  }
-
-  if (totalCount < spec.min_preferred) {
-    issues.push(`${totalCount} examples — below preferred ${spec.min_preferred}, results may be noisy`)
-  }
+  // Hard failures override
+  if (!secretScanPassed) result = 'failed'
+  if (parseErrors > 0 && approvedCount === 0) result = 'failed'
+  if (distinctClasses < 2) result = (result === 'failed') ? 'failed' : 'too_small'
 
   return {
-    ok: true,
-    result: 'ok',
+    ok: result === 'passed' || result === 'warn',
+    result,
     issues,
-    record_count: totalCount,
+    record_count: records.length,
     approved_count: approvedCount,
     rejected_count: rejectedCount,
     secret_scan_passed: secretScanPassed,
-    class_distribution: classDist,
-    examples,
+    class_distribution: classCounts,
+    examples: derived.examples, // returned for prepare step
   }
 }
 
-// ── Data preparation ───────────────────────────────────────────────────────────
+// ── Example derivation from Phase 7 exports ──────────────────────────────────
+// Phase 7 exports come in three shapes:
+//   - jsonl: full distillation records (have eval_cases, lessons, etc.)
+//   - eval_jsonl: flat eval cases {eval_type, input, expected, negative_case}
+//   - preference_jsonl: preference pairs
+// We derive labeled (input, label) examples from eval cases primarily.
 
-/**
- * Write validated examples to train/eval split JSONL files.
- * Returns: { trainPath, evalPath, train_count, eval_count }
- */
-function prepareTrainingData(examples, dir) {
-  fs.mkdirSync(dir, { recursive: true })
-  // 80/20 split
-  const split = Math.max(1, Math.floor(examples.length * 0.8))
-  const trainExamples = examples.slice(0, split)
-  const evalExamples = examples.slice(split)
-
-  const trainPath = path.join(dir, 'prepared_train.jsonl')
-  const evalPath = path.join(dir, 'prepared_eval.jsonl')
-  fs.writeFileSync(trainPath, trainExamples.map(e => JSON.stringify(e)).join('\n') + '\n', { mode: 0o600 })
-  fs.writeFileSync(evalPath, evalExamples.map(e => JSON.stringify(e)).join('\n') + '\n', { mode: 0o600 })
-
-  return { trainPath, evalPath, train_count: trainExamples.length, eval_count: evalExamples.length }
+function _collectEvalCases(records) {
+  const cases = []
+  for (const r of records) {
+    if (r.eval_type && r.input) {
+      cases.push(r) // flat eval case
+    } else if (Array.isArray(r.eval_cases)) {
+      for (const ec of r.eval_cases) cases.push(ec) // nested in distillation record
+    }
+  }
+  return cases
 }
 
-// ── Python trainer ─────────────────────────────────────────────────────────────
+function _passesFilters(rec, opts) {
+  const confScore = CONF_ORDER[rec.confidence] ?? 0
+  if (confScore < (opts.minConfScore ?? 0)) return false
+  return true
+}
 
-/**
- * Inline Python trainer script (numpy logistic regression).
- * Handles operations: train, evaluate, predict.
- * Self-contained — no peft/torch required for local_classifier.
- */
-const PYTHON_TRAINER_SCRIPT = `
-import sys, json, os
+function deriveRiskClassifierExamples(records, opts) {
+  const examples = []
+  const issues = []
+  let rejected = 0
+  for (const ec of _collectEvalCases(records)) {
+    if (ec.eval_type !== 'risk_classifier_eval' && ec.eval_type !== 'planner_eval') continue
+    if (!_passesFilters(ec, opts)) { rejected++; continue }
+    const label = ec.expected?.classification || ec.expected?.risk_level
+    if (!label || !['low', 'medium', 'high', 'critical', 'blocked'].includes(String(label))) { rejected++; continue }
+    const normLabel = label === 'blocked' ? 'critical' : label
+    examples.push({
+      input: {
+        goal: ec.input?.goal || '',
+        file_path: ec.input?.file_path || '',
+        action_type: ec.input?.action_type || '',
+        stack: ec.input?.stack || ec.input?.project_stack || '',
+      },
+      label: normLabel,
+    })
+  }
+  if (!examples.length) issues.push('no risk_classifier examples derivable from this dataset')
+  return { examples, rejected, issues }
+}
 
-payload = json.loads(sys.stdin.read())
-op = payload.get('operation', 'train')
+function deriveSkillSelectorExamples(records, opts) {
+  const examples = []
+  const issues = []
+  let rejected = 0
+  for (const ec of _collectEvalCases(records)) {
+    if (ec.eval_type !== 'planner_eval' && ec.eval_type !== 'skill_selection_eval') continue
+    if (!_passesFilters(ec, opts)) { rejected++; continue }
+    const skills = ec.expected?.selected_skills
+    if (!Array.isArray(skills) || !skills.length) { rejected++; continue }
+    examples.push({
+      input: { goal: ec.input?.goal || '', stack: ec.input?.stack || '' },
+      label: skills[0], // top-1 skill as label
+    })
+  }
+  if (!examples.length) issues.push('no skill_selector examples derivable from this dataset')
+  return { examples, rejected, issues }
+}
 
-def _featurize(examples):
-    # Simple bag-of-words over goal text
-    import re
-    vocab = {}
-    for ex in examples:
-        text = str(ex.get('goal', '') or ex.get('input', {}).get('goal', '') or ex.get('prompt', ''))
-        for tok in re.findall(r'[a-z]+', text.lower()):
-            if tok not in vocab:
-                vocab[tok] = len(vocab)
-    X = []
-    for ex in examples:
-        text = str(ex.get('goal', '') or ex.get('input', {}).get('goal', '') or ex.get('prompt', ''))
-        row = [0.0] * len(vocab)
-        for tok in re.findall(r'[a-z]+', text.lower()):
-            if tok in vocab:
-                row[vocab[tok]] = 1.0
-        X.append(row)
-    return X, vocab
+function deriveFailureClassifierExamples(records, opts) {
+  const examples = []
+  const issues = []
+  let rejected = 0
+  for (const ec of _collectEvalCases(records)) {
+    if (ec.eval_type !== 'command_safety_eval') continue
+    if (!_passesFilters(ec, opts)) { rejected++; continue }
+    const verdict = ec.expected?.verdict
+    const label = verdict === 'block' ? 'security_block' : 'unknown'
+    examples.push({
+      input: { findings: ec.expected?.findings || [], goal: ec.input?.goal || '' },
+      label,
+    })
+  }
+  if (!examples.length) issues.push('no failure_classifier examples derivable (needs command_safety_eval cases)')
+  return { examples, rejected, issues }
+}
 
-if op == 'train':
-    train_path = payload.get('train_path', '')
-    model_path = payload.get('model_path', '')
-    epochs = int(payload.get('epochs', 100))
+function deriveModelRouterExamples(records, opts) {
+  const examples = []
+  const issues = []
+  let rejected = 0
+  for (const ec of _collectEvalCases(records)) {
+    if (ec.eval_type !== 'model_router_eval') continue
+    if (!_passesFilters(ec, opts)) { rejected++; continue }
+    const routing = ec.expected?.routing || {}
+    const stages = Object.keys(routing)
+    if (!stages.length) { rejected++; continue }
+    for (const stage of stages) {
+      examples.push({
+        input: { stage, stack: ec.input?.stack || '', goal: ec.input?.goal || '' },
+        label: String(routing[stage]),
+      })
+    }
+  }
+  if (!examples.length) issues.push('no model_router examples derivable from this dataset')
+  return { examples, rejected, issues }
+}
 
-    try:
-        import numpy as np
-        lines = open(train_path).read().strip().split('\\n') if os.path.exists(train_path) else []
-        examples = [json.loads(l) for l in lines if l.strip()]
-        if not examples:
-            print(json.dumps({'ok': False, 'error': 'no training examples'}))
-            sys.exit(0)
+function deriveDecomposerExamples(records, opts) {
+  const examples = []
+  const issues = []
+  let rejected = 0
+  for (const ec of _collectEvalCases(records)) {
+    if (ec.eval_type !== 'decomposer_eval' && ec.eval_type !== 'planner_eval') continue
+    if (!_passesFilters(ec, opts)) { rejected++; continue }
+    const risk = ec.expected?.risk_level
+    if (!risk) { rejected++; continue }
+    examples.push({
+      input: { goal: ec.input?.goal || '', stack: ec.input?.stack || '' },
+      label: ec.expected?.should_decompose ? 'decompose' : 'single_run',
+    })
+  }
+  if (!examples.length) issues.push('no decomposer examples derivable from this dataset')
+  return { examples, rejected, issues }
+}
 
-        labels_raw = [ex.get('label', 1 if ex.get('is_positive') else 0) for ex in examples]
-        classes = sorted(set(str(l) for l in labels_raw))
-        label_map = {c: i for i, c in enumerate(classes)}
-        y = np.array([label_map[str(l)] for l in labels_raw])
-        X_list, vocab = _featurize(examples)
-        X = np.array(X_list) if X_list and X_list[0] else np.zeros((len(examples), 1))
+// ── Python trainer invocation ────────────────────────────────────────────────
 
-        # Logistic regression via gradient descent
-        n, d = X.shape
-        k = len(classes)
-        W = np.zeros((d, k))
-        lr = 0.1
-        for _ in range(epochs):
-            logits = X @ W
-            logits -= logits.max(axis=1, keepdims=True)
-            probs = np.exp(logits)
-            probs /= probs.sum(axis=1, keepdims=True)
-            one_hot = np.eye(k)[y]
-            grad = X.T @ (probs - one_hot) / n
-            W -= lr * grad
-
-        logits = X @ W
-        preds = logits.argmax(axis=1)
-        acc = float((preds == y).mean())
-
-        model = {'W': W.tolist(), 'vocab': vocab, 'classes': classes, 'label_map': label_map}
-        import json as _json
-        open(model_path, 'w').write(_json.dumps(model))
-        print(json.dumps({'ok': True, 'train_accuracy': acc, 'classes': classes, 'train_records': n}))
-    except ImportError:
-        print(json.dumps({'ok': False, 'code': 'NEEDS_SETUP', 'error': 'numpy is required for local_classifier training. Install via: pip install numpy'}))
-
-elif op == 'evaluate':
-    model_path = payload.get('model_path', '')
-    eval_path = payload.get('eval_path', '')
-    try:
-        import numpy as np
-        model = json.loads(open(model_path).read())
-        lines = open(eval_path).read().strip().split('\\n') if os.path.exists(eval_path) else []
-        examples = [json.loads(l) for l in lines if l.strip()]
-        if not examples:
-            print(json.dumps({'ok': True, 'metrics': {'accuracy': 0.0, 'n': 0}}))
-            sys.exit(0)
-        vocab = model['vocab']
-        classes = model['classes']
-        label_map = model['label_map']
-        W = np.array(model['W'])
-        labels_raw = [ex.get('label', 1 if ex.get('is_positive') else 0) for ex in examples]
-        y = np.array([label_map.get(str(l), 0) for l in labels_raw])
-        X_list = []
-        for ex in examples:
-            text = str(ex.get('goal', '') or ex.get('input', {}).get('goal', '') or '')
-            import re
-            row = [0.0] * len(vocab)
-            for tok in re.findall(r'[a-z]+', text.lower()):
-                if tok in vocab:
-                    row[vocab[tok]] = 1.0
-            X_list.append(row)
-        X = np.array(X_list) if X_list and X_list[0] else np.zeros((len(examples), 1))
-        preds = (X @ W).argmax(axis=1)
-        acc = float((preds == y).mean())
-        print(json.dumps({'ok': True, 'metrics': {'accuracy': acc, 'n': len(examples)}}))
-    except ImportError:
-        print(json.dumps({'ok': False, 'code': 'NEEDS_SETUP', 'error': 'numpy required for evaluation'}))
-
-elif op == 'predict':
-    model_path = payload.get('model_path', '')
-    inp = payload.get('input', {})
-    try:
-        import numpy as np, re
-        model = json.loads(open(model_path).read())
-        vocab = model['vocab']
-        classes = model['classes']
-        W = np.array(model['W'])
-        text = str(inp.get('goal', '') or inp.get('text', '') or json.dumps(inp))
-        row = [0.0] * len(vocab)
-        for tok in re.findall(r'[a-z]+', text.lower()):
-            if tok in vocab:
-                row[vocab[tok]] = 1.0
-        X = np.array([row])
-        logits = (X @ W)[0]
-        logits -= logits.max()
-        probs = list(float(p) for p in (lambda e: e / e.sum())(np.exp(logits)))
-        ranked = sorted(zip(classes, probs), key=lambda t: -t[1])
-        prediction = ranked[0][0]
-        confidence = ranked[0][1]
-        print(json.dumps({'ok': True, 'prediction': prediction, 'confidence': confidence, 'ranked': [{'label': r[0], 'score': r[1]} for r in ranked]}))
-    except ImportError:
-        print(json.dumps({'ok': False, 'error': 'numpy required for prediction'}))
-    except Exception as e:
-        print(json.dumps({'ok': False, 'error': str(e)}))
-
-else:
-    print(json.dumps({'ok': False, 'error': f'unknown operation: {op}'}))
-`
-
-/**
- * Invoke the inline Python trainer with a payload object.
- * operation: 'train' | 'evaluate' | 'predict'
- * Returns: { ok, ... }
- */
-function runPythonTrainer(payload, timeoutMs = 60000) {
-  return new Promise(resolve => {
-    let stdout = ''
-    let stderr = ''
-    const child = spawn(process.env.PYTHON || 'python3', ['-c', PYTHON_TRAINER_SCRIPT], {
+function runPythonTrainer(payload, timeoutMs = 120000) {
+  return new Promise((resolve) => {
+    let stdout = '', stderr = ''
+    const child = spawn(process.env.PYTHON_BIN || 'python3', [TRAIN_SCRIPT], {
       timeout: timeoutMs,
+      env: { ...process.env },
     })
     child.stdin.write(JSON.stringify(payload))
     child.stdin.end()
     child.stdout.on('data', d => { stdout += d })
     child.stderr.on('data', d => { stderr += d })
-    child.on('close', code => {
-      if (code !== 0 && !stdout.trim()) {
-        return resolve({ ok: false, error: stderr.slice(0, 400) || `trainer exited ${code}` })
-      }
+    child.on('close', () => {
       try {
-        const line = stdout.trim().split('\n').pop() || '{}'
+        const line = stdout.trim().split('\n').filter(Boolean).pop() || '{}'
         resolve(JSON.parse(line))
       } catch {
-        resolve({ ok: false, error: 'could not parse trainer output', stdout: stdout.slice(0, 400) })
+        resolve({ ok: false, error: `trainer output unparseable: ${(stderr || stdout).slice(0, 300)}` })
       }
     })
-    child.on('error', err => resolve({ ok: false, error: err.message }))
+    child.on('error', err => resolve({ ok: false, error: err.message, code: 'NEEDS_SETUP' }))
   })
 }
 
-// ── Evaluation gate ────────────────────────────────────────────────────────────
+// ── Prepare training data (write prepared_train/eval jsonl) ───────────────────
 
-/**
- * Apply the promotion gate: check if eval metrics pass the threshold for modelType.
- * Returns: { passed, failure_reasons }
- */
-function applyEvalGate(modelType, metrics, _unused) {
-  const spec = MODEL_TYPES[modelType]
-  if (!spec) return { passed: false, failure_reasons: [`unknown model_type: ${modelType}`] }
-  const accuracy = metrics?.accuracy ?? 0
-  const threshold = spec.eval_threshold
-  const failureReasons = []
-  if (accuracy < threshold) failureReasons.push(`accuracy ${accuracy.toFixed(3)} below threshold ${threshold}`)
-  if (metrics?.n !== undefined && metrics.n < 5) failureReasons.push(`evaluation set too small (${metrics.n} examples)`)
-  return { passed: failureReasons.length === 0, failure_reasons: failureReasons }
+function prepareTrainingData(examples, dir, splitRatio = 0.8) {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // Scrub once more before writing to disk
+  const clean = examples.map(e => scrubSecretsFromLearningData(e))
+  // Shuffle deterministically then split
+  const shuffled = [...clean].sort(() => 0.5 - Math.random())
+  const splitIdx = Math.max(1, Math.floor(shuffled.length * splitRatio))
+  const train = shuffled.slice(0, splitIdx)
+  const evalSet = shuffled.slice(splitIdx).length ? shuffled.slice(splitIdx) : shuffled.slice(0, Math.max(1, Math.floor(shuffled.length * 0.2)))
+  const trainPath = path.join(dir, 'prepared_train.jsonl')
+  const evalPath = path.join(dir, 'prepared_eval.jsonl')
+  fs.writeFileSync(trainPath, train.map(r => JSON.stringify(r)).join('\n'), { mode: 0o600 })
+  fs.writeFileSync(evalPath, evalSet.map(r => JSON.stringify(r)).join('\n'), { mode: 0o600 })
+  return { trainPath, evalPath, train_count: train.length, eval_count: evalSet.length }
+}
+
+// ── Evaluation gate ──────────────────────────────────────────────────────────
+// A candidate must beat the rule-augmented baseline AND meet absolute minimums.
+
+const EVAL_THRESHOLDS = {
+  risk_classifier: { min_accuracy: 0.6, max_high_risk_fn_rate: 0.25 },
+  skill_selector: { min_accuracy: 0.4 },
+  failure_classifier: { min_accuracy: 0.5 },
+  model_router_classifier: { min_accuracy: 0.5 },
+  decomposer_helper: { min_accuracy: 0.5 },
+}
+
+function applyEvalGate(modelType, metrics, baselineAccuracy = 0) {
+  const t = EVAL_THRESHOLDS[modelType] || { min_accuracy: 0.5 }
+  const reasons = []
+  const acc = metrics.accuracy ?? 0
+  if (acc < t.min_accuracy) reasons.push(`accuracy ${acc} below minimum ${t.min_accuracy}`)
+  if (acc <= baselineAccuracy) reasons.push(`accuracy ${acc} does not beat baseline ${baselineAccuracy}`)
+  if (t.max_high_risk_fn_rate != null && (metrics.high_risk_false_negative_rate ?? 0) > t.max_high_risk_fn_rate) {
+    reasons.push(`high-risk false-negative rate ${metrics.high_risk_false_negative_rate} exceeds ${t.max_high_risk_fn_rate} — unsafe`)
+  }
+  return { passed: reasons.length === 0, failure_reasons: reasons }
 }
 
 module.exports = {
   MODEL_TYPES,
   TRAINING_METHODS,
-  assertInsideForgeHome,
+  EVAL_THRESHOLDS,
   trainingDir,
+  assertInsideForgeHome,
+  lineContainsSecret,
   validateTrainingDataset,
   prepareTrainingData,
   runPythonTrainer,

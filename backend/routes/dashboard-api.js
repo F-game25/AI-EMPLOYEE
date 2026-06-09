@@ -1812,7 +1812,7 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
       const cpu_cores = os.cpus().length
       const cpu_model = os.cpus()[0]?.model || 'unknown'
 
-      let gpu = null, vram_gb = 0
+      let gpu = null, vram_gb = 0, amd_gpu = false
       try {
         const smi = execSync('nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits', { timeout: 3000 }).toString().trim()
         if (smi) {
@@ -1821,20 +1821,55 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
         }
       } catch {}
 
+      if (vram_gb === 0) {
+        try {
+          const rocm = execSync('rocm-smi --showmeminfo vram --json', { timeout: 3000 }).toString().trim()
+          const parsed = JSON.parse(rocm)
+          const card = Object.values(parsed)[0]
+          const totalBytes = card?.['VRAM Total Memory (B)'] || card?.['vram_total_memory'] || 0
+          if (totalBytes > 0) {
+            vram_gb = Math.round(parseInt(totalBytes) / 1073741824)
+            gpu = card?.['Card series'] || card?.['card_series'] || 'AMD GPU'
+            amd_gpu = true
+          }
+        } catch {}
+      }
+
       let tier = 'cpu'
       if (vram_gb >= 24) tier = 'high'
       else if (vram_gb >= 8) tier = 'mid'
       else if (vram_gb >= 4) tier = 'low'
       else if (gpu) tier = 'low'
 
+      const q = vram_gb >= 16 ? '' : vram_gb >= 8 ? ':q5_K_M' : ':q4_K_M'
       const recommended = {
-        cpu:  [{ provider: 'ollama', model: 'llama3.2:3b' }, { provider: 'ollama', model: 'phi3:mini' }],
-        low:  [{ provider: 'ollama', model: 'qwen2.5-coder:7b' }, { provider: 'ollama', model: 'llama3.2:8b' }],
-        mid:  [{ provider: 'ollama', model: 'qwen2.5-coder:32b-q4_K_M' }, { provider: 'ollama', model: 'llama3.3:70b-q4_K_M' }],
-        high: [{ provider: 'ollama', model: 'llama3.3:70b' }, { provider: 'ollama', model: 'qwen2.5-coder:32b' }],
+        cpu: [
+          { provider: 'ollama', model: 'phi3:mini', vram_est_gb: 2.3, note: 'Fastest on CPU' },
+          { provider: 'ollama', model: 'llama3.2:3b', vram_est_gb: 2.0, note: 'Good quality/speed' },
+        ],
+        low: [
+          { provider: 'ollama', model: `mistral:7b${q}`, vram_est_gb: vram_gb >= 8 ? 5.5 : 4.1, note: 'Best 7B on limited VRAM' },
+          { provider: 'ollama', model: `llama3.2:3b${q}`, vram_est_gb: 2.0, note: 'Ultra-fast' },
+        ],
+        mid: [
+          { provider: 'ollama', model: `llama3.1:8b${q}`, vram_est_gb: vram_gb >= 16 ? 8.0 : 5.5, note: 'Balanced performance' },
+          { provider: 'ollama', model: `qwen2.5-coder:7b${q}`, vram_est_gb: 4.5, note: 'Best for coding' },
+          { provider: 'ollama', model: `mistral:7b${q}`, vram_est_gb: 4.1, note: 'Fast general purpose' },
+        ],
+        high: [
+          { provider: 'ollama', model: 'llama3.1:70b:q4_K_M', vram_est_gb: 42, note: 'Top quality' },
+          { provider: 'ollama', model: 'qwen2.5-coder:32b:q5_K_M', vram_est_gb: 22, note: 'Best coder' },
+          { provider: 'ollama', model: 'llama3.3:70b:q4_K_M', vram_est_gb: 40, note: 'Latest Llama' },
+        ],
       }[tier] || []
 
-      res.json({ gpu, vram_gb, ram_gb, cpu_cores, cpu_model, tier, recommended })
+      // ui_tier maps hardware to frontend performance tier
+      let ui_tier = 'high'
+      if (ram_gb <= 4 || cpu_cores <= 2) ui_tier = 'low'
+      else if (ram_gb <= 8 || cpu_cores <= 4 || (gpu && vram_gb > 0 && vram_gb < 4)) ui_tier = 'medium'
+      else if (!gpu || vram_gb < 8) ui_tier = 'medium'
+
+      res.json({ gpu, vram_gb, ram_gb, cpu_cores, cpu_model, tier, recommended, ui_tier, amd_gpu })
     } catch (e) {
       res.status(500).json({ error: e.message })
     }

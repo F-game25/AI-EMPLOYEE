@@ -73,7 +73,7 @@ export default function FiberStreamParticles() {
   }, [positions, colors])
 
   useFrame((_, delta) => {
-    if (!pointsRef.current) return
+    if (!pointsRef.current || document.hidden) return
     const fibers = fibersRef.current
     const posAttr = pointsRef.current.geometry.attributes.position
     const colAttr = pointsRef.current.geometry.attributes.color

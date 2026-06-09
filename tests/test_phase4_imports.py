@@ -168,6 +168,7 @@ def test_schema_classes():
 
     insight = ProactiveInsight(
         tenant_id="test",
+        user_id=None,
         title="Test",
         body="Test body",
         insight_type="anomaly",

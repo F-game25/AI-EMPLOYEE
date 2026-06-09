@@ -293,9 +293,16 @@ class ConsciousnessEngine:
         from neural_brain.graph.graph_to_dashboard import graph_to_dashboard
         try:
             graph = get_brain_graph()
-            if graph is None:
+            if graph is not None:
+                return graph_to_dashboard(graph.full_snapshot(limit=limit))
+            # Neo4j offline — fall back to native SQLite store
+            try:
+                from neural_brain.graph import get_native_graph_store
+                snap = get_native_graph_store().full_snapshot(limit=limit)
+                return graph_to_dashboard(snap)
+            except Exception as e:
+                logger.warning("native graph fallback failed: %s", e)
                 return {"nodes": [], "connections": [], "stats": {"node_count": 0, "link_count": 0}}
-            return graph_to_dashboard(graph.full_snapshot(limit=limit))
         except Exception as e:
             logger.error("get_graph_snapshot failed: %s", e)
             return {"nodes": [], "connections": [], "stats": {}, "error": str(e)}

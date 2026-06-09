@@ -136,10 +136,12 @@ function GatewayRow({ evt }) {
    TAB 1 — Live Threat Console
 ═══════════════════════════════════════════════════════════════════════════════ */
 function ThreatTab() {
+  const token = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt')
   const { data: threats, error, refresh } = useLiveData({
     endpoint: '/api/security/threats',
     wsEvent: 'security:event',
     pollMs: 10000,
+    skip: !token,
   })
   const t = threats || {}
   const [blocked, setBlocked] = useState(t.blockedIPs || [])
@@ -325,16 +327,19 @@ function FairnessPanel() {
 }
 
 function AuditTab() {
+  const token = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt')
   const { data: auditData, refresh } = useLiveData({
     endpoint: '/api/security/audit',
     wsEvent: 'security:audit',
     transform: d => d?.entries || d,
+    skip: !token,
   })
   const { data: hitlData } = useLiveData({
     endpoint: '/api/security/hitl',
     wsEvent: 'security:hitl',
     pollMs: 15000,
     transform: d => d?.queue || d,
+    skip: !token,
   })
   const [resolved, setResolved] = useState([])
   const [filter, setFilter] = useState('')

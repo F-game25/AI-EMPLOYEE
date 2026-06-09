@@ -5,6 +5,14 @@ import { useCognitiveStore } from '../../store/cognitiveStore'
 import { toastSuccess, toastError } from '../nexus-ui/Toaster'
 import './CognitionPage.css'
 
+// Stable transform functions — defined outside components so useLiveData
+// never sees a new function reference and re-triggers fetches on every render.
+const xCalls      = (d) => d?.calls || []
+const xDecisions  = (d) => d?.decisions || []
+const xStrategies = (d) => d?.strategies || []
+const xSuccess    = (d) => d || { data: [], series: [], state: 'empty' }
+const xAbTests    = (d) => d?.tests || []
+
 const PHASES = [
   ['input', 'Input'],
   ['retrieve', 'Retrieve'],
@@ -40,8 +48,8 @@ function LLMCallStream() {
   const { data, loading, error } = useLiveData({
     endpoint: '/api/intelligence/llm-calls',
     wsEvent: 'llm:call',
-    pollMs: 5000,
-    transform: (d) => d?.calls || [],
+    pollMs: 15000,
+    transform: xCalls,
   })
   const calls = data || []
   return (
@@ -75,8 +83,8 @@ function DecisionLog() {
   const { data, loading, error } = useLiveData({
     endpoint: '/api/cognition/decisions',
     wsEvent: 'cognition:decision',
-    pollMs: 8000,
-    transform: (d) => d?.decisions || [],
+    pollMs: 20000,
+    transform: xDecisions,
   })
   const decisions = data || []
   return (
@@ -102,11 +110,13 @@ function DecisionLog() {
 function LearningTab() {
   const { data: strategiesData, error: strategiesError } = useLiveData({
     endpoint: '/api/cognition/learning/strategies',
-    transform: (d) => d?.strategies || [],
+    pollMs: 30000,
+    transform: xStrategies,
   })
   const { data: successData } = useLiveData({
     endpoint: '/api/cognition/learning/success-rate',
-    transform: (d) => d || { data: [], series: [], state: 'empty' },
+    pollMs: 30000,
+    transform: xSuccess,
   })
   const strategies = strategiesData || []
   const success = successData?.series || []
@@ -148,8 +158,8 @@ function LearningTab() {
 function ABTestsPanel() {
   const { data, loading, error, refresh } = useLiveData({
     endpoint: '/api/cognition/learning/ab-tests',
-    pollMs: 12000,
-    transform: (d) => d?.tests || [],
+    pollMs: 30000,
+    transform: xAbTests,
   })
   const tests = data || []
   const [draft, setDraft] = useState({ name: '', hypothesis: '', metric: 'success_rate' })

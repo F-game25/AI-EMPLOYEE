@@ -31,7 +31,7 @@ function schedulePersist(getState) {
 
 const HYDRATED = (typeof localStorage !== 'undefined') ? (loadSnapshot() || {}) : {}
 
-const DEFAULT_REVENUE = { total: 0, daily: 0, rate_per_min: 0, currency: 'USD' }
+const DEFAULT_REVENUE = { total: null, daily: null, rate_per_min: null, currency: 'USD' }
 const DEFAULT_PIPELINE = {
   active: false, status: 'inactive', current_objective: null,
   active_tasks: [], progress: 0, agents_used: [], performance: {}, result: null,

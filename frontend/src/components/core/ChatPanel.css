@@ -5,20 +5,17 @@
 
 .chat-panel {
   position: fixed;
-  bottom: 80px;
-  left: 0;
+  bottom: 80px;   /* above CommandDock */
+  left: var(--sidebar-width, 220px);  /* clear the sidebar */
   right: 0;
-  width: 100%;
+  width: auto;
   height: 360px;
-  z-index: 10000;
+  z-index: 500;   /* below TopBar (z-index 60 is topbar but it's in flow, chat is fixed) — use 500 so it floats above page content but topbar stays in flow above it */
 
   display: flex;
   flex-direction: column;
 
-  /* See-through glassmorphic panel — dashboard remains visible behind */
-  background: rgba(8, 12, 20, 0.55);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  background: rgba(8, 12, 20, 0.92);
 
   border-top: 1px solid rgba(255, 184, 0, 0.4);
   box-shadow:
@@ -362,6 +359,35 @@
 
 .turn-section--error {
   color: #ffb0a8;
+}
+
+.turn-section--preview {
+  gap: 6px;
+}
+
+.turn-section--preview .turn-section__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.turn-preview-link {
+  color: var(--mc-gold);
+  text-decoration: none;
+  font-size: 9px;
+  letter-spacing: 0.3px;
+}
+
+.turn-preview-link:hover {
+  text-decoration: underline;
+}
+
+.turn-preview-iframe {
+  width: 100%;
+  height: 320px;
+  border: 1px solid rgba(32, 214, 199, 0.25);
+  border-radius: var(--mc-radius-md);
+  background: #0a0a0f;
 }
 
 /* ────────────────────────────────────────────────────────

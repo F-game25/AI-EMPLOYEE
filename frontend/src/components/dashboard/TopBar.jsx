@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../store/appStore'
 import { useSystemStore, selectBackendHealth } from '../../store/systemStore'
 import { useSecurityStore } from '../../store/securityStore'
 import { useEconomyStore } from '../../store/economyStore'
 import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useUpdateCheck } from '../../hooks/useUpdateCheck'
-import { setPerformanceTier } from '../../hooks/usePerformanceMode'
 import { CommandPill, ClockModule, StatusPill, HexButton } from '../nexus-ui'
-import CognitiveEye from '../avatar/CognitiveEye'
+import MiniEye from '../core/MiniEye'
 import './TopBar.css'
 
 const PAGE_LABELS = {
@@ -112,19 +112,46 @@ function threatToEnum(score) {
   return { label: 'OK', tone: 'success', color: '#00FFB4' }
 }
 
+const LIVE_THRESHOLD_MS = 30_000
+
+function LiveBadge() {
+  const [isLive, setIsLive] = useState(() => {
+    const t = window.__lastWsEvent
+    return typeof t === 'number' && Date.now() - t < LIVE_THRESHOLD_MS
+  })
+
+  useEffect(() => {
+    const tick = () => {
+      const t = window.__lastWsEvent
+      setIsLive(typeof t === 'number' && Date.now() - t < LIVE_THRESHOLD_MS)
+    }
+    const id = setInterval(tick, 5000)
+    // Also update immediately on any WS message
+    const onMsg = () => { window.__lastWsEvent = Date.now(); setIsLive(true) }
+    window.addEventListener('ws:any', onMsg)
+    return () => { clearInterval(id); window.removeEventListener('ws:any', onMsg) }
+  }, [])
+
+  return (
+    <div className={`nx-topbar__live nx-topbar__live--${isLive ? 'live' : 'standby'}`} aria-label={isLive ? 'Live data' : 'Standby'}>
+      <span className="nx-topbar__live-dot" />
+      <span className="nx-topbar__live-label">{isLive ? 'LIVE' : 'STANDBY'}</span>
+    </div>
+  )
+}
+
 export default function TopBar() {
-  const wsConnected   = useAppStore(s => s.wsConnected)
-  const systemStatus  = useAppStore(s => s.systemStatus)
-  const systemHealth  = useAppStore(s => s.systemHealth) || {}
-  const nnStatus      = useAppStore(s => s.nnStatus)
-  const activeSection = useAppStore(s => s.activeSection)
-  const liteActive = (() => { try { return localStorage.getItem('nx_perf_tier') === 'low' } catch { return false } })()
+  const { wsConnected, systemStatus, systemHealth: _systemHealth, nnStatus, activeSection } = useAppStore(
+    useShallow(s => ({ wsConnected: s.wsConnected, systemStatus: s.systemStatus, systemHealth: s.systemHealth, nnStatus: s.nnStatus, activeSection: s.activeSection }))
+  )
+  const systemHealth = _systemHealth || {}
   const { updateReady, updateComplete, applying, applyUpdate } = useUpdateCheck()
   const toggleMobileSidebar = useSystemStore(s => s.toggleMobileSidebar)
 
   const threatScore  = useSecurityStore(s => s.securityStatus?.threat_score) ?? 0
-  const revenueToday = useEconomyStore(s => s.revenue?.today) ?? 0
-  const revenueYday  = useEconomyStore(s => s.revenue?.yesterday) ?? 0
+  const { revenueToday, revenueYday } = useEconomyStore(
+    useShallow(s => ({ revenueToday: s.revenue?.today ?? 0, revenueYday: s.revenue?.yesterday ?? 0 }))
+  )
   const modelCalls   = useCognitiveStore(s => s.modelCalls) || []
 
   // Tokens/sec EMA over last 30 samples (modelCalls is event-stream length proxy)
@@ -288,28 +315,13 @@ export default function TopBar() {
 
           <span className="nx-topbar__divider" />
 
-          {/* Lite-mode toggle — forces the low performance tier (fast, no heavy FX) */}
-          <button
-            type="button"
-            className="nx-topbar__lite"
-            onClick={() => setPerformanceTier(liteActive ? null : 'low')}
-            title={liteActive ? 'Lite-modus aan — klik voor volledige visuals' : 'Lite-modus: snelle UI zonder zware effecten'}
-            style={{
-              background: liteActive ? 'var(--gold-molten, #e5c76b)' : 'transparent',
-              color: liteActive ? '#111215' : 'var(--text-muted, #8A8A96)',
-              border: '1px solid var(--border-gold, rgba(229,199,107,0.3))',
-              borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 700,
-              cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '.04em',
-            }}
-          >⚡ LITE</button>
+          {/* Route-aware mini-eye */}
+          <MiniEye size={22} className="nx-topbar__mini-eye" />
 
-          {/* Companion eye — same CognitiveEye, 32px toolbar size */}
-          <CognitiveEye
-            size={32}
-            mode="toolbar"
-            onClick={() => window.dispatchEvent(new CustomEvent('nx:companion:open'))}
-            className="nx-topbar__mini-eye"
-          />
+          <span className="nx-topbar__divider" />
+
+          {/* LIVE data badge */}
+          <LiveBadge />
 
           <span className="nx-topbar__divider" />
 

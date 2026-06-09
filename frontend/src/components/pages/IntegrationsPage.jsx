@@ -535,7 +535,7 @@ function MobilePairingTab() {
 
   useEffect(() => {
     loadStatus()
-    const timer = setInterval(loadStatus, 5000)
+    const timer = setInterval(loadStatus, 30000)
     return () => clearInterval(timer)
   }, [])
 

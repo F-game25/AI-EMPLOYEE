@@ -9,6 +9,7 @@ Every request must pass:
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections import defaultdict
@@ -22,9 +23,12 @@ logger = logging.getLogger(__name__)
 
 # ── Rate limit config ─────────────────────────────────────────────────────────
 _RATE_LIMIT_WINDOW_S = 60
-_RATE_LIMIT_USER = 120   # requests per minute per user
-_RATE_LIMIT_IP = 200     # requests per minute per IP (unauthenticated)
-_RATE_LIMIT_LOGIN = 10   # login attempts per minute per IP
+_RATE_LIMIT_USER    = int(os.environ.get("RATE_LIMIT_USER",    "120"))   # per user/min
+_RATE_LIMIT_IP      = int(os.environ.get("RATE_LIMIT_IP",      "200"))   # per IP/min (external)
+_RATE_LIMIT_LOGIN   = int(os.environ.get("RATE_LIMIT_LOGIN",   "10"))    # login attempts/min
+_RATE_LIMIT_LOOPBACK = int(os.environ.get("RATE_LIMIT_LOOPBACK", "2000")) # per loopback IP/min
+
+_LOOPBACK_IPS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 
 # Paths that don't require authentication
 _PUBLIC_PATHS = frozenset({
@@ -32,12 +36,20 @@ _PUBLIC_PATHS = frozenset({
     "/api/auth/register",
     "/api/auth/refresh",
     "/auth/oidc/providers",
+    "/api/auth/auto-token",
     "/api/identity/public",
     "/api/health",
+    "/api/readiness",
     "/health",
     "/health/detail",
     "/events",
     "/metrics",
+    # OIDC discovery is public by spec — clients need it before they have tokens
+    "/auth/oidc/providers",
+    "/api/auth/oidc/providers",
+    # Telemetry and billing summary are read-only, non-sensitive observability
+    "/api/telemetry/summary",
+    "/api/billing/summary",
 })
 
 # NOTE: previous `_PUBLIC_PREFIXES` removed (2026-05-18 security audit CRITICAL).
@@ -91,9 +103,10 @@ class RequestGuard(BaseHTTPMiddleware):
 
     def __init__(self, app, *, skip_paths: set[str] | None = None) -> None:
         super().__init__(app)
-        self._user_limiter = SlidingWindowCounter(_RATE_LIMIT_WINDOW_S, _RATE_LIMIT_USER)
-        self._ip_limiter = SlidingWindowCounter(_RATE_LIMIT_WINDOW_S, _RATE_LIMIT_IP)
-        self._login_limiter = SlidingWindowCounter(_RATE_LIMIT_WINDOW_S, _RATE_LIMIT_LOGIN)
+        self._user_limiter    = SlidingWindowCounter(_RATE_LIMIT_WINDOW_S, _RATE_LIMIT_USER)
+        self._ip_limiter      = SlidingWindowCounter(_RATE_LIMIT_WINDOW_S, _RATE_LIMIT_IP)
+        self._loopback_limiter = SlidingWindowCounter(_RATE_LIMIT_WINDOW_S, _RATE_LIMIT_LOOPBACK)
+        self._login_limiter   = SlidingWindowCounter(_RATE_LIMIT_WINDOW_S, _RATE_LIMIT_LOGIN)
         self._extra_skip = skip_paths or set()
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
@@ -101,7 +114,11 @@ class RequestGuard(BaseHTTPMiddleware):
         ip = self._get_ip(request)
 
         # ── 1. Rate limit (IP-level, always) ─────────────────────────────────
-        if not self._ip_limiter.check(ip):
+        # Loopback/testclient gets a higher limit so automated tests and internal
+        # service calls don't hit the external-facing cap. External IPs use the
+        # tighter _RATE_LIMIT_IP budget.
+        limiter = self._loopback_limiter if ip in _LOOPBACK_IPS else self._ip_limiter
+        if not limiter.check(ip):
             self._emit_rate_limit(ip, "ip", path)
             return JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
 

@@ -30,7 +30,7 @@ const AgentNetwork = forwardRef(function AgentNetwork(_, ref) {
   }))
 
   useFrame((state, delta) => {
-    if (!meshRef.current) return
+    if (!meshRef.current || document.hidden) return
     const agents = agentsRef.current
     const count = Math.min(agents.length, MAX_AGENTS)
     const t = state.clock.elapsedTime

@@ -128,8 +128,12 @@
 .nxd__connline--tr { transform: rotate(-34deg); }
 .nxd__connline--bl { transform: rotate(146deg); }
 .nxd__connline--br { transform: rotate(34deg); }
-
 @keyframes nxd-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes nxd-drift { to { transform: rotate(360deg); } }
+
+/* Pause rings + drift when tab is hidden (toggled via JS) */
+.nxd__field--paused .nxd__ring,
+.nxd__field--paused::before { animation-play-state: paused; }
 
 /* Orb centered absolutely — no CSS scale transform, canvas is already size-capped */
 .nxd__orbwrap {
@@ -149,11 +153,9 @@
   position: absolute;
   width: 320px;
   z-index: 3;
-  background: linear-gradient(180deg, rgba(14,18,32,0.92) 0%, rgba(8,11,22,0.96) 100%);
+  background: linear-gradient(180deg, rgba(14,18,32,0.96) 0%, rgba(8,11,22,0.98) 100%);
   border: 1px solid rgba(var(--acc-rgb, 255,184,0), 0.35);
   border-radius: 2px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   box-shadow:
     0 0 0 1px rgba(0,0,0,0.6),
     0 0 22px rgba(var(--acc-rgb, 255,184,0), 0.18),
@@ -674,6 +676,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .nxd__ring,
+  .nxd__field::before,
   .nxd__eye-state--thinking,
   .nxd__eye-state--executing,
   .nxd__eye-state--error {
@@ -709,4 +712,105 @@ html[data-perf="medium"] .nxd__ring--5 {
 html[data-perf="medium"] .snode {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+/* ── Spark SVG ─────────────────────────────────────────────────────────────*/
+.nxd__spark-svg {
+  overflow: visible;
+}
+
+/* ── Holographic chamfer corner utility ────────────────────────────────────
+   Apply .nx-panel to any card/section that should get HUD corner ticks.
+   The snode panels already have their own richer version; this is the
+   lightweight shared utility for mission/lower/sidebar panels.
+   ─────────────────────────────────────────────────────────────────────── */
+.nx-panel {
+  position: relative;
+  background: var(--bg-card, rgba(13, 17, 28, 0.85));
+  border: 1px solid var(--border-subtle, rgba(229, 199, 107, 0.14));
+  border-radius: 4px;
+}
+
+.nx-panel::before,
+.nx-panel::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--gold, #e5c76b);
+  border-style: solid;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.nx-panel::before {
+  top: -1px;
+  left: -1px;
+  border-width: 2px 0 0 2px;
+}
+
+.nx-panel::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 2px 2px 0;
+}
+
+/* Apply chamfer to the dashboard's mission and lower section panels */
+.nxd__mission .co-band,
+.nxd__mission .cs-band,
+.nxd__lower .tp-panel,
+.nxd__lower .st-panel,
+.nxd-cap,
+.estream {
+  position: relative;
+}
+
+.nxd__mission .co-band::before,
+.nxd__mission .cs-band::before,
+.nxd__lower .tp-panel::before,
+.nxd__lower .st-panel::before,
+.nxd-cap::before,
+.estream::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 10px;
+  height: 10px;
+  border-color: rgba(229, 199, 107, 0.5);
+  border-style: solid;
+  border-width: 2px 0 0 2px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.nxd__mission .co-band::after,
+.nxd__mission .cs-band::after,
+.nxd__lower .tp-panel::after,
+.nxd__lower .st-panel::after,
+.nxd-cap::after,
+.estream::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-color: rgba(229, 199, 107, 0.5);
+  border-style: solid;
+  border-width: 0 2px 2px 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-panel::before, .nx-panel::after { opacity: 0.3; }
+}
+
+@media (max-width: 900px) {
+  .nxd { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .nxd__sidebar { max-height: 300px; }
+  .nxd__stage { height: 320px; }
+  .snode { display: none; } /* corner panels too complex for mobile */
 }

@@ -13,6 +13,7 @@
  *   router.post('/evolve/deploy', withPermission(PERMISSIONS.EVOLUTION_DEPLOY), handler)
  */
 
+const jwt = require('jsonwebtoken');
 const { ROLES, PERMISSIONS, roleHasPermission } = require('./roles');
 const { requirePermission, DECISION } = require('./policy');
 
@@ -40,13 +41,35 @@ function withRole(minimumRole) {
 }
 
 /**
- * Inject user role from JWT claims onto req.user.role.
- * Existing JWT middleware writes req.user — this augments it with role if missing.
+ * Inject user role from JWT claims onto req.user.
+ * Parses the Authorization: Bearer <token> header and populates req.user
+ * so that requirePermission() can enforce role-based access control.
+ * Routes without a valid JWT get no req.user (role defaults to EMPLOYEE in
+ * requirePermission, but tenantMiddleware blocks unauthenticated /api/ requests
+ * before this runs for most routes).
  */
 function injectRole(req, res, next) {
-  if (req.user && !req.user.role) {
-    // Default role from JWT claim 'role', fall back to employee
-    req.user.role = req.user.role || req.user.claims?.role || ROLES.EMPLOYEE;
+  if (!req.user) {
+    // Try to parse JWT and populate req.user if not already set by another middleware
+    const authHeader = req.headers.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      const secret = process.env.JWT_SECRET_KEY;
+      if (secret) {
+        try {
+          const payload = jwt.verify(authHeader.slice(7), secret);
+          req.user = {
+            id:        payload.sub,
+            role:      payload.role || ROLES.EMPLOYEE,
+            tenant_id: payload.tenant_id,
+            email:     payload.email,
+          };
+        } catch (_) {
+          // Invalid token — req.user stays null; requirePermission will use EMPLOYEE default
+        }
+      }
+    }
+  } else if (!req.user.role) {
+    req.user.role = req.user.claims?.role || ROLES.EMPLOYEE;
   }
   next();
 }

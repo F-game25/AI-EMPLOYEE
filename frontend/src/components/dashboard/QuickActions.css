@@ -6,7 +6,6 @@
   background: rgba(15, 11, 7, 0.55);
   border: 1px solid var(--nx-border, rgba(255, 184, 0, 0.18));
   border-radius: 10px;
-  backdrop-filter: blur(8px);
 }
 .qa-panel__head {
   display: flex;

@@ -391,3 +391,73 @@
     margin-left: 0;
   }
 }
+
+/* ── Offline banner ── */
+.vm-offline-banner {
+  background: rgba(255, 184, 0, 0.12);
+  border-bottom: 1px solid rgba(255, 184, 0, 0.3);
+  color: #FFB800;
+  font-family: var(--nx-font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 8px 18px;
+  text-align: center;
+}
+
+/* ── Select ── */
+.vm-select {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  color: rgba(255,255,255,0.85);
+  font-family: var(--nx-font-mono, monospace);
+  font-size: 11px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  outline: none;
+  cursor: pointer;
+}
+.vm-select:focus {
+  border-color: rgba(255, 184, 0, 0.4);
+}
+.vm-select option {
+  background: #0a0d14;
+}
+
+/* ── Details / Fish Speech collapsible ── */
+.vm-details {
+  margin-top: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 0;
+  overflow: hidden;
+}
+.vm-details-summary {
+  font-family: var(--nx-font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.5);
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.03);
+  user-select: none;
+}
+.vm-details-summary::-webkit-details-marker { display: none; }
+.vm-details-summary::before {
+  content: '▶';
+  font-size: 8px;
+  transition: transform 200ms;
+}
+details[open] .vm-details-summary::before { transform: rotate(90deg); }
+.vm-details > *:not(summary) {
+  padding: 0 14px 14px;
+}

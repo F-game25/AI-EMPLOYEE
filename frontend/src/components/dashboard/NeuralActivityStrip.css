@@ -9,8 +9,6 @@
   padding: 12px 16px;
   margin: 12px 0;
   min-height: 84px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .nas-leds {

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../store/appStore'
 import { useCognitiveStore } from '../../store/cognitiveStore'
 import { useAgentStore } from '../../store/agentStore'
@@ -17,6 +18,7 @@ import CognitiveStreamNew from '../dashboard/CognitiveStream'
 import TaskPipelineNew from '../dashboard/TaskPipeline'
 import SystemTelemetryNew from '../dashboard/SystemTelemetry'
 import TaskComposer from '../core/TaskComposer'
+import PanelConnections from '../nexus-ui/PanelConnections'
 import './NexusOSDashboard.css'
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ function Spark({ values = [], color = '#FFB800', w = 100, h = 22 }) {
   const step = w / (pts.length - 1)
   const line = pts.map((v, i) => `${i*step},${h - ((v-min)/range)*(h-3) - 1}`).join(' ')
   return (
-    <svg width={w} height={h} style={{ overflow:'visible' }}>
+    <svg width={w} height={h} className="nxd__spark-svg">
       <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
       <polyline points={`0,${h} ${line} ${w},${h}`} fill={color} fillOpacity="0.12" strokeWidth="0" />
     </svg>
@@ -69,10 +71,14 @@ function Spark({ values = [], color = '#FFB800', w = 100, h = 22 }) {
 }
 
 // ── Corner subsystem panel ─────────────────────────────────────────────────────
-function CornerPanel({ pos, label, icon, accent, metrics = [], sparkData = [], channelState = 'LIVE' }) {
+function CornerPanel({ pos, label, icon, accent, metrics = [], sparkData = [], channelState = 'LIVE', panelId }) {
   const dotColor = STATE_COLOR[channelState] || STATE_COLOR.OFFLINE
   return (
-    <div className={`snode snode--${pos} snode--${channelState.toLowerCase()}`} style={{ '--acc': accent }}>
+    <div
+      className={`snode snode--${pos} snode--${channelState.toLowerCase()}`}
+      style={{ '--acc': accent }}
+      {...(panelId ? { 'data-panel-id': panelId } : {})}
+    >
       <div className="snode__head">
         <span className="snode__icon">{icon}</span>
         <span className="snode__label">{label}</span>
@@ -215,23 +221,34 @@ function EventStream({ events = [] }) {
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function NexusOSDashboard() {
-  const setActiveSection = useAppStore(s => s.setActiveSection)
-  const systemHealth  = useAppStore(s => s.systemHealth) || {}
-  const wsConnected   = useAppStore(s => s.wsConnected)
+  const { setActiveSection, systemHealth: _systemHealth, wsConnected } = useAppStore(
+    useShallow(s => ({ setActiveSection: s.setActiveSection, systemHealth: s.systemHealth, wsConnected: s.wsConnected }))
+  )
+  const systemHealth = _systemHealth || {}
 
-  const reasoningSteps = useCognitiveStore(s => s.reasoningSteps) || []
-  const modelCalls     = useCognitiveStore(s => s.modelCalls) || []
-  const memoryWrites   = useCognitiveStore(s => s.memoryWrites) || []
-  const brainState     = useCognitiveStore(s => s.brainState) || {}
-  const brainActivity  = useCognitiveStore(s => s.brainActivity) || {}
+  const { reasoningSteps: _reasoningSteps, modelCalls: _modelCalls, memoryWrites: _memoryWrites, brainState: _brainState, brainActivity: _brainActivity } = useCognitiveStore(
+    useShallow(s => ({ reasoningSteps: s.reasoningSteps, modelCalls: s.modelCalls, memoryWrites: s.memoryWrites, brainState: s.brainState, brainActivity: s.brainActivity }))
+  )
+  const reasoningSteps = _reasoningSteps || []
+  const modelCalls     = _modelCalls || []
+  const memoryWrites   = _memoryWrites || []
+  const brainState     = _brainState || {}
+  const brainActivity  = _brainActivity || {}
 
-  const agents         = useAgentStore(s => s.agents) || []
-  const executionSteps = useTaskStore(s => s.executionSteps) || []
-  const workflowState  = useTaskStore(s => s.workflowState) || {}
-  const opsSummary     = useTaskStore(s => s.opsSummary) || {}
+  const agents = useAgentStore(s => s.agents) || []
 
-  const revenue               = useEconomyStore(s => s.revenue) || {}
-  const monetizationPipelines = useEconomyStore(s => s.monetizationPipelines) || {}
+  const { executionSteps: _executionSteps, workflowState: _workflowState, opsSummary: _opsSummary } = useTaskStore(
+    useShallow(s => ({ executionSteps: s.executionSteps, workflowState: s.workflowState, opsSummary: s.opsSummary }))
+  )
+  const executionSteps = _executionSteps || []
+  const workflowState  = _workflowState || {}
+  const opsSummary     = _opsSummary || {}
+
+  const { revenue: _revenue, monetizationPipelines: _monetizationPipelines } = useEconomyStore(
+    useShallow(s => ({ revenue: s.revenue, monetizationPipelines: s.monetizationPipelines }))
+  )
+  const revenue               = _revenue || {}
+  const monetizationPipelines = _monetizationPipelines || {}
 
   const threatLevel = useSecurityStore(s => s.securityStatus?.threat_score) || 0
   const events      = useEventFeedStore(s => s.events) || []
@@ -244,24 +261,32 @@ export default function NexusOSDashboard() {
 
   useEffect(() => {
     cpuHist.current = [...cpuHist.current.slice(1), systemHealth.cpu_percent ?? 0]
-  }, [systemHealth.cpu_percent])
-  useEffect(() => {
     ramHist.current = [...ramHist.current.slice(1), systemHealth.memory_percent ?? 0]
-  }, [systemHealth.memory_percent])
+  }, [systemHealth.cpu_percent, systemHealth.memory_percent])
+
   useEffect(() => {
     revHist.current = [...revHist.current.slice(1), revenue.today ?? revenue.daily ?? 0]
   }, [revenue.today, revenue.daily])
+
   useEffect(() => {
     tokHist.current = [...tokHist.current.slice(1), modelCalls.length]
   }, [modelCalls.length])
 
-  const systemStatus = useSystemStore(s => s.systemStatus) || {}
-  const capabilityStatus = useSystemStore(s => s.capabilityStatus)
-  const fetchCapabilityStatus = useSystemStore(s => s.fetchCapabilityStatus)
+  const { systemStatus: _systemStatus, capabilityStatus, fetchCapabilityStatus } = useSystemStore(
+    useShallow(s => ({ systemStatus: s.systemStatus, capabilityStatus: s.capabilityStatus, fetchCapabilityStatus: s.fetchCapabilityStatus }))
+  )
+  const systemStatus = _systemStatus || {}
 
   useEffect(() => {
     fetchCapabilityStatus?.()
   }, [fetchCapabilityStatus])
+
+  const fieldRef = useRef(null)
+  useEffect(() => {
+    const onVis = () => fieldRef.current?.classList.toggle('nxd__field--paused', document.hidden)
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
 
   const cpu      = systemHealth.cpu_percent ?? systemStatus.cpu ?? systemStatus.cpu_usage ?? 0
   const ram      = systemHealth.memory_percent ?? systemStatus.memory ?? 0
@@ -269,11 +294,14 @@ export default function NexusOSDashboard() {
   const gpuTemp  = systemStatus.gpu_temperature ?? systemHealth.gpu_temp ?? 0
   const load     = Math.min(1, cpu / 100)
   const thinking = reasoningSteps.length > 0
-  const running  = executionSteps.filter(s => s.status === 'running').length
-  const pending  = executionSteps.filter(s => s.status === 'pending').length
-  const activeAgents = agents.filter(a => a.status === 'active' || a.status === 'running' || a.active).length
-  const pipelines = Object.values(monetizationPipelines).filter(p => p.active).length
-  const currentStep = executionSteps.find(s => s.status === 'running')
+  const runningSteps  = useMemo(() => executionSteps.filter(s => s.status === 'running'), [executionSteps])
+  const pendingSteps  = useMemo(() => executionSteps.filter(s => s.status === 'pending'),  [executionSteps])
+  const recentSteps   = useMemo(() => reasoningSteps.slice(-6), [reasoningSteps])
+  const running  = runningSteps.length
+  const pending  = pendingSteps.length
+  const activeAgents = useMemo(() => agents.filter(a => a.status === 'active' || a.status === 'running' || a.active).length, [agents])
+  const pipelines = useMemo(() => Object.values(monetizationPipelines).filter(p => p.active).length, [monetizationPipelines])
+  const currentStep = runningSteps[0]
   const healthPct = Math.max(0, Math.round(100 - cpu * 0.3 - ram * 0.2))
   const errorCount = events.filter(e => (e.priority||'').toLowerCase() === 'critical' || (e.priority||'').toLowerCase() === 'error').length
   const activeTasks = opsSummary.active_tasks ?? workflowState.active_tasks ?? running
@@ -343,7 +371,14 @@ export default function NexusOSDashboard() {
 
         {/* The arena — eye centerpiece with 4 corner panels */}
         <div className="nxd__stage">
-          <div className="nxd__field" aria-hidden="true">
+          <div ref={fieldRef} className="nxd__field" aria-hidden="true">
+            <span className="nxd__axis nxd__axis--h" />
+            <span className="nxd__axis nxd__axis--v" />
+            <span className="nxd__beam nxd__beam--h" />
+            <span className="nxd__beam nxd__beam--v" />
+            <span className="nxd__ring nxd__ring--1" />
+            <span className="nxd__ring nxd__ring--2" />
+            <span className="nxd__ring nxd__ring--3" />
             <span className="nxd__ring nxd__ring--4" />
             <span className="nxd__ring nxd__ring--5" />
             <span className="nxd__connline nxd__connline--tl" />
@@ -353,7 +388,7 @@ export default function NexusOSDashboard() {
           </div>
 
           {/* Robotic Eye centerpiece */}
-          <div className="nxd__eye-caption">
+          <div className="nxd__eye-caption" data-panel-id="neural">
             <div className="nxd__eye-title">COGNITIVE CORE</div>
             <div className="nxd__eye-sub">AUTONOMOUS AI INTELLIGENCE</div>
             <div className={`nxd__eye-state nxd__eye-state--${orchestratorState.toLowerCase()}`}>
@@ -372,6 +407,7 @@ export default function NexusOSDashboard() {
           {/* TOP-LEFT — Cognition · cyan */}
           <CornerPanel
             pos="tl"
+            panelId="mem"
             label="COGNITION"
             icon="◈"
             accent="#00D4FF"
@@ -388,6 +424,7 @@ export default function NexusOSDashboard() {
           {/* TOP-RIGHT — Operations · gold */}
           <CornerPanel
             pos="tr"
+            panelId="agt"
             label="OPERATIONS"
             icon="⚙"
             accent="#F5A623"
@@ -404,6 +441,7 @@ export default function NexusOSDashboard() {
           {/* BOTTOM-LEFT — Economy · purple */}
           <CornerPanel
             pos="bl"
+            panelId="rsrc"
             label="ECONOMY"
             icon="$"
             accent="#B565F5"
@@ -420,6 +458,7 @@ export default function NexusOSDashboard() {
           {/* BOTTOM-RIGHT — Infrastructure · green */}
           <CornerPanel
             pos="br"
+            panelId="sec"
             label="INFRASTRUCTURE"
             icon="▣"
             accent={threatLevel >= 40 ? '#FF4444' : '#00FFB4'}

@@ -92,7 +92,7 @@ function BrainInspectorTab() {
 
       {/* LLM call log */}
       <Panel title="Live LLM Call Log" right={
-        <button className="int-btn int-btn--sm" onClick={refresh}>↻</button>
+        <button className="int-btn int-btn--sm" onClick={refresh} aria-label="Refresh LLM call log" title="Refresh">↻</button>
       }>
         <div className="int-call-head">
           <span>Model</span><span>Agent</span><span>ms</span><span>Tokens</span><span>Cost</span><span>Status</span>

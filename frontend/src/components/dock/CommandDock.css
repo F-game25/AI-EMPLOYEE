@@ -326,6 +326,208 @@
 }
 .cmd-bar__gauge { flex-shrink: 0; }
 
+/* ── Section 1: Pulse strip ── */
+.cmd-pulse-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cmd-pulse-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 28px;
+  cursor: default;
+}
+.cmd-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dot-color, rgba(255,255,255,0.3));
+  opacity: 0.35;
+  flex-shrink: 0;
+  transition: opacity 0.3s, box-shadow 0.3s;
+}
+.cmd-pulse-dot--active {
+  opacity: 1;
+  box-shadow: 0 0 6px var(--dot-color, rgba(255,255,255,0.3));
+  animation: cmd-pulse-pop 2s ease-in-out infinite;
+}
+@keyframes cmd-pulse-pop {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+.cmd-pulse-label {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+}
+.cmd-pulse-val {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Section 2: Quick actions ── */
+.cmd-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.cmd-quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 44px;
+  min-height: 52px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 184, 0, 0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 150ms, transform 150ms, background 150ms;
+  padding: 0;
+  flex-shrink: 0;
+}
+.cmd-quick-btn:hover {
+  border-color: rgba(255, 184, 0, 0.45);
+  background: rgba(255, 184, 0, 0.06);
+  transform: translateY(-1px);
+}
+.cmd-quick-btn:active {
+  transform: translateY(0);
+}
+.cmd-quick-icon {
+  font-size: 14px;
+  color: rgba(255, 184, 0, 0.7);
+  line-height: 1;
+}
+.cmd-quick-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+}
+
+/* ── Section 3: Task ticker ── */
+.cmd-task-ticker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  min-width: 100px;
+  overflow: hidden;
+  flex-shrink: 1;
+}
+.cmd-task-ticker--idle {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.2);
+}
+.cmd-task-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+.cmd-task-status {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.cmd-task-status--running {
+  color: #00FF88;
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+}
+.cmd-task-status--done {
+  color: #FFB800;
+  background: rgba(255, 184, 0, 0.08);
+  border: 1px solid rgba(255, 184, 0, 0.2);
+}
+.cmd-task-status--queued {
+  color: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.cmd-task-elapsed {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 184, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+/* ── Section 4: Resource meters ── */
+.cmd-resource-cluster {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.cmd-resource-meter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 42px;
+}
+.cmd-resource-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+.cmd-resource-value {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.cmd-resource-bar-track {
+  width: 40px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cmd-resource-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  min-width: 2px;
+}
+
+/* ── grow separator ── */
+.cmd-bar__sep--grow {
+  flex: 1;
+  width: auto;
+  background: none;
+}
+
 /* ── Responsive: hide subtitles when tight ── */
 @media (max-width: 1280px) {
   .cmd-pill__sub { display: none; }

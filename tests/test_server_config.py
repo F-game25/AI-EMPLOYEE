@@ -114,15 +114,20 @@ class TestAgentCountConsistency:
         )
 
     def test_agent_capabilities_json_total(self):
-        """agent_capabilities.json total_agents must match the power mode list."""
+        """agent_capabilities.json total_agents must match the agents dict length.
+
+        Note: total_agents counts all defined agent capabilities; the power-mode
+        list in server.py is a subset of activated agents, not all capabilities.
+        """
         with _AGENT_CAPS.open() as f:
             caps = json.load(f)
         total = caps.get("_meta", {}).get("total_agents")
         assert total is not None, "total_agents not found in agent_capabilities.json"
-        agents = _extract_power_agents()
-        assert total == len(agents), (
-            f"agent_capabilities.json total_agents={total} but power list has "
-            f"{len(agents)} agents."
+        agents_dict = caps.get("agents", {})
+        actual = len(agents_dict) if isinstance(agents_dict, dict) else len(agents_dict)
+        assert total == actual, (
+            f"agent_capabilities.json total_agents={total} but agents dict has "
+            f"{actual} entries. Update _meta.total_agents."
         )
 
 

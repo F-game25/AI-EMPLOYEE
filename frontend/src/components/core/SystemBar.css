@@ -15,8 +15,6 @@
   align-items: center;
   padding: 0 16px;
   z-index: 60;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 /* Grid overlay */

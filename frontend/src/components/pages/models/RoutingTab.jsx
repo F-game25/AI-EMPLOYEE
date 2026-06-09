@@ -280,18 +280,67 @@ function TaskRoutingSection({ registryData }) {
   )
 }
 
-function LiveRoutingTable({ liveRouting }) {
+function LiveRoutingTable({ liveRouting, onSaved }) {
+  const [localRouting, setLocalRouting] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+  const [saveError, setSaveError] = useState(null)
+
+  // Sync local state when live routing arrives
+  useEffect(() => {
+    if (!liveRouting) return
+    // Normalise: backend returns { routing: {coding:…}, source } OR flat { coding:…, source }
+    const raw = liveRouting.routing || liveRouting
+    const { source, config_path, _default, ...taskEntries } = raw
+    setLocalRouting(taskEntries)
+  }, [liveRouting])
+
   if (!liveRouting) return null
-  const { tasks = {}, _default, source } = liveRouting
-  const entries = Object.entries(tasks)
-  if (entries.length === 0 && !_default) return null
+  if (!localRouting) return null
+
+  const source = liveRouting.routing ? liveRouting.source : liveRouting.source
+  const entries = Object.entries(localRouting)
+  if (entries.length === 0) return null
+
+  const updateEntry = (taskType, field, value) =>
+    setLocalRouting(prev => ({ ...prev, [taskType]: { ...prev[taskType], [field]: value } }))
+
+  const saveRouting = async () => {
+    setSaving(true); setSaved(false); setSaveError(null)
+    try {
+      await api.post('/api/models/routing', localRouting)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+      onSaved?.()
+    } catch (e) {
+      setSaveError(e.message || 'save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const PROVIDER_OPTS = ['anthropic', 'openai', 'ollama', 'openrouter', 'nvidia_nim']
 
   return (
     <div style={{ marginBottom: 24 }}>
       <div className="mp-routing-header">
         <div className="mp-section-label" style={{ margin: 0 }}>LIVE ROUTING TABLE</div>
-        {source && <span className="mp-source-label">{source.toUpperCase()}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {source && <span className="mp-source-label">{source.toUpperCase()}</span>}
+          <button
+            className={`mp-row-save-btn ${saved ? 'mp-row-save-btn--saved' : ''}`}
+            onClick={saveRouting}
+            disabled={saving || saved}
+          >
+            {saved ? '✓ SAVED' : saving ? 'SAVING…' : 'SAVE ALL'}
+          </button>
+        </div>
       </div>
+      {saveError && (
+        <div className="mp-ops-banner mp-ops-banner--error" style={{ marginBottom: 8 }}>
+          Save failed: {saveError}
+        </div>
+      )}
       <div style={{ overflowX: 'auto' }}>
         <table className="mp-routing-table">
           <thead>
@@ -299,21 +348,40 @@ function LiveRoutingTable({ liveRouting }) {
               <th>TASK TYPE</th>
               <th>PROVIDER</th>
               <th>MODEL</th>
+              <th>FALLBACK MODEL</th>
             </tr>
           </thead>
           <tbody>
-            {_default && (
-              <tr key="_default">
-                <td><span className="mp-cell-agent">default</span></td>
-                <td>{_default.provider || '—'}</td>
-                <td>{_default.model || '—'}</td>
-              </tr>
-            )}
             {entries.map(([taskType, cfg]) => (
               <tr key={taskType}>
                 <td><span className="mp-cell-agent">{taskType}</span></td>
-                <td>{cfg?.provider || '—'}</td>
-                <td>{cfg?.model || '—'}</td>
+                <td>
+                  <select
+                    className="mp-model-select"
+                    value={cfg?.provider || 'anthropic'}
+                    onChange={e => updateEntry(taskType, 'provider', e.target.value)}
+                  >
+                    {PROVIDER_OPTS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    className="mp-budget-input"
+                    style={{ width: '100%' }}
+                    value={cfg?.model || ''}
+                    onChange={e => updateEntry(taskType, 'model', e.target.value)}
+                    placeholder="model name"
+                  />
+                </td>
+                <td>
+                  <input
+                    className="mp-budget-input"
+                    style={{ width: '100%' }}
+                    value={cfg?.fallback || ''}
+                    onChange={e => updateEntry(taskType, 'fallback', e.target.value)}
+                    placeholder="fallback model"
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -329,6 +397,12 @@ function RoutingTab() {
   const [rulesSource, setRulesSource] = useState('empty')
   const [liveRouting, setLiveRouting] = useState(null)
 
+  const loadLiveRouting = useCallback(() => {
+    api.get('/api/models/routing')
+      .then(d => { if (d && typeof d === 'object') setLiveRouting(d) })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     api.get('/api/models/registry')
       .then(d => { if (d?.providers) setRegistryData(d) })
@@ -341,10 +415,8 @@ function RoutingTab() {
         }
       })
       .catch(() => {})
-    api.get('/api/models/routing')
-      .then(d => { if (d && typeof d === 'object') setLiveRouting(d) })
-      .catch(() => {})
-  }, [])
+    loadLiveRouting()
+  }, [loadLiveRouting])
 
   const addRule = () => {
     const id = Date.now()
@@ -370,7 +442,7 @@ function RoutingTab() {
 
   return (
     <div>
-      <LiveRoutingTable liveRouting={liveRouting} />
+      <LiveRoutingTable liveRouting={liveRouting} onSaved={loadLiveRouting} />
       <SubsystemsRouting />
 
       <TaskRoutingSection registryData={registryData} />

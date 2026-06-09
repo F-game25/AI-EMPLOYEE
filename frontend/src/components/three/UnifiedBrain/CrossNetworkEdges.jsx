@@ -55,6 +55,7 @@ const CrossNetworkEdges = forwardRef(function CrossNetworkEdges(_, ref) {
   }))
 
   useFrame((_, delta) => {
+    if (document.hidden) return
     // Advance packets
     packets.current = packets.current.filter(p => {
       p.t += delta * p.speed

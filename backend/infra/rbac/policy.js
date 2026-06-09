@@ -163,8 +163,12 @@ function requirePermission(permission, contextFn = null) {
   const engine = new PolicyEngine();
   return async (req, res, next) => {
     try {
-      const role      = req.user?.role || ROLES.EMPLOYEE;
-      const tenant_id = req.tenantId  || req.user?.tenant_id || 'system';
+      // Reject unauthenticated callers — do not silently grant EMPLOYEE access
+      if (!req.user && !req.jwtPayload) {
+        return res.status(401).json({ ok: false, error: 'Authentication required', code: 'UNAUTHENTICATED' });
+      }
+      const role      = req.user?.role || req.jwtPayload?.role || ROLES.EMPLOYEE;
+      const tenant_id = req.tenantId  || req.user?.tenant_id || req.jwtPayload?.tenant_id || 'system';
       const context   = contextFn ? await contextFn(req) : {};
 
       const result = await engine.evaluate({ role, permission, tenant_id, user_id: req.user?.id, context });

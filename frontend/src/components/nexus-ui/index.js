@@ -3,7 +3,7 @@
  * Import primitives from a single path: `from '../nexus-ui'`
  */
 
-export { default as Panel } from './Panel'
+export { default as Panel, useFreshnessColor } from './Panel'
 export { default as HexFrame } from './HexFrame'
 export { SectionLabel, LiveBadge, default as SectionLabelDefault } from './SectionLabel'
 export { default as Sparkline } from './Sparkline'
@@ -22,3 +22,4 @@ export { default as EmptyState } from './EmptyState'
 export { default as ErrorState } from './ErrorState'
 export { default as KPIDelta } from './KPIDelta'
 export { default as Toaster, toast, toastSuccess, toastError, toastWarn } from './Toaster'
+export { default as NxButton } from './NxButton'

@@ -3,19 +3,64 @@
 
 const BASE = import.meta.env.VITE_API_BASE ?? '';
 
+function getToken() {
+  return localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || null
+}
+
+function storeToken(token) {
+  if (!token) return
+  localStorage.setItem('ai_jwt', token)
+  sessionStorage.setItem('ai_jwt', token)
+}
+
+let _refreshing = false
+let _refreshPromise = null
+
+async function refreshToken() {
+  if (_refreshing) return _refreshPromise
+  _refreshing = true
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${BASE}/api/auth/auto-token`, { method: 'GET' })
+      if (res.ok) {
+        const data = await res.json()
+        const token = data.token || data.access_token
+        if (token) { storeToken(token); return token }
+      }
+    } catch { /* network error — fall through */ }
+    return null
+  })().finally(() => { _refreshing = false; _refreshPromise = null })
+  return _refreshPromise
+}
+
 async function _fetch(method, path, body, opts = {}) {
-  const headers = { 'Content-Type': 'application/json', ...opts.headers };
+  const doRequest = (token) => {
+    const headers = { 'Content-Type': 'application/json', ...opts.headers }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    return fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      signal: opts.signal,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  }
 
-  // Attach JWT if stored
-  const token = sessionStorage.getItem('ai_jwt');
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  let res = await doRequest(getToken())
 
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    signal: opts.signal,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  if (res.status === 401 && !opts._retry) {
+    const newToken = await refreshToken()
+    if (newToken) {
+      res = await doRequest(newToken)
+    }
+    if (res.status === 401) {
+      localStorage.removeItem('ai_jwt')
+      sessionStorage.removeItem('ai_jwt')
+      window.dispatchEvent(new CustomEvent('nx:auth-expired'))
+      const err = new Error('Session expired — please log in again')
+      err.status = 401
+      throw err
+    }
+  }
 
   if (!res.ok) {
     if (res.status === 429) {
@@ -40,6 +85,18 @@ const api = {
   put:    (path, body, opts) => _fetch('PUT',    path, body,      opts),
   patch:  (path, body, opts) => _fetch('PATCH',  path, body,      opts),
   delete: (path, opts)       => _fetch('DELETE', path, undefined, opts),
+
+  // ── Orders ───────────────────────────────────────────────────────────────
+  orders: {
+    list:   ()        => api.get('/api/orders'),
+    get:    (id)      => api.get(`/api/orders/${id}`),
+    create: (body)    => api.post('/api/orders', body),
+    delete: (id)      => api.delete(`/api/orders/${id}`),
+    status: (id, s)   => api.post(`/api/orders/${id}/status`, { status: s }),
+    demo:   (id)      => api.post(`/api/orders/${id}/demo`, {}),
+    approve:(id)      => api.post(`/api/orders/${id}/approve`, {}),
+    pitch:  (id)      => api.post(`/api/orders/${id}/pitch`, {}),
+  },
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   auth: {
@@ -78,6 +135,7 @@ const api = {
 
   // ── Forge ─────────────────────────────────────────────────────────────────
   forge: {
+    getProject: (id)         => api.get(`/api/forge/projects/${id}`),
     submit:    (goal, opts)  => api.post('/api/forge/submit', { goal, ...opts }),
     approve:   (id, by)      => api.post(`/api/forge/approve/${id}`, { approved_by: by }),
     reject:    (id, reason)  => api.post(`/api/forge/reject/${id}`, { reason }),
@@ -85,6 +143,115 @@ const api = {
     queue:     ()            => api.get('/api/forge/queue'),
     snapshots: ()            => api.get('/api/forge/snapshots'),
     status:    ()            => api.get('/api/forge/status'),
+
+    // ── Phase 5 — Backlog ────────────────────────────────────────────
+    getBacklog:          (pid)       => api.get(`/api/forge/projects/${pid}/backlog`),
+    createBacklogItem:   (pid, body) => api.post(`/api/forge/projects/${pid}/backlog`, body),
+    updateBacklogItem:   (id, body)  => api.patch(`/api/forge/backlog/${id}`, body),
+    deleteBacklogItem:   (id)        => api.delete(`/api/forge/backlog/${id}`),
+    runBacklogItem:      (id, body)  => api.post(`/api/forge/backlog/${id}/run`, body),
+
+    // ── Phase 5/6 — Autopilot ────────────────────────────────────────
+    startAutopilot:      (pid, body) => api.post(`/api/forge/projects/${pid}/autopilot/start`, body || {}),
+    stopAutopilot:       (pid)       => api.post(`/api/forge/projects/${pid}/autopilot/stop`, {}),
+    resumeAutopilot:     (pid)       => api.post(`/api/forge/projects/${pid}/autopilot/resume`, {}),
+    autopilotStatus:     (pid)       => api.get(`/api/forge/projects/${pid}/autopilot/status`),
+
+    // ── Phase 5 — Decomposer ─────────────────────────────────────────
+    decomposeTask:       (pid, body) => api.post(`/api/forge/projects/${pid}/decompose`, body),
+
+    // ── Phase 5 — Skills ─────────────────────────────────────────────
+    getSkills:           ()          => api.get('/api/forge/skills'),
+    getSkill:            (id)        => api.get(`/api/forge/skills/${id}`),
+    reloadSkills:        ()          => api.post('/api/forge/skills/reload', {}),
+    applySkill:          (rid, body) => api.post(`/api/forge/runs/${rid}/apply-skill`, body),
+
+    // ── Phase 5 — Model Router ───────────────────────────────────────
+    getModels:           ()          => api.get('/api/forge/models'),
+    createModel:         (body)      => api.post('/api/forge/models', body),
+    updateModel:         (id, body)  => api.patch(`/api/forge/models/${id}`, body),
+    testModelRouter:     (body)      => api.post('/api/forge/model-router/test', body),
+    modelRoutingStats:   (pid)       => api.get(`/api/forge/projects/${pid}/model-routing-stats`),
+
+    // ── Phase 5 — Roadmap ────────────────────────────────────────────
+    getRoadmap:          (pid)       => api.get(`/api/forge/projects/${pid}/roadmap`),
+    generateRoadmap:     (pid)       => api.post(`/api/forge/projects/${pid}/roadmap/generate`, {}),
+    updateRoadmap:       (pid, body) => api.patch(`/api/forge/projects/${pid}/roadmap`, body),
+
+    // ── Phase 5 — Suggestions ────────────────────────────────────────
+    getSuggestions:      (pid)       => api.get(`/api/forge/projects/${pid}/suggestions`),
+    acceptSuggestion:    (id)        => api.post(`/api/forge/suggestions/${id}/accept`, {}),
+    rejectSuggestion:    (id)        => api.post(`/api/forge/suggestions/${id}/reject`, {}),
+    suggestionToBacklog: (id)        => api.post(`/api/forge/suggestions/${id}/create-backlog-item`, {}),
+
+    // ── Phase 5 — Cycles ─────────────────────────────────────────────
+    getCycles:           (pid)       => api.get(`/api/forge/projects/${pid}/cycles`),
+    createCycle:         (pid, body) => api.post(`/api/forge/projects/${pid}/cycles`, body),
+    getCycle:            (id)        => api.get(`/api/forge/cycles/${id}`),
+    pauseCycle:          (id)        => api.post(`/api/forge/cycles/${id}/pause`, {}),
+    resumeCycle:         (id)        => api.post(`/api/forge/cycles/${id}/resume`, {}),
+    cancelCycle:         (id)        => api.post(`/api/forge/cycles/${id}/cancel`, {}),
+
+    // ── Phase 5 — Memory ─────────────────────────────────────────────
+    getMemory:           (pid, cat)  => api.get(`/api/forge/projects/${pid}/memory${cat ? `?category=${cat}` : ''}`),
+
+    // ── Phase 7 — Learning / Distillation ───────────────────────────
+    getLearning:         (pid)       => api.get(`/api/forge/projects/${pid}/learning`),
+    getLessons:          (pid, opts) => api.get(`/api/forge/projects/${pid}/learning/lessons${opts?.category ? `?category=${opts.category}` : ''}`),
+    promoteLesson:       (lid)       => api.post(`/api/forge/learning/lessons/${lid}/promote-memory`, {}),
+    getPreferencePairs:  (pid)       => api.get(`/api/forge/projects/${pid}/preference-pairs`),
+    updatePreferencePair:(id, body)  => api.patch(`/api/forge/preference-pairs/${id}`, body),
+    getEvalCases:        (pid, opts) => api.get(`/api/forge/projects/${pid}/evaluation-cases${opts?.eval_type ? `?eval_type=${opts.eval_type}` : ''}`),
+    getSkillProposals:   (pid, opts) => api.get(`/api/forge/projects/${pid}/skill-proposals${opts?.status ? `?status=${opts.status}` : ''}`),
+    approveProposal:     (id)        => api.post(`/api/forge/skill-proposals/${id}/approve`, {}),
+    rejectProposal:      (id)        => api.post(`/api/forge/skill-proposals/${id}/reject`, {}),
+    applyProposal:       (id)        => api.post(`/api/forge/skill-proposals/${id}/apply`, {}),
+    getDatasets:         (pid)       => api.get(`/api/forge/projects/${pid}/learning/datasets`),
+    exportDataset:       (pid, body) => api.post(`/api/forge/projects/${pid}/learning/export`, body),
+    getRunDistillation:  (rid)       => api.get(`/api/forge/runs/${rid}/distillation`),
+    distillRun:          (rid)       => api.post(`/api/forge/runs/${rid}/distill`, {}),
+
+    // ── Phase 8 — Local Model Training ──────────────────────────────
+    training: {
+      getOverview:        (pid)       => api.get(`/api/forge/projects/${pid}/training`),
+      getSummary:         (pid)       => api.get(`/api/forge/projects/${pid}/training-summary`),
+      getRuns:            (pid)       => api.get(`/api/forge/projects/${pid}/training-runs`),
+      createRun:          (pid, body) => api.post(`/api/forge/projects/${pid}/training-runs`, body),
+      getRun:             (trid)      => api.get(`/api/forge/training-runs/${trid}`),
+      validateRun:        (trid, body)=> api.post(`/api/forge/training-runs/${trid}/validate`, body || {}),
+      startRun:           (trid, body)=> api.post(`/api/forge/training-runs/${trid}/start`, body || {}),
+      evaluateRun:        (trid)      => api.post(`/api/forge/training-runs/${trid}/evaluate`, {}),
+      getModelVersions:   (pid, opts) => api.get(`/api/forge/projects/${pid}/model-versions${opts?.model_type ? `?model_type=${opts.model_type}` : ''}`),
+      promoteVersion:     (id, body)  => api.post(`/api/forge/model-versions/${id}/promote`, body || {}),
+      rejectVersion:      (id)        => api.post(`/api/forge/model-versions/${id}/reject`, {}),
+      rollbackVersion:    (id)        => api.post(`/api/forge/model-versions/${id}/rollback`, {}),
+      helperAdvise:       (pid, body) => api.post(`/api/forge/projects/${pid}/helper-advise`, body),
+    },
+
+    // ── Phase 9 — Interconnected Cognitive Core ─────────────────────
+    cognitive: {
+      getMemoryGraphSummary:      (pid)            => api.get(`/api/forge/projects/${pid}/memory-graph/summary`),
+      getMemoryGraphNodes:        (pid, filters)   => api.get(`/api/forge/projects/${pid}/memory-graph/nodes${filters?.node_type || filters?.search ? `?${new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([, v]) => v))).toString()}` : ''}`),
+      getMemoryGraphNode:         (pid, nodeId)    => api.get(`/api/forge/projects/${pid}/memory-graph/nodes/${nodeId}`),
+      getMemoryGraphNeighborhood: (pid, nodeId, d) => api.get(`/api/forge/projects/${pid}/memory-graph/nodes/${nodeId}/neighborhood${d ? `?depth=${d}` : ''}`),
+      consolidateMemoryGraph:     (pid, payload)   => api.post(`/api/forge/projects/${pid}/memory-graph/consolidate`, payload || {}),
+      getProjectContextPackets:   (pid)            => api.get(`/api/forge/projects/${pid}/context-packets`),
+      getRunContextPackets:       (rid)            => api.get(`/api/forge/runs/${rid}/context-packets`),
+      getAdvisoryEvents:          (pid)            => api.get(`/api/forge/projects/${pid}/advisory-events`),
+      getAdvisoryMetrics:         (pid)            => api.get(`/api/forge/projects/${pid}/advisory-metrics`),
+      getCognitiveEvents:         (pid)            => api.get(`/api/forge/projects/${pid}/cognitive-events`),
+      createCognitiveEvent:       (pid, payload)   => api.post(`/api/forge/projects/${pid}/cognitive-events`, payload),
+      consultHelperAdvisory:      (pid, payload)   => api.post(`/api/forge/projects/${pid}/helper-advisory/consult`, payload),
+    },
+
+    // ── Phase 5 — Metrics / Replay / Patches / Approvals ────────────
+    getForgeMetrics:     (pid)       => api.get(`/api/forge/projects/${pid}/forge-metrics`),
+    getRunReplay:        (rid)       => api.get(`/api/forge/runs/${rid}/replay`),
+    getRunPatches:       (rid)       => api.get(`/api/forge/runs/${rid}/patches`),
+    getPendingApprovals: (rid)       => api.get(`/api/forge/runs/${rid}/pending-approvals`),
+    approveRunAction:    (rid, body) => api.post(`/api/forge/runs/${rid}/approve-action`, body),
+    rejectRunAction:     (rid, body) => api.post(`/api/forge/runs/${rid}/reject-action`, body),
+    continueRun:         (rid)       => api.post(`/api/forge/runs/${rid}/continue`, {}),
   },
 
   // ── System ────────────────────────────────────────────────────────────────

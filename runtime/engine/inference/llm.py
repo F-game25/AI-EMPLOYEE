@@ -270,13 +270,15 @@ def generate(
     if _AI_ROUTER and _query_ai is not None:
         try:
             result: Any = _query_ai(
-                agent="engine",
+                agent_type="engine",
                 prompt=full_prompt,
-                system=system,
-                model=chosen_model,
+                system_prompt=system,
             )
             if isinstance(result, dict):
-                return str(result.get("response") or result.get("content") or result)
+                # ai_router returns {"answer": "...", "provider": "...", "error": ...}
+                if result.get("error") or not result.get("answer"):
+                    raise RuntimeError(f"ai_router error: {result.get('error')}")
+                return str(result["answer"])
             return str(result)
         except Exception as exc:  # noqa: BLE001
             logger.warning("ai_router failed (%s) — falling back to direct Ollama", exc)

@@ -1,0 +1,34 @@
+{
+  "skill_id": "test_generation",
+  "name": "Test Generation",
+  "description": "Generate unit, integration, and edge-case tests for backend routes and frontend components.",
+  "triggers": ["test", "spec", "unit", "integration", "coverage", "pytest", "vitest", "jest", "assert", "expect", "mock", "stub", "fixture"],
+  "required_context": ["existing_tests", "file_to_test", "test_framework"],
+  "allowed_tools": ["read_file", "write_file", "run_tests", "run_lint"],
+  "blocked_tools": ["database_drop", "rm_rf", "git_push"],
+  "checklist": [
+    "Read existing test files to match framework and style",
+    "Cover happy path first, then error cases",
+    "Test 404 response when resource not found",
+    "Test 400 response for missing required fields",
+    "Test auth — verify 401 without token",
+    "Mock external calls (LLM, Python backend) where possible",
+    "Use descriptive test names: describe + it('should ...')",
+    "Do not import private/internal functions — test via API",
+    "Verify tests pass before marking done",
+    "Add test to the correct test file or create new one following naming convention"
+  ],
+  "verification_commands": ["npm test", "python3 -m pytest tests/", "npx vitest run"],
+  "example_tasks": [
+    "Add tests for POST /api/forge/projects/:id/backlog",
+    "Write pytest tests for the new suggestion endpoints",
+    "Add edge-case tests for autopilot session management"
+  ],
+  "common_failure_modes": [
+    "Test depends on real DB state (not isolated)",
+    "Missing auth token causes 401 in test",
+    "Test file not discovered by test runner (wrong naming)",
+    "Async test missing await causes false positive"
+  ],
+  "output_format": "Test file matching project framework (pytest / vitest / jest)"
+}

@@ -1,0 +1,1 @@
+{"id": "2a5a8700-1c36-48f7-9f3f-f2f4444c4aee", "ts": 1779816400.3242319, "category": "TelemetryCategory.SECURITY", "event_type": "security:key_rotated", "user_id": "system", "source": "system", "payload": {"version": 1}, "duration_ms": null, "trace_id": "635f5978-445f-44bf-93bd-4b7cf3994a70", "error": null}

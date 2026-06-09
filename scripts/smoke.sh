@@ -1,10 +1,52 @@
 #!/usr/bin/env bash
-# End-to-end smoke test for the Nexus OS API surface added in WS3–WS8.
-# Hits every new endpoint through the Node backend and reports pass/fail.
+# End-to-end smoke test for the Nexus OS API surface.
+# Section 1: lightweight auth-gate checks (no JWT required, curl-only).
+# Section 2: authenticated deep-endpoint checks (WS3–WS8, requires live stack).
 # Usage: bash scripts/smoke.sh   (backends must be running — e.g. via start.sh)
 
 set -uo pipefail
-BASE="${SMOKE_BASE:-http://localhost:8787}"
+BASE="${API_BASE:-${SMOKE_BASE:-http://localhost:8787}}"
+
+# ---------------------------------------------------------------------------
+# Section 1 — Auth-gate smoke (no JWT, curl only)
+# ---------------------------------------------------------------------------
+PASS=0; FAIL=0
+
+_check() {
+  local desc="$1" url="$2" expected="$3"
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || echo "000")
+  if [[ "$code" == "$expected" || ( "$expected" == "2xx" && "$code" =~ ^2 ) ]]; then
+    echo "  PASS $desc ($code)"; ((PASS++)) || true
+  else
+    echo "  FAIL $desc (got $code, want $expected)"; ((FAIL++)) || true
+  fi
+}
+
+echo "=== Nexus OS Smoke Test — Auth-Gate Checks ==="
+_check "health"               "$BASE/health"                          "2xx"
+_check "agents list"          "$BASE/api/agents"                      "401"
+_check "metrics"              "$BASE/metrics"                         "2xx"
+_check "vault (auth gate)"    "$BASE/api/vault/notes"                 "401"
+_check "topics (auth gate)"   "$BASE/api/topics"                      "401"
+_check "learning (auth gate)" "$BASE/api/learning/pending-review"     "401"
+_check "forge (auth gate)"    "$BASE/api/forge/projects"              "401"
+_check "threats (auth gate)"  "$BASE/api/security/threats"            "401"
+_check "blacklight tools"     "$BASE/api/blacklight/tools"            "401"
+_check "memory graph"         "$BASE/api/memory/graph/relations"      "401"
+
+echo ""
+echo "Auth-gate results: $PASS passed, $FAIL failed"
+if [[ $FAIL -gt 0 ]]; then
+  echo "FAIL: $FAIL auth-gate check(s) failed"
+  exit 1
+fi
+echo "OK: all auth-gate checks passed"
+echo ""
+
+# ---------------------------------------------------------------------------
+# Section 2 — Authenticated deep-endpoint checks (WS3–WS8)
+# ---------------------------------------------------------------------------
 PY="${PYTHON_BIN:-$HOME/.ai-employee/python-core/bin/python}"
 [[ -x "$PY" ]] || PY="python3"
 

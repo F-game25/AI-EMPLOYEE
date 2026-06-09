@@ -1,6 +1,6 @@
 /* Shared AscendForge helpers + constants (API, normalizers, risk rules). */
 
-export const TOKEN = () => sessionStorage.getItem('ai_jwt')
+export const TOKEN = () => localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt')
 export const H = (extra = {}) => TOKEN() ? { ...extra, Authorization: `Bearer ${TOKEN()}` } : extra
 export const JPOST = (url, body) => fetch(url, { method: 'POST', headers: H({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) })
 export const JGET  = url => fetch(url, { headers: H() })
