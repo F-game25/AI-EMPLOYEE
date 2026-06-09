@@ -17,7 +17,7 @@ const os = require('os');
 
 const STATE_DIR = path.resolve(process.env.STATE_DIR || path.join(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'), 'state'));
 const AGENTS_STATE_DIR = path.join(STATE_DIR, 'agents');
-const HEARTBEAT_INTERVAL_MS = 5000; // 5s polling
+const HEARTBEAT_INTERVAL_MS = 10000; // 10s polling — agents change slowly
 const IDLE_THRESHOLD_MS = 30000; // 30s = idle
 const DEAD_THRESHOLD_MS = 60000; // 60s = dead
 

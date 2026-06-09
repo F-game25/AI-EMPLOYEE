@@ -1,15 +1,9 @@
 """Demo-website generator — one business at a time.
 
-Generates a UNIQUE, multi-page demo website (Home, Diensten, Over ons, Contact).
-The local Ollama model writes only the Dutch copy; layout, styling and structure
-come from the hand-built block design system in `core.demo_blocks`, so model
-output can never break the page. Every business gets a distinct palette, font
-pair, style theme and section-variant mix (deterministic per business), while the
-four pages stay coherent as one site.
+Calls the local Ollama model to write Dutch copy for each section,
+then assembles a single-file HTML page.
 
-- All copy is HTML-escaped before insertion (see `_e`)
-- No fake phone/address/email — only real data from research_data
-- Output: a folder of HTML files under state/artifacts/demos/<slug>/
+Hard limit: ONE business per call. No batching.
 """
 from __future__ import annotations
 
@@ -19,10 +13,7 @@ import logging
 import os
 import re
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-
-from core import demo_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +33,8 @@ def _llm(prompt: str, max_tokens: int = 300) -> str:
         "prompt": prompt,
         "system": (
             "Je bent een professionele Nederlandse copywriter die website-teksten "
-            "schrijft voor lokale bedrijven. Schrijf beknopte, wervende teksten in "
-            "natuurlijk Nederlands. Geen markdown, geen Engels, alleen platte tekst. "
-            "Verzin GEEN feiten, namen, diensten, jaartallen of cijfers die niet in "
-            "de opdracht staan — schrijf alleen wervende, verbindende zinnen."
+            "schrijft voor lokale bedrijven. Schrijf beknopte, zakelijke teksten "
+            "in het Nederlands. Geen markdown, alleen platte tekst."
         ),
         "stream": False,
         "options": {"num_predict": max_tokens},
@@ -66,117 +55,23 @@ def _e(text: str) -> str:
     return _html.escape(str(text), quote=True)
 
 
-# Branche-typische diensten — generieke categorieën als Lars (nog) niets invult.
-# Geen verzonnen specifieke claims; gewone categorieën die bij de branche horen.
-_BRANCHE_DIENSTEN: list[tuple[tuple[str, ...], list[tuple[str, str]]]] = [
-    (("kapper", "haar", "barbier"), [
-        ("Knippen", "Voor dames, heren en kinderen."),
-        ("Kleuren & highlights", "Van bijwerken tot een complete kleuromslag."),
-        ("Föhnen & styling", "Een verzorgde look voor elke gelegenheid."),
-        ("Behandelingen", "Verzorging voor gezond en sterk haar.")]),
-    (("schoonheid", "beauty", "huid", "nagel", "spa"), [
-        ("Gezichtsbehandeling", "Reiniging en verzorging op maat."),
-        ("Wenkbrauwen & wimpers", "Epileren, verven en stylen."),
-        ("Ontharen", "Professioneel en zorgvuldig."),
-        ("Huidverbetering", "Advies en behandeling voor een stralende huid.")]),
-    (("schoon", "onderhoud"), [
-        ("Kantoorschoonmaak", "Een frisse werkplek, dagelijks of periodiek."),
-        ("Woningschoonmaak", "Uw huis grondig en betrouwbaar schoon."),
-        ("Glasbewassing", "Streeploze ramen, binnen en buiten."),
-        ("Opleverschoonmaak", "Compleet schoon bij verhuizing of verbouwing.")]),
-    (("loodgiet", "sanitair", "installat"), [
-        ("Lekkages verhelpen", "Snel opgespoord en vakkundig verholpen."),
-        ("Badkamer & sanitair", "Van kraan tot complete badkamer."),
-        ("CV & verwarming", "Onderhoud, storingen en vervanging."),
-        ("Spoedservice", "Snel ter plaatse bij acute problemen.")]),
-    (("elektr",), [
-        ("Groepenkast & bekabeling", "Veilig en volgens de norm."),
-        ("Verlichting", "Sfeer- en functionele verlichting."),
-        ("Laadpalen", "Installatie voor thuis en bedrijf."),
-        ("Storingen", "Snel opgelost door een vakman.")]),
-    (("schilder",), [
-        ("Binnenschilderwerk", "Strak afgewerkte muren en kozijnen."),
-        ("Buitenschilderwerk", "Bescherming én uitstraling."),
-        ("Behang & wandafwerking", "Van spachtelputz tot behang."),
-        ("Houtrotherstel", "Reparatie voor en tijdens het schilderen.")]),
-    (("bouw", "aannem", "timmer", "verbouw"), [
-        ("Verbouwingen", "Van idee tot opgeleverd resultaat."),
-        ("Aanbouw & dakkapel", "Meer ruimte, vakkundig gebouwd."),
-        ("Timmerwerk", "Maatwerk in hout."),
-        ("Onderhoud", "Klein en groot onderhoud aan uw woning.")]),
-    (("tuin", "groen", "hovenier"), [
-        ("Tuinaanleg", "Een tuin die bij u past."),
-        ("Tuinonderhoud", "Het hele jaar verzorgd."),
-        ("Bestrating", "Paden, terrassen en opritten."),
-        ("Beplanting", "Advies en aanplant op maat.")]),
-    (("restaurant", "horeca", "eten", "cafe", "café", "lunch"), [
-        ("À la carte", "Met zorg bereide gerechten."),
-        ("Lunch", "Vers en gevarieerd."),
-        ("Catering", "Ook buiten de deur."),
-        ("Groepen & reserveren", "Voor elke gelegenheid.")]),
-    (("bakker",), [
-        ("Brood & broodjes", "Elke dag vers gebakken."),
-        ("Taarten op maat", "Voor elk feest."),
-        ("Gebak", "Ambachtelijk en vers."),
-        ("Lunchhoek", "Belegde broodjes en koffie.")]),
-    (("auto", "garage", "reparatie", "monteur"), [
-        ("Onderhoud & APK", "Uw auto veilig op de weg."),
-        ("Reparaties", "Vakkundig en eerlijk."),
-        ("Banden", "Wisselen, opslag en vervanging."),
-        ("Diagnose", "Snel de oorzaak gevonden.")]),
-]
-_DIENSTEN_DEFAULT = [
-    ("Persoonlijk advies", "We denken met u mee voor de beste aanpak."),
-    ("Vakkundige uitvoering", "Net, op tijd en volgens afspraak."),
-    ("Service & nazorg", "Ook na de klus blijven we bereikbaar."),
-    ("Spoed mogelijk", "Snel ter plaatse wanneer het nodig is."),
-]
-
-
-def _branche_diensten(branche: str) -> list[tuple[str, str]]:
-    b = (branche or "").lower()
-    for keys, items in _BRANCHE_DIENSTEN:
-        if any(k in b for k in keys):
-            return items
-    return _DIENSTEN_DEFAULT
-
-
-def _norm_pairs(items, k1: str, k2: str) -> list[tuple[str, str]]:
-    """Normalize a list of dicts/strings/tuples into [(a, b)] pairs, dropping empties.
-
-    Only uses what's there — never fabricates. Used for diensten/reviews/stats from
-    the (Lars-confirmed) research data.
-    """
-    out: list[tuple[str, str]] = []
-    for it in (items or []):
-        if isinstance(it, dict):
-            a, b = str(it.get(k1, "")).strip(), str(it.get(k2, "")).strip()
-        elif isinstance(it, (list, tuple)) and len(it) >= 2:
-            a, b = str(it[0]).strip(), str(it[1]).strip()
-        else:
-            a, b = str(it).strip(), ""
-        if a:
-            out.append((a, b))
-    return out
-
-
-def _slugify(*parts: str) -> str:
-    raw = "_".join(p for p in parts if p)
-    slug = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
-    return slug[:60] or "demo"
-
-
-def _swarm_or_llm(prompt: str, context: str, max_tokens: int = 120) -> str:
-    """Run the swarm engine if available, otherwise a single LLM call."""
-    if os.environ.get("SWARM_DEMO", "1") != "0":
-        try:
-            from core.swarm_engine import swarm_pitch
-            result = swarm_pitch(prompt, context=context, n_agents=3)
-            if result.answer and result.confidence > 0.3:
-                return result.answer
-        except Exception as exc:  # noqa: BLE001 — best-effort, fall back to LLM
-            logger.debug("demo swarm fallback: %s", exc)
-    return _llm(prompt, max_tokens=max_tokens)
+def _kleur_voor_branche(branche: str) -> tuple[str, str]:
+    b = branche.lower()
+    if any(w in b for w in ("loodgiet", "installat", "sanitair")):
+        return "#1a3a5c", "#e87b1e"
+    if any(w in b for w in ("bouw", "timmer", "aannem")):
+        return "#2d4a1e", "#f5a623"
+    if any(w in b for w in ("schoon", "onderhoud")):
+        return "#1a5c4a", "#27ae60"
+    if any(w in b for w in ("elektr",)):
+        return "#1c2e4a", "#e74c3c"
+    if any(w in b for w in ("schilder",)):
+        return "#4a1a5c", "#9b59b6"
+    if any(w in b for w in ("kapper", "haar", "schoonheid", "beauty")):
+        return "#5c1a3a", "#e91e8c"
+    if any(w in b for w in ("tuin", "groen", "hoveniers")):
+        return "#1a4a1e", "#4caf50"
+    return "#1a3a5c", "#e87b1e"
 
 
 def genereer_demo(
@@ -186,146 +81,392 @@ def genereer_demo(
     branche: str,
     diensten: list[str] | None = None,
     research_data: dict | None = None,
-    job_id: str | None = None,
 ) -> dict:
-    """Generate a unique multi-page demo website for ONE business.
+    """Generate a demo website for ONE business.
 
     Returns:
-        {"status": "ok", "dir": "<abs dir>", "slug": "<slug>",
-         "pages": ["index.html", ...], "path": "<abs index.html>", "bytes": N}
+        {"status": "ok", "path": "/abs/path/to/demo.html", "bytes": N}
     or  {"status": "error", "error": "..."}
     """
     if not bedrijfsnaam or not plaats or not branche:
         return {"status": "error", "error": "bedrijfsnaam, plaats en branche zijn verplicht"}
 
+    diensten = diensten or []
+    primary, accent = _kleur_voor_branche(branche)
     rd = research_data or {}
-    slug = _slugify(bedrijfsnaam, plaats)
-    seed = job_id or slug
-    ctxname = f"{bedrijfsnaam}, {branche} in {plaats}"
+
     logger.info("demo_generator: genereren voor '%s' (%s, %s)", bedrijfsnaam, plaats, branche)
 
-    # ── Echte data uit research/Lars — diensten/reviews/stats/foto's: nooit verzonnen ──
-    diensten_items = _norm_pairs(rd.get("diensten"), "naam", "omschrijving")
-    if not diensten_items:                       # niets ingevuld → branche-typische categorieën
-        diensten_items = _branche_diensten(branche)
-    review_items   = _norm_pairs(rd.get("reviews"), "tekst", "naam")
-    stat_items     = _norm_pairs(rd.get("stats"), "cijfer", "label")
-    fotos          = [f for f in (rd.get("fotos") or []) if isinstance(f, str) and f.strip()]
-    social         = [s for s in (rd.get("social") or []) if isinstance(s, str) and s.strip()]
-    telefoon       = (rd.get("telefoon") or "").strip()
-    email          = (rd.get("email") or "").strip()
-    adres          = (rd.get("adres") or "").strip()
-    openingstijden = (rd.get("openingstijden") or "").strip()
-    website        = (rd.get("website") or "").strip()
-    diensten_namen = ", ".join(n for n, _ in diensten_items) if diensten_items else ""
+    # ── LLM calls — all outputs are html-escaped before template insertion ──────
+    hero_tekst = _e(_llm(
+        f"Schrijf een korte hero-tekst (2 zinnen) voor de website van {bedrijfsnaam}, "
+        f"een {branche} bedrijf in {plaats}. Spreek de bezoeker direct aan.",
+        max_tokens=80,
+    ))
 
-    # ── Copy: de LLM schrijft ALLEEN wervende/verbindende zinnen rond echte data ──
-    p_head = (f"Schrijf een korte, pakkende website-kop (H1, max 8 woorden) voor {bedrijfsnaam}, "
-              f"een {branche} in {plaats}. Alleen wervende tekst, geen aanhalingstekens, geen verzonnen cijfers.")
-    p_hero = (f"Schrijf 1-2 wervende zinnen onder de kop voor {bedrijfsnaam}, {branche} in {plaats}. "
-              f"Spreek de bezoeker direct aan. Verzin geen feiten of cijfers.")
-    p_meta = (f"Schrijf een Google meta-omschrijving (max 150 tekens) voor {bedrijfsnaam}, {branche} in {plaats}. "
-              f"Uitnodigend, met een call-to-action.")
-    _dienst_hint = f" Noem dat ze onder meer {diensten_namen} doen." if diensten_namen else ""
-    p_over = (f"Schrijf een warme, wervende 'Over ons'-tekst (3-4 zinnen) voor {bedrijfsnaam}, "
-              f"een {branche} in {plaats} en omgeving.{_dienst_hint} "
-              f"Alleen wervende tekst — verzin GEEN jaartallen, cijfers, namen of diensten die niet genoemd zijn.")
-    p_cta = f"Schrijf één wervende zin die aanzet tot contact opnemen met {bedrijfsnaam}. Geen prijs, geen cijfers."
+    diensten_items: list[tuple[str, str]] = []
+    if diensten:
+        for d in diensten[:4]:
+            omschr = _e(_llm(
+                f"Schrijf één zin (max 15 woorden) die de dienst '{d}' beschrijft "
+                f"voor {bedrijfsnaam} in {plaats}.",
+                max_tokens=40,
+            ))
+            diensten_items.append((_e(d), omschr))
+    else:
+        raw = _llm(
+            f"Noem 3 typische diensten van een {branche} bedrijf in Nederland. "
+            f"Geef alleen een komma-gescheiden lijst, geen nummers.",
+            max_tokens=40,
+        )
+        for d in raw.split(",")[:3]:
+            d = d.strip().rstrip(".")
+            if d:
+                omschr = _e(_llm(
+                    f"Schrijf één zin (max 15 woorden) die '{d}' beschrijft voor {bedrijfsnaam}.",
+                    max_tokens=40,
+                ))
+                diensten_items.append((_e(d), omschr))
 
-    with ThreadPoolExecutor(max_workers=5, thread_name_prefix="demo-copy") as pool:
-        f_head = pool.submit(_llm, p_head, 30)
-        f_hero = pool.submit(_swarm_or_llm, p_hero, ctxname, 80)
-        f_meta = pool.submit(_llm, p_meta, 60)
-        f_over = pool.submit(_swarm_or_llm, p_over, ctxname, 160)
-        f_cta  = pool.submit(_llm, p_cta, 40)
+    over_ons = _e(_llm(
+        f"Schrijf een 'Over ons' alinea (3-4 zinnen) voor {bedrijfsnaam}, "
+        f"een {branche} bedrijf dat al jaren actief is in {plaats} en omgeving. "
+        f"Nadruk op vakmanschap en betrouwbaarheid.",
+        max_tokens=120,
+    ))
 
-        def _safe(fut, fallback):
-            try:
-                val = fut.result()
-                return val.strip().strip('"“”') if val and val.strip() else fallback
-            except Exception:  # noqa: BLE001
-                return fallback
+    cta_tekst = _e(_llm(
+        f"Schrijf een uitnodigende call-to-action (1 zin) voor {bedrijfsnaam} "
+        f"om een offerte aan te vragen.",
+        max_tokens=40,
+    ))
 
-        head = _safe(f_head, f"Welkom bij {bedrijfsnaam}")
-        hero_text = _safe(f_hero, f"{bedrijfsnaam} — uw {branche} in {plaats} en omgeving. Neem gerust contact op.")
-        meta = _safe(f_meta, f"{bedrijfsnaam} — {branche} in {plaats}. Neem vrijblijvend contact op.")
-        over_text = _safe(f_over, f"Bij {bedrijfsnaam} staat persoonlijke service voorop. Als {branche} in {plaats} "
-                          f"helpen we je graag verder met een duidelijke, eerlijke aanpak.")
-        cta_text = _safe(f_cta, f"Neem vandaag nog vrijblijvend contact op met {bedrijfsnaam}.")
+    # Real contact info from research_data — never invent phone/address
+    telefoon_html = (
+        f"<p>{_e(rd['telefoon'])}</p>" if rd.get("telefoon")
+        else "<p>Bel ons voor een afspraak</p>"
+    )
+    adres_html = (
+        f"<p>{_e(rd['adres'])}</p>" if rd.get("adres")
+        else f"<p>{_e(plaats)} en omgeving</p>"
+    )
+    website_html = (
+        f'<p><a href="{_e(rd["website"])}" style="color:var(--accent)">{_e(rd["website"])}</a></p>'
+        if rd.get("website") else ""
+    )
 
-    # ── Foto's (echt of leeg) ─────────────────────────────────────────────────
-    hero_img  = fotos[0] if len(fotos) >= 1 else ""
-    about_img = fotos[1] if len(fotos) >= 2 else ""
-    gallery   = fotos[2:8]
+    # ── Services HTML ──────────────────────────────────────────────────────────
+    diensten_html = "\n".join(
+        f"""        <div class="svc-card">
+          <div class="svc-icon">&#10003;</div>
+          <h3>{naam}</h3>
+          <p>{omschr}</p>
+        </div>"""
+        for naam, omschr in diensten_items
+    )
 
-    # ── Build escaped context for the block system ────────────────────────────
-    over_paras = _split_paragraphs(over_text)
-    ctx = {
-        "naam": _e(bedrijfsnaam), "naam_raw": bedrijfsnaam,
-        "branche": _e(branche), "branche_raw": branche,
-        "plaats": _e(plaats), "plaats_raw": plaats,
-        "initial": _e(bedrijfsnaam.strip()[:1].upper() or "•"),
-        "hero_title": _e(head), "hero_text": _e(hero_text), "meta": _e(meta),
-        "over_kort": _e(over_paras[0]),
-        "over_lang": [_e(p) for p in over_paras],
-        "cta_text": _e(cta_text),
-        # Alleen echte, door Lars bevestigde data — leeg = sectie weg:
-        "diensten": [(_e(n), _e(o)) for n, o in diensten_items],
-        "reviews":  [(_e(t), _e(w)) for t, w in review_items if t],
-        "stats":    [(_e(c), _e(l)) for c, l in stat_items if c],
-        "values": [
-            ("✓", "Persoonlijke aanpak", "Eén vast aanspreekpunt dat met je meedenkt."),
-            ("★", "Duidelijke afspraken", "Heldere afspraken vooraf, geen verrassingen achteraf."),
-            ("⚡", "Snel geregeld", "Korte lijnen — je hoeft nooit lang op antwoord te wachten."),
-        ],
-        "hero_img": _e(hero_img), "about_img": _e(about_img),
-        "gallery": [_e(f) for f in gallery],
-        "telefoon": _e(telefoon), "telefoon_raw": telefoon,
-        "email": _e(email),
-        "email_link": (f'<a href="mailto:{_e(email)}">{_e(email)}</a>' if email else ""),
-        "adres": _e(adres),
-        "openingstijden": _e(openingstijden),
-        "social": [_e(s) for s in social],
-        "website": _e(website), "website_raw": website,
-        "website_link": (f'<a href="{_e(website)}" target="_blank" rel="noopener">{_e(website)}</a>' if website else ""),
-        "form_name": "contact-" + re.sub(r"[^a-z0-9]", "-", bedrijfsnaam.lower())[:30],
-        "jaar": _e(str(__import__("datetime").datetime.now().year)),
-    }
+    # Only show email if we have a real website to derive it from — never invent one
+    real_website = (research_data or {}).get("website")
+    if real_website:
+        domain = re.sub(r"https?://(www\.)?", "", real_website).rstrip("/")
+        safe_email = _e(f"info@{domain}")
+    else:
+        safe_email = None
 
-    # ── Compose + write the multi-page site ───────────────────────────────────
-    theme = demo_blocks.build_theme(seed, branche)
-    pages = demo_blocks.render_site(ctx, theme)
+    # ── Full HTML template ─────────────────────────────────────────────────────
+    # Layout principle: full-width colored stripes via outer divs,
+    # centered content via inner .inner divs. body has no max-width.
+    html_out = f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{_e(bedrijfsnaam)} — {_e(branche)} in {_e(plaats)}</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html, body {{
+    width: 100%;
+    min-height: 100vh;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #333;
+    background: #fff;
+  }}
+  :root {{
+    --primary: {primary};
+    --accent:  {accent};
+    --light:   #f4f6f8;
+    --text:    #333;
+  }}
 
-    dest_dir = _DEMO_ROOT / slug
+  /* ── centered content container ── */
+  .inner {{
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 2rem;
+  }}
+
+  /* ── NAV (full-width stripe) ── */
+  nav {{
+    width: 100%;
+    background: var(--primary);
+    color: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }}
+  nav .inner {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }}
+  .logo {{ font-size: 1.4rem; font-weight: 700; }}
+  .nav-links a {{
+    color: #fff;
+    text-decoration: none;
+    margin-left: 1.5rem;
+    font-size: 0.95rem;
+    opacity: 0.9;
+  }}
+  .nav-links a:hover {{ opacity: 1; text-decoration: underline; }}
+
+  /* ── HERO (full-width stripe) ── */
+  .hero {{
+    width: 100%;
+    background: linear-gradient(135deg, var(--primary) 0%, {primary}cc 100%);
+    color: #fff;
+    padding: 5rem 0;
+    text-align: center;
+  }}
+  .hero h1 {{ font-size: 2.8rem; margin-bottom: 1rem; line-height: 1.2; }}
+  .hero p  {{ font-size: 1.2rem; max-width: 640px; margin: 0 auto 2rem; opacity: 0.9; }}
+  .btn {{
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    padding: 0.9rem 2.2rem;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: opacity 0.2s;
+  }}
+  .btn:hover {{ opacity: 0.85; }}
+
+  /* ── SERVICES (full-width stripe, light bg) ── */
+  .svc-strip {{
+    width: 100%;
+    background: #fff;
+    padding: 4rem 0;
+  }}
+  .svc-strip h2 {{
+    font-size: 1.9rem;
+    color: var(--primary);
+    text-align: center;
+    margin-bottom: 2.5rem;
+  }}
+  .svc-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.5rem;
+  }}
+  .svc-card {{
+    background: var(--light);
+    border-radius: 8px;
+    padding: 1.8rem 1.5rem;
+    border-top: 4px solid var(--accent);
+    text-align: center;
+  }}
+  .svc-icon {{ font-size: 1.6rem; color: var(--accent); margin-bottom: 0.5rem; }}
+  .svc-card h3 {{ font-size: 1.05rem; margin-bottom: 0.5rem; color: var(--primary); }}
+  .svc-card p  {{ font-size: 0.9rem; line-height: 1.5; }}
+
+  /* ── ABOUT (full-width, light bg) ── */
+  .about-strip {{
+    width: 100%;
+    background: var(--light);
+    padding: 4rem 0;
+  }}
+  .about-strip .inner {{ display: flex; gap: 3rem; align-items: center; }}
+  .about-text {{ flex: 1; }}
+  .about-text h2 {{ font-size: 1.9rem; color: var(--primary); margin-bottom: 1rem; }}
+  .about-text p  {{ line-height: 1.7; font-size: 1rem; }}
+  .about-badge {{
+    flex: 0 0 auto;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 50%;
+    width: 140px;
+    height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 1rem;
+  }}
+  .about-badge .badge-icon {{ font-size: 2.5rem; }}
+  .about-badge .badge-label {{ font-size: 0.75rem; opacity: 0.85; margin-top: 0.3rem; }}
+
+  /* ── CTA (full-width, primary bg) ── */
+  .cta-strip {{
+    width: 100%;
+    background: var(--primary);
+    color: #fff;
+    padding: 4rem 0;
+    text-align: center;
+  }}
+  .cta-strip h2 {{ font-size: 2rem; margin-bottom: 1rem; }}
+  .cta-strip p  {{ max-width: 520px; margin: 0 auto 2rem; opacity: 0.9; font-size: 1.1rem; }}
+
+  /* ── CONTACT (full-width, white) ── */
+  .contact-strip {{
+    width: 100%;
+    background: #fff;
+    padding: 4rem 0;
+  }}
+  .contact-strip h2 {{
+    font-size: 1.9rem;
+    color: var(--primary);
+    text-align: center;
+    margin-bottom: 2.5rem;
+  }}
+  .contact-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    text-align: center;
+  }}
+  .contact-item {{
+    padding: 1.8rem 1.5rem;
+    background: var(--light);
+    border-radius: 8px;
+  }}
+  .contact-item .ci {{ font-size: 2rem; margin-bottom: 0.5rem; }}
+  .contact-item h4 {{ color: var(--primary); margin-bottom: 0.4rem; font-size: 1rem; }}
+  .contact-item p, .contact-item a {{ font-size: 0.95rem; color: var(--text); }}
+
+  /* ── FOOTER (full-width, dark) ── */
+  footer {{
+    width: 100%;
+    background: #111;
+    color: rgba(255,255,255,0.75);
+    text-align: center;
+    padding: 1.5rem;
+    font-size: 0.85rem;
+  }}
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 768px) {{
+    .hero h1 {{ font-size: 1.9rem; }}
+    .hero p  {{ font-size: 1rem; }}
+    .about-strip .inner {{ flex-direction: column; }}
+    .about-badge {{ width: 110px; height: 110px; }}
+    .nav-links {{ display: none; }}
+    .svc-grid, .contact-grid {{ grid-template-columns: 1fr; }}
+  }}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="inner">
+    <div class="logo">{_e(bedrijfsnaam)}</div>
+    <div class="nav-links">
+      <a href="#diensten">Diensten</a>
+      <a href="#over-ons">Over ons</a>
+      <a href="#contact">Contact</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="inner">
+    <h1>{_e(bedrijfsnaam)}</h1>
+    <p>{hero_tekst}</p>
+    <a href="#contact" class="btn">Vraag een offerte aan</a>
+  </div>
+</div>
+
+<!-- SERVICES -->
+<div class="svc-strip" id="diensten">
+  <div class="inner">
+    <h2>Onze Diensten</h2>
+    <div class="svc-grid">
+{diensten_html}
+    </div>
+  </div>
+</div>
+
+<!-- ABOUT -->
+<div class="about-strip" id="over-ons">
+  <div class="inner">
+    <div class="about-text">
+      <h2>Over {_e(bedrijfsnaam)}</h2>
+      <p>{over_ons}</p>
+    </div>
+    <div class="about-badge">
+      <span class="badge-icon">✓</span>
+      <span class="badge-label">Vakman in<br>{_e(plaats)}</span>
+    </div>
+  </div>
+</div>
+
+<!-- CTA -->
+<div class="cta-strip">
+  <div class="inner">
+    <h2>Klaar voor uw project?</h2>
+    <p>{cta_tekst}</p>
+    <a href="#contact" class="btn">Neem contact op</a>
+  </div>
+</div>
+
+<!-- CONTACT -->
+<div class="contact-strip" id="contact">
+  <div class="inner">
+    <h2>Contact</h2>
+    <div class="contact-grid">
+      <div class="contact-item">
+        <div class="ci">📞</div>
+        <h4>Bel ons</h4>
+        {telefoon_html}
+      </div>
+      <div class="contact-item">
+        <div class="ci">📧</div>
+        <h4>E-mail</h4>
+        {f'<p>{safe_email}</p>' if safe_email else '<p style="color:#999">Neem contact op via het formulier</p>'}
+        {website_html}
+      </div>
+      <div class="contact-item">
+        <div class="ci">📍</div>
+        <h4>Locatie</h4>
+        {adres_html}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <p>&copy; 2025 {_e(bedrijfsnaam)} — {_e(branche)} in {_e(plaats)}</p>
+  <p style="margin-top:0.4rem;opacity:0.6;font-size:0.75rem;">Demo-website gegenereerd door AI Employee</p>
+</footer>
+
+</body>
+</html>"""
+
+    _DEMO_ROOT.mkdir(parents=True, exist_ok=True)
+    safe_naam = "".join(c if c.isalnum() or c in "-_" else "_" for c in bedrijfsnaam)
+    filename  = f"demo_{safe_naam}_{plaats.lower()}.html"
+    dest_path = _DEMO_ROOT / filename
+
     try:
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        total = 0
-        for fname, html_doc in pages.items():
-            (dest_dir / fname).write_text(html_doc, encoding="utf-8")
-            total += len(html_doc)
-    except OSError as exc:
-        return {"status": "error", "error": f"Kon demo niet wegschrijven: {exc}"}
+        dest_path.write_text(html_out, encoding="utf-8")
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
 
-    logger.info("demo_generator: %s (%d pagina's, %d bytes, thema %s)",
-                dest_dir, len(pages), total, theme["key"])
-    return {
-        "status": "ok",
-        "dir": str(dest_dir),
-        "slug": slug,
-        "pages": list(pages.keys()),
-        "path": str(dest_dir / "index.html"),  # backward compat
-        "theme": theme["key"],
-        "bytes": total,
-    }
-
-
-def _split_paragraphs(text: str) -> list[str]:
-    """Split a copy block into 1-2 paragraphs for the about section."""
-    text = (text or "").strip()
-    if not text:
-        return [""]
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    if len(sentences) <= 2:
-        return [text]
-    mid = (len(sentences) + 1) // 2
-    return [" ".join(sentences[:mid]).strip(), " ".join(sentences[mid:]).strip()]
+    logger.info("demo_generator: %s (%d bytes)", dest_path, len(html_out))
+    return {"status": "ok", "path": str(dest_path), "bytes": len(html_out.encode("utf-8"))}

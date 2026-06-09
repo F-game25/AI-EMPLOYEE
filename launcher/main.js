@@ -441,48 +441,89 @@ function createLauncherWindow() {
 function attachDashboardEvents(win, readiness) {
   clearTimers()
 
-  // Phase 1: HTML load
-  timers.html = setTimeout(() => {
-    handleLoadFailure('html-load-timeout', readiness)
-  }, HTML_LOAD_TIMEOUT_MS)
+  // Track whether the current page in the window is the splash (file://) or
+  // the real dashboard (http://). The did-finish-load listener must not treat
+  // a splash load as a successful dashboard load.
+  let _loadingSplash = false
+  let _connRetries = 0
+  const MAX_CONN_RETRIES = 12  // 12 × 2s = 24s total before giving up
 
-  win.webContents.once('did-finish-load', () => {
+  function onDashboardLoaded() {
     if (timers.html) { clearTimeout(timers.html); timers.html = null }
     tracker.complete('html-loaded')
     tracker.start('react-rendered')
     setStatus({ state: 'ui-loading', phase: 'html-loaded', message: 'Dashboard HTML loaded' })
-
-    // v4: SHOW THE DASHBOARD WINDOW NOW. We do not gate visibility on the
-    // React-side `notifyUiBootPhase('react-rendered')` handshake because that
-    // handshake silently fails when window.ai is undefined in the dashboard
-    // renderer (preload not running / CSP / etc.). The backend is observably
-    // serving HTTP 200 — show the user what's there. The React signal is
-    // still wanted as a richer "fully mounted" indicator, but the window is
-    // no longer hidden waiting for it.
     log.info('did-finish-load fired — showing dashboard window')
     showDashboardWindow()
-
-    // Stream Python subsystem timings into the launcher boot console so a slow
-    // subsystem (>2 s amber, >5 s red) is visible at a glance. Fire-and-forget;
-    // never block the boot path.
     setTimeout(() => fetchPythonSubsystemTimings(), 1500)
-
-    // Phase 2 (soft): React first paint. Timeout = warning, not failure.
     timers.render = setTimeout(() => {
       log.warn(`react-rendered ping not received after ${REACT_RENDER_TIMEOUT_MS}ms — marking phase done with degraded note`)
       tracker.complete('react-rendered')
       setStatus({ state: 'ui-mounted', phase: 'react-rendered', message: 'Dashboard live (react-rendered handshake missing — preload may not be injecting)' })
-      // Still start the mount timer so the rail advances naturally
       timers.mount = setTimeout(() => {
         tracker.complete('react-mounted')
         setStatus({ state: 'ui-mounted', phase: 'react-mounted', message: 'Dashboard live (mount handshake missing)' })
       }, REACT_MOUNT_TIMEOUT_MS)
     }, REACT_RENDER_TIMEOUT_MS)
+  }
+
+  function onSplashLoaded(attempt) {
+    // Inject a status message into the splash page so the user sees progress
+    const msg = `Connecting to runtime… (attempt ${attempt}/${MAX_CONN_RETRIES})`
+    const js = `
+      (function(){
+        var sub = document.getElementById('bootSub');
+        if (sub) sub.textContent = ${JSON.stringify(msg)};
+        var tk = document.getElementById('bootTicker');
+        if (tk) tk.innerHTML = '<span class="console__chevron">\\u25b8</span> waiting for Node gateway on :8787…';
+        var bar = document.getElementById('bootBar');
+        if (bar) bar.innerHTML = 'SYSTEM BOOT  [<span class="console__bar-fill">████████</span><span class="console__bar-empty">░░░░░░░░░░░░░░░░░░░░░░░░</span>]  45%';
+      })();
+    `
+    win.webContents.executeJavaScript(js).catch(() => {})
+    // Show the window so the splash is visible (not Chromium error page)
+    if (!win.isVisible()) {
+      if (launcherWindow && !launcherWindow.isDestroyed()) launcherWindow.hide()
+      win.show(); win.focus()
+    }
+    // Retry the real dashboard URL after 2 seconds
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) {
+        log.info(`retrying dashboard URL (attempt ${attempt})`)
+        _loadingSplash = false
+        win.webContents.loadURL(health.getRuntimeRoute().dashboardUrl)
+          .catch(e => log.warn(`retry loadURL failed: ${e.message}`))
+      }
+    }, 2000)
+  }
+
+  // Phase 1: HTML load timeout (only counts towards real dashboard, not splash)
+  timers.html = setTimeout(() => {
+    if (!_loadingSplash) handleLoadFailure('html-load-timeout', readiness)
+  }, HTML_LOAD_TIMEOUT_MS)
+
+  win.webContents.on('did-finish-load', () => {
+    if (_loadingSplash) {
+      onSplashLoaded(_connRetries)
+    } else {
+      onDashboardLoaded()
+    }
   })
 
+  // Connection-refused / timeout: show branded splash + retry silently
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
-    // -3 / ABORTED happens during reload; ignore it
-    if (code === -3) return
+    if (code === -3) return  // ABORTED during reload — ignore
+    const isConnErr = code === -102 || code === -7 || code === -21
+    if (isConnErr && _connRetries < MAX_CONN_RETRIES && !_loadingSplash) {
+      _connRetries++
+      log.warn(`appWindow connection failed (${code}, attempt ${_connRetries}/${MAX_CONN_RETRIES}) — showing splash`)
+      _loadingSplash = true
+      win.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+        .catch(e => log.warn(`splash load failed: ${e.message}`))
+      return
+    }
+    _connRetries = 0
+    _loadingSplash = false
     log.error(`appWindow did-fail-load (${code}): ${desc} url=${url}`)
     handleLoadFailure(`HTTP load failed (${code}): ${desc || url}`, readiness)
   })

@@ -576,6 +576,79 @@ module.exports = function createTasksChatRouter(deps) {
     } catch {}
   });
 
+  // ── /api/chat/stream — SSE proxy to Python streaming endpoint ────────────
+  router.post('/chat/stream', requireAuth, _rl_chat, async (req, res) => {
+    const body = req.body || {};
+    const message = (body.message || '').trim();
+    if (!message) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.write('data: {"error":"message required"}\n\n');
+      return res.end();
+    }
+
+    const PYTHON_HOST = process.env.PYTHON_BACKEND_HOST || '127.0.0.1';
+    const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || 18790;
+
+    // Set SSE headers before any data arrives
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    let pyReq = null;
+    // Listen on res (response), not req — req 'close' fires when the request body
+    // is consumed (immediately after flushHeaders), not when the client disconnects.
+    res.on('close', () => { try { pyReq?.destroy(); } catch (_) {} });
+
+    try {
+      const http = require('http');
+      const postBody = JSON.stringify({ message, model_route: body.model || '' });
+
+      // Forward the original browser token OR generate a service token as fallback.
+      // Both Node and Python share JWT_SECRET_KEY so the browser token is always valid
+      // for Python too — no re-signing needed.
+      const pyAuthHeader = req.headers.authorization || pythonServiceAuthorization(req);
+
+      await new Promise((resolve, reject) => {
+        pyReq = http.request({
+          hostname: PYTHON_HOST,
+          port: PYTHON_PORT,
+          path: '/api/chat/stream',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postBody),
+            'Authorization': pyAuthHeader,
+          },
+          timeout: 90_000,
+        }, (pyRes) => {
+          pyRes.on('data', (chunk) => {
+            if (!res.writableEnded) res.write(chunk);
+          });
+          pyRes.on('end', () => {
+            if (!res.writableEnded) res.end();
+            resolve();
+          });
+          pyRes.on('error', reject);
+        });
+        pyReq.on('error', reject);
+        pyReq.on('timeout', () => {
+          pyReq.destroy();
+          reject(new Error('Python stream timeout'));
+        });
+        pyReq.write(postBody);
+        pyReq.end();
+      });
+    } catch (err) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.write('data: {"done":true}\n\n');
+        res.end();
+      }
+    }
+  });
+
   // ── Approvals ─────────────────────────────────────────────────────────────
 
   router.get('/approvals/inbox', requireAuth, (_req, res) => {

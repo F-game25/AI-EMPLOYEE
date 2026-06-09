@@ -135,7 +135,7 @@ class LLMClient:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.state_dir / "llm_calls.jsonl"
 
-    def complete(self, *, prompt: str, system: str = "You are a helpful AI assistant.", tenant_id: str = "default") -> dict[str, Any]:
+    def complete(self, *, prompt: str, system: str = "You are a helpful AI assistant.", tenant_id: str = "default", model: str | None = None) -> dict[str, Any]:
         attempts = 3
         delay_s = 1.0
         last_error = ""
@@ -187,7 +187,7 @@ class LLMClient:
             started = time.time()
             try:
                 if self.backend == "ollama" or self.backend == "remote_compute":
-                    response = self._call_ollama(prompt=prompt, system=system)
+                    response = self._call_ollama(prompt=prompt, system=system, model=model)
                 elif self.backend == "openrouter":
                     response = self._call_openrouter(prompt=prompt, system=system)
                 elif self.backend == "nvidia_nim":
@@ -387,9 +387,9 @@ class LLMClient:
             "model": model,
         }
 
-    def _call_ollama(self, *, prompt: str, system: str) -> dict[str, Any]:
+    def _call_ollama(self, *, prompt: str, system: str, model: str | None = None) -> dict[str, Any]:
         host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-        model = os.environ.get("OLLAMA_MODEL", "llama3.2:latest")
+        model = model or os.environ.get("OLLAMA_MODEL", "llama3.2:latest")
         payload = {"model": model, "prompt": prompt, "system": system, "stream": False}
         req = urllib.request.Request(
             f"{host}/api/generate",

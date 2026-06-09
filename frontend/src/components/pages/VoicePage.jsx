@@ -2,15 +2,15 @@ import { useState, useEffect } from 'react'
 import { Panel, Badge, StatCard, DataRow } from '../ui/primitives'
 import api from '../../api/client'
 
-const TONES = ['authoritative','warm','cheerful','calm','professional','casual','empathetic','robotic']
+const TONES = ['warm_confident','calm','focused','curious','concerned','firm','urgent','subtle_excited']
 
 const PRESETS = [
-  { name:'Executive',     gender:'male',    tone:'authoritative', pitch:0.9, speed:0.9, articulation:0.85, friendliness:0.4 },
-  { name:'Warm Advisor',  gender:'female',  tone:'warm',          pitch:1.1, speed:1.0, articulation:0.65, friendliness:0.9 },
+  { name:'Executive',     gender:'male',    tone:'firm',           pitch:0.9, speed:0.95, articulation:0.85, friendliness:0.45 },
+  { name:'Warm Advisor',  gender:'female',  tone:'warm_confident', pitch:1.1, speed:1.0, articulation:0.65, friendliness:0.65 },
   { name:'Calm Guide',    gender:'neutral', tone:'calm',          pitch:1.0, speed:0.9, articulation:0.7,  friendliness:0.7 },
-  { name:'Energetic',     gender:'female',  tone:'cheerful',      pitch:1.3, speed:1.2, articulation:0.75, friendliness:0.95 },
-  { name:'Analyst',       gender:'male',    tone:'professional',  pitch:1.0, speed:1.1, articulation:0.9,  friendliness:0.5 },
-  { name:'Casual',        gender:'neutral', tone:'casual',        pitch:1.05,speed:1.15,articulation:0.6,  friendliness:0.85 },
+  { name:'Energetic',     gender:'female',  tone:'subtle_excited', pitch:1.2, speed:1.08, articulation:0.75, friendliness:0.6 },
+  { name:'Analyst',       gender:'male',    tone:'focused',        pitch:1.0, speed:1.05, articulation:0.9,  friendliness:0.45 },
+  { name:'Concerned',     gender:'neutral', tone:'concerned',      pitch:1.0, speed:0.92, articulation:0.75, friendliness:0.55 },
 ]
 
 const BARS = [12,18,28,42,55,38,62,71,58,44,32,25,38,48,60,72,65,50,38,28,18,12,8,14]
@@ -46,16 +46,16 @@ export default function VoicePage() {
 
   // Persona params
   const [gender, setGender] = useState('neutral')
-  const [tone, setTone] = useState('professional')
+  const [tone, setTone] = useState('warm_confident')
   const [pitch, setPitch] = useState(1.0)
   const [speed, setSpeed] = useState(1.0)
   const [articulation, setArticulation] = useState(0.7)
   const [friendliness, setFriendliness] = useState(0.6)
 
-  const persona = { gender, tone, pitch, speed, articulation, friendliness }
+  const persona = { provider: 'voice_core_local', gender, tone, emotion: tone, emotion_intensity: friendliness * 0.7, speaking_rate: speed, pitch, articulation, friendliness }
 
   useEffect(() => {
-    api.get('/api/voice/personaplex/status').then(setBackendStatus).catch(() => setBackendStatus({ available: false }))
+    api.voice.runtime().then(setBackendStatus).catch(() => setBackendStatus({ ok: false }))
   }, [])
 
   const applyPreset = (p) => {
@@ -68,8 +68,29 @@ export default function VoicePage() {
     if (!testText.trim()) return
     setTesting(true); setTestResult(null)
     try {
-      const res = await api.voice.synthesize(testText.trim(), persona)
-      setTestResult({ ok: true, message: res.message || 'Synthesized successfully', chars: testText.length })
+      const token = sessionStorage.getItem('ai_jwt')
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers.Authorization = `Bearer ${token}`
+      const res = await fetch('/api/voice/synthesize', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          text: testText.trim(),
+          provider: 'voice_core_local',
+          voice: 'default',
+          emotion: tone,
+          emotion_intensity: friendliness * 0.7,
+          speaking_rate: speed,
+          persona,
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || body.setup || `HTTP ${res.status}`)
+      }
+      const audio = new Audio(URL.createObjectURL(await res.blob()))
+      await audio.play()
+      setTestResult({ ok: true, message: `Synthesized with ${res.headers.get('X-Voice-Provider') || 'default voice'}`, chars: testText.length })
     } catch (e) {
       setTestResult({ ok: false, message: e.message || 'Synthesis failed' })
     } finally {
@@ -90,9 +111,9 @@ export default function VoicePage() {
     <div style={{ display:'flex', flexDirection:'column', gap:10, height:'100%' }}>
       {/* Stats row */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
-        <StatCard label="Backend"    value={backendStatus?.available ? 'ONLINE' : 'OFFLINE'} color={backendStatus?.available ? '#22C55E' : '#ef4444'} sub="Nvidia PersonaPlex"/>
-        <StatCard label="Model"      value="PersonaPlex TTS" color="var(--gold,#E5C76B)" sub="v1"/>
-        <StatCard label="Tones"      value={`${TONES.length}`} color="var(--teal,#20D6C7)" sub="Available styles"/>
+        <StatCard label="Backend"    value={backendStatus?.ok ? 'ONLINE' : 'OFFLINE'} color={backendStatus?.ok ? '#22C55E' : '#ef4444'} sub="Local voice runtime"/>
+        <StatCard label="Model"      value={backendStatus?.tts?.voice_core_local?.state || 'unknown'} color="var(--gold,#E5C76B)" sub="Default Human Voice"/>
+        <StatCard label="Emotions"   value={`${TONES.length}`} color="var(--teal,#20D6C7)" sub="Subtle styles"/>
       </div>
 
       {/* Tab bar */}
@@ -122,7 +143,7 @@ export default function VoicePage() {
 
             {/* Tone */}
             <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:9, fontFamily:'monospace', color:'rgba(255,255,255,0.35)', marginBottom:6 }}>TONE</div>
+              <div style={{ fontSize:9, fontFamily:'monospace', color:'rgba(255,255,255,0.35)', marginBottom:6 }}>EMOTION STYLE</div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:4 }}>
                 {TONES.map(t => (
                   <button key={t} onClick={() => setTone(t)} style={{
@@ -154,7 +175,7 @@ export default function VoicePage() {
 
           {/* Right: test panel */}
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-            <Panel title="Test Voice" badge={<Badge label={backendStatus?.available ? 'API READY' : 'OFFLINE'} variant={backendStatus?.available ? 'teal' : 'default'}/>}>
+            <Panel title="Test Default Human Voice" badge={<Badge label={backendStatus?.tts?.voice_core_local?.state === 'ready' ? 'READY' : 'NOT READY'} variant={backendStatus?.tts?.voice_core_local?.state === 'ready' ? 'teal' : 'default'}/>}>
               {/* Waveform visualizer */}
               <div onClick={() => setActive(a => !a)} style={{ display:'flex', alignItems:'flex-end', justifyContent:'center', gap:2, height:48, marginBottom:12, cursor:'pointer' }}>
                 {BARS.map((h, i) => (
@@ -185,16 +206,16 @@ export default function VoicePage() {
               )}
             </Panel>
 
-            <Panel title="Backend Status" style={{ flex:1 }}>
+            <Panel title="Local Voice Status" style={{ flex:1 }}>
               {backendStatus ? (
                 <>
-                  <DataRow label="Available" value={backendStatus.available ? 'YES' : 'NO'} color={backendStatus.available ? '#22C55E' : '#ef4444'}/>
-                  <DataRow label="Model"     value={backendStatus.model || 'N/A'}/>
-                  <DataRow label="Tones"     value={`${backendStatus.tones?.length || TONES.length} styles`}/>
-                  <DataRow label="Genders"   value={backendStatus.genders?.join(', ') || 'male, female, neutral'}/>
-                  {!backendStatus.available && (
+                  <DataRow label="Default voice" value={backendStatus.tts?.voice_core_local?.state || 'unknown'} color={backendStatus.tts?.voice_core_local?.state === 'ready' ? '#22C55E' : '#ef4444'}/>
+                  <DataRow label="EN voice"     value={backendStatus.tts?.voice_core_local?.tts_en_ready ? backendStatus.tts?.voice_core_local?.active_voice?.voice || 'af_heart' : 'missing'}/>
+                  <DataRow label="NL voice"     value={backendStatus.tts?.voice_core_local?.tts_nl_ready ? 'nl_NL-mls-medium' : 'missing'}/>
+                  <DataRow label="No install"   value={backendStatus.tts?.voice_core_local?.requires_installation === false ? 'YES' : 'NO'}/>
+                  {backendStatus.tts?.voice_core_local?.state !== 'ready' && (
                     <div style={{ marginTop:8, fontSize:10, fontFamily:'monospace', color:'rgba(239,68,68,0.7)', padding:'6px 8px', background:'rgba(239,68,68,0.06)', borderRadius:5, border:'1px solid rgba(239,68,68,0.2)' }}>
-                      Set NVIDIA_API_KEY env var to enable PersonaPlex TTS.
+                      {backendStatus.tts?.voice_core_local?.recommendation || 'Packaged Default Human Voice bundle is not ready.'}
                     </div>
                   )}
                 </>

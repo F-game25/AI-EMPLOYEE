@@ -2,7 +2,7 @@
   "_meta": {
     "version": "2.1",
     "description": "All 110 agents at full capacity — no tier restrictions",
-    "total_agents": 56,
+    "total_agents": 59,
     "updated_at": "2026-06-03T00:00:00Z",
     "model_routing": {
       "sales": {
@@ -3067,6 +3067,87 @@
       "model_provider": "anthropic",
       "model": "claude-sonnet-4-6",
       "capacity_mode": "full"
+    },
+    "react_coder": {
+      "description": "ReAct Coder Agent — writes, reads, and executes code iteratively using a Reason-Act-Observe loop",
+      "category": "engineering",
+      "skills": [
+        "code_generation",
+        "file_ops",
+        "shell_exec",
+        "code_exec"
+      ],
+      "commands": [
+        "code",
+        "implement",
+        "write",
+        "fix"
+      ],
+      "specialties": [
+        "file writing",
+        "code execution",
+        "test running",
+        "iterative debugging"
+      ],
+      "parallel_capable": true,
+      "model_provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "capacity_mode": "full",
+      "react_agent": true,
+      "max_risk": 2
+    },
+    "react_researcher": {
+      "description": "ReAct Researcher Agent — searches, fetches, and synthesises information via iterative tool use",
+      "category": "research",
+      "skills": [
+        "web_search",
+        "web_fetch",
+        "memory_retrieval",
+        "synthesis"
+      ],
+      "commands": [
+        "research",
+        "find",
+        "search",
+        "investigate"
+      ],
+      "specialties": [
+        "multi-hop research",
+        "source synthesis",
+        "knowledge retrieval"
+      ],
+      "parallel_capable": true,
+      "model_provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "capacity_mode": "full",
+      "react_agent": true,
+      "max_risk": 2
+    },
+    "react_planner": {
+      "description": "ReAct Planner Agent — decomposes complex goals into structured subtask plans",
+      "category": "coordination",
+      "skills": [
+        "goal_decomposition",
+        "task_planning",
+        "agent_selection"
+      ],
+      "commands": [
+        "plan",
+        "decompose",
+        "strategy",
+        "outline"
+      ],
+      "specialties": [
+        "goal decomposition",
+        "multi-agent planning",
+        "priority ordering"
+      ],
+      "parallel_capable": false,
+      "model_provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "capacity_mode": "full",
+      "react_agent": true,
+      "max_risk": 0
     }
   }
 }

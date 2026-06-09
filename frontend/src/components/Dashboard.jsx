@@ -49,6 +49,9 @@ const ReconPage         = lazy(() => import('./pages/ReconPage'))
 const PromptInspectorPage = lazy(() => import('./pages/PromptInspectorPage'))
 const SalesPage         = lazy(() => import('./pages/sales/SalesPage'))
 const AvatarLabPage     = lazy(() => import('./pages/AvatarLabPage'))
+const QuantumBrainPage   = lazy(() => import('./pages/QuantumBrainPage'))
+const DeepResearchPage   = lazy(() => import('./pages/DeepResearchPage'))
+const OrdersPage         = lazy(() => import('./pages/OrdersPage'))
 import { API_URL } from '../config/api'
 import { usePerformanceMode } from '../hooks/usePerformanceMode'
 import TopBar from './dashboard/TopBar'
@@ -79,6 +82,7 @@ const PAGES = {
   'memory':         MemoryPage,
   'economy':        MoneyModePage,
   'sales':          SalesPage,
+  'orders':         SalesPage,
   // OPERATIONS
   'tasks':          OperationsPage,
   'workflows':      WorkflowsPage,
@@ -91,6 +95,7 @@ const PAGES = {
   'knowledge':      KnowledgePage,
   'trends':         IntelligencePage,
   'research':       ResearchPage,
+  'deep-research':  DeepResearchPage,
   'recon':          ReconPage,
   'prompt-inspector': PromptInspectorPage,
   // SECURITY — panel switches internally on activeSection
@@ -113,6 +118,7 @@ const PAGES = {
   'roles':          UserExperienceCenter,
   'perspectives':   UserExperienceCenter,
   'avatar-lab':     AvatarLabPage,
+  'quantum-brain':  QuantumBrainPage,
 }
 
 function DashboardMountedSignal({ section }) {

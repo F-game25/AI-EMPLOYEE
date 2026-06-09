@@ -932,23 +932,67 @@ export function sendChatMessage(message) {
   }
   getStore().setTyping(true)
   clearTimeout(_typingTimeout)
-  _typingTimeout = setTimeout(() => getStore().setTyping(false), 30000)
-  // streaming: raw fetch intentional (WS-down fallback path, manual auth)
+  _typingTimeout = setTimeout(() => getStore().setTyping(false), 90000)
+
   const token = sessionStorage.getItem('ai_jwt')
-  fetch('/api/chat', {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+
+  // Streaming SSE fetch — tokens appear as they generate
+  fetch('/chat/stream', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers,
     body: JSON.stringify({ message }),
   })
-    .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-    .then(data => {
-      clearTimeout(_typingTimeout)
-      getStore().setTyping(false)
-      if (data?.turn_id) getStore().upsertTurnMessage?.(data)
-      else getStore().addChatMessage?.({ role: 'ai', content: data?.reply || data?.content || data?.response || 'No response returned.', ts: Date.now() })
+    .then(async r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let accumulated = ''
+      let msgAdded = false
+
+      const flush = (text) => {
+        if (!text) return
+        if (!msgAdded) {
+          getStore().setTyping(false)
+          clearTimeout(_typingTimeout)
+          getStore().addChatMessage?.({ role: 'ai', content: text, ts: Date.now() })
+          msgAdded = true
+        } else {
+          getStore().updateLastAiMessage?.(text)
+        }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6))
+            if (evt.chunk) {
+              accumulated += evt.chunk
+              flush(accumulated)
+            } else if (evt.done) {
+              break
+            } else if (evt.error) {
+              throw new Error(evt.error)
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!msgAdded) {
+        getStore().setTyping(false)
+        clearTimeout(_typingTimeout)
+        getStore().addChatMessage?.({ role: 'ai', content: accumulated || 'No response returned.', ts: Date.now() })
+      }
     })
     .catch(err => {
       clearTimeout(_typingTimeout)

@@ -366,7 +366,7 @@ CHATLOG_MAX_ENTRIES = 1000
 # ── IntelligenceCore identity ─────────────────────────────────────────────────
 # Default user ID when no auth token is present (single-user / local install).
 _DEFAULT_USER = "user:default"
-LLM_TIMEOUT_SECONDS = 30
+LLM_TIMEOUT_SECONDS = 90
 
 from constants import (  # noqa: F401 — extracted for readability
     ROUTING_MAP, AGENTS_BY_MODE, AGENT_ALIASES, CAPS_ID_ALIASES, INFRA_AGENTS,
@@ -946,6 +946,36 @@ def _call_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: 
   with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
     body = json.loads(resp.read().decode("utf-8", errors="replace"))
   return ((body.get("message") or {}).get("content") or "").strip()
+
+
+def _stream_ollama_chat(prompt: str, system_prompt: str, model: str, ollama_host: str,
+                        history: Optional[list] = None):
+  """Generator that yields text chunks from a streaming Ollama /api/chat call."""
+  messages: list = [{"role": "system", "content": system_prompt}]
+  if history:
+    messages.extend(history)
+  messages.append({"role": "user", "content": prompt})
+  payload = json.dumps({"model": model, "stream": True, "messages": messages}).encode("utf-8")
+  req = urllib.request.Request(
+    f"{ollama_host.rstrip('/')}/api/chat",
+    data=payload,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+  )
+  with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+    for raw_line in resp:
+      line = raw_line.decode("utf-8", errors="replace").strip()
+      if not line:
+        continue
+      try:
+        chunk = json.loads(line)
+      except json.JSONDecodeError:
+        continue
+      token = (chunk.get("message") or {}).get("content", "")
+      if token:
+        yield token
+      if chunk.get("done"):
+        break
 
 
 def _call_gemma_chat(prompt: str, system_prompt: str, ollama_host: str,
@@ -4504,6 +4534,92 @@ async def post_chat(payload: dict, request: Request):
 @app.post("/chat")
 async def post_chat_alias(payload: dict, request: Request):
     return await post_chat(payload, request)
+
+
+@app.post("/api/chat/stream", tags=["tasks"])
+async def post_chat_stream(payload: dict, request: Request):
+    """Stream LLM tokens as SSE for the chat UI.
+
+    Yields ``data: {"chunk": "<token>"}\\n\\n`` lines while the model generates,
+    then ``data: {"done": true}\\n\\n`` when finished.
+    Falls back to a single non-streaming response if Ollama isn't available.
+    """
+    from starlette.responses import StreamingResponse  # noqa: PLC0415
+
+    raw_message = (payload or {}).get("message", "").strip()
+    model_route = ((payload or {}).get("model_route") or "").strip().lower()
+    if not raw_message:
+        async def _err():
+            yield 'data: {"error": "message required"}\n\n'
+        return StreamingResponse(_err(), media_type="text/event-stream")
+
+    # Sanitize
+    if _SECURITY_AVAILABLE:
+        message = InputSanitizer.sanitize_input(raw_message, max_length=10000)
+    else:
+        message = raw_message[:10000].replace("\x00", "")
+    message = _sanitize_for_log(message)
+
+    async def _event_gen():
+        collected: list[str] = []
+        try:
+            # Log user turn
+            append_chatlog({"ts": now_iso(), "type": "user", "message": message, "model_route": model_route})
+            try:
+                _bc = _ws_broadcast("chat:user", {"message": message, "model_route": model_route})
+                if _bc is not None:
+                    await _bc
+            except Exception:
+                pass
+
+            # Determine provider/model using existing routing
+            routed_agent = route_to_agent(message)
+            mode = _current_mode()
+            provider, mdl, runtime_env = _detect_llm_provider(model_route or None)
+            ollama_host = runtime_env.get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+            system_prompt = _build_llm_system_prompt(message, routed_agent, mode)
+            chat_history = _load_chat_history(n_exchanges=8)
+
+            if provider in ("ollama", "gemma") or (not provider and os.environ.get("LLM_BACKEND") == "ollama"):
+                use_model = mdl or os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+                for token in _stream_ollama_chat(message, system_prompt, use_model, ollama_host, history=chat_history):
+                    collected.append(token)
+                    yield f"data: {json.dumps({'chunk': token})}\n\n"
+            else:
+                # Non-streaming fallback for other providers
+                full = await run_in_threadpool(
+                    _generate_llm_response, message, routed_agent, mode,
+                    model_route=model_route, user_id=_DEFAULT_USER
+                )
+                collected.append(full)
+                yield f"data: {json.dumps({'chunk': full})}\n\n"
+        except Exception as exc:
+            logger.warning("stream error: %s", exc)
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+        finally:
+            full_response = "".join(collected)
+            if full_response:
+                safe = _sanitize_for_log(full_response)
+                append_chatlog({"ts": now_iso(), "type": "agent", "message": safe, "model_route": model_route})
+                try:
+                    _bc2 = _ws_broadcast("orchestrator:message", {"message": safe, "subsystem": "orchestrator"})
+                    if _bc2 is not None:
+                        await _bc2
+                except Exception:
+                    pass
+            yield 'data: {"done": true}\n\n'
+
+    return StreamingResponse(
+        _event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            # Disable GZipMiddleware for SSE — it buffers before compressing which
+            # kills streaming. GZip ignores responses that declare identity encoding.
+            "Content-Encoding": "identity",
+        },
+    )
 
 
 def handle_command(
@@ -13161,6 +13277,134 @@ async def research_screenshot(hash_name: str):
     return FileResponse(str(path), media_type="image/png")
 
 
+# ── Deep Research — exhaustive multi-hop pipeline ──────────────────────────
+
+@app.post("/api/research/deep/start")
+async def deep_research_start(req: dict, _auth: None = Depends(require_auth)):
+    """Launch a deep research run in the background. Returns report_id immediately.
+    Client polls /api/research/deep/{id} for status or subscribes to WS events.
+    """
+    topic = (req or {}).get("topic", "").strip()
+    depth = (req or {}).get("depth", "deep")
+    if not topic:
+        raise HTTPException(400, "topic required")
+    if len(topic) > 600:
+        raise HTTPException(400, "topic too long (max 600 chars)")
+    if depth not in ("shallow", "normal", "deep"):
+        depth = "deep"
+
+    try:
+        from core.deep_research_engine import DeepResearchEngine, DeepResearchReport, _save_report
+        import uuid as _uuid
+
+        report_id = _uuid.uuid4().hex[:16]
+        report = DeepResearchReport(id=report_id, topic=topic, created_at=time.time())
+        _save_report(report)
+
+        async def _bg():
+            try:
+                q: asyncio.Queue = asyncio.Queue()
+                engine = DeepResearchEngine(progress_queue=q)
+
+                async def _drain():
+                    while True:
+                        try:
+                            evt = q.get_nowait()
+                        except asyncio.QueueEmpty:
+                            await asyncio.sleep(0.1)
+                            continue
+                        if evt is None:
+                            break
+                        try:
+                            _bc = _ws_broadcast("research:progress", {"report_id": report_id, **evt})
+                            if _bc is not None:
+                                await _bc
+                        except Exception:
+                            pass
+                        if evt.get("event") in ("done", "failed"):
+                            break
+
+                drain_task = asyncio.create_task(_drain())
+                await engine.run(topic=topic, depth=depth)
+                await q.put(None)
+                await drain_task
+            except Exception as exc:
+                logger.warning("deep research background failed: %s", exc)
+                try:
+                    _bc = _ws_broadcast("research:progress", {
+                        "report_id": report_id,
+                        "event": "failed", "data": {"error": str(exc)}, "ts": time.time(),
+                    })
+                    if _bc is not None:
+                        await _bc
+                except Exception:
+                    pass
+
+        asyncio.create_task(_bg())
+        return JSONResponse({"ok": True, "report_id": report_id, "topic": topic, "depth": depth, "status": "started"})
+
+    except Exception as exc:
+        logger.warning("deep_research_start failed: %s", exc)
+        raise HTTPException(500, f"start failed: {exc}")
+
+
+@app.get("/api/research/deep")
+async def deep_research_list(_auth: None = Depends(require_auth)):
+    """List all deep research reports (index, not full content)."""
+    try:
+        from core.deep_research_engine import list_reports
+        return JSONResponse({"ok": True, "reports": list_reports(limit=100)})
+    except Exception as exc:
+        raise HTTPException(500, f"list failed: {exc}")
+
+
+@app.get("/api/research/deep/{report_id}")
+async def deep_research_get(report_id: str, _auth: None = Depends(require_auth)):
+    """Fetch a single deep research report (full content)."""
+    import re as _re
+    if not _re.fullmatch(r"[a-f0-9]{16}", report_id):
+        raise HTTPException(400, "invalid report_id")
+    try:
+        from core.deep_research_engine import load_report
+        data = load_report(report_id)
+        if not data:
+            raise HTTPException(404, "report not found")
+        return JSONResponse({"ok": True, "report": data})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"get failed: {exc}")
+
+
+@app.delete("/api/research/deep/{report_id}")
+async def deep_research_delete(report_id: str, _auth: None = Depends(require_auth)):
+    """Delete a deep research report."""
+    import re as _re
+    if not _re.fullmatch(r"[a-f0-9]{16}", report_id):
+        raise HTTPException(400, "invalid report_id")
+    try:
+        from core.deep_research_engine import delete_report
+        ok = delete_report(report_id)
+        return JSONResponse({"ok": ok})
+    except Exception as exc:
+        raise HTTPException(500, f"delete failed: {exc}")
+
+
+@app.post("/api/research/deep/{report_id}/commit")
+async def deep_research_commit(report_id: str, _auth: None = Depends(require_auth)):
+    """Commit a completed report to all memory layers (vault + knowledge_store + vector)."""
+    import re as _re
+    if not _re.fullmatch(r"[a-f0-9]{16}", report_id):
+        raise HTTPException(400, "invalid report_id")
+    try:
+        from core.deep_research_engine import DeepResearchEngine
+        engine = DeepResearchEngine()
+        result = await engine.commit_to_memory(report_id)
+        return JSONResponse(result)
+    except Exception as exc:
+        raise HTTPException(500, f"commit failed: {exc}")
+
+
 # ── Knowledge Upload — chunk + embed + persist ──────────────────────────────
 def _chunk_text(text: str, chunk_size: int = 512, overlap: int = 51) -> list[str]:
     words = text.split()
@@ -14046,6 +14290,343 @@ async def quantum_stats():
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─── Swarm / ReAct Agent routes ───────────────────────────────────────────────
+
+class _SwarmRunRequest(BaseModel):  # type: ignore[misc]
+    goal: str
+    max_agents: int = 4
+    context: dict = {}
+
+
+class _ReactRunRequest(BaseModel):  # type: ignore[misc]
+    task: str
+    agent: str = "react_coder"  # react_coder | react_researcher | react_planner
+    max_steps: int = 15
+    context: dict = {}
+
+
+@app.post("/swarm/run", tags=["swarm"])
+async def swarm_run(req: _SwarmRunRequest):
+    """Run the SwarmController: decompose goal → parallel ReActAgent subtasks → synthesise."""
+    def _run():
+        from core.swarm.swarm_controller import SwarmController
+        ctrl = SwarmController(max_agents=req.max_agents)
+        result = ctrl.run_swarm(goal=req.goal, max_agents=req.max_agents, context=req.context)
+        return {
+            "run_id": result.run_id,
+            "goal": result.goal,
+            "status": result.status,
+            "output": result.output,
+            "subtask_count": len(result.subtask_results),
+            "tokens_used": result.tokens_used,
+            "duration_ms": result.duration_ms,
+        }
+    try:
+        return await run_in_threadpool(_run)
+    except Exception as exc:
+        logger.error("swarm_run error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/swarm/stream/{run_id}", tags=["swarm"])
+async def swarm_stream(run_id: str):
+    """SSE stream of ReAct step events for a running swarm job."""
+    import json as _json
+    from starlette.responses import StreamingResponse
+    from core.swarm.swarm_controller import get_run_step_queue
+
+    _SENTINEL = None  # closed marker
+
+    async def event_gen():
+        import queue as _q
+        q = get_run_step_queue(run_id)
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                event = await loop.run_in_executor(None, lambda: q.get(timeout=30))
+                # Sentinel object closes the stream
+                if not isinstance(event, dict):
+                    yield "event: done\ndata: {}\n\n"
+                    break
+                yield f"event: step\ndata: {_json.dumps(event)}\n\n"
+            except _q.Empty:
+                yield ": keepalive\n\n"
+            except Exception:
+                break
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/tools/pending", tags=["swarm"])
+async def tools_pending():
+    """Return all pending tool approval requests from the ToolApprovalGate."""
+    try:
+        from core.tool_approval_gate import pending_approvals
+        return {"pending": pending_approvals()}
+    except Exception as exc:
+        return {"pending": [], "error": str(exc)}
+
+
+@app.post("/tools/{request_id}/approve", tags=["swarm"])
+async def tool_approve(request_id: str):
+    """Approve a pending tool call (unblocks the waiting ReActAgent step)."""
+    try:
+        from core.tool_approval_gate import approve
+        found = approve(request_id)
+        return {"ok": found, "request_id": request_id}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/tools/{request_id}/reject", tags=["swarm"])
+async def tool_reject(request_id: str):
+    """Reject a pending tool call."""
+    try:
+        from core.tool_approval_gate import reject
+        found = reject(request_id)
+        return {"ok": found, "request_id": request_id}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/react/run", tags=["swarm"])
+async def react_run(req: _ReactRunRequest):
+    """Run a single ReActAgent directly (no swarm decomposition)."""
+    def _run():
+        from engine.agent.agent_loop import ReActAgent
+        from tools.registry import get_tool_registry
+        from core.orchestrator import get_llm_client
+        agent = ReActAgent(
+            tools=get_tool_registry(),
+            llm=get_llm_client(),
+            max_steps=req.max_steps,
+            max_risk=2,
+        )
+        result = agent.run(req.task, context=req.context)
+        return {
+            "run_id": result.run_id,
+            "status": result.status,
+            "output": result.output,
+            "steps": len(result.steps),
+            "tokens_used": result.tokens_used,
+            "duration_ms": result.duration_ms,
+        }
+    try:
+        return await run_in_threadpool(_run)
+    except Exception as exc:
+        logger.error("react_run error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cluster & Resource endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/system/resources", tags=["cluster"])
+async def system_resources():
+    """Return live hardware specs and safe AI budget for this node."""
+    def _get():
+        from engine.compute.resource_manager import get_resource_manager
+        return get_resource_manager().to_dict()
+    try:
+        return await run_in_threadpool(_get)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/cluster/status", tags=["cluster"])
+async def cluster_status():
+    """Return cluster topology: this node + all discovered peers."""
+    def _get():
+        from engine.compute.cluster_node import get_cluster_node
+        return get_cluster_node().status()
+    try:
+        return await run_in_threadpool(_get)
+    except Exception as exc:
+        return {"error": str(exc), "enabled": False, "peers": []}
+
+
+class _ClusterInferRequest(BaseModel):  # type: ignore[misc]
+    prompt: str
+    system: str = "You are a helpful assistant."
+    model: str = ""
+
+
+class _ClusterAgentRequest(BaseModel):  # type: ignore[misc]
+    goal: str
+    agent: str = "react_researcher"
+    context: dict = {}
+    max_steps: int = 15
+
+
+class _PairConfirmRequest(BaseModel):  # type: ignore[misc]
+    code: str
+    remote_node_id: str
+    remote_ip: str
+    totp_code: str          # user-entered TOTP code — NEVER auto-generated by the system
+
+
+class _PairInitRequest(BaseModel):  # type: ignore[misc]
+    remote_ip: str
+    remote_port: int = 18790
+    code: str               # pairing code from the other machine (user copied it)
+    totp_secret: str        # TOTP secret from the other machine (user copied it)
+    totp_code: str          # 6-digit code from authenticator app — user must enter this
+
+
+class _UnpairRequest(BaseModel):  # type: ignore[misc]
+    node_id: str
+
+
+def _verify_cluster_2fa(request: Request) -> None:
+    """Verify both shared token AND TOTP code for incoming cluster requests.
+
+    TOTP is ALWAYS required — the code can only be provided by a human
+    who has access to the paired authenticator. No auto-bypass path exists.
+    """
+    from engine.compute.cluster_node import get_cluster_node
+    token     = request.headers.get("X-Cluster-Token", "")
+    node_id   = request.headers.get("X-Cluster-Node", "")
+    totp_code = request.headers.get("X-Cluster-TOTP", "")
+    expected  = os.environ.get("AI_CLUSTER_TOKEN", "")
+
+    if not expected:
+        raise HTTPException(status_code=403, detail="Cluster not configured on this node")
+    if token != expected:
+        raise HTTPException(status_code=403, detail="Invalid cluster token")
+    if not node_id:
+        raise HTTPException(status_code=403, detail="Missing node ID header")
+
+    node = get_cluster_node()
+    if not node.verify_request(node_id, token, totp_code):
+        logger.warning("cluster: 2FA failed for node_id=%s ip=%s", node_id,
+                       request.client.host if request.client else "?")
+        raise HTTPException(status_code=403, detail="2FA verification failed — invalid or expired TOTP code")
+
+
+# ── Pairing endpoints (user-initiated only) ────────────────────────────────────
+
+@app.post("/cluster/pair/generate", tags=["cluster"])
+async def cluster_pair_generate(_auth=Depends(require_auth)):
+    """Generate a pairing invitation code. The user shares this with the other machine.
+    Only authenticated dashboard users can generate pairing codes.
+    """
+    def _gen():
+        from engine.compute.cluster_node import get_cluster_node
+        return get_cluster_node().generate_pair_code()
+    try:
+        return await run_in_threadpool(_gen)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/cluster/pair/confirm", tags=["cluster"])
+async def cluster_pair_confirm(req: _PairConfirmRequest, request: Request):
+    """Worker-side: confirm a pairing invitation.
+    The user must enter the TOTP code from their authenticator app.
+    This endpoint does NOT require prior auth — it's the bootstrap handshake.
+    It DOES require a valid TOTP code which only the human user can provide.
+    """
+    def _confirm():
+        from engine.compute.cluster_node import get_cluster_node
+        return get_cluster_node().confirm_pair(
+            code=req.code,
+            remote_node_id=req.remote_node_id,
+            remote_ip=req.remote_ip,
+            totp_code=req.totp_code,   # user-entered, never auto-filled
+        )
+    try:
+        result = await run_in_threadpool(_confirm)
+        if not result.get("ok"):
+            raise HTTPException(status_code=403, detail=result.get("error", "Pairing failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/cluster/pair/init", tags=["cluster"])
+async def cluster_pair_init(req: _PairInitRequest, _auth=Depends(require_auth)):
+    """Primary-side: initiate pairing with a remote worker.
+    The user must enter the TOTP code — the system never auto-generates it here.
+    """
+    def _init():
+        from engine.compute.cluster_node import get_cluster_node
+        return get_cluster_node().pair_with_remote(
+            remote_ip=req.remote_ip,
+            remote_port=req.remote_port,
+            code=req.code,
+            totp_secret=req.totp_secret,
+            totp_code=req.totp_code,   # user-entered
+        )
+    try:
+        result = await run_in_threadpool(_init)
+        if not result.get("ok"):
+            raise HTTPException(status_code=403, detail=result.get("error", "Pairing failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/cluster/unpair", tags=["cluster"])
+async def cluster_unpair(req: _UnpairRequest, _auth=Depends(require_auth)):
+    """Remove a paired node. Requires dashboard auth."""
+    def _do():
+        from engine.compute.cluster_node import get_cluster_node
+        return {"ok": get_cluster_node().unpair(req.node_id), "node_id": req.node_id}
+    return await run_in_threadpool(_do)
+
+
+# ── Worker endpoints (require 2FA on every call) ───────────────────────────────
+
+@app.post("/cluster/infer", tags=["cluster"])
+async def cluster_infer(req: _ClusterInferRequest, request: Request):
+    """Worker endpoint: run LLM inference. Requires token + TOTP 2FA."""
+    _verify_cluster_2fa(request)
+    def _run():
+        from engine.inference.llm import generate
+        return {"response": generate(req.prompt, system=req.system, model=req.model or None)}
+    try:
+        return await run_in_threadpool(_run)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/cluster/agent_run", tags=["cluster"])
+async def cluster_agent_run(req: _ClusterAgentRequest, request: Request):
+    """Worker endpoint: run a ReActAgent. Requires token + TOTP 2FA."""
+    _verify_cluster_2fa(request)
+    def _run():
+        from engine.agent.agent_loop import ReActAgent
+        from tools.registry import get_tool_registry
+        from core.orchestrator import get_llm_client
+        agent = ReActAgent(
+            tools=get_tool_registry(),
+            llm=get_llm_client(),
+            max_steps=req.max_steps,
+            max_risk=2,
+            hitl_approved=True,
+        )
+        result = agent.run(req.goal, context=req.context)
+        return {
+            "run_id": result.run_id,
+            "status": result.status,
+            "output": result.output,
+            "steps": len(result.steps),
+            "tokens_used": result.tokens_used,
+        }
+    try:
+        return await run_in_threadpool(_run)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 @app.on_event("startup")
 async def _start_knowledge_scheduler():
     try:
@@ -14205,6 +14786,35 @@ async def _init_neural_brain():
         from neural_brain.security.blacklight_engine import get_blacklight
         get_blacklight()
 
+    async def _factory_cluster_node():
+        from engine.compute.cluster_node import get_cluster_node
+        node = get_cluster_node()
+        node.start()
+        if node._enabled:
+            logger.info("✅ ClusterNode started — LAN discovery active, role=%s", node._role)
+        else:
+            logger.info("ClusterNode disabled (set AI_CLUSTER_TOKEN to enable multi-PC mode)")
+
+    async def _factory_resource_manager():
+        from engine.compute.resource_manager import get_resource_manager
+        rm = get_resource_manager()
+        budget = rm.budget
+        logger.info(
+            "✅ ResourceManager: vram_budget=%dMB ram_budget=%.1fGB cpu=%d | "
+            "primary=%s stt=%s tts=%s coder=%s",
+            budget.max_vram_mb, budget.max_ram_gb, budget.max_cpu_cores,
+            budget.llm_primary, budget.stt_model, budget.tts_engine,
+            budget.llm_coder if budget.can_run_coder else "offloaded",
+        )
+
+    async def _factory_model_warmer():
+        try:
+            from engine.inference.llm import warm_core_models
+            await asyncio.get_event_loop().run_in_executor(None, warm_core_models)
+            logger.info("✅ Core models warmed (keep_alive=-1)")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("model_warmer skipped: %s", exc)
+
     async def _wave_b_gather():
         await asyncio.gather(
             _wave_b_hook("phase4.loop_detector", _factory_loop_detector),
@@ -14217,6 +14827,9 @@ async def _init_neural_brain():
             _wave_b_hook("phase3.rpa_and_healing", _factory_rpa_and_healing),
             _wave_b_hook("phase4.adaptive_throttler", _factory_adaptive_throttler),
             _wave_b_hook("security.blacklight_sentinel", _factory_blacklight_sentinel),
+            _wave_b_hook("compute.resource_manager", _factory_resource_manager),
+            _wave_b_hook("compute.cluster_node", _factory_cluster_node),
+            _wave_b_hook("compute.model_warmer", _factory_model_warmer),
             return_exceptions=True,
         )
 

@@ -646,11 +646,18 @@ async function executeAction(action, project) {
     return { ok: true, output: `Wrote ${filePath} (${Buffer.byteLength(body, 'utf8')} bytes)`, diff: action.diff || null }
   }
   if (action.type === 'test_run') {
-    return {
-      ok: false,
-      approval_required: true,
-      output: 'Test command execution is staged. Shell execution must be wired through the supervised execution engine before it can run.',
+    const cmds = Array.isArray(action.commands) && action.commands.length
+      ? action.commands
+      : defaultVerificationCommands(project)
+    const root = safeProjectRoot(project)
+    const results = []
+    for (const cmd of cmds.slice(0, 6)) {
+      // eslint-disable-next-line no-await-in-loop
+      results.push(await runSandboxedVerifyCommand(project, cmd, root))
     }
+    const allPassed = results.length > 0 && results.every(r => r.pass)
+    const output = results.map(r => `[${r.pass ? 'PASS' : 'FAIL'}] ${r.command}\n${r.output || ''}`.trim()).join('\n\n')
+    return { ok: allPassed, output, results, all_passed: allPassed }
   }
   return { ok: false, approval_required: true, output: `${action.type} is staged but not executable in this safety profile yet.` }
 }
@@ -1722,7 +1729,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       root_path: root,
       path: root,
       allowed_write_paths: req.body?.allowed_write_paths || [],
-      write_access: false,
+      write_access: req.body?.write_access === true,
       package_type: inferPackageType({ root_path: root }),
       verification_commands: req.body?.verification_commands || defaultVerificationCommands({ target_type: root === REPO_ROOT ? 'internal_repo' : 'external_local_repo', root_path: root }),
       policy_profile: 'read_only_until_owner_approval',
@@ -1732,6 +1739,22 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     updateProject(project)
     appendAudit('forge_project_imported_read_only', { id: project.id, root_path: root, target_type: project.target_type })
     res.json({ ok: true, state: 'live', project, tree: buildTree(root) })
+  })
+
+  router.patch('/projects/:id', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const allowed = ['write_access', 'allowed_write_paths', 'verification_commands', 'name']
+    const updates = {}
+    for (const key of allowed) {
+      if (key in (req.body || {})) updates[key] = req.body[key]
+    }
+    if ('write_access' in updates) {
+      appendAudit('forge_project_write_access_changed', { id: project.id, write_access: updates.write_access, by: req.user?.email || 'operator' })
+    }
+    const updated = { ...project, ...updates, updated_at: nowIso() }
+    updateProject(updated)
+    res.json({ ok: true, state: 'live', project: updated })
   })
 
   router.delete('/projects/:id', requireAuth, (req, res) => {
@@ -2019,6 +2042,40 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     const updated = updateAction(action.id, { status: 'rejected', rejected_at: nowIso(), rejected_by: req.user?.email || 'operator', reject_reason: req.body?.reason || '' })
     appendAudit('forge_action_rejected', { id: action.id, type: action.type, reason: req.body?.reason || '' })
     res.json({ ok: true, state: 'live', action: updated })
+  })
+
+  // ── Tool approval endpoints (proxy to Python ToolApprovalGate) ──────────────
+  router.get('/tools/pending', requireAuth, async (req, res) => {
+    const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || '18790'
+    try {
+      const r = await fetch(`http://127.0.0.1:${PYTHON_PORT}/tools/pending`, { signal: AbortSignal.timeout(5000) })
+      const data = await r.json()
+      res.json(data)
+    } catch (err) {
+      res.json({ pending: [], error: err.message })
+    }
+  })
+
+  router.post('/tools/:id/approve', requireAuth, async (req, res) => {
+    const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || '18790'
+    try {
+      const r = await fetch(`http://127.0.0.1:${PYTHON_PORT}/tools/${req.params.id}/approve`, { method: 'POST', signal: AbortSignal.timeout(5000) })
+      const data = await r.json()
+      res.json(data)
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/tools/:id/reject', requireAuth, async (req, res) => {
+    const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || '18790'
+    try {
+      const r = await fetch(`http://127.0.0.1:${PYTHON_PORT}/tools/${req.params.id}/reject`, { method: 'POST', signal: AbortSignal.timeout(5000) })
+      const data = await r.json()
+      res.json(data)
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
   })
 
   router.post('/sandbox', requireAuth, async (req, res) => {
@@ -3078,8 +3135,40 @@ Respond with ONLY valid JSON (no markdown fences):
   // bounded and owner-gated. Captures original file contents and auto-rolls-back the
   // whole run if it can't reach green. Reuses the indexer context + verify allowlist.
 
+  // Fast-path: delegate to Python SwarmController when opts.use_swarm is set.
+  async function _executeSwarmRun(project, goal, opts = {}) {
+    const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || '18790'
+    const url = `http://127.0.0.1:${PYTHON_PORT}/swarm/run`
+    const body = JSON.stringify({
+      goal,
+      max_agents: opts.max_agents || 4,
+      context: { project_id: project.id, project_name: project.name },
+    })
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(300_000), // 5 min max
+    })
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => resp.statusText)
+      throw new Error(`SwarmController HTTP ${resp.status}: ${text}`)
+    }
+    return resp.json()
+  }
+
   // Shared execution core — called by both the HTTP route and the autopilot loop.
   async function _executeAgenticRun(project, goal, opts = {}) {
+    // Delegate to Python SwarmController when use_swarm flag is set
+    if (opts.use_swarm) {
+      try {
+        return await _executeSwarmRun(project, goal, opts)
+      } catch (err) {
+        // Log and fall through to the local pipeline
+        console.error('[forge] swarm delegation failed, using local pipeline:', err.message)
+      }
+    }
+
     const maxIters = Math.min(5, Math.max(1, Number(opts.max_iterations) || 3))
     const verifyCmds = (Array.isArray(opts.commands) && opts.commands.length)
       ? opts.commands : (project.verification_commands || defaultVerificationCommands(project))
@@ -3289,8 +3378,10 @@ Respond with ONLY valid JSON (no markdown fences):
     if (!project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
     const goal = String(req.body?.goal || '').trim()
     if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
+    // Full Auto mode: delegate to Python SwarmController
+    const opts = { ...(req.body || {}), use_swarm: req.body?.mode === 'auto' || req.body?.use_swarm === true }
     try {
-      const result = await _executeAgenticRun(project, goal, req.body || {})
+      const result = await _executeAgenticRun(project, goal, opts)
       res.json(result)
     } catch (err) {
       const errMsg = err?.message || String(err)

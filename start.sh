@@ -291,32 +291,60 @@ EOF
 
 _PYTHON_BACKEND_PORT="${PYTHON_BACKEND_PORT:-18790}"
 
-# ── [2/3] Ensure Ollama is running (local AI — must be online before backend) ─
+# ── [2/3] Ensure Ollama is running (managed local AI) ───────────────────────
 _OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+_OLLAMA_MODELS="${OLLAMA_MODELS:-$AI_HOME/models/ollama}"
+export OLLAMA_HOST="$_OLLAMA_HOST"
+export OLLAMA_MODELS="$_OLLAMA_MODELS"
+export OLLAMA_NO_CLOUD="${OLLAMA_NO_CLOUD:-1}"
+mkdir -p "$_OLLAMA_MODELS"
+
+_OLLAMA_BIN="${OLLAMA_BIN:-}"
+if [[ -z "$_OLLAMA_BIN" && -x "$REPO_ROOT/runtime/vendor/ollama/ollama" ]]; then
+  _OLLAMA_BIN="$REPO_ROOT/runtime/vendor/ollama/ollama"
+elif [[ -z "$_OLLAMA_BIN" && -x "$REPO_ROOT/runtime/vendor/ollama/bin/ollama" ]]; then
+  _OLLAMA_BIN="$REPO_ROOT/runtime/vendor/ollama/bin/ollama"
+elif [[ -z "$_OLLAMA_BIN" ]] && command -v ollama > /dev/null 2>&1; then
+  _OLLAMA_BIN="$(command -v ollama)"
+fi
+
+_OLLAMA_LIBRARY_PATH=""
+if [[ -d "$REPO_ROOT/runtime/vendor/ollama/lib" ]]; then
+  _OLLAMA_LIBRARY_PATH="$REPO_ROOT/runtime/vendor/ollama/lib"
+fi
+if [[ -d "/usr/local/lib/ollama" ]]; then
+  _OLLAMA_LIBRARY_PATH="${_OLLAMA_LIBRARY_PATH:+$_OLLAMA_LIBRARY_PATH:}/usr/local/lib/ollama"
+fi
+if [[ -n "$_OLLAMA_LIBRARY_PATH" ]]; then
+  export OLLAMA_LIBRARY_PATH="$_OLLAMA_LIBRARY_PATH"
+  export LD_LIBRARY_PATH="$_OLLAMA_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 _ollama_running() { curl -fsS --max-time 2 "${_OLLAMA_HOST}/api/tags" > /dev/null 2>&1; }
-if command -v ollama > /dev/null 2>&1; then
+if [[ -n "$_OLLAMA_BIN" && -x "$_OLLAMA_BIN" ]]; then
   if _ollama_running; then
     _ok "Ollama already running at ${_OLLAMA_HOST}"
   else
-    _log "Starting Ollama..."
+    _log "Starting managed Ollama..."
     _OLLAMA_PID_FILE="$APP_RUN_DIR/ollama.pid"
-    nohup ollama serve >> "$APP_LOG_DIR/ollama.log" 2>&1 </dev/null &
+    nohup env OLLAMA_HOST="$_OLLAMA_HOST" OLLAMA_MODELS="$_OLLAMA_MODELS" OLLAMA_LIBRARY_PATH="${OLLAMA_LIBRARY_PATH:-}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" OLLAMA_NO_CLOUD="$OLLAMA_NO_CLOUD" "$_OLLAMA_BIN" serve >> "$APP_LOG_DIR/ollama.log" 2>&1 </dev/null &
     echo "$!" > "$_OLLAMA_PID_FILE"
-    # Wait up to 10 s for Ollama to be ready
     for _oi in $(seq 1 20); do
       sleep 0.5
       if _ollama_running; then
         _ok "Ollama ready at ${_OLLAMA_HOST}"
+        _ok "Ollama model storage: ${_OLLAMA_MODELS}"
         break
       fi
     done
     if ! _ollama_running; then
-      _warn "Ollama did not respond within 10 s — chat will fall back to cloud providers"
+      _warn "Ollama did not respond within 10 s — local chat will remain unavailable until it starts"
+      _warn "  Log: $APP_LOG_DIR/ollama.log"
     fi
   fi
 else
-  _warn "Ollama not installed — local AI unavailable. Chat will use cloud providers."
-  _warn "  Install: curl -fsSL https://ollama.com/install.sh | sh"
+  _warn "Packaged Ollama runtime missing — local AI unavailable until runtime/vendor/ollama/ollama is bundled."
+  _warn "  Model storage is reserved at: ${_OLLAMA_MODELS}"
 fi
 
 # ── [2.5/3] Start Python AI backend (LLM pipeline) ───────────────────────────
@@ -364,6 +392,14 @@ if [[ -n "${PYTHON_BIN:-}" && -f "$_PYTHON_SERVER" ]]; then
         # Mirror the native graph into Neo4j (idempotent; no-op if Neo4j down).
         PYTHONPATH="$REPO_ROOT/runtime" "$PYTHON_BIN" -m neural_brain.graph.sync_native_to_neo4j \
           >> "$APP_LOG_DIR/python-backend.log" 2>&1 || true
+        # Pre-warm Ollama model so first chat message is instant
+        _WARM_MODEL="${OLLAMA_MODEL:-qwen2.5:7b-instruct}"
+        _OLLAMA_WARM_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+        curl -s --max-time 60 -X POST "${_OLLAMA_WARM_HOST}/api/generate" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"${_WARM_MODEL}\",\"prompt\":\"hi\",\"stream\":false}" \
+          > /dev/null 2>&1 &
+        echo "  [warm-up] Loading ${_WARM_MODEL} into VRAM in background..."
         exit 0
       fi
     done

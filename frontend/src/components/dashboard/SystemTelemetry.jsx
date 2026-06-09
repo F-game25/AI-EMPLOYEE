@@ -60,23 +60,25 @@ function Cell({ label, value, unit, delta, color, history }) {
 
 export default function SystemTelemetry() {
   const sh = useSystemStore(s => s.systemHealth) || {}
+  const ss = useSystemStore(s => s.systemStatus) || {}
 
-  const netRef     = useRef([])
-  const latRef     = useRef([])
+  const vramRef    = useRef([])
+  const diskRef    = useRef([])
   const tpsRef     = useRef([])
   const errRef     = useRef([])
   const [, force] = useState(0)
 
   useEffect(() => {
-    pushSample(netRef, sh.net_mbps ?? sh.network ?? 0)
-    pushSample(latRef, sh.latency_ms ?? sh.latency ?? 0)
+    pushSample(vramRef, ss.vram_free_mb ?? 0)
+    pushSample(diskRef, ss.disk_pct ?? 0)
     pushSample(tpsRef, sh.throughput_tps ?? sh.throughput ?? 0)
     pushSample(errRef, (sh.error_rate ?? 0) * 100)
     force(x => x + 1)
-  }, [sh])
+  }, [sh, ss])
 
-  const netVal = (sh.net_mbps ?? 0).toFixed(0)
-  const latVal = (sh.latency_ms ?? 0).toFixed(1)
+  const vramVal = ss.vram_free_mb != null ? Math.round(ss.vram_free_mb) : '—'
+  const diskVal = ss.disk_pct != null ? Math.round(ss.disk_pct) : '—'
+  const pyLatVal = ss.py_latency_ms != null ? Math.round(ss.py_latency_ms) : '—'
   const tpsRaw = sh.throughput_tps ?? 0
   const tpsVal = tpsRaw >= 1e6 ? `${(tpsRaw / 1e6).toFixed(2)}M` : tpsRaw >= 1e3 ? `${(tpsRaw / 1e3).toFixed(1)}K` : Math.round(tpsRaw)
   const errVal = ((sh.error_rate ?? 0) * 100).toFixed(3)
@@ -88,10 +90,10 @@ export default function SystemTelemetry() {
         <span className="st-panel__live">REAL-TIME</span>
       </header>
       <div className="st-panel__row">
-        <Cell label="NETWORK"    value={netVal} unit=" MB/s" delta={sh.net_delta} color="#00CFFF" history={netRef.current} />
-        <Cell label="LATENCY"    value={latVal} unit=" ms"   delta={sh.lat_delta} color="#FFB800" history={latRef.current} />
-        <Cell label="THROUGHPUT" value={tpsVal} unit=" t/s"  delta={sh.tps_delta} color="#00FFB4" history={tpsRef.current} />
-        <Cell label="ERROR RATE" value={errVal} unit="%"     delta={sh.err_delta} color="#FF6B6B" history={errRef.current} />
+        <Cell label="VRAM FREE"  value={vramVal} unit=" MB"   color="#A78BFA" history={vramRef.current} />
+        <Cell label="DISK"       value={diskVal} unit="%"     color="#60A5FA" history={diskRef.current} />
+        <Cell label="THROUGHPUT" value={tpsVal}  unit=" t/s"  delta={sh.tps_delta} color="#00FFB4" history={tpsRef.current} />
+        <Cell label="PY LATENCY" value={pyLatVal} unit=" ms"  color="#34D399" history={[]} />
       </div>
     </section>
   )

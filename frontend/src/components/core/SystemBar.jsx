@@ -17,45 +17,24 @@ export default function SystemBar({
   // Use prop value if provided, otherwise use store
   const wsConnected = wsConnectedProp !== null ? wsConnectedProp : wsConnectedStore
 
-  const [clock, setClock] = useState('00:00:00')
-  const [uptime, setUptime] = useState('00:00:00')
+  const [tick, setTick] = useState(() => Date.now())
 
-  // Live clock tick
+  // Single 1s interval drives both clock and uptime — one re-render per second
   useEffect(() => {
-    const tick = () => {
-      const now = new Date()
-      setClock(
-        now.getHours().toString().padStart(2, '0') +
-        ':' +
-        now.getMinutes().toString().padStart(2, '0') +
-        ':' +
-        now.getSeconds().toString().padStart(2, '0')
-      )
-    }
-    tick()
-    const interval = setInterval(tick, 1000)
-    return () => clearInterval(interval)
+    const id = setInterval(() => setTick(Date.now()), 1000)
+    return () => clearInterval(id)
   }, [])
 
-  // Uptime formatter from systemStatus
-  useEffect(() => {
-    const updateUptime = () => {
-      const seconds = Math.floor((systemStatus?.uptime || 0) / 1000)
-      const h = Math.floor(seconds / 3600)
-      const m = Math.floor((seconds % 3600) / 60)
-      const s = seconds % 60
-      setUptime(
-        h.toString().padStart(2, '0') +
-        ':' +
-        m.toString().padStart(2, '0') +
-        ':' +
-        s.toString().padStart(2, '0')
-      )
-    }
-    updateUptime()
-    const interval = setInterval(updateUptime, 1000)
-    return () => clearInterval(interval)
-  }, [systemStatus?.uptime])
+  const _now = new Date(tick)
+  const clock = _now.getHours().toString().padStart(2, '0') + ':' +
+    _now.getMinutes().toString().padStart(2, '0') + ':' +
+    _now.getSeconds().toString().padStart(2, '0')
+
+  const _uptimeSec = Math.floor((systemStatus?.uptime || 0) / 1000)
+  const uptime =
+    Math.floor(_uptimeSec / 3600).toString().padStart(2, '0') + ':' +
+    Math.floor((_uptimeSec % 3600) / 60).toString().padStart(2, '0') + ':' +
+    (_uptimeSec % 60).toString().padStart(2, '0')
 
   // Threat level color and label
   const threatScore = securityStatus?.threat_score || 0

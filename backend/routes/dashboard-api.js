@@ -85,10 +85,104 @@ function normalizeStrategy(raw, index) {
   }
 }
 
+const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || 18790
+const PYTHON_BACKEND_URL = `http://127.0.0.1:${PYTHON_PORT}`
+
+async function _pyGet(path, timeoutMs = 3000) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const r = await fetch(`${PYTHON_BACKEND_URL}${path}`, { signal: ctrl.signal })
+    clearTimeout(timer)
+    if (!r.ok) return null
+    return r.json()
+  } catch { clearTimeout(timer); return null }
+}
+
 module.exports = function createDashboardAPIRouter(requireAuth) {
   const r = express.Router()
   const dashboardRateLimit = createRouteRateLimit({ keyPrefix: 'dashboard-api', max: 180, windowMs: 60_000 })
   r.use(dashboardRateLimit)
+
+  // ── SYSTEM RESOURCES & CLUSTER ────────────────────────────────────────────
+
+  r.get('/system/resources', requireAuth, async (req, res) => {
+    const data = await _pyGet('/system/resources', 4000)
+    if (data) return res.json(data)
+    // Fallback: basic Node.js os snapshot
+    const os = require('os')
+    const totalMem = os.totalmem()
+    const freeMem  = os.freemem()
+    res.json({
+      specs: {
+        ram_total_gb: parseFloat((totalMem / 1024**3).toFixed(2)),
+        ram_free_gb:  parseFloat((freeMem  / 1024**3).toFixed(2)),
+        cpu_cores:    os.cpus().length,
+        cpu_name:     os.cpus()[0]?.model || 'unknown',
+        os_name:      `${os.type()} ${os.release()} ${os.arch()}`,
+      },
+      budget: { offline: true },
+      recommended_stack: { offline: true },
+    })
+  })
+
+  r.get('/cluster/status', requireAuth, async (req, res) => {
+    const data = await _pyGet('/cluster/status', 3000)
+    if (data) return res.json(data)
+    res.json({ enabled: false, peers: [], peer_count: 0, offline: true })
+  })
+
+  // Cluster pairing — all routes require dashboard auth; TOTP code is always user-entered
+  r.post('/cluster/pair/generate', requireAuth, async (req, res) => {
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 5000)
+      const r2 = await fetch(`${PYTHON_BACKEND_URL}/cluster/pair/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: req.headers.authorization || '' },
+        signal: ctrl.signal,
+        body: '{}',
+      })
+      clearTimeout(timer)
+      if (!r2.ok) return res.status(r2.status).json({ error: 'Python backend error' })
+      return res.json(await r2.json())
+    } catch (e) { res.status(503).json({ error: 'Python backend unavailable' }) }
+  })
+
+  r.post('/cluster/pair/init', requireAuth, async (req, res) => {
+    // Forwards user-supplied pairing code + TOTP code to Python backend
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 15000)
+      const r2 = await fetch(`${PYTHON_BACKEND_URL}/cluster/pair/init`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: req.headers.authorization || '' },
+        signal: ctrl.signal,
+        body: JSON.stringify(req.body),
+      })
+      clearTimeout(timer)
+      if (!r2.ok) {
+        const err = await r2.json().catch(() => ({}))
+        return res.status(r2.status).json({ error: err.detail || 'Pairing failed' })
+      }
+      return res.json(await r2.json())
+    } catch (e) { res.status(503).json({ error: 'Python backend unavailable' }) }
+  })
+
+  r.post('/cluster/unpair', requireAuth, async (req, res) => {
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 5000)
+      const r2 = await fetch(`${PYTHON_BACKEND_URL}/cluster/unpair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: req.headers.authorization || '' },
+        signal: ctrl.signal,
+        body: JSON.stringify(req.body),
+      })
+      clearTimeout(timer)
+      return res.json(await r2.json().catch(() => ({ ok: false })))
+    } catch (e) { res.status(503).json({ error: 'Python backend unavailable' }) }
+  })
 
   // ── SECURITY ─────────────────────────────────────────────────────────────
 
@@ -1321,6 +1415,25 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
   // ── OLLAMA ADMIN ────────────────────────────────────────────────────────────
   const ollamaAdmin = require('../services/ollama_admin')
 
+  r.get('/ollama/status', requireAuth, async (_req, res) => {
+    try { res.json(await ollamaAdmin.getRuntimeStatus()) }
+    catch (e) { res.status(502).json({ ok: false, status: 'error', error: e.message }) }
+  })
+
+  r.post('/ollama/start', requireAuth, async (_req, res) => {
+    try {
+      const result = await ollamaAdmin.startManaged({ waitMs: 20000 })
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (e) {
+      res.status(502).json({ ok: false, status: 'error', error: e.message })
+    }
+  })
+
+  r.get('/ollama/recommendation', requireAuth, async (_req, res) => {
+    try { res.json({ ok: true, recommendation: ollamaAdmin.getModelRecommendation() }) }
+    catch (e) { res.status(502).json({ ok: false, error: e.message }) }
+  })
+
   r.get('/ollama/models', requireAuth, async (_req, res) => {
     try { res.json({ models: await ollamaAdmin.listLocalModels() }) }
     catch (e) { res.status(502).json({ error: e.message, models: [] }) }
@@ -1357,6 +1470,28 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
       res.end()
     } catch (e) {
       res.write(`data: ${JSON.stringify({ status: 'error', error: e.message })}\n\n`)
+      res.end()
+    }
+  })
+
+  r.post('/ollama/pull-recommended', requireAuth, async (_req, res) => {
+    const recommendation = ollamaAdmin.getModelRecommendation()
+    const name = recommendation.model
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    try {
+      res.write(`data: ${JSON.stringify({ status: 'recommendation', recommendation, name })}\n\n`)
+      for await (const evt of ollamaAdmin.pullModelStream(name)) {
+        res.write(`data: ${JSON.stringify({ ...evt, recommendation, name })}\n\n`)
+      }
+      const cfg = readJSON(ROUTING_FILE, {})
+      cfg._default = { provider: 'ollama', model: name }
+      writeJSON(ROUTING_FILE, cfg)
+      res.write(`data: ${JSON.stringify({ status: 'success', complete: true, recommendation, name })}\n\n`)
+      res.end()
+    } catch (e) {
+      res.write(`data: ${JSON.stringify({ status: 'error', error: e.message, recommendation, name })}\n\n`)
       res.end()
     }
   })

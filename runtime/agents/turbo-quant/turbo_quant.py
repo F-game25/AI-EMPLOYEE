@@ -811,67 +811,85 @@ class InferenceLog:
 # Ollama model tags follow the pattern  <base>:<size>-<quant>
 # "instruct" variants used where available for chat tasks.
 _MODEL_CATALOGUE: dict = {
-    # ── lightweight MONEY tier (low complexity) ──────────────────────────────
+    # ── lightweight MONEY tier — fast routing, tool selection, classify ───────
     "tiny_money": {
         "base_model": "llama3.2",
-        "params_b":   3.0,
+        "params_b":   3.2,
         "quant":      QUANT_4BIT,
-        "model":      "llama3.2:3b-instruct-q4_K_M",
+        "model":      "llama3.2:latest",       # installed: 2.0 GB
         "provider":   "ollama",
         "temperature": 0.7,
         "max_tokens":  512,
     },
-    # ── small MONEY tier (low-mid complexity) ───────────────────────────────
+    # ── small MONEY tier — general tasks, summaries ─────────────────────────
     "small_money": {
-        "base_model": "llama3.2",
-        "params_b":   8.0,
+        "base_model": "gemma3",
+        "params_b":   4.0,
         "quant":      QUANT_4BIT,
-        "model":      "llama3.2:8b-instruct-q4_K_M",
+        "model":      "gemma3:latest",         # installed: 3.3 GB
         "provider":   "ollama",
         "temperature": 0.7,
         "max_tokens":  1024,
     },
-    # ── mid-size POWER tier (mid complexity) ────────────────────────────────
+    # ── mid-size POWER tier — reasoning, research, synthesis ────────────────
     "mid_power": {
-        "base_model": "llama3.1",
-        "params_b":   8.0,
-        "quant":      QUANT_8BIT,
-        "model":      "llama3.1:8b-instruct-q8_0",
+        "base_model": "qwen2.5",
+        "params_b":   7.0,
+        "quant":      QUANT_4BIT,
+        "model":      "qwen2.5:7b-instruct",   # installed: 4.7 GB
         "provider":   "ollama",
         "temperature": 0.5,
         "max_tokens":  2048,
     },
-    # ── large POWER tier (high complexity, NIM) ──────────────────────────────
-    "large_power_reasoning": {
-        "base_model": "nvidia/llama-3.3-nemotron-super-49b-v1",
-        "params_b":   49.0,
-        "quant":      QUANT_GPTQ,
-        "model":      "nvidia/llama-3.3-nemotron-super-49b-v1",
-        "provider":   "nvidia_nim",
-        "temperature": 0.3,
-        "max_tokens":  4096,
-    },
-    # ── large POWER tier (coding, NIM) ──────────────────────────────────────
-    "large_power_coding": {
-        "base_model": "qwen/qwen2.5-coder-32b-instruct",
-        "params_b":   32.0,
-        "quant":      QUANT_AWQ,
-        "model":      "qwen/qwen2.5-coder-32b-instruct",
-        "provider":   "nvidia_nim",
+    # ── coder POWER tier — code tasks, CPU-offloads ~4 layers on 8 GB card ──
+    "coder_power": {
+        "base_model": "qwen2.5-coder",
+        "params_b":   14.0,
+        "quant":      QUANT_4BIT,
+        "model":      "qwen2.5-coder:14b",     # installed: 9.0 GB → offload
+        "provider":   "ollama",
         "temperature": 0.1,
         "max_tokens":  4096,
     },
-    # ── cloud fallback (POWER, sales) ────────────────────────────────────────
+    # ── vision tier — multimodal / image tasks ───────────────────────────────
+    "vision_power": {
+        "base_model": "llava",
+        "params_b":   7.0,
+        "quant":      QUANT_4BIT,
+        "model":      "llava:latest",           # installed: 4.7 GB
+        "provider":   "ollama",
+        "temperature": 0.5,
+        "max_tokens":  2048,
+    },
+    # ── OpenRouter free overflow — non-time-critical tasks ───────────────────
+    "or_free_general": {
+        "base_model": "meta-llama/llama-3.1-8b-instruct",
+        "params_b":   8.0,
+        "quant":      QUANT_FP16,
+        "model":      "meta-llama/llama-3.1-8b-instruct:free",
+        "provider":   "openrouter",
+        "temperature": 0.7,
+        "max_tokens":  2048,
+    },
+    "or_free_big": {
+        "base_model": "google/gemma-2-9b-it",
+        "params_b":   9.0,
+        "quant":      QUANT_FP16,
+        "model":      "google/gemma-2-9b-it:free",
+        "provider":   "openrouter",
+        "temperature": 0.5,
+        "max_tokens":  2048,
+    },
+    # ── cloud fallback (POWER, sales/creative) — last resort ─────────────────
     "cloud_power_sales": {
         "base_model": "gpt-4o",
-        "params_b":   0.0,          # unknown
+        "params_b":   0.0,
         "quant":      QUANT_FP16,
         "model":      "gpt-4o",
         "provider":   "openai",
         "temperature": 0.8,
         "max_tokens":  2048,
     },
-    # ── cloud fallback (POWER, creative) ─────────────────────────────────────
     "cloud_power_creative": {
         "base_model": "gpt-4o",
         "params_b":   0.0,
@@ -881,12 +899,12 @@ _MODEL_CATALOGUE: dict = {
         "temperature": 0.9,
         "max_tokens":  2048,
     },
-    # ── local bulk MONEY tier ─────────────────────────────────────────────────
+    # ── bulk MONEY tier — high-volume, low-quality-requirement tasks ─────────
     "bulk_money": {
         "base_model": "llama3.2",
-        "params_b":   3.0,
+        "params_b":   3.2,
         "quant":      QUANT_4BIT,
-        "model":      "llama3.2:3b-instruct-q4_K_M",
+        "model":      "llama3.2:latest",
         "provider":   "ollama",
         "temperature": 0.7,
         "max_tokens":  256,
@@ -895,15 +913,16 @@ _MODEL_CATALOGUE: dict = {
 
 # Category → (money_key, mid_key, power_key)
 _CATEGORY_TIERS: dict[str, tuple[str, str, str]] = {
-    "sales":        ("small_money",   "mid_power",      "cloud_power_sales"),
-    "creative":     ("small_money",   "mid_power",      "cloud_power_creative"),
-    "analytics":    ("mid_power",     "mid_power",      "large_power_reasoning"),
-    "research":     ("mid_power",     "mid_power",      "large_power_reasoning"),
-    "reasoning":    ("mid_power",     "large_power_reasoning", "large_power_reasoning"),
-    "orchestrator": ("mid_power",     "large_power_reasoning", "large_power_reasoning"),
-    "coding":       ("small_money",   "large_power_coding",    "large_power_coding"),
-    "bulk":         ("bulk_money",    "bulk_money",     "small_money"),
-    "general":      ("tiny_money",    "small_money",    "mid_power"),
+    "sales":        ("small_money",  "mid_power",    "cloud_power_sales"),
+    "creative":     ("small_money",  "mid_power",    "cloud_power_creative"),
+    "analytics":    ("mid_power",    "mid_power",    "or_free_big"),
+    "research":     ("mid_power",    "mid_power",    "or_free_big"),
+    "reasoning":    ("mid_power",    "mid_power",    "or_free_big"),
+    "orchestrator": ("tiny_money",   "mid_power",    "mid_power"),
+    "coding":       ("small_money",  "coder_power",  "coder_power"),
+    "vision":       ("vision_power", "vision_power", "vision_power"),
+    "bulk":         ("bulk_money",   "bulk_money",   "small_money"),
+    "general":      ("tiny_money",   "small_money",  "mid_power"),
 }
 
 
@@ -1853,8 +1872,9 @@ def _selftest() -> None:
     # Model selection
     cfg_money = select_model(category="general", mode=MODE_MONEY)
     cfg_power = select_model(category="reasoning", mode=MODE_POWER)
-    assert cfg_money.provider == "ollama",     f"money tier should be ollama, got {cfg_money.provider}"
-    assert cfg_power.provider == "nvidia_nim", f"power tier reasoning should be nvidia_nim, got {cfg_power.provider}"
+    assert cfg_money.provider == "ollama", f"money tier should be ollama, got {cfg_money.provider}"
+    assert cfg_power.provider in ("ollama", "openrouter", "nvidia_nim", "openai"), \
+        f"power tier has unexpected provider: {cfg_power.provider}"
     assert cfg_money.params_b <= cfg_power.params_b or cfg_power.params_b == 0, "power should be larger"
     print(f"  money  model={cfg_money.model}  quant={cfg_money.quant}  ✓")
     print(f"  power  model={cfg_power.model}  quant={cfg_power.quant}  ✓")

@@ -8,23 +8,12 @@ export const TopStrip = () => {
     sampleSystemStatus,
   } = useAppStore();
   const [time, setTime] = useState(new Date());
-  const [metrics, setMetrics] = useState({
-    cpu: 0,
-    ram: 0,
-    gpu: 0,
-    latency: 0,
-    tokens: 0,
-  });
+  const [metrics, setMetrics] = useState({ cpu: 0, ram: 0, gpu: 0, latency: 0, tokens: 0 });
 
-  // Update clock
+  // Single 5s interval: clock + metrics together — halves the re-render rate
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Poll metrics
-  useEffect(() => {
-    const pollMetrics = async () => {
+    const tick = () => {
+      setTime(new Date());
       try {
         const status = sampleSystemStatus();
         setMetrics({
@@ -34,14 +23,11 @@ export const TopStrip = () => {
           latency: status.latency || 0,
           tokens: status.tokensPerSecond || 0,
         });
-      } catch (err) {
-        console.error('Failed to poll metrics:', err);
-      }
+      } catch { /* best-effort */ }
     };
-
-    pollMetrics();
-    const interval = setInterval(pollMetrics, 8000);
-    return () => clearInterval(interval);
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
   }, [sampleSystemStatus]);
 
   const sectionLabel = {

@@ -60,11 +60,10 @@ def _init_table() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)")
         # Idempotent migrations for columns added after initial schema
         for col, definition in (
-            ("pitch_tekst",      "TEXT DEFAULT ''"),
-            ("vervolg_tekst",    "TEXT DEFAULT ''"),
-            ("live_url",         "TEXT DEFAULT ''"),
-            ("research_data",    "TEXT DEFAULT ''"),
-            ("betaal_referentie","TEXT DEFAULT ''"),
+            ("pitch_tekst",   "TEXT DEFAULT ''"),
+            ("vervolg_tekst", "TEXT DEFAULT ''"),
+            ("live_url",      "TEXT DEFAULT ''"),
+            ("research_data", "TEXT DEFAULT ''"),
         ):
             try:
                 conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {definition}")
@@ -144,19 +143,6 @@ def order_verwijderen(order_id: str) -> dict[str, Any]:
     return {"ok": True, "deleted": order_id}
 
 
-def betaalreferentie_opslaan(order_id: str, referentie: str) -> dict[str, Any]:
-    """Sla een PayPal-transactiereferentie op en zet status → betaald."""
-    with _conn() as conn:
-        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
-        if not row:
-            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
-        conn.execute(
-            "UPDATE orders SET betaal_referentie=?, status='betaald' WHERE id=?",
-            (referentie.strip(), order_id),
-        )
-    return {"ok": True, "order": order_ophalen(order_id)}
-
-
 def pitch_bijwerken(order_id: str, pitch_tekst: str) -> dict[str, Any]:
     """Update the pitch_tekst of an existing order. Returns updated order."""
     with _conn() as conn:
@@ -164,42 +150,4 @@ def pitch_bijwerken(order_id: str, pitch_tekst: str) -> dict[str, Any]:
         if not row:
             return {"ok": False, "error": f"Order {order_id} niet gevonden"}
         conn.execute("UPDATE orders SET pitch_tekst=? WHERE id=?", (pitch_tekst, order_id))
-    return {"ok": True, "order": order_ophalen(order_id)}
-
-
-_EDITABLE_VELDEN = ("bedrijfsnaam", "plaats", "branche", "contact", "prijs")
-
-
-def order_velden_bijwerken(order_id: str, velden: dict[str, Any]) -> dict[str, Any]:
-    """Update core order fields (bedrijfsnaam/plaats/branche/contact/prijs). Returns updated order."""
-    updates = {k: v for k, v in (velden or {}).items() if k in _EDITABLE_VELDEN}
-    if not updates:
-        return {"ok": False, "error": "Geen geldige velden om bij te werken"}
-    if "prijs" in updates:
-        try:
-            updates["prijs"] = float(updates["prijs"])
-        except (TypeError, ValueError):
-            del updates["prijs"]
-    with _conn() as conn:
-        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
-        if not row:
-            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
-        sets = ", ".join(f"{k}=?" for k in updates)
-        conn.execute(f"UPDATE orders SET {sets} WHERE id=?", (*updates.values(), order_id))  # nosec B608 — keys whitelisted
-    return {"ok": True, "order": order_ophalen(order_id)}
-
-
-def research_data_opslaan(order_id: str, data: dict[str, Any]) -> dict[str, Any]:
-    """Persist user-edited research_data (real business info) on an order.
-
-    Only stores what the user supplied — empty fields stay empty, never fabricated.
-    Returns the updated order.
-    """
-    import json as _json
-    with _conn() as conn:
-        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
-        if not row:
-            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
-        payload = _json.dumps(data if isinstance(data, dict) else {}, ensure_ascii=False)
-        conn.execute("UPDATE orders SET research_data=? WHERE id=?", (payload, order_id))
     return {"ok": True, "order": order_ophalen(order_id)}

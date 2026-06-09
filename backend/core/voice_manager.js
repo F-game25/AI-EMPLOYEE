@@ -69,7 +69,7 @@ const DEFAULT_CUSTOMER_CONFIG = {
 
 const DEFAULT_CONFIG = {
   enabled: true,
-  provider: 'fish_speech',
+  provider: 'voice_core_local',
   profile: 'default_futuristic',
   verbosity: VERBOSITY.NORMAL,
   volume: 0.9,
@@ -78,6 +78,12 @@ const DEFAULT_CONFIG = {
   tone: 'futuristic',
   voiceStyle: 'default',
   bootGreeting: true,
+  identity: {
+    userName: 'Lars',
+    rank: 'Chief',
+    addressStyle: 'command',
+    startupStyle: 'soldier',
+  },
   fishSpeech: {
     enabled: true,
     baseUrl: process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL || 'http://127.0.0.1:8080',
@@ -96,6 +102,32 @@ const DEFAULT_CONFIG = {
     timeoutMs: 45000,
     healthTimeoutMs: 1500,
     localFallback: true,
+  },
+  voiceLite: {
+    enabled: true,
+    device: 'cpu',
+    engine: 'piper_onnx_cpu',
+    language: 'en',
+    voice: 'base',
+    baseModel: null,
+    foundationModel: null,
+    threads: 4,
+    timeoutMs: 30000,
+    localFallback: true,
+  },
+  voiceCore: {
+    enabled: true,
+    engine: 'voice_core_local',
+    installMode: 'bundled',
+    language: 'en',
+    voice: 'female',
+    gender: 'female',
+    emotion: 'warm_confident',
+    emotionIntensity: 0.35,
+    speakingRate: 1.0,
+    threads: 4,
+    timeoutMs: 30000,
+    localFallback: false,
   },
   events: {
     system_boot:         true,
@@ -135,6 +167,9 @@ function loadConfig() {
         ...DEFAULT_CONFIG,
         ...parsed,
         provider: parsed.provider || DEFAULT_CONFIG.provider,
+        identity: { ...DEFAULT_CONFIG.identity, ...(parsed.identity || {}) },
+        voiceCore: { ...DEFAULT_CONFIG.voiceCore, ...(parsed.voiceCore || {}) },
+        voiceLite: { ...DEFAULT_CONFIG.voiceLite, ...(parsed.voiceLite || {}) },
         fishSpeech: { ...DEFAULT_CONFIG.fishSpeech, ...(parsed.fishSpeech || {}) },
         events: { ...DEFAULT_CONFIG.events, ...(parsed.events || {}) },
         customer: {
@@ -148,6 +183,9 @@ function loadConfig() {
     config = {
       ...DEFAULT_CONFIG,
       fishSpeech: { ...DEFAULT_CONFIG.fishSpeech },
+      identity: { ...DEFAULT_CONFIG.identity },
+      voiceCore: { ...DEFAULT_CONFIG.voiceCore },
+      voiceLite: { ...DEFAULT_CONFIG.voiceLite },
       customer: { ...DEFAULT_CUSTOMER_CONFIG },
     };
   }
@@ -169,6 +207,9 @@ function applyConfig(patch) {
   config = {
     ...config,
     ...patch,
+    identity: { ...config.identity, ...(patch.identity || {}) },
+    voiceCore: { ...config.voiceCore, ...(patch.voiceCore || {}) },
+    voiceLite: { ...config.voiceLite, ...(patch.voiceLite || {}) },
     fishSpeech: { ...config.fishSpeech, ...(patch.fishSpeech || {}) },
     events: { ...config.events, ...(patch.events || {}) },
     customer: {
@@ -186,6 +227,8 @@ function applyConfig(patch) {
     speed: config.speed,
     tone: config.tone,
     voiceStyle: config.voiceStyle,
+    voiceCore: config.voiceCore,
+    voiceLite: config.voiceLite,
     fishSpeech: config.fishSpeech,
   });
 }
@@ -288,6 +331,8 @@ async function init() {
     tone: config.tone,
     voiceStyle: config.voiceStyle,
     channel: 'system',
+    voiceCore: config.voiceCore,
+    voiceLite: config.voiceLite,
     fishSpeech: config.fishSpeech,
   });
   // Warm the pipeline phrase cache with all known pre-roll phrases

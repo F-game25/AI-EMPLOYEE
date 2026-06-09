@@ -135,11 +135,171 @@ const api = {
 
   // ── Voice ─────────────────────────────────────────────────────────────────
   voice: {
-    synthesize: (text, persona) => api.post('/api/voice/synthesize', { text, persona }),
+    synthesize: (text, persona = {}) => api.post('/api/voice/synthesize', { text, persona, provider: persona.provider }),
     status:     ()              => api.get('/api/voice/status'),
     config:     ()              => api.get('/api/voice/config'),
     saveConfig: (payload)       => api.post('/api/voice/config', payload),
     fishStatus: ()              => api.get('/api/voice/fish-speech/status'),
+    bundleStatus: () => api.get('/api/voice/bundle/status'),
+    verifyBundle: (payload = {}) => api.post('/api/voice/bundle/verify', payload),
+    modelSamples: () => api.get('/api/voice/model/samples'),
+    benchmarkModel: (payload = {}) => api.post('/api/voice/model/benchmark', payload),
+    createSession: (payload = {}) => api.post('/api/voice/sessions', payload),
+    getSession:    (sessionId) => api.get(`/api/voice/sessions/${encodeURIComponent(sessionId)}`),
+    sendSessionText: (sessionId, text, context = {}) => api.post(
+      `/api/voice/sessions/${encodeURIComponent(sessionId)}/text`,
+      { text, context },
+    ),
+    sendSessionAudio: async (sessionId, wavBlob, opts = {}) => {
+      const token = sessionStorage.getItem('ai_jwt')
+      const headers = { 'Content-Type': 'audio/wav' }
+      if (token) headers.Authorization = `Bearer ${token}`
+      const res = await fetch(`${BASE}/api/voice/sessions/${encodeURIComponent(sessionId)}/audio`, {
+        method: 'POST',
+        headers,
+        signal: opts.signal,
+        body: wavBlob,
+      })
+      const contentType = res.headers.get('content-type') || ''
+      const payload = contentType.includes('application/json')
+        ? await res.json().catch(() => ({}))
+        : await res.text().catch(() => '')
+      if (!res.ok) {
+        const err = new Error(payload?.message || payload?.error || payload || `HTTP ${res.status}`)
+        err.status = res.status
+        err.payload = payload
+        throw err
+      }
+      return payload
+    },
+    interruptSession: (sessionId) => api.post(`/api/voice/sessions/${encodeURIComponent(sessionId)}/interrupt`, {}),
+    converse: (text, context = {}) => api.post('/api/voice/converse', { text, context }),
+    runtime: () => api.get('/api/voice/runtime'),
+    runtimeLogs: (limit = 100) => api.get(`/api/voice/runtime/logs?limit=${encodeURIComponent(limit)}`),
+    runtimeDoctor: () => api.get('/api/voice/runtime/doctor'),
+    runtimeSelfTest: (payload = {}) => api.post('/api/voice/runtime/self-test', payload),
+    startRuntime: (payload = {}) => api.post('/api/voice/runtime/start', payload),
+    stopRuntime: (payload = {}) => api.post('/api/voice/runtime/stop', payload),
+    customVoiceDatasetStatus: () => api.get('/api/voice/custom-voice/dataset/status'),
+    saveCustomVoiceDataset: (payload = {}) => api.post('/api/voice/custom-voice/dataset', payload),
+    startCustomVoiceTraining: (payload = {}) => api.post('/api/voice/custom-voice/train', payload),
+    getCustomVoiceTraining: (jobId) => api.get(`/api/voice/custom-voice/train/${encodeURIComponent(jobId)}`),
+    benchmarkCustomVoice: (payload = {}) => api.post('/api/voice/custom-voice/benchmark', payload),
+    activateCustomVoice: (payload = {}) => api.post('/api/voice/custom-voice/activate', payload),
+    downloadRuntime: async (payload = {}, { onEvent, signal } = {}) => {
+      const token = sessionStorage.getItem('ai_jwt')
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers.Authorization = `Bearer ${token}`
+      const res = await fetch(`${BASE}/api/voice/runtime/download`, {
+        method: 'POST',
+        headers,
+        signal,
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      if (!res.body?.getReader) return null
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let lastEvent = null
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop()
+        for (const frame of frames) {
+          const dataLines = frame
+            .split('\n')
+            .filter(line => line.startsWith('data: '))
+            .map(line => line.slice(6))
+          if (!dataLines.length) continue
+          const event = JSON.parse(dataLines.join('\n'))
+          lastEvent = event
+          onEvent?.(event)
+        }
+      }
+      return lastEvent
+    },
+    cancelRuntimeDownload: (payload = {}) => api.post('/api/voice/runtime/download/cancel', payload),
+    subscribeSessionEvents: async (sessionId, onEvent, opts = {}) => {
+      const token = sessionStorage.getItem('ai_jwt')
+      const headers = {}
+      if (token) headers.Authorization = `Bearer ${token}`
+      const res = await fetch(`${BASE}/api/voice/sessions/${encodeURIComponent(sessionId)}/events`, {
+        method: 'GET',
+        headers,
+        signal: opts.signal,
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      if (!res.body?.getReader) return null
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop()
+        for (const frame of frames) {
+          const dataLines = frame
+            .split('\n')
+            .filter(line => line.startsWith('data: '))
+            .map(line => line.slice(6))
+          if (!dataLines.length) continue
+          try {
+            onEvent?.(JSON.parse(dataLines.join('\n')))
+          } catch { /* ignore malformed server-sent event */ }
+        }
+      }
+      return null
+    },
+  },
+
+  // ── Ollama ────────────────────────────────────────────────────────────────
+  ollama: {
+    status: ()                  => api.get('/api/ollama/status'),
+    start:  ()                  => api.post('/api/ollama/start', {}),
+    recommendation: ()          => api.get('/api/ollama/recommendation'),
+    pullRecommended: async ({ onEvent } = {}) => {
+      const token = sessionStorage.getItem('ai_jwt')
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers.Authorization = `Bearer ${token}`
+      const res = await fetch(`${BASE}/api/ollama/pull-recommended`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let lastEvent = null
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const events = buf.split('\n\n')
+        buf = events.pop()
+        for (const event of events) {
+          if (!event.startsWith('data: ')) continue
+          const payload = JSON.parse(event.slice(6))
+          lastEvent = payload
+          if (onEvent) onEvent(payload)
+        }
+      }
+      return lastEvent
+    },
   },
 
   // ── Product / Ops ─────────────────────────────────────────────────────────

@@ -6,16 +6,25 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+  /* Responsive: clamp between 280px and the JS-supplied --ce-size, but never exceed 36vw */
+  width:  clamp(280px, min(var(--ce-size, 480px), 36vw), 520px);
+  height: clamp(280px, min(var(--ce-size, 480px), 36vw), 520px);
   border-radius: 50%;
-  overflow: visible;
+  overflow: hidden;
+  isolation: isolate;
+  contain: layout style;
 }
 
-/* The engine sizes the canvas to min(vw,vh). We clip it into our container. */
+/* Canvas fills the wrapper exactly */
 .ce-canvas {
   display: block;
-  /* Canvas is centered; clip to expected size */
-  max-width: 100%;
-  max-height: 100%;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Perf-lite: only used when perfLite class is applied by component */
+.ce-wrap--perf-lite .ce-canvas {
+  image-rendering: optimizeSpeed;
 }
 
 /* ── Toolbar wrapper ── */

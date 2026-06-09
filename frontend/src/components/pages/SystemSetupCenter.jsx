@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import api from '../../api/client'
 import { useAppStore } from '../../store/appStore'
 import { useSystemStore } from '../../store/systemStore'
@@ -125,6 +125,52 @@ function StatusBadge({ status }) {
   return <span className={`setup-status setup-status--${normalized}`}>{statusLabel(normalized)}</span>
 }
 
+function formatOllamaPullStatus(event) {
+  if (!event) return ''
+  if (event.error) return `Model download failed: ${event.error}`
+  const model = event.name || event.recommendation?.model || 'recommended model'
+  const status = event.status || 'downloading'
+  if (event.total && event.completed) {
+    const total = (event.total / 1e9).toFixed(2)
+    const done = (event.completed / 1e9).toFixed(2)
+    return `${model}: ${status} (${done}/${total} GB)`
+  }
+  if (event.recommendation && status === 'recommendation') {
+    return `Recommended for this PC: ${event.recommendation.model}. Starting download.`
+  }
+  return `${model}: ${status}`
+}
+
+function voiceStatusToSetup(status) {
+  if (status === 'ready') return 'live'
+  if (status === 'starting' || status === 'downloading' || status === 'training' || status === 'benchmarking') return 'fallback'
+  if (status === 'runtime_missing' || status === 'model_missing' || status === 'license_required' || status === 'bundle_missing' || status === 'bundle_corrupt') return 'not_configured'
+  if (status === 'hardware_blocked') return 'unavailable'
+  if (status === 'error') return 'error'
+  return 'unavailable'
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0
+  if (value >= 1e9) return `${(value / 1e9).toFixed(2)} GB`
+  if (value >= 1e6) return `${(value / 1e6).toFixed(1)} MB`
+  if (value >= 1e3) return `${(value / 1e3).toFixed(1)} KB`
+  return `${value} B`
+}
+
+function formatVoiceDownloadStatus(event) {
+  if (!event) return ''
+  const component = event.component || 'voice runtime'
+  if (event.error) return `${component}: ${event.error}`
+  const state = event.state || event.type || 'downloading'
+  if (Number.isFinite(event.percent)) {
+    const received = event.bytes_received ? ` ${formatBytes(event.bytes_received)}` : ''
+    const total = event.total_bytes ? `/${formatBytes(event.total_bytes)}` : ''
+    return `${component}: ${state} ${Math.round(event.percent)}%${received}${total}`
+  }
+  return `${component}: ${event.message || state}`
+}
+
 function CapabilityRow({ capability, onAction }) {
   const missing = Array.isArray(capability.missing_env) ? capability.missing_env : []
   const action = capability.setup_action || 'none'
@@ -158,11 +204,37 @@ export default function SystemSetupCenter() {
   const [identity, setIdentity] = useState({ systemName: 'Aeternus Nexus', adminName: 'Technical Admin', voicePreset: 'professional', colorPalette: null })
   const [palettes, setPalettes] = useState([])
   const [actionResult, setActionResult] = useState(null)
+  const [ollamaPullStatus, setOllamaPullStatus] = useState(null)
+  const [voiceRuntime, setVoiceRuntime] = useState(null)
+  const [voiceDownloadStatus, setVoiceDownloadStatus] = useState(null)
+  const [voiceBenchmark, setVoiceBenchmark] = useState(null)
+  const [voiceDoctor, setVoiceDoctor] = useState(null)
+  const [voiceSelfTest, setVoiceSelfTest] = useState(null)
+  const [voiceLogs, setVoiceLogs] = useState(null)
+  const [voiceSamples, setVoiceSamples] = useState(null)
   const [smokeResult, setSmokeResult] = useState(null)
   const [busyAction, setBusyAction] = useState(null)
 
+  const refreshVoiceRuntime = useCallback(async () => {
+    const runtime = await api.voice.runtime()
+    setVoiceRuntime(runtime)
+    api.voice.runtimeDoctor()
+      .then(setVoiceDoctor)
+      .catch(() => {})
+    api.voice.runtimeLogs(12)
+      .then(setVoiceLogs)
+      .catch(() => {})
+    api.voice.modelSamples()
+      .then(setVoiceSamples)
+      .catch(() => {})
+    return runtime
+  }, [])
+
   useEffect(() => {
     fetchCapabilityStatus()
+    refreshVoiceRuntime().catch(error => {
+      setVoiceRuntime({ ok: false, error: error?.message || 'Voice runtime status unavailable' })
+    })
     // Salvaged from the old Onboarding flow: backend-generated accent palettes.
     api.get('/api/onboarding/palettes')
       .then(d => {
@@ -171,7 +243,7 @@ export default function SystemSetupCenter() {
         if (list[0]) setIdentity(prev => prev.colorPalette ? prev : { ...prev, colorPalette: list[0] })
       })
       .catch(() => {})
-  }, [fetchCapabilityStatus])
+  }, [fetchCapabilityStatus, refreshVoiceRuntime])
 
   const saveIdentity = async () => {
     setBusyAction('identity')
@@ -190,7 +262,9 @@ export default function SystemSetupCenter() {
     }
   }
 
-  const capabilities = Array.isArray(capabilityStatus.capabilities) ? capabilityStatus.capabilities : []
+  const capabilities = useMemo(() => {
+    return Array.isArray(capabilityStatus.capabilities) ? capabilityStatus.capabilities : []
+  }, [capabilityStatus.capabilities])
   const grouped = useMemo(() => groupCapabilities(capabilities), [capabilities])
   const counts = capabilityStatus.counts || {}
   const total = capabilities.length
@@ -211,8 +285,69 @@ export default function SystemSetupCenter() {
       setActiveSection('infrastructure')
       return
     }
+    if (action === 'start_managed_runtime' || (action === 'start_service' && capabilityId(capability) === 'ollama_local_model')) {
+      setBusyAction(`${action}:${capabilityId(capability)}`)
+      try {
+        const result = await api.ollama.start()
+        await fetchCapabilityStatus()
+        const runtime = result?.runtime || {}
+        setActionResult({
+          type: result?.ok ? 'success' : 'warning',
+          message: result?.ok
+            ? `Managed Ollama started at ${runtime.host || 'local host'}.`
+            : (result?.error || `${capLabel} could not be started.`),
+        })
+      } catch (error) {
+        fetchCapabilityStatus()
+        setActionResult({ type: 'error', message: error?.message || `${capLabel} start failed.` })
+      } finally {
+        setBusyAction(null)
+      }
+      return
+    }
     if (action === 'run_build') {
       setActionResult({ type: 'info', message: 'Frontend build is a terminal action: npm --prefix frontend run build.' })
+      return
+    }
+    if (action === 'bundle_runtime') {
+      setActionResult({ type: 'warning', message: 'Packaged Ollama runtime is missing. Bundle runtime/vendor/ollama/ollama or set OLLAMA_BIN before local LLM can run.' })
+      return
+    }
+    if (action === 'pull_recommended_model') {
+      setBusyAction(`${action}:${capabilityId(capability)}`)
+      setOllamaPullStatus({ status: 'starting', name: capability?.proof?.recommended_model?.model })
+      try {
+        const finalEvent = await api.ollama.pullRecommended({ onEvent: setOllamaPullStatus })
+        await fetchCapabilityStatus()
+        const model = finalEvent?.name || finalEvent?.recommendation?.model || capability?.proof?.recommended_model?.model || 'recommended model'
+        setActionResult({
+          type: finalEvent?.status === 'error' ? 'error' : 'success',
+          message: finalEvent?.status === 'error'
+            ? (finalEvent.error || `Failed to download ${model}.`)
+            : `${model} is installed and selected as the main local model.`,
+        })
+      } catch (error) {
+        setOllamaPullStatus({ status: 'error', error: error?.message || 'Download failed' })
+        setActionResult({ type: 'error', message: error?.message || 'Recommended model download failed.' })
+      } finally {
+        setBusyAction(null)
+      }
+      return
+    }
+    if (action === 'pull_model') {
+      const proof = capability?.proof || {}
+      setActionResult({
+        type: 'warning',
+        message: `Ollama is running, but ${proof.configured_model || 'the configured model'} is not installed in ${proof.model_home || 'the app model directory'}. Recommended model: ${proof.recommended_model?.model || 'not reported'}.`,
+      })
+      return
+    }
+    if (action === 'configure_storage') {
+      const proof = capability?.proof || {}
+      setActionResult({
+        type: 'warning',
+        message: `Ollama model storage is low or unavailable at ${proof.model_home || proof.disk?.path || 'the configured model directory'}. Set OLLAMA_MODELS to a larger writable drive before pulling models.`,
+      })
       return
     }
     if (action === 'start_service') {
@@ -235,6 +370,180 @@ export default function SystemSetupCenter() {
       }
     } catch (error) {
       setActionResult({ type: 'error', message: error?.message || `${capLabel} action failed.` })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const runVoiceDownload = async (component, options = {}) => {
+    setBusyAction(`voice:${component}`)
+    setVoiceDownloadStatus({ component, state: 'starting', percent: 0 })
+    try {
+      const finalEvent = await api.voice.downloadRuntime(
+        { component, ...options },
+        { onEvent: setVoiceDownloadStatus },
+      )
+      const runtime = await refreshVoiceRuntime()
+      const failedResult = finalEvent?.result?.ok === false
+      setActionResult({
+        type: finalEvent?.state === 'error' || finalEvent?.type === 'download.error'
+          ? 'error'
+          : failedResult ? 'warning' : 'success',
+        message: finalEvent?.error || finalEvent?.result?.message || `${component} download finished. Current voice recommendation: ${runtime?.recommendation?.label || 'none'}.`,
+      })
+    } catch (error) {
+      setVoiceDownloadStatus({ component, state: 'error', error: error?.message || 'Download failed' })
+      setActionResult({ type: 'error', message: error?.message || `${component} download failed.` })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const cancelVoiceDownload = async () => {
+    const component = voiceDownloadStatus?.component || null
+    setBusyAction('voice:cancel')
+    try {
+      const result = await api.voice.cancelRuntimeDownload(component ? { component } : {})
+      setVoiceDownloadStatus(prev => ({ ...(prev || {}), state: result.cancelled ? 'cancelled' : 'idle', message: result.cancelled ? 'Download cancelled.' : 'No active download to cancel.' }))
+      setActionResult({ type: result.cancelled ? 'warning' : 'info', message: result.cancelled ? `Cancelled ${result.component || component || 'voice download'}.` : 'No active voice download was running.' })
+      await refreshVoiceRuntime().catch(() => {})
+    } catch (error) {
+      setActionResult({ type: 'error', message: error?.message || 'Voice download cancel failed.' })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const runVoiceDoctor = async () => {
+    setBusyAction('voice:doctor')
+    try {
+      const result = await api.voice.runtimeDoctor()
+      setVoiceDoctor(result)
+      setVoiceRuntime(result.status || await refreshVoiceRuntime())
+      setActionResult({
+        type: result.blocking?.length ? 'warning' : 'success',
+        message: result.blocking?.length
+          ? `Voice doctor found ${result.blocking.length} blocker(s).`
+          : 'Voice doctor found no blocking issue.',
+      })
+    } catch (error) {
+      setActionResult({ type: 'error', message: error?.message || 'Voice doctor failed.' })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const runVoiceSelfTest = async () => {
+    setBusyAction('voice:self-test')
+    setVoiceSelfTest(null)
+    try {
+      const result = await api.voice.runtimeSelfTest({
+        voice: 'default',
+        text_en: 'System ready. I can speak locally with a natural default voice.',
+        text_nl: 'Systeem klaar. Ik kan lokaal spreken met een standaardstem.',
+      })
+      setVoiceSelfTest(result)
+      setVoiceRuntime(result.status_after || await refreshVoiceRuntime())
+      setActionResult({
+        type: result.blocking?.length ? 'warning' : 'success',
+        message: result.blocking?.length
+          ? `Voice self-test has ${result.blocking.length} blocking failure(s).`
+          : `Voice self-test passed in ${result.elapsed_ms || 0}ms.`,
+      })
+    } catch (error) {
+      const payload = error?.payload
+      if (payload?.checks) setVoiceSelfTest(payload)
+      if (payload?.status_after) setVoiceRuntime(payload.status_after)
+      setActionResult({ type: 'warning', message: error?.message || 'Voice self-test found blockers.' })
+    } finally {
+      await refreshVoiceRuntime().catch(() => {})
+      setBusyAction(null)
+    }
+  }
+
+  const verifyVoiceBundle = async () => {
+    setBusyAction('voice:bundle')
+    try {
+      const result = await api.voice.verifyBundle({ install: true })
+      setVoiceRuntime(result.status || await refreshVoiceRuntime())
+      setActionResult({
+        type: result?.ok ? 'success' : 'warning',
+        message: result?.ok
+          ? 'Bundled Default Human Voice verified.'
+          : `Default voice bundle is not ready: ${result?.state || 'missing or incomplete'}.`,
+      })
+    } catch (error) {
+      await refreshVoiceRuntime().catch(() => {})
+      setActionResult({ type: 'error', message: error?.message || 'Default voice bundle verification failed.' })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const startVoiceRuntime = async () => {
+    setBusyAction('voice:start')
+    try {
+      const result = await api.voice.startRuntime({ component: 'voice_core_local' })
+      setVoiceRuntime(result.runtime || await refreshVoiceRuntime())
+      setActionResult({
+        type: result?.ok ? 'success' : 'warning',
+        message: result?.ok
+          ? (result.result?.message || 'Default Human Voice checked.')
+          : (result?.error || 'Default Human Voice could not start.'),
+      })
+    } catch (error) {
+      await refreshVoiceRuntime().catch(() => {})
+      setActionResult({ type: 'error', message: error?.message || 'Default Human Voice start failed.' })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const startFishRuntime = async () => {
+    setBusyAction('voice:fish:start')
+    try {
+      const result = await api.voice.startRuntime({ component: 'fish_speech', accept_personal_license: true })
+      setVoiceRuntime(result.runtime || await refreshVoiceRuntime())
+      setActionResult({
+        type: result?.ok ? 'success' : 'warning',
+        message: result?.ok ? 'Fish Speech runtime start requested.' : (result?.error || 'Fish Speech could not start.'),
+      })
+    } catch (error) {
+      await refreshVoiceRuntime().catch(() => {})
+      setActionResult({ type: 'error', message: error?.message || 'Fish Speech start failed.' })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const stopVoiceRuntime = async () => {
+    setBusyAction('voice:stop')
+    try {
+      const result = await api.voice.stopRuntime({ component: 'fish_speech' })
+      setVoiceRuntime(result.runtime || await refreshVoiceRuntime())
+      setActionResult({ type: 'success', message: 'Fish Speech runtime stopped.' })
+    } catch (error) {
+      await refreshVoiceRuntime().catch(() => {})
+      setActionResult({ type: 'error', message: error?.message || 'Fish Speech stop failed.' })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const benchmarkVoiceLite = async () => {
+    setBusyAction('voice:benchmark')
+    try {
+      const result = await api.voice.benchmarkModel({ provider: 'voice_core_local', voice: 'default' })
+      setVoiceBenchmark(result)
+      await refreshVoiceRuntime().catch(() => {})
+      setActionResult({
+        type: result?.ok ? 'success' : 'warning',
+        message: result?.ok
+          ? `Default voice benchmark complete. RTF ${result.average_rtf ?? 'n/a'}, TTFA ${result.average_ttfa_ms ?? 'n/a'}ms.`
+          : (result?.message || 'Default voice benchmark could not run.'),
+      })
+    } catch (error) {
+      setActionResult({ type: 'error', message: error?.message || 'Default voice benchmark failed.' })
     } finally {
       setBusyAction(null)
     }
@@ -270,6 +579,24 @@ export default function SystemSetupCenter() {
       fetchCapabilityStatus()
     }
   }
+
+  const voiceTts = voiceRuntime?.tts || {}
+  const voiceCore = voiceTts.voice_core_local || {}
+  const voiceLite = voiceTts.voice_lite || {}
+  const voiceFish = voiceTts.fish_speech || {}
+  const voiceStt = voiceRuntime?.stt || {}
+  const voiceVad = voiceRuntime?.vad || {}
+  const voiceHardware = voiceRuntime?.hardware || {}
+  const fishState = voiceFish.state || 'runtime_missing'
+  const fishHardwareBlocked = fishState === 'hardware_blocked' || voiceFish.hardware_blocked
+  const fishMissingRuntime = fishState === 'runtime_missing' || voiceFish.source_ready === false
+  const fishCanStart = voiceFish.model_ready && voiceFish.license_acknowledged && !fishHardwareBlocked && !fishMissingRuntime
+  const voiceBusy = typeof busyAction === 'string' && busyAction.startsWith('voice:')
+  const voiceDownloadActive = voiceDownloadStatus && ['starting', 'downloading'].includes(voiceDownloadStatus.state)
+  const doctorChecks = Array.isArray(voiceDoctor?.checks) ? voiceDoctor.checks : []
+  const selfTestChecks = Array.isArray(voiceSelfTest?.checks) ? voiceSelfTest.checks : []
+  const voiceLogLines = Array.isArray(voiceLogs?.logs) ? voiceLogs.logs : []
+  const bundledSamples = Array.isArray(voiceSamples?.samples) ? voiceSamples.samples : []
 
   return (
     <main className="setup-center">
@@ -316,6 +643,296 @@ export default function SystemSetupCenter() {
           {actionResult.message}
         </div>
       )}
+      {ollamaPullStatus && (
+        <div className={`setup-alert setup-alert--${ollamaPullStatus.error ? 'error' : 'info'}`}>
+          {formatOllamaPullStatus(ollamaPullStatus)}
+        </div>
+      )}
+      {voiceDownloadStatus && (
+        <div className={`setup-alert setup-alert--${voiceDownloadStatus.error ? 'error' : 'info'}`}>
+          {formatVoiceDownloadStatus(voiceDownloadStatus)}
+        </div>
+      )}
+
+      <section className="setup-panel setup-voice">
+        <div className="setup-panel__head">
+          <div>
+            <p className="setup-kicker">VOICE RUNTIME</p>
+            <h2>Default Human Voice, bundled and local</h2>
+          </div>
+          <button type="button" className="setup-btn setup-btn--small" onClick={refreshVoiceRuntime} disabled={voiceBusy}>
+            Refresh voice
+          </button>
+        </div>
+        <div className="setup-voice__hardware">
+          <span>CPU: {voiceHardware.cpu || 'unknown'}</span>
+          <span>RAM: {voiceHardware.ram_gib ? `${voiceHardware.ram_gib} GiB` : 'unknown'}</span>
+          <span>
+            GPU: {voiceHardware.gpu?.name || 'none'}
+            {voiceHardware.gpu?.vram_mib ? ` / ${(voiceHardware.gpu.vram_mib / 1024).toFixed(1)} GiB VRAM` : ''}
+          </span>
+          <span>Driver: {voiceHardware.gpu?.driver_status || 'unknown'}</span>
+        </div>
+        <div className="setup-voice__rows">
+          <div className="setup-voice__row">
+            <div>
+              <b>Default Human Voice: {voiceCore.state === 'ready' ? 'Ready' : 'Not ready'}</b>
+              <p>
+                No voice training required. EN: {voiceCore.tts_en_ready ? `Kokoro ${voiceCore.active_voice?.voice || 'af_heart'}` : 'missing bundled Kokoro voice'}.
+                {' '}NL: {voiceCore.tts_nl_ready ? 'Piper nl_NL-mls-medium' : 'missing bundled Dutch voice'}.
+              </p>
+              <small>
+                No GPU / no internet after packaging / active root: {voiceCore.active_root || 'not found'} / RTF: {voiceCore.rtf ?? 'not benchmarked'} / TTFA: {voiceCore.ttfa_ms ?? 'not benchmarked'}ms
+              </small>
+            </div>
+            <div className="setup-voice__actions">
+              <StatusBadge status={voiceStatusToSetup(voiceCore.state || voiceTts.state)} />
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={verifyVoiceBundle}
+                disabled={voiceBusy || voiceCore.state === 'ready'}
+                title="Verifies the packaged voice-core manifest, runtimes, models, and checksums."
+              >
+                Verify Bundle
+              </button>
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={startVoiceRuntime}
+                disabled={voiceBusy}
+              >
+                Start Voice
+              </button>
+              <button
+                type="button"
+                className="setup-btn setup-btn--small setup-btn--quiet"
+                onClick={benchmarkVoiceLite}
+                disabled={voiceBusy || voiceCore.state !== 'ready'}
+              >
+                Benchmark
+              </button>
+            </div>
+          </div>
+          <div className="setup-voice__row">
+            <div>
+              <b>Optional Compatibility: Voice Lite CPU</b>
+              <p>
+                Runtime: {voiceLite.runtime_ready ? voiceLite.runtime?.binary : 'missing Piper/ONNX runtime'}.
+                {' '}EN base: {voiceLite.base_en_ready ? 'ready' : 'missing'}.
+                {' '}NL base: {voiceLite.base_nl_ready ? 'ready' : 'missing'}.
+              </p>
+              <small>
+                Optional repair/fallback path only. It is not custom voice training and is not required when Default Human Voice is ready.
+              </small>
+            </div>
+            <div className="setup-voice__actions">
+              <StatusBadge status={voiceStatusToSetup(voiceLite.state || voiceTts.state)} />
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={() => runVoiceDownload('voice_lite_runtime')}
+                disabled={voiceBusy || voiceLite.runtime_ready}
+              >
+                Repair Runtime
+              </button>
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={() => runVoiceDownload('voice_lite_base_en')}
+                disabled={voiceBusy || voiceLite.base_en_ready}
+              >
+                Repair EN
+              </button>
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={() => runVoiceDownload('voice_lite_base_nl')}
+                disabled={voiceBusy || voiceLite.base_nl_ready}
+              >
+                Repair NL
+              </button>
+            </div>
+          </div>
+          <div className="setup-voice__row">
+            <div>
+              <b>Recommended STT: Whisper base.en</b>
+              <p>{voiceStt.model_ready ? `Installed at ${voiceStt.model_path}` : `Missing model at ${voiceStt.model_path || 'voice model directory'}.`}</p>
+              {voiceStt.runtime?.binary ? <small>Runtime: {voiceStt.runtime.binary}</small> : <small>Runtime missing: bundle whisper.cpp or set WHISPER_CPP_BIN.</small>}
+            </div>
+            <div className="setup-voice__actions">
+              <StatusBadge status={voiceStatusToSetup(voiceStt.state)} />
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={() => runVoiceDownload('whisper_model')}
+                disabled={voiceBusy || voiceStt.model_ready}
+              >
+                Download Whisper
+              </button>
+            </div>
+          </div>
+          <div className="setup-voice__row">
+            <div>
+              <b>VAD: Silero ONNX</b>
+              <p>{voiceVad.model_ready ? `Installed at ${voiceVad.model_path}` : 'Missing VAD model. Simple RMS fallback is active until downloaded.'}</p>
+              <small>Used for no-speech detection and silence gating.</small>
+            </div>
+            <div className="setup-voice__actions">
+              <StatusBadge status={voiceStatusToSetup(voiceVad.state)} />
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={() => runVoiceDownload('vad_model')}
+                disabled={voiceBusy || voiceVad.model_ready}
+              >
+                Download VAD
+              </button>
+            </div>
+          </div>
+          {voiceBenchmark && (
+            <div className="setup-voice__row">
+              <div>
+                <b>Last Default Voice Benchmark</b>
+                <p>RTF {voiceBenchmark.average_rtf ?? 'n/a'} / TTFA {voiceBenchmark.average_ttfa_ms ?? 'n/a'}ms.</p>
+                <small>Benchmarks use bundled EN/NL default voices and subtle emotion presets.</small>
+              </div>
+            </div>
+          )}
+          <div className="setup-voice__row">
+            <div>
+              <b>Fish S2-Pro TTS</b>
+              <p>
+                {fishHardwareBlocked
+                  ? voiceFish.hardware_reason || 'Fish Speech is not recommended on this hardware.'
+                  : voiceFish.model_ready
+                    ? `Model installed at ${voiceFish.model_path}`
+                    : `Model missing at ${voiceFish.model_path || 'Fish model directory'}.`}
+              </p>
+              <small>
+                Runtime: {voiceFish.source_ready ? voiceFish.source_path : 'missing Fish Speech runtime source'}
+                {voiceFish.license_acknowledged ? ' / license acknowledged for personal-local use' : ' / license acknowledgement required'}
+              </small>
+            </div>
+            <div className="setup-voice__actions">
+              <StatusBadge status={voiceStatusToSetup(fishState)} />
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={() => runVoiceDownload('fish_speech', { accept_personal_license: true })}
+                disabled={voiceBusy || fishHardwareBlocked || voiceFish.model_ready}
+                title={fishHardwareBlocked ? 'Fish Speech download is hardware-gated on this PC.' : 'Download Fish S2-Pro model assets for personal-local use.'}
+              >
+                Download Fish
+              </button>
+              <button
+                type="button"
+                className="setup-btn setup-btn--small"
+                onClick={startFishRuntime}
+                disabled={voiceBusy || !fishCanStart}
+              >
+                Start Fish
+              </button>
+              <button
+                type="button"
+                className="setup-btn setup-btn--small setup-btn--quiet"
+                onClick={stopVoiceRuntime}
+                disabled={voiceBusy || !voiceFish.process_running}
+              >
+                Stop Fish
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="setup-voice__recommendation">
+          <b>{voiceRuntime?.recommendation?.label || 'Voice runtime not checked'}</b>
+          <span>{voiceRuntime?.recommendation?.details || voiceRuntime?.error || 'Run a voice refresh to inspect local speech readiness.'}</span>
+        </div>
+        <div className="setup-voice-lab">
+          <div className="setup-voice-lab__head">
+            <div>
+              <b>Voice Test Lab</b>
+              <span>Run production checks for runtime readiness, local TTS, STT readiness, VAD gating, logs, and sample playback.</span>
+            </div>
+            <div className="setup-voice__actions">
+              <button type="button" className="setup-btn setup-btn--small" onClick={runVoiceDoctor} disabled={voiceBusy}>
+                Run Doctor
+              </button>
+              <button type="button" className="setup-btn setup-btn--small" onClick={runVoiceSelfTest} disabled={voiceBusy}>
+                Run Self-Test
+              </button>
+              <button type="button" className="setup-btn setup-btn--small setup-btn--quiet" onClick={cancelVoiceDownload} disabled={!voiceDownloadActive || busyAction === 'voice:cancel'}>
+                Cancel Download
+              </button>
+            </div>
+          </div>
+          <div className="setup-voice-lab__grid">
+            <div className="setup-voice-lab__panel">
+              <div className="setup-kicker">DOCTOR CHECKS</div>
+              {doctorChecks.length ? doctorChecks.map(check => (
+                <div key={check.id} className={`setup-voice-check setup-voice-check--${check.state}`}>
+                  <span>{check.label}</span>
+                  <b>{check.state}</b>
+                  <small>{check.message}</small>
+                </div>
+              )) : (
+                <p className="setup-voice-lab__empty">Run Doctor to see exact blockers.</p>
+              )}
+            </div>
+            <div className="setup-voice-lab__panel">
+              <div className="setup-kicker">SELF-TEST</div>
+              {voiceSelfTest && (
+                <div className="setup-voice-lab__summary">
+                  <span>{voiceSelfTest.ok ? 'Pass' : 'Has blockers'}</span>
+                  <span>{voiceSelfTest.elapsed_ms ?? 0}ms</span>
+                  <span>{voiceSelfTest.blocking?.length || 0} blockers</span>
+                </div>
+              )}
+              {selfTestChecks.length ? selfTestChecks.map(check => (
+                <div key={check.id} className={`setup-voice-check setup-voice-check--${check.state}`}>
+                  <span>{check.label}</span>
+                  <b>{check.state}</b>
+                  <small>{check.message}</small>
+                </div>
+              )) : (
+                <p className="setup-voice-lab__empty">Run Self-Test to generate EN/NL voice samples when runtime and models are ready.</p>
+              )}
+              {voiceSelfTest?.artifacts?.length > 0 && (
+                <div className="setup-voice-samples">
+                  {voiceSelfTest.artifacts.map(artifact => (
+                    <a key={artifact.id || artifact.url} href={artifact.url} target="_blank" rel="noreferrer">
+                      {artifact.language?.toUpperCase() || 'AUDIO'} sample
+                    </a>
+                  ))}
+                </div>
+              )}
+              {bundledSamples.length > 0 && (
+                <div className="setup-voice-samples">
+                  {bundledSamples.map(sample => sample.exists ? (
+                    <a key={sample.id} href={sample.url} target="_blank" rel="noreferrer">
+                      {sample.language?.toUpperCase() || 'AUDIO'} bundled sample
+                    </a>
+                  ) : (
+                    <span key={sample.id}>{sample.language?.toUpperCase() || 'AUDIO'} sample missing</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="setup-voice-lab__panel setup-voice-lab__panel--logs">
+              <div className="setup-kicker">RUNTIME LOGS</div>
+              {voiceLogLines.length ? voiceLogLines.map((line, index) => (
+                <div key={`${line.ts || index}-${index}`} className="setup-voice-log">
+                  <span>{fmtTime(line.ts)}</span>
+                  <b>{line.level || 'info'}</b>
+                  <small>{line.message}</small>
+                </div>
+              )) : (
+                <p className="setup-voice-lab__empty">No voice runtime logs yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="setup-grid">
         <div className="setup-panel setup-panel--wizard">

@@ -71,6 +71,7 @@
 .nxd__threat   { color: rgba(200,212,232,0.4); margin-left: auto; flex-shrink: 0; }
 .nxd__threat b { color: #00FF88; margin-left: 4px; }
 .nxd__threat--hi b { color: #FF4444; animation: nxd-blink 0.7s step-end infinite; }
+.nxd__stat--hot b  { color: #F87171; animation: nxd-blink 1.2s ease-in-out infinite; }
 .nxd__health { color: rgba(200,212,232,0.4); flex-shrink: 0; }
 .nxd__health b { color: #FFB800; margin-left: 4px; }
 
@@ -78,8 +79,8 @@
 
 /* ── The stage — orb arena with corner panels ───────────────────────────────*/
 .nxd__stage {
-  flex: 0 0 clamp(500px, 62vh, 760px);
-  min-height: 500px;
+  flex: 0 0 clamp(560px, 66vh, 820px);
+  min-height: 560px;
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(229,199,107,0.12);
@@ -96,11 +97,8 @@
 
 /* Orbital field, beams, and panel connector lines */
 .nxd__field,
-.nxd__axis,
-.nxd__beam,
 .nxd__ring,
-.nxd__connline,
-.nxd__sparkbit {
+.nxd__connline {
   position: absolute;
   pointer-events: none;
 }
@@ -108,102 +106,42 @@
   inset: 0;
   overflow: hidden;
   z-index: 1;
-  background:
-    repeating-radial-gradient(ellipse at 50% 50%, transparent 0 34px, rgba(255,184,0,0.055) 35px 36px, transparent 37px 70px),
-    repeating-linear-gradient(15deg, transparent 0 48px, rgba(0,207,255,0.035) 49px 50px, transparent 51px 96px);
-}
-.nxd__field::before {
-  content: '';
-  position: absolute;
-  inset: -18%;
-  background:
-    radial-gradient(circle at 21% 36%, rgba(255,198,88,0.95) 0 1px, transparent 2px),
-    radial-gradient(circle at 79% 34%, rgba(255,198,88,0.75) 0 1px, transparent 2px),
-    radial-gradient(circle at 64% 74%, rgba(0,207,255,0.65) 0 1px, transparent 2px),
-    radial-gradient(circle at 34% 78%, rgba(181,101,245,0.65) 0 1px, transparent 2px);
-  opacity: 0.55;
-  animation: nxd-drift 28s linear infinite;
-}
-.nxd__axis {
-  left: 50%;
-  top: 50%;
-  background: linear-gradient(90deg, transparent, rgba(255,184,0,0.38), rgba(255,232,170,0.86), rgba(255,184,0,0.38), transparent);
-  filter: drop-shadow(0 0 10px rgba(255,184,0,0.48));
-  opacity: 0.78;
-}
-.nxd__axis--h { width: 78%; height: 1px; transform: translate(-50%, -50%); }
-.nxd__axis--v { width: 1px; height: 74%; transform: translate(-50%, -50%); background: linear-gradient(180deg, transparent, rgba(255,184,0,0.34), rgba(255,232,170,0.75), rgba(255,184,0,0.34), transparent); }
-.nxd__beam {
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  opacity: 0.72;
-  mix-blend-mode: screen;
-}
-.nxd__beam--h {
-  width: 86%;
-  height: 46px;
-  background: radial-gradient(ellipse at 50% 50%, rgba(255,216,130,0.62), rgba(255,184,0,0.18) 30%, transparent 68%);
-}
-.nxd__beam--v {
-  width: 46px;
-  height: 80%;
-  background: radial-gradient(ellipse at 50% 50%, rgba(255,216,130,0.38), rgba(255,184,0,0.12) 32%, transparent 70%);
 }
 .nxd__ring {
   left: 50%;
   top: 50%;
   border-radius: 50%;
-  border: 1px solid rgba(255,184,0,0.18);
+  border: 1px solid rgba(255,184,0,0.08);
   transform: translate(-50%, -50%);
-  box-shadow: inset 0 0 18px rgba(255,184,0,0.035), 0 0 24px rgba(255,184,0,0.04);
 }
-.nxd__ring--1 { width: 270px; height: 270px; border-color: rgba(255,230,170,0.34); animation: nxd-spin 18s linear infinite; }
-.nxd__ring--2 { width: 390px; height: 250px; border-color: rgba(0,207,255,0.15); animation: nxd-spin 26s linear infinite reverse; }
-.nxd__ring--3 { width: 530px; height: 340px; border-color: rgba(255,184,0,0.16); animation: nxd-spin 36s linear infinite; }
-.nxd__ring--4 { width: 700px; height: 430px; border-color: rgba(255,184,0,0.10); animation: nxd-spin 48s linear infinite reverse; }
-.nxd__ring--5 { width: 880px; height: 520px; border-color: rgba(0,207,255,0.07); }
+.nxd__ring--4 { width: 700px; height: 430px; border-color: rgba(255,184,0,0.07); animation: nxd-spin 60s linear infinite reverse; }
+.nxd__ring--5 { width: 900px; height: 540px; border-color: rgba(0,207,255,0.05); }
 .nxd__connline {
   left: 50%;
   top: 50%;
   width: 245px;
   height: 1px;
   transform-origin: 0 50%;
-  background: linear-gradient(90deg, rgba(255,224,150,0.65), rgba(255,184,0,0.18), transparent);
-  filter: drop-shadow(0 0 5px rgba(255,184,0,0.45));
+  background: linear-gradient(90deg, rgba(255,224,150,0.45), rgba(255,184,0,0.10), transparent);
 }
 .nxd__connline--tl { transform: rotate(214deg); }
 .nxd__connline--tr { transform: rotate(-34deg); }
 .nxd__connline--bl { transform: rotate(146deg); }
 .nxd__connline--br { transform: rotate(34deg); }
-.nxd__sparkbit {
-  left: 50%;
-  top: 50%;
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: rgba(255,210,120,0.78);
-  box-shadow: 0 0 8px rgba(255,184,0,0.8);
-  transform: rotate(calc(var(--i) * 41deg)) translateX(calc(135px + var(--i) * 5px));
-  opacity: 0.2;
-  animation: nxd-pulsebit 4.8s ease-in-out infinite;
-  animation-delay: calc(var(--i) * -0.17s);
-}
 
 @keyframes nxd-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
-@keyframes nxd-drift { to { transform: rotate(360deg); } }
-@keyframes nxd-pulsebit { 0%, 100% { opacity: 0.16; } 50% { opacity: 0.82; } }
 
-/* Orb centered absolutely */
+/* Orb centered absolutely — no CSS scale transform, canvas is already size-capped */
 .nxd__orbwrap {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%) scale(var(--core-scale, 1));
+  transform: translate(-50%, -50%);
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
+  contain: layout style;
 }
 
 /* ── Corner panels — integrated with eye's metal-bevel language ──────────── */
@@ -692,7 +630,6 @@
 /* ── Responsive: collapse to single column on narrow screens ────────────────*/
 @media (max-width: 1280px) {
   .nxd { grid-template-columns: minmax(0, 1fr) 320px; }
-  .nxd__stage { --core-scale: 0.88; }
   .snode { width: 280px; }
   .nxd__mission,
   .nxd__lower { grid-template-columns: 1fr; }
@@ -707,7 +644,7 @@
     border-top: 1px solid rgba(229,199,107,0.14);
     overflow: visible;
   }
-  .nxd__stage { --core-scale: 0.72; min-height: 600px; }
+  .nxd__stage { min-height: 600px; }
   .snode { width: 240px; }
   .snode__m-val { font-size: 16px; }
 }
@@ -717,7 +654,6 @@
   .nxd__stage {
     flex-basis: auto;
     min-height: 880px;
-    --core-scale: 0.62;
   }
   .nxd__orbwrap { top: 45%; }
   .nxd__eye-title { font-size: 15px; letter-spacing: 0.22em; }
@@ -738,25 +674,37 @@
 
 @media (prefers-reduced-motion: reduce) {
   .nxd__ring,
-  .nxd__field::before,
-  .nxd__sparkbit,
   .nxd__eye-state--thinking,
   .nxd__eye-state--executing,
   .nxd__eye-state--error {
     animation: none;
   }
+  /* Drop backdrop blur — heavy on GPU when compositing */
+  .snode {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
-/* Medium-tier: kill the most expensive effects, keep the core visual */
-html[data-perf="medium"] .nxd__sparkbit {
-  display: none;
+/* WQHD (2560px) and above — drop all compositor-heavy effects */
+@media (min-width: 1921px) {
+  .snode {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  /* drop-shadow on these creates a GPU layer per element at large viewport */
+  .snode::after { filter: none; }
+  .snode__icon  { filter: none; }
+  .nxd__eye-title { filter: none; }
+  .nxd__ring--4,
+  .nxd__ring--5 {
+    display: none;
+  }
 }
+
 html[data-perf="medium"] .nxd__ring--4,
 html[data-perf="medium"] .nxd__ring--5 {
   display: none;
-}
-html[data-perf="medium"] .nxd__field::before {
-  animation: none;
 }
 html[data-perf="medium"] .snode {
   backdrop-filter: none;

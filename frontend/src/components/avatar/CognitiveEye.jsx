@@ -11,7 +11,8 @@
  *   onClick fn      — pulse on click + optional callback
  *   className / style — pass-through
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
+import { avatarStateForVoicePhase, useVoiceStore } from '../../store/voiceStore'
 import './CognitiveEye.css'
 
 /* ── Engine bootstrap (once per page) ─────────────────────────────── */
@@ -39,20 +40,26 @@ function setupGaze(canvasEl) {
     if (!window.NX?.setGaze) return
     const canvas = _gazeCanvas
     if (!canvas) {
+      // Fallback: very gentle screen-relative gaze
       window.NX.setGaze(
-        (e.clientX / window.innerWidth  - 0.5) * 2,
-        (e.clientY / window.innerHeight - 0.5) * 2,
+        (e.clientX / window.innerWidth  - 0.5) * 0.6,
+        (e.clientY / window.innerHeight - 0.5) * 0.6,
       )
       return
     }
     const r = canvas.getBoundingClientRect()
     const cx = r.left + r.width  / 2
     const cy = r.top  + r.height / 2
-    const nx = Math.max(-1, Math.min(1, (e.clientX - cx) / (r.width  * 0.6)))
-    const ny = Math.max(-1, Math.min(1, (e.clientY - cy) / (r.height * 0.6)))
+    // Wider normalization divisor = gentler tracking; clamp to ±0.7 max
+    const nx = Math.max(-0.7, Math.min(0.7, (e.clientX - cx) / (r.width  * 1.4)))
+    const ny = Math.max(-0.7, Math.min(0.7, (e.clientY - cy) / (r.height * 1.4)))
     window.NX.setGaze(nx, ny)
   }, { passive: true })
   window.addEventListener('mouseleave', () => window.NX?.setGaze?.(0, 0))
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 }
 
 /* ══════════════════════════════════════════════════════════════════ */
@@ -65,56 +72,108 @@ export default function CognitiveEye({
 }) {
   const canvasRef = useRef(null)
   const wrapRef   = useRef(null)
+  const voicePhase = useVoiceStore(state => state.phase)
+  const audioLevel = useVoiceStore(state => state.audioLevel)
+  const micLevel = useVoiceStore(state => state.micLevel)
+  const isSpeaking = useVoiceStore(state => state.isSpeaking)
 
   useEffect(() => {
     if (mode !== 'dashboard') return
 
     let cancelled = false
     let onVisibility = null
+    let cancelCleanup = null
 
     loadEngine().then(() => {
       if (cancelled || !window.NX?.init) return
-      const canvas = wrapRef.current
-      if (!canvas) return
+      const wrap = wrapRef.current
+      if (!wrap) return
 
-      // Read actual container size so engine renders at correct resolution
-      const rect = canvas.getBoundingClientRect()
-      const sz = Math.max(320, Math.min(rect.width, rect.height) || size)
+      const initEngine = () => {
+        if (cancelled) return
+        const rect = wrap.getBoundingClientRect()
+        const sz = Math.max(180, Math.min(rect.width || size, rect.height || size, 520))
 
-      // Pin container size so resize events don't inflate canvas to window size
-      window.NX._containerSize = sz
+        // Pin container size — engine reads this in resize() instead of window dimensions
+        window.NX._containerSize = sz
 
-      // Seed tweaks before init
-      window.__avatarTweaks = {
-        accentIdle: { hue: 43, sat: 0.88 },
-        energy:  1.8,
-        glow:    1.8,
-        density: 0.65,
-        tracking: true,
-        autocycle: false,
+        // perf-lite: disable glow on large/4K displays or reduced-motion
+        const perfLite = prefersReducedMotion() || window.screen.width > 3440
+        window.__avatarTweaks = {
+          accentIdle: { hue: 43, sat: 0.88 },
+          energy:  1.4,
+          glow:    perfLite ? 0 : 1.0,
+          density: 0.50,
+          tracking: true,
+          autocycle: false,
+          perfLite,
+        }
+
+        window.NX.init(canvasRef.current)
+
+        // Keep engine size in sync when container changes
+        let roTimer = null
+        const ro = new ResizeObserver(() => {
+          clearTimeout(roTimer)
+          roTimer = setTimeout(() => {
+            const r = wrap.getBoundingClientRect()
+            const s = Math.max(180, Math.min(r.width || size, r.height || size, 520))
+            if (Math.abs(s - (window.NX._containerSize || 0)) > 4) {
+              window.NX._containerSize = s
+              window.dispatchEvent(new Event('resize'))
+            }
+          }, 120)
+        })
+        ro.observe(wrap)
+
+        setupGaze(canvasRef.current)
+
+        onVisibility = () => { if (window.NX) window.NX._paused = document.hidden }
+        document.addEventListener('visibilitychange', onVisibility)
+
+        // Store cleanup refs on the closure
+        cancelCleanup = () => { ro.disconnect(); clearTimeout(roTimer) }
       }
 
-      // Temporarily override window dimensions so engine.setup() picks container size
-      const _iw = Object.getOwnPropertyDescriptor(window, 'innerWidth')
-      const _ih = Object.getOwnPropertyDescriptor(window, 'innerHeight')
-      Object.defineProperty(window, 'innerWidth',  { configurable: true, get: () => sz })
-      Object.defineProperty(window, 'innerHeight', { configurable: true, get: () => sz })
-      window.NX.init(canvasRef.current)
-      if (_iw) Object.defineProperty(window, 'innerWidth',  _iw); else delete window.innerWidth
-      if (_ih) Object.defineProperty(window, 'innerHeight', _ih); else delete window.innerHeight
-
-      setupGaze(canvasRef.current)
-
-      // Pause engine when tab is hidden — saves CPU on slow machines
-      onVisibility = () => { if (window.NX) window.NX._paused = document.hidden }
-      document.addEventListener('visibilitychange', onVisibility)
+      // Wait one rAF to ensure the container is fully laid out
+      requestAnimationFrame(initEngine)
     })
 
     return () => {
       cancelled = true
       if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
+      if (cancelCleanup) cancelCleanup()
     }
   }, [mode, size])
+
+  useEffect(() => {
+    if (mode !== 'dashboard') return undefined
+    let timer = null
+    const avatarState = avatarStateForVoicePhase(voicePhase)
+    loadEngine().then(() => {
+      window.NX?.setState?.(avatarState)
+      if (avatarState === 'alert') {
+        timer = setTimeout(() => {
+          if (window.NX?.state === 'alert') window.NX.setState('idle')
+        }, 1200)
+      }
+    })
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
+  }, [mode, voicePhase])
+
+  useEffect(() => {
+    if (mode !== 'dashboard') return
+    const level = prefersReducedMotion()
+      ? 0
+      : isSpeaking
+        ? audioLevel
+        : voicePhase === 'listening'
+          ? micLevel * 0.45
+          : 0
+    window.NX?.setSpeakLevel?.(level)
+  }, [audioLevel, isSpeaking, micLevel, mode, voicePhase])
 
   const handleClick = e => {
     window.NX?.pulse?.(1.1)
@@ -138,7 +197,7 @@ export default function CognitiveEye({
     <div
       ref={wrapRef}
       className={`ce-wrap ce-wrap--dashboard ${className}`}
-      style={{ width: size, height: size, ...style }}
+      style={{ '--ce-size': `${size}px`, ...style }}
       onClick={handleClick}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
@@ -158,7 +217,7 @@ export default function CognitiveEye({
    All proportions derived from those reference coordinates.
 ══════════════════════════════════════════════════════════════════ */
 function ToolbarEye({ size, onClick, className, style }) {
-  const id = useRef(Math.random().toString(36).slice(2, 6)).current
+  const id = useId().replace(/:/g, '')
   const IRIS = 0.74
   const R1RX = IRIS * (320 / 230)
   const R1RY = IRIS * (90  / 230)
@@ -229,7 +288,3 @@ function ToolbarEye({ size, onClick, className, style }) {
     </div>
   )
 }
-
-/* Public API passthrough */
-export const setAvatarState = name  => window.NX?.setState?.(name)
-export const pulseAvatar    = (s=1) => window.NX?.pulse?.(s)

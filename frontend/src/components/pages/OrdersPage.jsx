@@ -136,30 +136,17 @@ function BedrijfZoekerPanel({ onCreated }) {
             <span>{kandidaten.length} kandidaten gevonden</span>
             <button onClick={voegAlleToe} disabled={Object.values(creating).some(Boolean)}>Voeg alle toe</button>
           </div>
-          {kandidaten.map((k, i) => {
-            const ws = k.website_kwaliteit || (k.heeft_website ? 'onbekend' : 'geen')
-            const wsBadge = {
-              geen:     { label: '✓ Geen site', cls: 'ws-geen' },
-              slecht:   { label: '⚡ Slechte site', cls: 'ws-slecht' },
-              matig:    { label: '~ Matige site', cls: 'ws-matig' },
-              goed:     { label: '✗ Goede site', cls: 'ws-goed' },
-              onbekend: { label: '? Website', cls: 'ws-onbekend' },
-            }[ws] || { label: ws, cls: 'ws-onbekend' }
-            return (
-              <div key={i} className={`op-zoeker__item${ws === 'goed' ? ' op-zoeker__item--skip' : ''}`}>
-                <div>
-                  <strong>{k.bedrijfsnaam}</strong>
-                  <span className="op-card__branche"> — {k.branche} in {k.plaats}</span>
-                  <span className={`op-ws-badge op-ws-badge--${wsBadge.cls}`}>{wsBadge.label}</span>
-                  {ws === 'goed' && <span className="op-zoeker__skip-hint"> Heeft al goede site — waarschijnlijk overslaan</span>}
-                </div>
-                <button onClick={() => voegToe(k, i)} disabled={creating[i] || ws === 'goed'}
-                  title={ws === 'goed' ? 'Dit bedrijf heeft al een goede website' : ''}>
-                  {creating[i] ? 'Toevoegen…' : ws === 'goed' ? 'Heeft al site' : '+ Toevoegen'}
-                </button>
+          {kandidaten.map((k, i) => (
+            <div key={i} className="op-zoeker__item">
+              <div>
+                <strong>{k.bedrijfsnaam}</strong>
+                <span className="op-card__branche"> — {k.branche} in {k.plaats}</span>
               </div>
-            )
-          })}
+              <button onClick={() => voegToe(k, i)} disabled={creating[i]}>
+                {creating[i] ? 'Toevoegen…' : '+ Toevoegen'}
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -176,56 +163,11 @@ function useCopy(text) {
   return [copied, copy]
 }
 
-function StuurNaarKlantPanel({ orderId }) {
-  const [data, setData] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState(null)
-  const [copiedUrl, copyUrl] = useCopy(data?.demo_url || '')
-
-  async function laden() {
-    setBusy(true); setErr(null)
-    try {
-      const res = await api.get(`/api/orders/${orderId}/stuur-link`)
-      if (res.ok) setData(res)
-      else setErr(res.error || 'Fout bij ophalen link')
-    } catch (e) { setErr(e.message) }
-    finally { setBusy(false) }
-  }
-
-  if (!data) return (
-    <div className="op-stuur">
-      <button className="op-stuur__open" onClick={laden} disabled={busy}>
-        {busy ? 'Laden…' : 'Stuur naar klant'}
-      </button>
-      {err && <p className="op-err">{err}</p>}
-    </div>
-  )
-
-  return (
-    <div className="op-stuur op-stuur--open">
-      <p className="op-stuur__label">Stuur naar klant</p>
-      <div className="op-stuur__url">{data.demo_url}</div>
-      <div className="op-stuur__actions">
-        <a className="op-stuur__btn op-stuur__btn--wa" href={data.whatsapp_url} target="_blank" rel="noreferrer">
-          WhatsApp
-        </a>
-        <a className="op-stuur__btn op-stuur__btn--email" href={data.email_url} target="_blank" rel="noreferrer">
-          E-mail
-        </a>
-        <button className="op-stuur__btn op-stuur__btn--copy" onClick={copyUrl}>
-          {copiedUrl ? 'Gekopieerd!' : 'Kopieer link'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function PitchBox({ order, onStatusChange }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [copiedPitch, copyPitch] = useCopy(order.pitch_tekst)
   const [copiedVervolg, copyVervolg] = useCopy(order.vervolg_tekst)
-  const [prijsAdvies, setPrijsAdvies] = useState('')
 
   async function markStatus(newStatus) {
     setBusy(true); setErr(null)
@@ -241,24 +183,16 @@ function PitchBox({ order, onStatusChange }) {
     setBusy(true); setErr(null)
     try {
       const res = await api.post(`/api/orders/${order.id}/akkoord`, {})
-      if (res.ok) {
-        if (res.prijs_advies) setPrijsAdvies(res.prijs_advies)
-        onStatusChange(res.order)
-      } else setErr(res.error)
+      if (res.ok) onStatusChange(res.order)
+      else setErr(res.error)
     } catch (e) { setErr(e.message) }
     finally { setBusy(false) }
   }
 
-  const [referentie, setReferentie] = useState('')
-
   async function markBetaald() {
-    if (!referentie.trim()) {
-      setErr('Vul de PayPal-transactiereferentie in voordat je markeert als betaald.')
-      return
-    }
     setBusy(true); setErr(null)
     try {
-      const res = await api.post(`/api/orders/${order.id}/betaald`, { referentie })
+      const res = await api.post(`/api/orders/${order.id}/status`, { status: 'betaald' })
       if (res.ok) onStatusChange(res.order)
       else setErr(res.error)
     } catch (e) { setErr(e.message) }
@@ -283,29 +217,10 @@ function PitchBox({ order, onStatusChange }) {
 
       {order.status === 'akkoord' && order.vervolg_tekst && <>
         <p className="op-pitch__label">Vervolgbericht (met prijs + betaallink):</p>
-        {prijsAdvies && (
-          <div className={`op-prijs-advies ${prijsAdvies.includes('lage') ? 'op-prijs-advies--warn' : 'op-prijs-advies--ok'}`}>
-            🐟 {prijsAdvies}
-          </div>
-        )}
         <pre className="op-pitch__text">{order.vervolg_tekst}</pre>
         <div className="op-pitch__actions">
           <button onClick={copyVervolg}>{copiedVervolg ? 'Gekopieerd!' : 'Kopieer vervolgbericht'}</button>
-        </div>
-        <div className="op-betaald-check">
-          <p className="op-pitch__label">Betaling ontvangen? Vul het PayPal-transactie-ID in:</p>
-          <p className="op-betaald-check__hint">Te vinden in PayPal → Activiteit → klik op de betaling → Transactie-ID</p>
-          <div className="op-betaald-check__row">
-            <input
-              className="op-betaald-check__input"
-              placeholder="bijv. 5TY05013RG0287623"
-              value={referentie}
-              onChange={e => setReferentie(e.target.value)}
-            />
-            <button onClick={markBetaald} disabled={busy || !referentie.trim()}>
-              {busy ? 'Bezig…' : 'Betaling bevestigen'}
-            </button>
-          </div>
+          <button onClick={markBetaald} disabled={busy}>Gemarkeerd als betaald</button>
         </div>
       </>}
 
@@ -403,7 +318,18 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
   }
 
   const s = order.status
-  const hasNetlifyToken = true // server-side check — knop disabled als token ontbreekt
+
+  // Of NETLIFY_API_TOKEN op de server is ingesteld — bepaalt of de deploy-knop werkt.
+  // null = nog onbekend (laden), true/false = serverantwoord.
+  const [hasNetlifyToken, setHasNetlifyToken] = useState(null)
+  useEffect(() => {
+    if (s !== 'betaald') return
+    let alive = true
+    api.get('/api/orders/hosting/status')
+      .then(r => { if (alive) setHasNetlifyToken(!!r.has_token) })
+      .catch(() => { if (alive) setHasNetlifyToken(false) })
+    return () => { alive = false }
+  }, [s])
 
   return (
     <div className={`op-card op-card--${s}`}>
@@ -445,9 +371,20 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
           <button onClick={generatePitch} disabled={busy}>Genereer pitch</button>
         )}
         {s === 'betaald' && (<>
-          <button onClick={deployNetlify} disabled={deployBusy}>
+          <button
+            onClick={deployNetlify}
+            disabled={deployBusy || hasNetlifyToken === false}
+            title={hasNetlifyToken === false ? 'Stel eerst NETLIFY_API_TOKEN in (~/.ai-employee/.env)' : ''}
+          >
             {deployBusy ? 'Deployen…' : 'Zet live via Netlify'}
           </button>
+          {hasNetlifyToken === false && (
+            <p className="op-deploy__warn">
+              ⚠️ NETLIFY_API_TOKEN niet ingesteld. Maak een gratis token op netlify.com
+              (Account → Applications → New access token) en zet
+              <code> NETLIFY_API_TOKEN=… </code> in <code>~/.ai-employee/.env</code>, herstart daarna de server.
+            </p>
+          )}
           {(order.live_url || deployResult?.live_url) && (<>
             <a href={order.live_url || deployResult.live_url} target="_blank" rel="noreferrer" className="op-live-link">
               {order.live_url || deployResult.live_url}
@@ -467,20 +404,6 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
       {researchData && (
         <div className="op-research">
           <p className="op-research__label">Research resultaten:</p>
-          {researchData.website_status && (() => {
-            const statusMap = {
-              geen_site:    { label: '✓ Geen website — ideale kandidaat', cls: 'ws-geen' },
-              slechte_site: { label: '⚡ Slechte/verouderde website — kans!', cls: 'ws-slecht' },
-              goede_site:   { label: '✗ Al een goede website — overweeg te skippen', cls: 'ws-goed' },
-            }
-            const s = statusMap[researchData.website_status] || { label: researchData.website_status, cls: 'ws-onbekend' }
-            return (
-              <div className={`op-ws-status op-ws-status--${s.cls}`}>
-                <strong>{s.label}</strong>
-                {researchData.website_reden && <span> — {researchData.website_reden}</span>}
-              </div>
-            )
-          })()}
           <div className="op-research__items">
             {researchData.telefoon
               ? <span>📞 {researchData.telefoon}</span>
@@ -492,10 +415,6 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
             {researchData.social?.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer">🔗 {u}</a>)}
           </div>
         </div>
-      )}
-
-      {order.demo_pad && (
-        <StuurNaarKlantPanel orderId={order.id} />
       )}
 
       {(showPitch || order.pitch_tekst) && (

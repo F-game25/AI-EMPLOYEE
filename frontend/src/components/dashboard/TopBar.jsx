@@ -61,7 +61,7 @@ function OfflineBanner({ reason }) {
     const target = last.ts + seconds * 1000
     const tick = () => setCountdown(Math.max(0, Math.ceil((target - Date.now()) / 1000)))
     tick()
-    const id = setInterval(tick, 500)
+    const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [heartbeatLogs])
 

@@ -292,11 +292,24 @@ export default function NexusOSDashboard() {
     busyLoad: load,
   })
 
-  // Wire orchestrator state → avatar eye color/energy (declared after orchestratorState)
+  // Wire orchestrator state + hardware load → avatar eye color/energy
   useEffect(() => {
-    const stateMap = { idle: 'idle', thinking: 'thinking', executing: 'executing', error: 'alert', busy: 'listening' }
-    window.NX?.setState?.(stateMap[orchestratorState?.toLowerCase()] || 'idle')
-  }, [orchestratorState])
+    const highLoad = cpu > 70 || gpu > 70
+    const hotTemp  = gpuTemp > 78
+    const busy     = activeTasks > 3 || thinking
+
+    let state = 'idle'
+    if (hotTemp)       state = 'alert'
+    else if (highLoad) state = 'executing'
+    else if (busy)     state = 'thinking'
+    else {
+      const stateMap = { idle: 'idle', thinking: 'thinking', executing: 'executing', error: 'alert', busy: 'listening' }
+      state = stateMap[orchestratorState?.toLowerCase()] || 'idle'
+    }
+
+    window.NX?.setState?.(state)
+    window.NX?.setSpeakLevel?.(Math.min(0.9, cpu / 100 * 0.55 + activeTasks * 0.04))
+  }, [cpu, gpu, gpuTemp, activeTasks, thinking, orchestratorState])
 
   const focusKeyword = currentStep?.description?.split(' ')[0] || currentStep?.task?.split(' ')[0] || 'NEXUS'
 
@@ -320,6 +333,8 @@ export default function NexusOSDashboard() {
           <span className="nxd__stat">RAM <b>{Math.round(ram)}%</b></span>
           <span className="nxd__stat">AGENTS <b>{activeAgents}</b></span>
           <span className="nxd__stat">TASKS <b>{running}</b></span>
+          <span className="nxd__stat">GPU <b>{Math.round(gpu)}%</b></span>
+          <span className={`nxd__stat${gpuTemp > 75 ? ' nxd__stat--hot' : ''}`}>TEMP <b>{Math.round(gpuTemp)}°C</b></span>
           <span className={`nxd__threat ${threatLevel >= 40 ? 'nxd__threat--hi' : ''}`}>
             THREAT <b>{threatLevel}</b>
           </span>
@@ -329,22 +344,12 @@ export default function NexusOSDashboard() {
         {/* The arena — eye centerpiece with 4 corner panels */}
         <div className="nxd__stage">
           <div className="nxd__field" aria-hidden="true">
-            <span className="nxd__axis nxd__axis--h" />
-            <span className="nxd__axis nxd__axis--v" />
-            <span className="nxd__beam nxd__beam--h" />
-            <span className="nxd__beam nxd__beam--v" />
-            <span className="nxd__ring nxd__ring--1" />
-            <span className="nxd__ring nxd__ring--2" />
-            <span className="nxd__ring nxd__ring--3" />
             <span className="nxd__ring nxd__ring--4" />
             <span className="nxd__ring nxd__ring--5" />
             <span className="nxd__connline nxd__connline--tl" />
             <span className="nxd__connline nxd__connline--tr" />
             <span className="nxd__connline nxd__connline--bl" />
             <span className="nxd__connline nxd__connline--br" />
-            {Array.from({ length: 42 }).map((_, i) => (
-              <span key={i} className="nxd__sparkbit" style={{ '--i': i }} />
-            ))}
           </div>
 
           {/* Robotic Eye centerpiece */}
@@ -358,7 +363,7 @@ export default function NexusOSDashboard() {
           </div>
           <div className="nxd__orbwrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <CognitiveEye
-              size={560}
+              size={480}
               mode="dashboard"
               onClick={() => window.dispatchEvent(new CustomEvent('nx:companion:open'))}
             />

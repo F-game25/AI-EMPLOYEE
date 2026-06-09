@@ -321,14 +321,38 @@ function CommandPalette({ onClose, onSelectView }) {
 function ProjectsView({ onSelect, onNew }) {
   const [projects, setProjects] = useState([])
   const [loading, setLoading] = useState(true)
+  const [focused, setFocused] = useState(null)
+  const [togglingWrite, setTogglingWrite] = useState(false)
 
-  useEffect(() => {
+  const reload = () => {
     fetch('/api/forge/projects', { headers: TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {} })
       .then(r => r.ok ? r.json() : [])
-      .then(d => setProjects(Array.isArray(d) ? d : d.projects || []))
+      .then(d => {
+        const list = Array.isArray(d) ? d : d.projects || []
+        setProjects(list)
+        setFocused(f => f ? (list.find(p => p.id === f.id) || f) : f)
+      })
       .catch(() => setProjects([]))
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { reload() }, [])
+
+  const toggleWriteAccess = async (p) => {
+    setTogglingWrite(true)
+    try {
+      const r = await fetch(`/api/forge/projects/${p.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {}) },
+        body: JSON.stringify({ write_access: !p.write_access }),
+      })
+      const d = await r.json()
+      if (!r.ok) { toastError(d.error || 'Failed to update'); return }
+      toastSuccess(`Write access ${d.project.write_access ? 'enabled' : 'disabled'}`)
+      reload()
+    } catch (e) { toastError(e.message) }
+    finally { setTogglingWrite(false) }
+  }
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 14, height: '100%', minHeight: 0 }}>
@@ -345,24 +369,48 @@ function ProjectsView({ onSelect, onNew }) {
               <Btn variant="primary" onClick={onNew}>Create project</Btn>
             </div>
           ) : projects.map(p => (
-            <div key={p.id} className="af2-row" onClick={() => onSelect(p)}>
-              <Hex tone="bronze"><Icon name="branch" size={14}/></Hex>
+            <div key={p.id} className="af2-row" style={{ background: focused?.id === p.id ? 'rgba(205,127,50,0.05)' : undefined, borderLeft: focused?.id === p.id ? '2px solid var(--af2-bronze)' : '2px solid transparent' }}
+              onClick={() => setFocused(p)}>
+              <Hex tone={p.write_access ? 'bronze' : 'idle'}><Icon name="branch" size={14}/></Hex>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ font: '600 13px var(--af2-sans)', color: 'var(--af2-text)' }}>{p.name || p.id}</div>
-                <div style={{ font: '400 11px var(--af2-mono)', color: 'var(--af2-muted)', marginTop: 2 }}>{p.id}</div>
+                <div style={{ font: '400 11px var(--af2-mono)', color: 'var(--af2-muted)', marginTop: 2 }}>{p.write_access ? 'writable' : 'read-only'} · {p.template || p.package_type || 'project'}</div>
               </div>
-              <Pill tone="success" sm dot={false}>Open</Pill>
+              <Btn variant="primary" sm onClick={e => { e.stopPropagation(); onSelect(p) }}>Open</Btn>
             </div>
           ))}
         </div>
       </Panel>
-      <Panel title="Forge capacity" tone="gold">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <CapRow label="Projects" value={`${projects.length}`}/>
-          <CapRow label="Backend" value="Ready"/>
-          <CapRow label="Provider" value="Anthropic"/>
-        </div>
-      </Panel>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {focused ? (
+          <Panel title={focused.name} sub={focused.id ? compactId(focused.id) : ''} tone="gold">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <CapRow label="Template" value={focused.template || focused.package_type || '—'}/>
+              <CapRow label="Write access" value={focused.write_access ? 'Yes' : 'No'}/>
+              <CapRow label="Policy" value={focused.policy_profile || '—'}/>
+              <div style={{ height: 1, background: 'var(--af2-border)', margin: '4px 0' }}/>
+              <Btn variant={focused.write_access ? 'ghost' : 'primary'} sm
+                disabled={togglingWrite}
+                onClick={() => toggleWriteAccess(focused)}
+                style={{ width: '100%', justifyContent: 'center' }}>
+                {togglingWrite ? 'Updating…' : focused.write_access ? 'Disable write access' : 'Enable write access'}
+              </Btn>
+              <Btn variant="primary" sm onClick={() => onSelect(focused)} style={{ width: '100%', justifyContent: 'center' }}>
+                Open in Forge
+              </Btn>
+            </div>
+          </Panel>
+        ) : (
+          <Panel title="Forge capacity" tone="gold">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <CapRow label="Projects" value={`${projects.length}`}/>
+              <CapRow label="Backend" value="Ready"/>
+              <CapRow label="Provider" value="Anthropic"/>
+            </div>
+          </Panel>
+        )}
+      </div>
     </div>
   )
 }
@@ -386,7 +434,7 @@ function NewProjectModal({ onClose, onCreate }) {
     if (!name.trim()) return
     setBusy(true)
     try {
-      const r = await JPOST('/api/forge/projects', { name: name.trim(), description: desc.trim() })
+      const r = await JPOST('/api/forge/projects', { name: name.trim(), description: desc.trim(), template: 'web-app' })
       const d = await r.json()
       onCreate(d)
       onClose()
@@ -426,10 +474,11 @@ function NewProjectModal({ onClose, onCreate }) {
 }
 
 /* ── Compose View ──────────────────────────────────────────────── */
-function ComposeView({ project, onSubmit, onSwitchProject }) {
+function ComposeView({ project, onSubmit, onAutoRun, onSwitchProject }) {
   const [goal, setGoal] = useState('')
   const [mode, setMode] = useState('balanced')
   const [autoApprove, setAutoApprove] = useState('safe')
+  const [runMode, setRunMode] = useState('supervised') // 'supervised' | 'auto'
   const textRef = useRef(null)
 
   useEffect(() => { textRef.current?.focus() }, [])
@@ -440,6 +489,12 @@ function ComposeView({ project, onSubmit, onSwitchProject }) {
     { id: 'refac', icon: 'branch', label: 'Refactor', sub: 'Map blast radius first' },
     { id: 'migr', icon: 'pipeline', label: 'Migration', sub: 'Schema + data + rollback' },
   ]
+
+  const handleSubmit = () => {
+    if (!goal.trim() || !project) return
+    if (runMode === 'auto') onAutoRun(goal, { mode, autoApprove })
+    else onSubmit(goal, { mode, autoApprove })
+  }
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 14, height: '100%', minHeight: 0 }}>
@@ -454,7 +509,7 @@ function ComposeView({ project, onSubmit, onSwitchProject }) {
               <textarea ref={textRef} value={goal} onChange={e => setGoal(e.target.value)}
                 placeholder="Describe what to forge…  e.g. Add a Stripe webhook that records refunds in the payments table, with tests and observability."
                 style={{ width: '100%', minHeight: 160, resize: 'vertical', background: 'transparent', border: 'none', outline: 'none', color: 'var(--af2-text)', font: '400 14px/1.6 var(--af2-sans)' }}
-                onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); onSubmit(goal) } }}
+                onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); handleSubmit() } }}
               />
               <div style={{ position: 'absolute', bottom: 10, right: 12, display: 'flex', gap: 10, font: '500 10px var(--af2-mono)', color: 'var(--af2-faint)', letterSpacing: '0.08em' }}>
                 <span>{goal.length} CHARS</span>
@@ -463,26 +518,47 @@ function ComposeView({ project, onSubmit, onSwitchProject }) {
               </div>
             </div>
 
+            {/* Run mode toggle */}
+            <div style={{ display: 'flex', gap: 0, background: 'rgba(205,127,50,0.06)', border: '1px solid rgba(205,127,50,0.18)', borderRadius: 6, overflow: 'hidden' }}>
+              {[['supervised', 'Supervised', 'Plan & propose — you approve each action'], ['auto', 'Full Auto', 'Planner → Coder → Tester loop — runs end to end']].map(([id, label, desc]) => (
+                <button key={id} onClick={() => setRunMode(id)}
+                  style={{ flex: 1, padding: '10px 14px', background: runMode === id ? 'rgba(205,127,50,0.18)' : 'transparent', border: 'none', borderRight: id === 'supervised' ? '1px solid rgba(205,127,50,0.18)' : 'none', cursor: 'pointer', textAlign: 'left' }}>
+                  <div style={{ font: `600 11px var(--af2-mono)`, color: runMode === id ? 'var(--af2-bronze-bright)' : 'var(--af2-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</div>
+                  <div style={{ font: '400 10px var(--af2-sans)', color: 'var(--af2-muted)', marginTop: 2 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
+
             <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div>
-                <div className="af2-label-plain" style={{ marginBottom: 6 }}>EXECUTION MODE</div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {['precise', 'balanced', 'speed'].map(m => (
-                    <button key={m} onClick={() => setMode(m)} className={`af2-mode-btn${mode === m ? ' af2-mode-btn--active' : ''}`}>{m}</button>
-                  ))}
+              {runMode === 'supervised' && (
+                <>
+                  <div>
+                    <div className="af2-label-plain" style={{ marginBottom: 6 }}>EXECUTION MODE</div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {['precise', 'balanced', 'speed'].map(m => (
+                        <button key={m} onClick={() => setMode(m)} className={`af2-mode-btn${mode === m ? ' af2-mode-btn--active' : ''}`}>{m}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="af2-label-plain" style={{ marginBottom: 6 }}>AUTO-APPROVE</div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {[['none', 'None'], ['safe', 'Safe ops'], ['review', '+Review']].map(([id, lbl]) => (
+                        <button key={id} onClick={() => setAutoApprove(id)} className={`af2-mode-btn${autoApprove === id ? ' af2-mode-btn--active' : ''}`}>{lbl}</button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+              {runMode === 'auto' && (
+                <div style={{ font: '400 11px var(--af2-sans)', color: 'var(--af2-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: '#FCA5A5', font: '600 10px var(--af2-mono)' }}>⚠</span>
+                  Full Auto writes files and runs tests without per-action approval. Snapshots are taken before every write.
                 </div>
-              </div>
-              <div>
-                <div className="af2-label-plain" style={{ marginBottom: 6 }}>AUTO-APPROVE</div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {[['none', 'None'], ['safe', 'Safe ops'], ['review', '+Review']].map(([id, lbl]) => (
-                    <button key={id} onClick={() => setAutoApprove(id)} className={`af2-mode-btn${autoApprove === id ? ' af2-mode-btn--active' : ''}`}>{lbl}</button>
-                  ))}
-                </div>
-              </div>
+              )}
               <div style={{ flex: 1 }}/>
-              <Btn variant="primary" icon="send" lg onClick={() => onSubmit(goal)} disabled={!goal.trim() || !project}>
-                Forge plan
+              <Btn variant={runMode === 'auto' ? 'danger' : 'primary'} icon={runMode === 'auto' ? 'zap' : 'send'} lg onClick={handleSubmit} disabled={!goal.trim() || !project}>
+                {runMode === 'auto' ? 'Run auto' : 'Forge plan'}
                 <span style={{ marginLeft: 4, padding: '1px 5px', background: 'rgba(0,0,0,0.20)', borderRadius: 3, font: '600 9.5px var(--af2-mono)' }}>⌘↵</span>
               </Btn>
             </div>
@@ -508,7 +584,7 @@ function ComposeView({ project, onSubmit, onSwitchProject }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {[
               { k: '⌘K', desc: 'Command palette' },
-              { k: '⌘↵', desc: 'Submit plan' },
+              { k: '⌘↵', desc: 'Submit' },
               { k: 'A', desc: 'Approve highlighted' },
               { k: 'X', desc: 'Reject' },
               { k: '1-9', desc: 'Switch view' },
@@ -520,13 +596,48 @@ function ComposeView({ project, onSubmit, onSwitchProject }) {
             ))}
           </div>
         </Panel>
+        {runMode === 'auto' && (
+          <Panel title="Full Auto pipeline" tone="gold">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {['Planner agent', 'Coder agent', 'Security scan', 'Test runner', 'Debug retry (×3)'].map((step, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{ font: '600 10px var(--af2-mono)', color: 'var(--af2-bronze)', width: 16, textAlign: 'right' }}>{i + 1}</span>
+                  <span style={{ font: '400 11.5px var(--af2-sans)', color: 'var(--af2-text)' }}>{step}</span>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        )}
       </div>
     </div>
   )
 }
 
 /* ── Activity View ─────────────────────────────────────────────── */
-function ActivityView({ messages, termLines, sending, agents }) {
+const _STRATEGY_LABEL = {
+  local_tiny:      { label: 'Fast · Local',    color: '#4ADE80' },
+  local_general:   { label: 'General · Local', color: '#4ADE80' },
+  local_reasoning: { label: 'Reasoning · Local', color: '#60A5FA' },
+  local_coder:     { label: 'Coder · Local',   color: '#A78BFA' },
+  openrouter_free: { label: 'Cloud · Free',    color: '#F59E0B' },
+  rent_gpu:        { label: 'Remote GPU',      color: '#F87171' },
+}
+
+function ComputePlanBadge({ plan }) {
+  if (!plan) return null
+  const meta = _STRATEGY_LABEL[plan.strategy] || { label: plan.strategy, color: '#94a3b8' }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', marginBottom: 8, flexShrink: 0 }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.color, flexShrink: 0 }}/>
+      <span style={{ font: '600 10px var(--af2-mono)', color: meta.color }}>{meta.label}</span>
+      <span style={{ font: '500 10px var(--af2-mono)', color: 'var(--af2-muted)' }}>·</span>
+      <span style={{ font: '500 10px var(--af2-mono)', color: 'var(--af2-text)', opacity: 0.8 }}>{plan.model}</span>
+      <span style={{ font: '500 9px var(--af2-mono)', color: 'var(--af2-muted)', marginLeft: 'auto' }}>{plan.rationale}</span>
+    </div>
+  )
+}
+
+function ActivityView({ messages, termLines, sending, agents, computePlan }) {
   const logRef = useRef(null)
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -535,7 +646,8 @@ function ActivityView({ messages, termLines, sending, agents }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 14, height: '100%', minHeight: 0 }}>
       <Panel title="Live activity" icon="activity" sub={`${messages.length} events`} flush>
-        <div ref={logRef} className="af2-log" style={{ height: '100%', overflow: 'auto' }}>
+        <div style={{ padding: '8px 12px 0' }}><ComputePlanBadge plan={computePlan}/></div>
+        <div ref={logRef} className="af2-log" style={{ flex: 1, overflow: 'auto' }}>
           {messages.map((m, i) => (
             <div key={i} className={`af2-log-line${m.role === 'assistant' ? ' af2-log-line--ai' : ''}`}>
               <span className="af2-log-agent">{m.role === 'assistant' ? 'FORGE' : 'USER'}</span>
@@ -669,8 +781,10 @@ function ApprovalsView({ actions, onApprove, onReject }) {
     return isPendingAction(n) && !CLOSED_STATUSES.has((n.status || '').toLowerCase())
   })
   const [selected, setSelected] = useState(new Set())
+  const [diffOpen, setDiffOpen] = useState(new Set())
 
   const toggle = id => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleDiff = id => setDiffOpen(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 14, height: '100%', minHeight: 0 }}>
@@ -686,7 +800,7 @@ function ApprovalsView({ actions, onApprove, onReject }) {
         ) : (
           <>
             <span>{pending.length} ACTIONS</span>
-            <Btn variant="success" sm icon="check" onClick={() => pending.forEach(a => onApprove(normalizeAction(a)))}>Approve all safe</Btn>
+            <Btn variant="success" sm icon="check" onClick={() => pending.filter(a => { const n = normalizeAction(a); return n.risk_level !== 'high' && n.risk !== 'dangerous' && n.risk !== 'gated' }).forEach(a => onApprove(normalizeAction(a)))}>Approve all safe</Btn>
           </>
         )}
         flush>
@@ -715,13 +829,30 @@ function ApprovalsView({ actions, onApprove, onReject }) {
                       </span>
                     </div>
                     <div style={{ font: '600 13px var(--af2-sans)', color: 'var(--af2-text)', marginBottom: 4 }}>{n.description || n.title || 'Pending action'}</div>
-                    {n.path && <div style={{ font: '500 11px var(--af2-mono)', color: 'var(--af2-secondary)' }}>{n.path}</div>}
+                    {(n.file_path || n.path) && (
+                      <div style={{ font: '500 11px var(--af2-mono)', color: 'var(--af2-secondary)', marginBottom: 2 }}>{n.file_path || n.path}</div>
+                    )}
+                    {(n.diff || n.unified_diff) && (
+                      <button onClick={() => toggleDiff(id)} style={{ background: 'none', border: 'none', cursor: 'pointer', font: '500 10px var(--af2-mono)', color: 'var(--af2-bronze-bright)', padding: 0, marginTop: 2 }}>
+                        {diffOpen.has(id) ? '▲ hide diff' : '▼ show diff'}
+                      </button>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                     <IconBtn icon="cross" onClick={() => onReject(n)} title="Reject"/>
                     <Btn variant="success" sm icon="check" onClick={() => onApprove(n)}>Approve</Btn>
                   </div>
                 </div>
+                {diffOpen.has(id) && (n.diff || n.unified_diff) && (
+                  <div className="af2-diff" style={{ marginTop: 10, maxHeight: 260, overflow: 'auto', borderRadius: 4 }}>
+                    {(n.unified_diff || n.diff).split('\n').map((line, li) => (
+                      <div key={li} className={`af2-diff-row af2-diff-row--${line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : 'ctx'}`}>
+                        <span className="af2-diff-num">{li + 1}</span>
+                        <span className="af2-diff-line">{line}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           })}
@@ -797,6 +928,13 @@ function PipelineView({ activeRun }) {
   )
 }
 
+function flattenTree(node, files = []) {
+  if (!node) return files
+  if (node.type === 'file') files.push(node)
+  if (Array.isArray(node.children)) node.children.forEach(c => flattenTree(c, files))
+  return files
+}
+
 /* ── Files View ────────────────────────────────────────────────── */
 function FilesView({ project }) {
   const [files, setFiles] = useState([])
@@ -805,16 +943,16 @@ function FilesView({ project }) {
 
   useEffect(() => {
     if (!project?.id) return
-    fetch(`/api/forge/projects/${project.id}/files`, { headers: TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {} })
-      .then(r => r.ok ? r.json() : { files: [] })
-      .then(d => setFiles(d.files || []))
+    fetch(`/api/forge/files/tree?project_id=${encodeURIComponent(project.id)}`, { headers: TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {} })
+      .then(r => r.ok ? r.json() : { tree: [] })
+      .then(d => { const all = []; (d.tree || []).forEach(n => flattenTree(n, all)); setFiles(all) })
       .catch(() => {})
   }, [project?.id])
 
   const loadFile = async (path) => {
     setActive(path)
     try {
-      const r = await fetch(`/api/forge/projects/${project.id}/file?path=${encodeURIComponent(path)}`, { headers: TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {} })
+      const r = await fetch(`/api/forge/files/read?project_id=${encodeURIComponent(project.id)}&file_path=${encodeURIComponent(path)}`, { headers: TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {} })
       const d = await r.json()
       setContent(d.content || '')
     } catch { setContent('') }
@@ -853,50 +991,135 @@ function FilesView({ project }) {
 /* ── History View ──────────────────────────────────────────────── */
 function HistoryView({ project }) {
   const [runs, setRuns] = useState([])
+  const [selected, setSelected] = useState(null)
+  const [busy, setBusy] = useState('')
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     if (!project?.id) return
-    fetch(`/api/forge/projects/${project.id}/runs`, { headers: TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {} })
-      .then(r => r.ok ? r.json() : [])
-      .then(d => setRuns(Array.isArray(d) ? d : d.runs || []))
+    fetch(`/api/forge/runs?project_id=${encodeURIComponent(project.id)}`, { headers: TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {} })
+      .then(r => r.ok ? r.json() : {})
+      .then(d => {
+        const list = Array.isArray(d) ? d : d.runs || []
+        setRuns(list)
+        setSelected(sel => sel ? (list.find(r => r.run_id === sel.run_id) || sel) : sel)
+      })
       .catch(() => {})
   }, [project?.id])
 
+  useEffect(() => { reload() }, [reload])
+
+  const runAction = async (action) => {
+    if (!selected) return
+    setBusy(action)
+    try {
+      const runId = selected.run_id || selected.id
+      const r = await fetch(`/api/forge/runs/${runId}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {}) },
+        body: JSON.stringify({ ownerApproved: true }),
+      })
+      const d = await r.json()
+      if (!r.ok) { toastError(d.error || `${action} failed`); return }
+      toastSuccess(`${action.charAt(0).toUpperCase() + action.slice(1)} complete`)
+      reload()
+    } catch (e) { toastError(e.message) }
+    finally { setBusy('') }
+  }
+
+  const statusDot = s => s === 'applied' ? 'done' : s === 'running' ? 'running' : s === 'verified' ? 'done' : s === 'verify_failed' ? 'err' : 'pending'
+  const runTone = s => s === 'applied' || s === 'verified' ? 'success' : s === 'running' ? 'bronze' : s === 'verify_failed' ? 'danger' : 'idle'
+
+  const latestTest = selected?.test_results?.slice(-1)[0]
+  const canVerify = selected && ['awaiting_approval', 'staged', 'approved', 'verify_failed'].includes(selected.status)
+  const canApply = selected && (selected.status === 'verified' || latestTest?.all_passed)
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 14, height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 14, height: '100%', minHeight: 0 }}>
       <Panel title="Run history" icon="history" sub={`${runs.length} runs`} flush>
         <div style={{ overflow: 'auto', height: '100%' }}>
           {runs.length === 0 && (
             <div style={{ padding: 60, textAlign: 'center', color: 'var(--af2-muted)' }}>No runs yet. Forge a plan to get started.</div>
           )}
-          {runs.map((h, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 100px 80px', gap: 14, padding: '14px 16px', borderBottom: '1px solid rgba(205,127,50,0.06)', alignItems: 'center', cursor: 'pointer', transition: 'background 0.16s' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(205,127,50,0.04)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <span className={`af2-status-dot af2-status-dot--${h.status === 'completed' ? 'done' : h.status === 'running' ? 'running' : 'pending'}`}/>
-              <div>
-                <div style={{ font: '500 12.5px var(--af2-sans)', color: 'var(--af2-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.goal || 'Unnamed run'}</div>
-                <div style={{ font: '400 10px var(--af2-mono)', color: 'var(--af2-muted)', marginTop: 2 }}>{h.run_id ? compactId(h.run_id) : ''} · {h.created_at ? new Date(h.created_at).toLocaleTimeString() : ''}</div>
+          {runs.map((h) => {
+            const isSelected = selected?.run_id === (h.run_id || h.id)
+            return (
+              <div key={h.run_id || h.id}
+                onClick={() => setSelected(h)}
+                style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 12, padding: '14px 16px', borderBottom: '1px solid rgba(205,127,50,0.06)', borderLeft: isSelected ? '2px solid var(--af2-bronze)' : '2px solid transparent', alignItems: 'center', cursor: 'pointer', background: isSelected ? 'rgba(205,127,50,0.05)' : 'transparent', transition: 'all 0.16s' }}>
+                <span className={`af2-status-dot af2-status-dot--${statusDot(h.status)}`}/>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ font: '500 12.5px var(--af2-sans)', color: 'var(--af2-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.goal || 'Unnamed run'}</div>
+                  <div style={{ font: '400 10px var(--af2-mono)', color: 'var(--af2-muted)', marginTop: 2 }}>{h.run_id ? compactId(h.run_id) : ''} · {h.created_at ? new Date(h.created_at).toLocaleTimeString() : ''}</div>
+                </div>
+                <Pill tone={runTone(h.status)} sm dot={false}>{h.status || 'unknown'}</Pill>
               </div>
-              <span style={{ font: '500 12px var(--af2-mono)', color: 'var(--af2-text)' }}>{h.cost ? `$${h.cost.toFixed(3)}` : '—'}</span>
-              <Pill tone={h.status === 'completed' ? 'success' : h.status === 'running' ? 'bronze' : 'idle'} sm dot={false}>{h.status || 'unknown'}</Pill>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </Panel>
-      <Panel title="7-day total" tone="gold">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div>
-            <div style={{ font: '500 10px var(--af2-mono)', letterSpacing: '0.10em', color: 'var(--af2-muted)', textTransform: 'uppercase' }}>SPEND</div>
-            <div style={{ font: '600 26px var(--af2-mono)', color: 'var(--af2-bronze-bright)', lineHeight: 1.1 }}>
-              ${runs.reduce((s, r) => s + (r.cost || 0), 0).toFixed(2)}
-            </div>
-          </div>
-          <div style={{ height: 1, background: 'var(--af2-border)' }}/>
-          <CapRow label="Runs" value={`${runs.length}`}/>
-          <CapRow label="Completed" value={`${runs.filter(r => r.status === 'completed').length}`}/>
-        </div>
-      </Panel>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
+        {selected ? (
+          <>
+            <Panel title={compactId(selected.run_id || selected.id)} sub={selected.status} tone="gold">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ font: '400 12px var(--af2-sans)', color: 'var(--af2-text)', marginBottom: 4 }}>{selected.goal}</div>
+                <CapRow label="Actions" value={`${selected.action_count ?? '—'}`}/>
+                <CapRow label="Patches" value={`${selected.patch_count ?? '—'}`}/>
+                <CapRow label="Mode" value={selected.mode || '—'}/>
+                <CapRow label="Created" value={selected.created_at ? new Date(selected.created_at).toLocaleTimeString() : '—'}/>
+              </div>
+            </Panel>
+
+            <Panel title="Actions">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Btn
+                  variant="ghost" sm icon="check"
+                  disabled={!canVerify || busy === 'verify'}
+                  onClick={() => runAction('verify')}
+                  style={{ width: '100%', justifyContent: 'center' }}
+                >
+                  {busy === 'verify' ? 'Running tests…' : 'Run tests & verify'}
+                </Btn>
+                <Btn
+                  variant={canApply ? 'success' : 'ghost'} sm icon="play"
+                  disabled={!canApply || busy === 'apply'}
+                  onClick={() => runAction('apply')}
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  title={!canApply ? 'Verify must pass first' : undefined}
+                >
+                  {busy === 'apply' ? 'Applying…' : 'Apply to project'}
+                </Btn>
+              </div>
+            </Panel>
+
+            {latestTest && (
+              <Panel title="Last test run" tone={latestTest.all_passed ? 'success' : 'danger'} flush>
+                <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <Pill tone={latestTest.all_passed ? 'success' : 'danger'} dot pulse={!latestTest.all_passed}>
+                    {latestTest.all_passed ? 'All passed' : 'Failed'}
+                  </Pill>
+                  {(latestTest.results || []).map((r, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <span style={{ font: '600 10px var(--af2-mono)', color: r.pass ? '#4ADE80' : '#FCA5A5', flexShrink: 0, paddingTop: 1 }}>{r.pass ? 'PASS' : 'FAIL'}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ font: '500 10.5px var(--af2-mono)', color: 'var(--af2-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.command}</div>
+                        {!r.pass && r.output && (
+                          <div style={{ font: '400 10px var(--af2-mono)', color: 'var(--af2-muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{r.output.slice(0, 300)}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+            )}
+          </>
+        ) : (
+          <Panel title="Run detail" tone="gold">
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>Select a run to see actions</div>
+          </Panel>
+        )}
+      </div>
     </div>
   )
 }
@@ -1015,12 +1238,22 @@ export default function AscendForgePage() {
   const [actions, setActions]     = useState([])
   const [busyActions, setBusyActions] = useState({})
   const [termLines, setTermLines] = useState([])
+  const [computePlan, setComputePlan] = useState(null)
   const [activeRun, setActiveRun] = useState(null)
   const [runBusy, setRunBusy]     = useState(false)
   const [provider, setProvider]   = useState('anthropic')
 
   const addTerm = (text, type = 'out') => setTermLines(p => [...p.slice(-400), { text, type, ts: Date.now() }])
   const mergeActions = useCallback((items) => setActions(prev => mergeActionLists(prev, items)), [])
+
+  useEffect(() => {
+    const handler = e => {
+      const { type, data } = e.detail || {}
+      if (type === 'task:compute_plan') setComputePlan(data)
+    }
+    window.addEventListener('ws:event', handler)
+    return () => window.removeEventListener('ws:event', handler)
+  }, [])
 
   // Forge session when project changes
   useEffect(() => {
@@ -1044,7 +1277,47 @@ export default function AscendForgePage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const sendGoal = useCallback(async (text) => {
+  const sendAutoRun = useCallback(async (text, opts = {}) => {
+    if (!project?.id || !text.trim() || sending) return
+    setSending(true)
+    setRunState('running')
+    setMessages(prev => [...prev, { role: 'user', content: text }])
+    addTerm('Full Auto run started — planner → coder → tester loop…', 'cmd')
+    setView('activity')
+    try {
+      const resp = await fetch('/api/forge/agentic-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {}) },
+        body: JSON.stringify({ project_id: project.id, goal: text, provider, ownerApproved: true, max_iterations: 3 }),
+      })
+      const d = await resp.json()
+      if (!resp.ok || d.ok === false) throw new Error(d.error || `HTTP ${resp.status}`)
+      if (d.run) { setActiveRun(d.run); mergeActions(d.run.actions || []) }
+      if (d.final_report) {
+        const report = d.final_report
+        addTerm(`Auto run complete — ${report.applied?.length || 0} file(s) applied`, 'success')
+        setMessages(p => [...p, { role: 'assistant', content: report.summary || 'Auto run complete.' }])
+        if (report.test_result) {
+          const tr = report.test_result
+          addTerm(`Tests: ${tr.all_passed ? 'ALL PASSED' : 'FAILURES DETECTED'}`, tr.all_passed ? 'success' : 'err')
+        }
+      } else {
+        const msg = `Auto run finished — status: ${d.status || d.run?.status || 'complete'}`
+        addTerm(msg, 'success')
+        setMessages(p => [...p, { role: 'assistant', content: msg }])
+      }
+      setRunState('idle')
+      setView('history')
+    } catch (e) {
+      toastError(`Auto run failed: ${e.message}`)
+      addTerm(`Error: ${e.message}`, 'err')
+      setRunState('idle')
+    } finally {
+      setSending(false)
+    }
+  }, [project, sending, provider, mergeActions])
+
+  const sendGoal = useCallback(async (text, opts = {}) => {
     if (!sessionId || !text.trim() || sending) return
     setSending(true)
     setRunState('running')
@@ -1052,17 +1325,18 @@ export default function AscendForgePage() {
     addTerm(`Sending goal to Forge…`, 'cmd')
     setView('activity')
 
+    const { mode = 'balanced', autoApprove = 'safe' } = opts
     try {
       const resp = await fetch('/api/forge/runs/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(TOKEN() ? { Authorization: `Bearer ${TOKEN()}` } : {}) },
-        body: JSON.stringify({ project_id: project.id, goal: text, provider, max_iterations: 3 }),
+        body: JSON.stringify({ project_id: project.id, goal: text, provider, mode, auto_approve: autoApprove, max_iterations: 3 }),
       })
       if (!resp.ok) { const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` })); throw new Error(err.error || `HTTP ${resp.status}`) }
 
       const reader = resp.body.getReader()
       const decoder = new TextDecoder()
-      let buffer = ''
+      let buffer = '', evtName = ''
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -1070,19 +1344,32 @@ export default function AscendForgePage() {
         const lines = buffer.split('\n')
         buffer = lines.pop()
         for (const line of lines) {
+          if (line.startsWith('event: ')) { evtName = line.slice(7).trim(); continue }
           if (!line.startsWith('data: ')) continue
           try {
-            const ev = JSON.parse(line.slice(6))
-            if (ev.type === 'run_started') { setActiveRun(ev.run); addTerm(`Run started: ${ev.run?.run_id || ''}`, 'info') }
-            else if (ev.type === 'action') { mergeActions([ev.action]) }
-            else if (ev.type === 'message') { setMessages(p => [...p, { role: 'assistant', content: ev.content || ev.message }]) }
-            else if (ev.type === 'log') { addTerm(ev.message || ev.content, ev.level || 'out') }
-            else if (ev.type === 'run_complete' || ev.type === 'done') {
-              setActiveRun(ev.run || activeRun)
+            const d = JSON.parse(line.slice(6))
+            if (evtName === 'run' || d.run) {
+              const run = d.run || d
+              setActiveRun(run)
+              addTerm(`Run started: ${run.run_id || ''}`, 'info')
+              if (d.actions?.length) mergeActions(d.actions)
+            } else if (evtName === 'done' || d.run_id) {
               setRunState('idle')
               addTerm('Run complete.', 'success')
-              if (ev.actions) mergeActions(ev.actions)
+              if (d.actions) mergeActions(d.actions)
+            } else if (evtName === 'error') {
+              addTerm(`Forge error: ${d.error}`, 'err')
+              setRunState('idle')
+            } else if (evtName === 'progress') {
+              addTerm(d.message || d.stage || 'Working…', 'info')
+            } else if (d.type === 'action') {
+              mergeActions([d.action])
+            } else if (d.type === 'message') {
+              setMessages(p => [...p, { role: 'assistant', content: d.content || d.message }])
+            } else if (d.type === 'log') {
+              addTerm(d.message || d.content, d.level || 'out')
             }
+            evtName = ''
           } catch { /* ignore parse errors */ }
         }
       }
@@ -1173,8 +1460,8 @@ export default function AscendForgePage() {
 
         <main className="af2-main">
           {view === 'projects'  && <ProjectsView onSelect={handleSelectProject} onNew={() => setShowNewProj(true)}/>}
-          {view === 'compose'   && <ComposeView project={project} onSubmit={sendGoal} onSwitchProject={() => setView('projects')}/>}
-          {view === 'activity'  && <ActivityView messages={messages} termLines={termLines} sending={sending} agents={agents}/>}
+          {view === 'compose'   && <ComposeView project={project} onSubmit={(goal, opts) => sendGoal(goal, opts)} onAutoRun={(goal, opts) => sendAutoRun(goal, opts)} onSwitchProject={() => setView('projects')}/>}
+          {view === 'activity'  && <ActivityView messages={messages} termLines={termLines} sending={sending} agents={agents} computePlan={computePlan}/>}
           {view === 'review'    && <ReviewView actions={actions} onApprove={handleApprove} onReject={handleReject}/>}
           {view === 'approvals' && <ApprovalsView actions={actions} onApprove={handleApprove} onReject={handleReject}/>}
           {view === 'pipeline'  && <PipelineView activeRun={activeRun}/>}

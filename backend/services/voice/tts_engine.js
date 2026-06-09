@@ -3,6 +3,8 @@
 const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const fishSpeech = require('./fish_speech');
+const voiceCore = require('./voice_core_local');
+const voiceLite = require('./voice_lite');
 
 const DEFAULT_VOLUME = 0.9;
 
@@ -48,8 +50,10 @@ let engineAmplitude = 180;
 let engineTone = 'futuristic';
 let engineVoiceId = 'default';
 let engineChannel = 'system'; // 'system' | 'customer'
-let engineProvider = 'fish_speech'; // 'fish_speech' | 'local'
+let engineProvider = 'voice_core_local'; // 'voice_core_local' | 'voice_lite' | 'fish_speech' | 'local'
 let engineFishOptions = { ...fishSpeech.DEFAULT_OPTIONS };
+let engineVoiceCoreOptions = { enabled: true, language: 'en', voice: 'default', emotion: 'warm_confident', threads: 4, timeoutMs: 30000, localFallback: false };
+let engineVoiceLiteOptions = { enabled: true, language: 'en', voice: 'custom', threads: 4, timeoutMs: 30000, localFallback: true };
 let lastProviderError = null;
 let lastArtifact = null;
 let queue = [];
@@ -197,7 +201,10 @@ function setChannel(channel) {
 }
 
 function setProvider(provider) {
-  engineProvider = provider === 'local' ? 'local' : 'fish_speech';
+  const value = String(provider || '').trim();
+  if (value === 'voice_core_local' || value === 'voice_core' || value === 'default_voice') engineProvider = 'voice_core_local';
+  else if (value.startsWith('voice_lite')) engineProvider = 'voice_lite';
+  else engineProvider = ['fish_speech', 'local'].includes(value) ? value : 'voice_core_local';
 }
 
 function getChannel() {
@@ -210,6 +217,12 @@ async function init(options = {}) {
     engineFishOptions = fishSpeech.configure({ ...engineFishOptions, ...options.fishSpeech });
   } else {
     engineFishOptions = fishSpeech.configure(engineFishOptions);
+  }
+  if (options.voiceCore && typeof options.voiceCore === 'object') {
+    engineVoiceCoreOptions = { ...engineVoiceCoreOptions, ...options.voiceCore };
+  }
+  if (options.voiceLite && typeof options.voiceLite === 'object') {
+    engineVoiceLiteOptions = { ...engineVoiceLiteOptions, ...options.voiceLite };
   }
 
   engineVolume = clampVolume(options.volume ?? engineVolume);
@@ -241,6 +254,80 @@ async function runSpeak(text, channel) {
   const normalized = normalizeText(text, resolvedChannel);
   if (!normalized) return;
   if (!initialized) await init();
+
+  if (engineProvider === 'voice_core_local' && engineVoiceCoreOptions.enabled !== false) {
+    try {
+      const status = await voiceCore.getStatus({ language: engineVoiceCoreOptions.language });
+      if (status.state === 'ready') {
+        speaking = true;
+        console.log(`[VOICE:${resolvedChannel}] Default Human Voice: ${normalized}`);
+        const result = await voiceCore.synthesize(normalized, {
+          language: engineVoiceCoreOptions.language,
+          voice: engineVoiceCoreOptions.voice || 'default',
+          emotion: engineVoiceCoreOptions.emotion || engineTone || 'warm_confident',
+          emotion_intensity: engineVoiceCoreOptions.emotionIntensity,
+          speaking_rate: engineVoiceCoreOptions.speakingRate || engineSpeed,
+          threads: engineVoiceCoreOptions.threads,
+          timeoutMs: engineVoiceCoreOptions.timeoutMs,
+          persona: { speed: engineSpeed, tone: engineTone },
+        });
+        lastArtifact = voiceCore.saveArtifact(result.audioBuf);
+        const played = await playAudioFile(lastArtifact.path).catch((err) => {
+          lastProviderError = String(err.message || err);
+          return false;
+        });
+        lastProviderError = null;
+        speaking = false;
+        consecutiveFailures = 0;
+        if (played) return;
+        lastProviderError = 'Default Human Voice produced audio, but no local WAV player is available for server-side playback.';
+        if (!engineVoiceCoreOptions.localFallback) return;
+      }
+      lastProviderError = status.recommendation || `Default Human Voice is not ready: ${status.state}`;
+      if (!engineVoiceCoreOptions.localFallback) return;
+    } catch (err) {
+      speaking = false;
+      lastProviderError = String(err.message || err);
+      consecutiveFailures += 1;
+      console.warn(`[VOICE] Default Human Voice failed: ${lastProviderError}`);
+      if (!engineVoiceCoreOptions.localFallback) return;
+    }
+  }
+
+  if (engineProvider === 'voice_lite' && engineVoiceLiteOptions.enabled !== false) {
+    try {
+      const status = await voiceLite.getStatus({ language: engineVoiceLiteOptions.language });
+      if (status.state === 'ready') {
+        speaking = true;
+        console.log(`[VOICE:${resolvedChannel}] Voice Lite CPU: ${normalized}`);
+        const result = await voiceLite.synthesize(normalized, {
+          language: engineVoiceLiteOptions.language,
+          voice: engineVoiceLiteOptions.voice || 'custom',
+          threads: engineVoiceLiteOptions.threads,
+          timeoutMs: engineVoiceLiteOptions.timeoutMs,
+          persona: { speed: engineSpeed, tone: engineTone },
+        });
+        lastArtifact = voiceLite.saveArtifact(result.audioBuf);
+        const played = await playAudioFile(lastArtifact.path).catch((err) => {
+          lastProviderError = String(err.message || err);
+          return false;
+        });
+        lastProviderError = null;
+        speaking = false;
+        consecutiveFailures = 0;
+        if (played) return;
+        lastProviderError = 'Voice Lite produced audio, but no local WAV player is available for server-side playback.';
+        if (!engineVoiceLiteOptions.localFallback) return;
+      }
+      lastProviderError = status.recommendation || `Voice Lite is not ready: ${status.state}`;
+    } catch (err) {
+      speaking = false;
+      lastProviderError = String(err.message || err);
+      consecutiveFailures += 1;
+      console.warn(`[VOICE] Voice Lite failed, using local fallback: ${lastProviderError}`);
+      if (!engineVoiceLiteOptions.localFallback) return;
+    }
+  }
 
   if (engineProvider === 'fish_speech' && engineFishOptions.enabled) {
     try {
@@ -301,6 +388,27 @@ async function runSpeak(text, channel) {
   });
 }
 
+function audioPlayerCommand(filePath) {
+  if (os.platform() === 'linux' && commandExists('aplay')) return { cmd: 'aplay', args: ['-q', filePath] };
+  if (os.platform() === 'linux' && commandExists('paplay')) return { cmd: 'paplay', args: [filePath] };
+  if (os.platform() === 'darwin' && commandExists('afplay')) return { cmd: 'afplay', args: [filePath] };
+  if (os.platform() === 'win32' && commandExists('powershell')) {
+    const ps = `(New-Object Media.SoundPlayer '${filePath.replace(/'/g, "''")}').PlaySync()`;
+    return { cmd: 'powershell', args: ['-NoProfile', '-Command', ps] };
+  }
+  return null;
+}
+
+function playAudioFile(filePath) {
+  const command = audioPlayerCommand(filePath);
+  if (!command) return Promise.resolve(false);
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.cmd, command.args, { stdio: 'ignore' });
+    child.once('exit', (code) => code === 0 ? resolve(true) : reject(new Error(`${command.cmd} exited with code ${code}`)));
+    child.once('error', reject);
+  });
+}
+
 async function drainQueue() {
   if (draining) return;
   draining = true;
@@ -341,6 +449,9 @@ async function reconfigure(options = {}) {
   if (options.fishSpeech && typeof options.fishSpeech === 'object') {
     engineFishOptions = fishSpeech.configure({ ...engineFishOptions, ...options.fishSpeech });
   }
+  if (options.voiceLite && typeof options.voiceLite === 'object') {
+    engineVoiceLiteOptions = { ...engineVoiceLiteOptions, ...options.voiceLite };
+  }
   engineVolume = clampVolume(options.volume ?? engineVolume);
   if (options.profile && VOICE_PROFILES[options.profile]) {
     loadVoice(options.profile);
@@ -361,6 +472,14 @@ function getStatus() {
     silent: silentMode,
     speaking,
     channel: engineChannel,
+    voice_core_local: {
+      status: engineProvider === 'voice_core_local' ? 'selected' : 'available_when_selected',
+      options: { ...engineVoiceCoreOptions },
+    },
+    voice_lite: {
+      status: engineProvider === 'voice_lite' ? 'selected' : 'available_when_selected',
+      options: { ...engineVoiceLiteOptions },
+    },
     fish_speech: fishSpeech.getStatus(),
     last_provider_error: lastProviderError,
     last_artifact: lastArtifact,

@@ -48,8 +48,8 @@ function HealthGauge({ value = 0 }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Navigation Structure: 5 Groups x 29 Items
-// CORE (5): Nexus, Cognition, Agents, Memory, Economy
+// Navigation Structure: 5 Groups x 30 Items
+// CORE (6): Nexus, Cognition, Agents, Memory, Economy, Orders
 // OPERATIONS (4): Tasks, Workflows, Infrastructure, Ascend Forge
 // INTELLIGENCE (6): Neural Graph, Memory Graphs, Knowledge, Trends, Research, Prompt Inspector
 // SECURITY (6): Security, Recon, Blacklight, Audit, Approvals, Proof
@@ -85,6 +85,11 @@ const NAV_GROUPS = [
         id: 'economy',
         label: 'Economy',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6-6-2.7-6-6z"/><path d="M8 5v6M6 7h4"/></svg>,
+      },
+      {
+        id: 'orders',
+        label: 'Orders',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M5 5h6M5 8h6M5 11h3"/><circle cx="12" cy="11" r="2" fill="none"/><path d="M11.3 11l.5.5 1-1"/></svg>,
       },
     ],
   },
@@ -147,6 +152,11 @@ const NAV_GROUPS = [
         id: 'research',
         label: 'Research',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="6.5" cy="6.5" r="3.5"/><path d="M9.5 9.5l4 4M1 8c0 3.9 3.1 7 7 7s7-3.1 7-7-3.1-7-7-7-7 3.1-7 7z"/></svg>,
+      },
+      {
+        id: 'deep-research',
+        label: 'Deep Research',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="6.5" cy="6.5" r="3.5"/><path d="M9.5 9.5l4 4"/><circle cx="6.5" cy="6.5" r="1.5" fill="currentColor"/><path d="M3.5 3.5l1.2 1.2M9.8 3.5l-1.2 1.2M3.5 9.5l1.2-1.2"/></svg>,
       },
       {
         id: 'prompt-inspector',

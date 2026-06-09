@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { Panel, Badge, StatCard, MiniBar, DataRow } from '../ui/primitives'
+import api from '../../api/client'
 
 const APIS = [
   { name:'Anthropic Claude',  status:'ok',   calls:4241, cost:'$1.82',  p99:'340ms' },
@@ -17,45 +19,70 @@ const SECURITY = [
 ]
 const STATUS_C = { ok:'#22C55E', warn:'#F59E0B', error:'#EF4444', idle:'rgba(255,255,255,0.25)' }
 
+function useResourceStats() {
+  const [res, setRes] = useState(null)
+  useEffect(() => {
+    const fetch_ = () => api.get('/api/system/resources').then(d => setRes(d)).catch(() => {})
+    fetch_()
+    const id = setInterval(fetch_, 8000)
+    return () => clearInterval(id)
+  }, [])
+  return res
+}
+
 export default function SystemPage() {
   const systemStatus = useAppStore(s => s.systemStatus)
   const nnStatus     = useAppStore(s => s.nnStatus)
+  const live         = useResourceStats()
 
-  const cpu     = systemStatus?.cpu     ?? 42
-  const memory  = systemStatus?.memory  ?? 67
-  const gpu     = systemStatus?.gpu     ?? 31
-  const temp    = systemStatus?.temp    ?? 48
-  const mode    = systemStatus?.mode    || 'BALANCED'
-  const uptime  = systemStatus?.uptime  || '6h 14m'
+  const cpu     = live?.cpu_pct          ?? systemStatus?.cpu     ?? 42
+  const memory  = live ? Math.round((live.ram_used_gb / live.ram_total_gb) * 100) : (systemStatus?.memory ?? 67)
+  const gpu     = live?.gpu_util_pct     ?? systemStatus?.gpu     ?? 31
+  const temp    = systemStatus?.temp     ?? 48
+  const mode    = systemStatus?.mode     || 'BALANCED'
+  const uptime  = systemStatus?.uptime   || '6h 14m'
   const agents  = systemStatus?.agentCount ?? 8
-  const conf    = nnStatus?.confidence  ?? 0
+  const conf    = nnStatus?.confidence   ?? 0
   const brainPct = conf > 1 ? Math.round(conf) : Math.round(conf * 100)
 
-  const totalAPICost = APIS.reduce((a, api) => a + parseFloat(api.cost.replace('$', '') || '0'), 0).toFixed(2)
+  const vramUsed  = live ? live.vram_total_mb - live.vram_free_mb : null
+  const vramTotal = live?.vram_total_mb ?? null
+  const vramPct   = vramTotal ? Math.round((vramUsed / vramTotal) * 100) : null
+  const gpuName   = live?.gpu_name ?? 'GPU'
+  const ramFreeGb = live?.ram_free_gb?.toFixed(1) ?? '—'
+  const ramTotalGb = live?.ram_total_gb?.toFixed(1) ?? '—'
+  const cpuCores  = live?.cpu_cores ?? '—'
+  const vramFreeMb = live?.vram_free_mb ?? null
+
+  const totalAPICost = APIS.reduce((a, r) => a + parseFloat(r.cost.replace('$', '') || '0'), 0).toFixed(2)
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:10, height:'100%' }}>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, flexShrink:0 }}>
-        <StatCard label="CPU"         value={`${cpu}%`}      color={cpu>80?'#EF4444':cpu>60?'#F59E0B':'#22C55E'} sub={`Temp: ${temp}°C`}/>
-        <StatCard label="Memory"      value={`${memory}%`}   color={memory>80?'#EF4444':memory>60?'#F59E0B':'var(--teal,#20D6C7)'} sub="System RAM"/>
-        <StatCard label="GPU"         value={`${gpu}%`}      color="var(--gold,#E5C76B)" sub="Neural compute"/>
+        <StatCard label="CPU"         value={`${cpu}%`}      color={cpu>80?'#EF4444':cpu>60?'#F59E0B':'#22C55E'} sub={`${cpuCores} cores`}/>
+        <StatCard label="RAM"         value={`${memory}%`}   color={memory>80?'#EF4444':memory>60?'#F59E0B':'var(--teal,#20D6C7)'} sub={`${ramFreeGb} GB free / ${ramTotalGb} GB`}/>
+        <StatCard label="VRAM"        value={vramPct != null ? `${vramPct}%` : `${gpu}%`} color="var(--gold,#E5C76B)" sub={vramFreeMb != null ? `${vramFreeMb} MB free` : gpuName}/>
         <StatCard label="Uptime"      value={uptime}         color="#22C55E"              sub={`Mode: ${mode}`}/>
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, flex:1, minHeight:0 }}>
         <div style={{ display:'flex', flexDirection:'column', gap:10, minHeight:0 }}>
-          <Panel title="Hardware" badge={<Badge label="LIVE" variant="green"/>}>
-            {[['CPU Load', cpu, cpu>80?'#EF4444':cpu>60?'#F59E0B':'#22C55E'], ['Memory', memory, memory>80?'#EF4444':memory>60?'#F59E0B':'var(--teal,#20D6C7)'], ['GPU', gpu, 'var(--gold,#E5C76B)'], ['Disk I/O', 34, 'rgba(255,255,255,0.35)']].map(([l, v, c]) => (
+          <Panel title="Hardware" badge={<Badge label={live ? 'LIVE' : 'CACHED'} variant={live ? 'green' : 'yellow'}/>}>
+            {[
+              [`CPU Load`, cpu, cpu>80?'#EF4444':cpu>60?'#F59E0B':'#22C55E'],
+              [`RAM`, memory, memory>80?'#EF4444':memory>60?'#F59E0B':'var(--teal,#20D6C7)'],
+              [`VRAM (${gpuName})`, vramPct ?? gpu, 'var(--gold,#E5C76B)'],
+            ].map(([l, v, c]) => (
               <div key={l} style={{ marginBottom:8 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, fontFamily:'monospace', color:'rgba(255,255,255,0.35)', marginBottom:4, letterSpacing:'0.06em', textTransform:'uppercase' }}><span>{l}</span><span style={{ color:c }}>{v}%</span></div>
                 <MiniBar value={v} color={c}/>
               </div>
             ))}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginTop:4 }}>
-              <DataRow label="CPU Temp"  value={`${temp}°C`}/>
-              <DataRow label="Fans"      value="1,840 RPM"/>
-              <DataRow label="Processes" value="247"/>
-              <DataRow label="Threads"   value="1,023"/>
+              <DataRow label="CPU Cores"  value={cpuCores}/>
+              <DataRow label="RAM Free"   value={`${ramFreeGb} GB`}/>
+              <DataRow label="VRAM Free"  value={vramFreeMb != null ? `${vramFreeMb} MB` : '—'}/>
+              <DataRow label="VRAM Total" value={vramTotal != null ? `${vramTotal} MB` : '—'}/>
             </div>
           </Panel>
 

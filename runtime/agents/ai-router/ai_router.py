@@ -1337,6 +1337,118 @@ def _ddg_instant(query: str) -> list:
     return results
 
 
+def _ddg_html_search(query: str, max_results: int = 8) -> list:
+    """Scrape DuckDuckGo HTML search results — no API key required.
+
+    Uses the HTML endpoint at https://html.duckduckgo.com/html/ which returns
+    a standard web page with real search results (not just instant answers).
+    Parses result links and snippets with stdlib html.parser.
+    """
+    import html as _html_mod
+    from html.parser import HTMLParser
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    class _DDGParser(HTMLParser):
+        """Parse DDG HTML structure:
+        <div class="result results_links..."> (outer, depth-tracked)
+          <div class="...result__body">
+            <a class="result__a">Title</a>
+            <a class="result__snippet">Snippet text with <b>bold</b> parts</a>
+          </div>
+        </div>
+        """
+        def __init__(self):
+            super().__init__()
+            self.results = []
+            self._result_depth = 0  # div depth of outer result div
+            self._in_result = False
+            self._in_title = False
+            self._in_snippet = False
+            self._cur: dict = {}
+            self._div_depth = 0  # global div depth
+
+        @staticmethod
+        def _extract_url(href: str) -> str:
+            if "uddg=" in href:
+                try:
+                    params = parse_qs(urlparse(href).query)
+                    real = params.get("uddg", [""])[0]
+                    if real:
+                        return unquote(real)
+                except Exception:
+                    pass
+            return href
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            cls = attrs.get("class", "")
+            if tag == "div":
+                self._div_depth += 1
+                if "result results_links" in cls or "web-result" in cls:
+                    self._in_result = True
+                    self._result_depth = self._div_depth
+                    self._cur = {}
+                    return
+            if self._in_result:
+                if tag == "a" and "result__a" in cls:
+                    self._in_title = True
+                    self._cur["url"] = self._extract_url(attrs.get("href", ""))
+                elif tag == "a" and "result__snippet" in cls:
+                    self._in_snippet = True
+
+        def handle_endtag(self, tag):
+            if tag == "div":
+                if self._in_result and self._div_depth == self._result_depth:
+                    # Closing the outer result div — save and reset
+                    if self._cur.get("url") and self._cur.get("title"):
+                        self.results.append({
+                            "title": self._cur.get("title", ""),
+                            "url": self._cur.get("url", ""),
+                            "snippet": self._cur.get("snippet", ""),
+                            "source": "DuckDuckGo",
+                        })
+                    self._in_result = False
+                    self._cur = {}
+                self._div_depth -= 1
+                return
+            if self._in_title and tag == "a":
+                self._in_title = False
+            if self._in_snippet and tag == "a":
+                self._in_snippet = False
+
+        def handle_data(self, data):
+            if self._in_title:
+                self._cur["title"] = self._cur.get("title", "") + data
+            elif self._in_snippet:
+                self._cur["snippet"] = self._cur.get("snippet", "") + data
+
+    try:
+        url = "https://html.duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query, "kl": "us-en"})
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=WEB_SEARCH_TIMEOUT) as resp:
+            html_bytes = resp.read(500_000)
+        html_text = html_bytes.decode("utf-8", errors="replace")
+        parser = _DDGParser()
+        parser.feed(html_text)
+        results = []
+        for r in parser.results[:max_results]:
+            r["title"] = _html_mod.unescape(r["title"].strip())
+            r["snippet"] = _html_mod.unescape(r["snippet"].strip())
+            if r["url"] and r["title"]:
+                results.append(r)
+        logger.debug("_ddg_html_search: %d results for %r", len(results), query[:60])
+        return results
+    except Exception as exc:
+        logger.debug("_ddg_html_search failed (%s)", type(exc).__name__)
+        return []
+
+
 def _wiki_search(query: str, max_results: int = 3) -> list:
     """Wikipedia search + extract summary — free, no key required."""
     results = []
@@ -1587,10 +1699,18 @@ def search_web(query: str, max_results: int = 5, include_news: bool = False) -> 
             results += _news_api_search(query, 3)
         return results
 
-    # Free fallback: DuckDuckGo + Wikipedia
-    ddg = _ddg_instant(query)
+    # Free fallback: DuckDuckGo HTML scrape (real results, no key) + instant answers + Wikipedia
+    ddg_html = _ddg_html_search(query, max_results)
+    ddg_instant = _ddg_instant(query)
     wiki = _wiki_search(query, max_results=2)
-    results = ddg + wiki
+    # Merge: HTML results first (most useful), dedupe by URL
+    seen_urls: set = set()
+    results = []
+    for r in ddg_html + ddg_instant + wiki:
+        u = r.get("url", "")
+        if u and u not in seen_urls:
+            seen_urls.add(u)
+            results.append(r)
 
     # Bing as supplement when free-tier results are thin
     if len(results) < max_results:

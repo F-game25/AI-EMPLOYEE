@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import glsl from 'vite-plugin-glsl'
+import { compression } from 'vite-plugin-compression2'
 
 const BACKEND_PORT = process.env.BACKEND_PORT || 8787
 
@@ -11,6 +12,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     glsl(),
+    // Pre-compress assets at build time — server sends .gz files directly, zero CPU per-request
+    compression({ algorithm: 'gzip', exclude: [/\.(png|jpg|gif|webp|woff2?)$/] }),
+    compression({ algorithm: 'brotliCompress', exclude: [/\.(png|jpg|gif|webp|woff2?)$/] }),
   ],
   test: {
     environment: 'jsdom',

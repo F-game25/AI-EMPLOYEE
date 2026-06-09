@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "provider": "fish_speech",
+  "provider": "voice_core_local",
   "profile": "default_futuristic",
   "verbosity": 3,
   "volume": 0.9,
@@ -9,6 +9,12 @@
   "tone": "futuristic",
   "voiceStyle": "default",
   "bootGreeting": true,
+  "identity": {
+    "userName": "Lars",
+    "rank": "Chief",
+    "addressStyle": "command",
+    "startupStyle": "soldier"
+  },
   "fishSpeech": {
     "enabled": true,
     "baseUrl": "http://127.0.0.1:8080",
@@ -27,6 +33,32 @@
     "timeoutMs": 45000,
     "healthTimeoutMs": 1500,
     "localFallback": true
+  },
+  "voiceLite": {
+    "enabled": true,
+    "device": "cpu",
+    "engine": "piper_onnx_cpu",
+    "language": "en",
+    "voice": "base",
+    "baseModel": null,
+    "foundationModel": null,
+    "threads": 4,
+    "timeoutMs": 30000,
+    "localFallback": true
+  },
+  "voiceCore": {
+    "enabled": true,
+    "engine": "voice_core_local",
+    "installMode": "bundled",
+    "language": "en",
+    "voice": "female",
+    "gender": "female",
+    "emotion": "warm_confident",
+    "emotionIntensity": 0.35,
+    "speakingRate": 1,
+    "threads": 4,
+    "timeoutMs": 30000,
+    "localFallback": false
   },
   "events": {
     "system_boot": true,

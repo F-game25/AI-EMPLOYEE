@@ -135,6 +135,23 @@ class AgentController:
         start = time.perf_counter()
         self._learn_from_conversation(goal)
 
+        # ── Compute plan — cheapest model that can handle this goal ──────────
+        _compute_plan = None
+        try:
+            from engine.compute.compute_planner import assess_compute_needs
+            _compute_plan = assess_compute_needs(goal, context_len=len(goal))
+            self._broadcast_fn("task:compute_plan", {
+                "strategy": _compute_plan.strategy,
+                "model": _compute_plan.model,
+                "estimated_cost_usd": _compute_plan.estimated_cost_usd,
+                "vram_needed_mb": _compute_plan.vram_needed_mb,
+                "rationale": _compute_plan.rationale,
+                "needs_approval": _compute_plan.needs_approval,
+            })
+        except Exception as _cp_err:
+            self._logger.log_event(component="controller", action="compute_plan_skipped",
+                                   result="warn", latency_ms=0.0, meta={"err": str(_cp_err)})
+
         # QCE agent routing — attempt amplitude-based selection, fall back to planner
         _qce_agent: str | None = None
         try:

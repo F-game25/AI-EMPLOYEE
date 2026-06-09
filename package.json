@@ -27,9 +27,11 @@
     "test:settings:integration": "node tests/test_settings_integration.js",
     "test:settings:all": "npm run test:settings && npm run test:settings:frontend && npm run test:settings:integration",
     "test:security:node": "node tests/test_security_node.js",
+    "test:voice-runtime": "node tests/test_voice_runtime_manager.js",
     "verify:settings": "bash scripts/verify-settings.sh"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "multer": "^2.1.1",
     "uuid": "^14.0.0"
   }

@@ -9,9 +9,10 @@ import SecurityTab from './SecurityTab'
 import NotificationsTab from './NotificationsTab'
 import BillingTab from './BillingTab'
 import TeamTab from './TeamTab'
+import ClusterTab from './ClusterTab'
 
-const TABS = ['GENERAL', 'LLM', 'INTEGRATIONS', 'APPEARANCE', 'ADVANCED', 'SECURITY', 'NOTIFICATIONS', 'BILLING & USAGE', 'TEAM & ACCESS']
-const TAB_CONTENT = [GeneralTab, LLMTab, IntegrationsTab, AppearanceTab, AdvancedTab, SecurityTab, NotificationsTab, BillingTab, TeamTab]
+const TABS = ['GENERAL', 'LLM', 'INTEGRATIONS', 'APPEARANCE', 'ADVANCED', 'SECURITY', 'NOTIFICATIONS', 'BILLING & USAGE', 'TEAM & ACCESS', 'CLUSTER']
+const TAB_CONTENT = [GeneralTab, LLMTab, IntegrationsTab, AppearanceTab, AdvancedTab, SecurityTab, NotificationsTab, BillingTab, TeamTab, ClusterTab]
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState(0)

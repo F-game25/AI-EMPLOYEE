@@ -24,6 +24,7 @@ const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
+const compression = require('compression');
 
 const gateway = require('./gateway');
 const orchestrator = require('./orchestrator');
@@ -416,6 +417,9 @@ if (process.env.SENTRY_DSN) {
 }
 
 // Security headers — applied before all routes
+// Gzip all text responses >1KB. Serves hashed JS/CSS ~60-70% smaller.
+app.use(compression({ level: 6, threshold: 1024 }));
+
 app.use(helmet({
   // Allow WebSocket upgrades and inline scripts needed by the Vite-built frontend
   contentSecurityPolicy: {
@@ -451,6 +455,26 @@ app.use(injectRole);
 app.use(enforceRegion);
 
 if (HAS_FRONTEND_DIST) {
+  // Serve pre-compressed .br / .gz assets produced by vite-plugin-compression2.
+  // Browser sends Accept-Encoding: br,gzip — we check for pre-built files and
+  // serve them directly, setting the right Content-Encoding header. Falls back
+  // to the compression() middleware for anything without a pre-built variant.
+  app.use((req, res, next) => {
+    if (!/\.(js|css|svg)$/.test(req.path)) return next();
+    const ae = req.headers['accept-encoding'] || '';
+    const tryExts = ae.includes('br') ? ['.br', '.gz'] : ae.includes('gzip') ? ['.gz'] : [];
+    for (const ext of tryExts) {
+      const candidate = path.join(FRONTEND_DIST, req.path + ext);
+      if (fs.existsSync(candidate)) {
+        res.set('Content-Encoding', ext === '.br' ? 'br' : 'gzip');
+        res.set('Content-Type', req.path.endsWith('.css') ? 'text/css' : 'application/javascript');
+        res.set('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.sendFile(candidate);
+      }
+    }
+    next();
+  });
+
   // Vite content-hashes all JS/CSS filenames — safe to cache long-term.
   // index.html is NOT hashed and must never be stale, so it gets no-store.
   app.use(express.static(FRONTEND_DIST, {
@@ -459,7 +483,6 @@ if (HAS_FRONTEND_DIST) {
       if (filePath.endsWith('.html')) {
         res.set('Cache-Control', 'no-store, must-revalidate');
       } else if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|ico)$/.test(filePath)) {
-        // Hashed assets — immutable cache (1 year)
         res.set('Cache-Control', 'public, max-age=31536000, immutable');
       }
     },
@@ -517,6 +540,23 @@ app.use('/api/learning', createLearningRouter(requireAuth));
 
 const GPU_USAGE_BASELINE = 18;
 let currentGpuUsage = GPU_USAGE_BASELINE;
+
+// Real hardware telemetry — polled from Python backend every 5 s.
+// Falls back to formula-based estimates when Python is offline.
+let _realHwCache = null;
+let _lastPyPingMs = null;
+async function _pollRealHardware() {
+  const t0 = Date.now();
+  try {
+    const r = await fetch(
+      `http://127.0.0.1:${PYTHON_BACKEND_PORT}/api/system/resources`,
+      { signal: AbortSignal.timeout(3000) }
+    );
+    if (r.ok) { _realHwCache = await r.json(); _lastPyPingMs = Date.now() - t0; }
+  } catch { /* Python offline — formula fallback stays active */ }
+}
+setInterval(_pollRealHardware, 5000);
+_pollRealHardware();
 
 // Agents monitoring API — Phase 3.2 agent activity monitor
 const { createAgentsMonitorRouter, AgentStateRegistry } = require('./routes/agents-monitor');
@@ -779,7 +819,7 @@ function _updateSystemReady(patch) {
     setBlacklightStatus: (v) => { _lastBlacklightStatus = v; },
     getSrvStartMs: () => _srvStartMs,
     // Modules & services
-    broadcaster, errorRecovery, taskHistory,
+    broadcaster, errorRecovery, taskHistory, orchestrator,
     economyService, ollamaAdmin, autoUpdateWatchdog,
     brain, subsystems, getNativeMemoryGraph,
     getAgents, activateAgents, getMode, setMode, getRobotSignal,
@@ -994,9 +1034,13 @@ function markBootVoicePlayed() {
 
 function getTimeBasedGreeting(now = new Date()) {
   const hour = now.getHours();
-  if (hour >= 5 && hour < 12) return 'Good morning. Control panel online.';
-  if (hour >= 12 && hour < 18) return 'Good afternoon. Systems ready.';
-  return 'Good evening. All systems operational.';
+  const cfg = voiceManager.getConfig();
+  const identity = cfg.identity || {};
+  const name = String(identity.userName || 'Lars').trim();
+  const rank = String(identity.rank || 'Chief').trim();
+  const address = [rank, name].filter(Boolean).join(' ');
+  const period = hour >= 5 && hour < 12 ? 'Good morning' : hour >= 12 && hour < 18 ? 'Good afternoon' : 'Good evening';
+  return `${period}, ${address}. Command voice link established. Local intelligence core online. Standing by for planning, conversation, and execution orders.`;
 }
 
 async function maybeSpeakBootGreeting() {
@@ -1210,9 +1254,9 @@ function buildDashboardPayload() {
       total_revenue: runtimeState.revenueCents / 100,
     },
     top_skills: topSkills,
-    activity_feed: runtimeState.activityFeed,
-    execution_logs: runtimeState.executionLogs,
-    workflow_runs: runtimeState.workflowRuns,
+    activity_feed: (runtimeState.activityFeed || []).slice(-20),
+    execution_logs: (runtimeState.executionLogs || []).slice(-10),
+    workflow_runs: (runtimeState.workflowRuns || []).slice(-10),
     workflow_focus: runtimeState.selectedWorkflowRun,
     pipelines: {
       total_estimated_roi: runtimeState.pipelineRoiTotal,
@@ -1302,11 +1346,14 @@ function sampleSystemStatus() {
     uptime: process.uptime(),
     connections: wss ? wss.clients.size : 0,
     cpu_usage: cpu,
-    gpu_usage: currentGpuUsage,
-    gpu_estimated: true,
-    cpu_temperature: cpuTemp,
-    gpu_temperature: gpuTemp,
-    temperature_estimated: true,
+    gpu_usage: _realHwCache?.gpu_pct ?? currentGpuUsage,
+    gpu_estimated: !_realHwCache?.gpu_pct,
+    cpu_temperature: _realHwCache?.cpu_temp ?? cpuTemp,
+    gpu_temperature: _realHwCache?.gpu_temp ?? gpuTemp,
+    temperature_estimated: !_realHwCache?.gpu_temp,
+    vram_free_mb: _realHwCache?.vram_free_mb ?? null,
+    disk_pct: _realHwCache?.disk_pct ?? null,
+    py_latency_ms: _lastPyPingMs,
     heartbeat: heartbeatCounter,
     running_agents: running,
     total_agents: total,
@@ -2043,9 +2090,9 @@ function buildLocalFallbackReply(message, queuedTask) {
  * Returns the response string on success, or null if the Python backend
  * is unreachable (callers fall back to the local buildHumanReply).
  *
- * Timeout is generous (30 s) because LLM inference may be slow.
+ * Timeout is generous (90 s) because 7B models need more inference time than 3B.
  */
-const PYTHON_CHAT_TIMEOUT_MS = 30000;
+const PYTHON_CHAT_TIMEOUT_MS = 90000;
 
 let _pyUp = false;
 let _pyLastCheck = 0;
@@ -3436,7 +3483,7 @@ module.exports.broadcastQCEEvent = broadcastQCEEvent;
 
 subsystems.startPolling(5000);
 broadcaster.startHeartbeat({
-  intervalMs: 1800,
+  intervalMs: 5000,
   messageFactory: ({ seq }) => {
     heartbeatCounter = seq;
     const stats = sampleSystemStatus();

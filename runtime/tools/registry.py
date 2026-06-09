@@ -212,6 +212,7 @@ def _autoregister() -> None:
     try:
         from . import web_research_tool  # noqa: F401
         from . import context_score_tool  # noqa: F401
+        from . import react_tools  # noqa: F401
     except Exception as e:
         logger.debug("tool autoregister partial failure: %s", e)
 

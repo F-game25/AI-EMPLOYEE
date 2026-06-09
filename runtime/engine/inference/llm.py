@@ -11,6 +11,21 @@ from typing import Any
 
 from core.model_routing import select_model_route
 
+# ── Model size map (params_b) for installed Ollama models ─────────────────────
+# Used by _build_ollama_options to compute num_gpu layers.
+_MODEL_PARAMS_B: dict[str, float] = {
+    "llama3.2":              3.2,
+    "llama3.2:latest":       3.2,
+    "gemma3":                4.0,
+    "gemma3:latest":         4.0,
+    "qwen2.5:7b-instruct":   7.0,
+    "qwen2.5-coder:14b":    14.0,
+    "llava":                 7.0,
+    "llava:latest":          7.0,
+    "qwen3.5":               7.0,
+    "nomic-embed-text":      0.1,
+}
+
 logger = logging.getLogger("engine.inference")
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
@@ -105,6 +120,87 @@ def _ollama_quant(model: str) -> str | None:
     return quant
 
 
+def _build_ollama_options(model: str) -> dict:
+    """Compute Ollama inference options: num_gpu (layers on GPU), num_thread, low_vram.
+
+    Uses the existing disk_offload_config() from turbo_quant and _free_vram_mb()
+    from lifecycle_manager to compute how many layers to keep on GPU vs offload
+    to CPU/RAM. This stops OOM crashes on models that exceed VRAM (e.g. 14B on 8 GB).
+    """
+    try:
+        from neural_brain.models.lifecycle_manager import _free_vram_mb
+        import importlib, pathlib as _pl, sys as _sys
+        _tq_path = str(_pl.Path(__file__).parents[2] / "agents" / "turbo-quant")
+        if _tq_path not in _sys.path:
+            _sys.path.insert(0, _tq_path)
+        _tq = importlib.import_module("turbo_quant")
+        disk_offload_config = _tq.disk_offload_config
+        select_quant = _tq.select_quant
+
+        free_mb = _free_vram_mb()
+        params_b = _MODEL_PARAMS_B.get(model, 0.0)
+        # Fallback: strip tag and retry
+        if params_b == 0.0:
+            base = model.split(":")[0]
+            params_b = _MODEL_PARAMS_B.get(base, 0.0)
+
+        if params_b <= 0.0:
+            # Unknown model — use safe defaults
+            return {
+                "num_thread": min(8, os.cpu_count() or 4),
+                "num_batch": 256 if (free_mb or 0) < 4000 else 512,
+            }
+
+        quant = select_quant()
+        cfg = disk_offload_config(params_b, quant)
+
+        # RAM pressure check — offloaded layers live in RAM, so check available RAM too.
+        # If system RAM < 3 GB free, cap GPU offload to avoid paging to disk.
+        import psutil
+        try:
+            ram_free_gb = psutil.virtual_memory().available / (1024 ** 3)
+        except Exception:  # noqa: BLE001
+            ram_free_gb = 999.0  # unknown → no restriction
+        ram_constrained = ram_free_gb < 3.0
+
+        gpu_layers = cfg.get("gpu_layers_suggested", 0)
+        # Under RAM pressure, prefer keeping more layers on GPU (less CPU offload work).
+        if ram_constrained and gpu_layers > 0:
+            total_layers = max(1, int(params_b * 4))  # ~4 layers per B param
+            gpu_layers = min(total_layers, gpu_layers + max(2, int(total_layers * 0.1)))
+
+        opts: dict = {
+            "num_thread": min(8, os.cpu_count() or 4),
+            "num_batch": 256 if (free_mb or 0) < 4000 else 512,
+            "num_gpu": gpu_layers,
+        }
+
+        if free_mb is not None and free_mb < 2000:
+            opts["low_vram"] = True
+
+        logger.debug(
+            "ollama_options model=%s params_b=%.1f quant=%s gpu_layers=%s free_mb=%s low_vram=%s",
+            model, params_b, quant, gpu_layers, free_mb, opts.get("low_vram"),
+        )
+        return opts
+
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("_build_ollama_options skipped: %s", exc)
+        return {}
+
+
+_CORE_MODELS = [DEFAULT_MODEL, DEFAULT_EMBED_MODEL]
+
+def warm_core_models() -> None:
+    """Send keep_alive=-1 to core models so Ollama never evicts them between calls."""
+    for m in _CORE_MODELS:
+        try:
+            _ollama_post("/api/generate", {"model": m, "prompt": " ", "keep_alive": -1, "stream": False}, 30)
+            logger.info("model_warm model=%s keep_alive=-1", m)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("model_warm skipped model=%s: %s", m, exc)
+
+
 def _ollama_unloader(model: str):
     """Callable that drops *model* from VRAM (keep_alive=0 forces an unload)."""
     def _unload():
@@ -186,11 +282,13 @@ def generate(
             logger.warning("ai_router failed (%s) — falling back to direct Ollama", exc)
 
     mgr, _ = _enforce_lifecycle(chosen_model)
+    offload_opts = _build_ollama_options(chosen_model)
     payload = {
         "model": chosen_model,
         "prompt": full_prompt,
         "system": system,
         "stream": False,
+        **({"options": offload_opts} if offload_opts else {}),
     }
     import time as _t
     t0 = _t.time()

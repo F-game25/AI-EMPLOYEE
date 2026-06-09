@@ -604,10 +604,14 @@ const ROUTE_REGISTRY = [
   { method: 'DELETE', path: '/api/roles/:id',                       auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'GET',    path: '/api/permissions-matrix',              auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'PUT',    path: '/api/permissions-matrix',              auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/ollama/status',                   auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/ollama/start',                    auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/ollama/recommendation',           auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'GET',    path: '/api/ollama/models',                   auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'GET',    path: '/api/ollama/models/:name',             auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'DELETE', path: '/api/ollama/models/:name',             auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'POST',   path: '/api/ollama/pull',                     auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/ollama/pull-recommended',         auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'GET',    path: '/api/settings/main-model',             auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'PUT',    path: '/api/settings/main-model',             auth: true,        file: 'routes/dashboard-api.js' },
   { method: 'GET',    path: '/api/settings/subsystems',             auth: true,        file: 'routes/dashboard-api.js' },
@@ -689,6 +693,13 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/api/topics/:id',                      auth: true,        file: 'routes/topics.js' },
   { method: 'GET',    path: '/api/learning',                        auth: true,        file: 'routes/learning.js' },
   { method: 'POST',   path: '/api/learning/execute',                auth: true,        file: 'routes/learning.js' },
+
+  // ── System Resources & Cluster ────────────────────────────────────────────
+  { method: 'GET',    path: '/api/system/resources',                auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'GET',    path: '/api/cluster/status',                  auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/cluster/pair/generate',           auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/cluster/pair/init',               auth: true,        file: 'routes/dashboard-api.js' },
+  { method: 'POST',   path: '/api/cluster/unpair',                  auth: true,        file: 'routes/dashboard-api.js' },
 
 ];
 
