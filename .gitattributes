@@ -1,0 +1,30 @@
+# Normalize line endings so a Windows clone runs without "bad interpreter".
+# Text files are LF in the repo; checked out per-rule below.
+* text=auto eol=lf
+
+# Shell / Python / config MUST stay LF (run under Git Bash / WSL / Docker on Windows).
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+Dockerfile text eol=lf
+
+# Windows-native launchers MUST be CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary assets — never touch.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.db    binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
