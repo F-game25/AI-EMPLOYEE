@@ -9,10 +9,19 @@ HARDE REGEL: niets verzinnen. Wat niet gevonden wordt, komt niet in de lijst.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import urllib.parse
 
 from core.bedrijf_research import _fetch, _strip_tags, _SKIP_DOMAINS
+
+# SSRF guard: any Ollama host used downstream must be http(s) only — reject
+# file://, ftp://, gopher:// etc. at import so a poisoned env fails fast.
+_OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+if not _OLLAMA_HOST.startswith(("http://", "https://")):
+    raise ValueError(
+        f"OLLAMA_HOST must start with http:// or https://, got: {_OLLAMA_HOST!r}"
+    )
 
 logger = logging.getLogger(__name__)
 
