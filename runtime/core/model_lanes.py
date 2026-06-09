@@ -1,28 +1,30 @@
-"""Named model lanes — a thin, explicit task-type → local model abstraction.
+"""Model tiers — hardware-dynamic task → model selection.
 
-This sits ON TOP of the existing routing (``model_routing.select_model_route`` for
-tier/wavefield, ``ResourceManager.select_llm_stack`` for hardware-aware picks). It
-does NOT replace them. Callers that just want "the right local model for this kind
-of work" ask for a lane; the lane resolves to a concrete model name, honouring:
+Nothing here is a fixed LLM. Every tier resolves to the best model the machine can
+actually run *right now*, driven by ``ResourceManager`` (VRAM/RAM budget). This sits
+ON TOP of existing routing (``model_routing`` tier/wavefield); it does not replace it.
 
-  1. an explicit env override per lane (e.g. ``MODEL_LANE_CODE``), then
-  2. the hardware-aware stack from ResourceManager (so an 8 GB card and a 24 GB
-     card get different coder models), then
-  3. a static, installed-model default.
-
-Lanes
+Tiers
 -----
-  FAST       quick routing / classification / short Q&A     (smallest, always hot)
-  DEFAULT    general chat / balanced work                   (always hot)
-  CODE       code generation / review                       (coder model, on demand)
-  REASONING  multi-step analysis / planning                 (mid model, on demand)
-  DEEP       hardest reasoning / long synthesis             (largest available)
+  FAST           quick routing / classification / short chat   — smallest, always hot
+  NORMAL         general work / balanced chat                   — mid model, hot
+  HEAVY          hard analysis / planning / long context        — largest reasoner that fits
+  DEEP_THINKING  the hardest reasoning / deep synthesis         — biggest model the box can run
+
+  CODE           code generation / review                       — ALWAYS a coder model
+                 (qwen2.5-coder family, never a general llama); degrades to a smaller
+                 coder, never to a non-coder.
+
+Selection is dynamic:
+  1. explicit env override per tier (e.g. ``MODEL_TIER_HEAVY``, ``MODEL_TIER_CODE``)
+  2. largest model in the tier's candidate ladder whose VRAM need fits the live budget
+  3. smallest candidate as a last resort (CPU offload)
 
 Usage
 -----
-    from core.model_lanes import resolve_lane, lane_for_task, LANE_FAST
-    model = resolve_lane(LANE_FAST)                # -> "llama3.2:latest"
-    model = resolve_lane(lane_for_task("coding"))  # -> coder model
+    from core.model_lanes import resolve_tier, tier_for_task, TIER_FAST, TIER_CODE
+    model = resolve_tier(TIER_FAST)
+    model = resolve_tier(tier_for_task("coding"))   # -> a coder model
 """
 from __future__ import annotations
 
@@ -31,96 +33,128 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-LANE_FAST = "FAST"
-LANE_DEFAULT = "DEFAULT"
-LANE_CODE = "CODE"
-LANE_REASONING = "REASONING"
-LANE_DEEP = "DEEP"
+TIER_FAST = "FAST"
+TIER_NORMAL = "NORMAL"
+TIER_HEAVY = "HEAVY"
+TIER_DEEP = "DEEP_THINKING"
+TIER_CODE = "CODE"
 
-ALL_LANES = (LANE_FAST, LANE_DEFAULT, LANE_CODE, LANE_REASONING, LANE_DEEP)
+# The 4 size tiers, smallest→largest. CODE is separate (specialised, not a size tier).
+SIZE_TIERS = (TIER_FAST, TIER_NORMAL, TIER_HEAVY, TIER_DEEP)
+ALL_TIERS = (TIER_FAST, TIER_NORMAL, TIER_HEAVY, TIER_DEEP, TIER_CODE)
 
-# Static fallbacks — installed models confirmed in resource_manager._MODEL_CATALOGUE.
-# Only used when neither an env override nor the hardware stack supplies a value.
-_LANE_DEFAULTS: dict[str, str] = {
-    LANE_FAST:      "llama3.2:latest",
-    LANE_DEFAULT:   "gemma3:latest",
-    LANE_CODE:      "qwen2.5-coder:14b",
-    LANE_REASONING: "qwen2.5:7b-instruct",
-    LANE_DEEP:      "llama3.3:latest",
+# Candidate ladders (model, vram_mb_needed), ordered LARGEST→SMALLEST.
+# resolve_tier walks each ladder and picks the first model that fits the live budget.
+# These are *candidates the system may use*, not fixed choices — the hardware decides.
+_LADDERS: dict[str, list[tuple[str, int]]] = {
+    # FAST: tiny, must run anywhere (even CPU-only).
+    TIER_FAST: [
+        ("llama3.2:latest", 2000),
+    ],
+    # NORMAL: balanced general model.
+    TIER_NORMAL: [
+        ("qwen2.5:7b-instruct", 4700),
+        ("gemma3:latest", 3300),
+        ("llama3.2:latest", 2000),
+    ],
+    # HEAVY: strongest reasoner that fits.
+    TIER_HEAVY: [
+        ("qwen2.5:14b-instruct", 9000),
+        ("qwen3.5", 6600),
+        ("qwen2.5:7b-instruct", 4700),
+        ("gemma3:latest", 3300),
+        ("llama3.2:latest", 2000),
+    ],
+    # DEEP_THINKING: the biggest the box can run; falls all the way down if needed.
+    TIER_DEEP: [
+        ("llama3.3:70b", 43000),
+        ("qwen2.5:32b-instruct", 20000),
+        ("qwen2.5:14b-instruct", 9000),
+        ("qwen3.5", 6600),
+        ("qwen2.5:7b-instruct", 4700),
+        ("gemma3:latest", 3300),
+        ("llama3.2:latest", 2000),
+    ],
+    # CODE: ALWAYS a coder model. Never degrades to a general model.
+    TIER_CODE: [
+        ("qwen2.5-coder:32b", 20000),
+        ("qwen2.5-coder:14b", 9000),
+        ("qwen2.5-coder:7b", 4700),
+        ("qwen2.5-coder:3b", 2200),
+        ("qwen2.5-coder:1.5b", 1200),
+    ],
 }
 
-# task_type (as used across agents / ai_router) -> lane
-_TASK_TO_LANE: dict[str, str] = {
-    "routing": LANE_FAST, "classification": LANE_FAST, "fast": LANE_FAST,
-    "chat": LANE_DEFAULT, "general": LANE_DEFAULT, "default": LANE_DEFAULT,
-    "code": LANE_CODE, "coding": LANE_CODE, "engineering": LANE_CODE,
-    "reasoning": LANE_REASONING, "analysis": LANE_REASONING, "planning": LANE_REASONING,
-    "research": LANE_DEEP, "synthesis": LANE_DEEP, "deep": LANE_DEEP,
-}
-
-# Which ResourceManager stack key each lane prefers (hardware-aware layer).
-_LANE_TO_STACK_KEY: dict[str, str] = {
-    LANE_FAST: "primary",
-    LANE_DEFAULT: "primary",
-    LANE_CODE: "coder",
-    LANE_REASONING: "reasoning",
-    LANE_DEEP: "reasoning",  # DEEP wants the strongest; stack tops out at reasoning
+# Free-form task_type → tier.
+_TASK_TO_TIER: dict[str, str] = {
+    "routing": TIER_FAST, "classification": TIER_FAST, "fast": TIER_FAST, "short": TIER_FAST,
+    "chat": TIER_NORMAL, "general": TIER_NORMAL, "normal": TIER_NORMAL, "default": TIER_NORMAL,
+    "analysis": TIER_HEAVY, "planning": TIER_HEAVY, "reasoning": TIER_HEAVY, "heavy": TIER_HEAVY,
+    "research": TIER_DEEP, "synthesis": TIER_DEEP, "deep": TIER_DEEP, "deep_thinking": TIER_DEEP,
+    "code": TIER_CODE, "coding": TIER_CODE, "engineering": TIER_CODE, "review": TIER_CODE,
 }
 
 
-def lane_for_task(task_type: str | None) -> str:
-    """Map a free-form task_type to a lane. Unknown/empty -> DEFAULT."""
-    return _TASK_TO_LANE.get((task_type or "").strip().lower(), LANE_DEFAULT)
+def tier_for_task(task_type: str | None) -> str:
+    """Map a free-form task_type to a tier. Unknown/empty → NORMAL."""
+    return _TASK_TO_TIER.get((task_type or "").strip().lower(), TIER_NORMAL)
 
 
-def _hardware_stack() -> dict | None:
-    """Best-effort hardware-aware model stack; None if unavailable."""
+def _usable_vram_mb() -> int | None:
+    """Live usable VRAM budget in MB; None if ResourceManager unavailable."""
     try:
         from engine.compute.resource_manager import get_resource_manager
-        return get_resource_manager().select_llm_stack()
-    except Exception as exc:  # noqa: BLE001 — never break resolution on this
-        logger.debug("model_lanes: resource stack unavailable: %s", exc)
+        b = get_resource_manager().budget
+        # max_vram_mb = the ceiling the system may use (offload makes "fit" generous).
+        return int(getattr(b, "max_vram_mb", 0) or 0)
+    except Exception as exc:  # noqa: BLE001 — never break resolution
+        logger.debug("model_lanes: VRAM budget unavailable: %s", exc)
         return None
 
 
-def resolve_lane(lane: str) -> str:
-    """Resolve a lane name to a concrete model. Order: env override → hardware stack → default."""
-    lane = (lane or LANE_DEFAULT).strip().upper()
-    if lane not in _LANE_DEFAULTS:
-        lane = LANE_DEFAULT
+def resolve_tier(tier: str) -> str:
+    """Resolve a tier to the best concrete model the hardware can run.
 
-    env_override = os.environ.get(f"MODEL_LANE_{lane}")
-    if env_override:
-        return env_override.strip()
+    Order: env override → largest candidate that fits live VRAM → smallest candidate.
+    A coder tier always returns a coder model.
+    """
+    tier = (tier or TIER_NORMAL).strip().upper()
+    if tier not in _LADDERS:
+        tier = TIER_NORMAL
 
-    stack = _hardware_stack()
-    if stack:
-        key = _LANE_TO_STACK_KEY[lane]
-        # CODE only honours the coder slot if the box can actually run it.
-        if lane == LANE_CODE and not stack.get("can_run_coder", True):
-            return resolve_lane(LANE_REASONING)
-        model = stack.get(key)
-        if model:
+    override = os.environ.get(f"MODEL_TIER_{tier}")
+    if override:
+        return override.strip()
+
+    ladder = _LADDERS[tier]
+    vram = _usable_vram_mb()
+    if vram is None:
+        # No hardware info: be safe — pick the SMALLEST candidate (runs anywhere).
+        return ladder[-1][0]
+
+    # Allow CPU offload headroom: a model "fits" if its need is within budget,
+    # or within 2x budget for the offloadable larger models (Ollama spills to RAM/CPU).
+    for model, need in ladder:  # largest → smallest
+        if need <= vram or need <= vram * 2:
             return model
-
-    return _LANE_DEFAULTS[lane]
+    return ladder[-1][0]
 
 
 def resolve_for_task(task_type: str | None) -> str:
-    """Convenience: task_type -> lane -> model."""
-    return resolve_lane(lane_for_task(task_type))
+    """Convenience: task_type → tier → model."""
+    return resolve_tier(tier_for_task(task_type))
 
 
-def lane_models() -> dict[str, str]:
-    """Current resolved model per lane — for warmup, /api/models, and diagnostics."""
-    return {lane: resolve_lane(lane) for lane in ALL_LANES}
+def tier_models() -> dict[str, str]:
+    """Current resolved model per tier — for warmup, /api/models, diagnostics."""
+    return {tier: resolve_tier(tier) for tier in ALL_TIERS}
 
 
-def hot_lane_models() -> list[str]:
-    """Models that should stay resident (keep_alive=-1): the always-hot lanes."""
+def hot_tier_models() -> list[str]:
+    """Models that should stay resident (keep_alive=-1): FAST + NORMAL."""
     seen: list[str] = []
-    for lane in (LANE_FAST, LANE_DEFAULT):
-        m = resolve_lane(lane)
+    for tier in (TIER_FAST, TIER_NORMAL):
+        m = resolve_tier(tier)
         if m not in seen:
             seen.append(m)
     return seen

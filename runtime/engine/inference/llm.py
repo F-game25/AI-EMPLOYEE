@@ -193,19 +193,19 @@ _CORE_MODELS = [DEFAULT_MODEL, DEFAULT_EMBED_MODEL]
 
 
 def _warm_targets() -> list[str]:
-    """Embed model + the always-hot lane models (FAST/DEFAULT), deduped.
+    """Embed model + the always-hot tier models (FAST/NORMAL), deduped.
 
-    Lanes are resolved hardware-aware; if model_lanes is unavailable we fall back
-    to the static core list so warmup never breaks startup.
+    Tiers are resolved hardware-dynamically; if model_lanes is unavailable we fall
+    back to the static core list so warmup never breaks startup.
     """
     targets = [DEFAULT_EMBED_MODEL]
     try:
-        from core.model_lanes import hot_lane_models
-        for m in hot_lane_models():
+        from core.model_lanes import hot_tier_models
+        for m in hot_tier_models():
             if m not in targets:
                 targets.append(m)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("warm_core_models: lane resolution unavailable: %s", exc)
+        logger.debug("warm_core_models: tier resolution unavailable: %s", exc)
         for m in _CORE_MODELS:
             if m not in targets:
                 targets.append(m)
