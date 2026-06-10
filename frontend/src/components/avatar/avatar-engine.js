@@ -55,23 +55,40 @@
     alert:     { hue: 2,   sat: 0.86, scanSp: .0170, ringMul:1.45, rayInt:1.35, coreBri:1.22, pulseRate: 5.2, pulseAmp: .090, partMul:1.35, jitter: .50 },
   };
 
-  /* ── ring definitions (13 rings — full orbital structure) ─────── */
+  /* ── ring definitions (8 rings — lean orbital structure, evenly spread) ─────── */
   const RINGS = [
-    { r: 1.42, ys: .38, sp: -.034, a: .15, w: 0.7, tk: 14, gl: 0 },
-    { r: 1.30, ys: .44, sp: -.040, a: .20, w: 0.8, tk: 12, gl: 0 },
-    { r: 1.24, ys: .26, sp:  .050, a: .24, w: 0.9, tk: 11, gl: 0 },
+    { r: 1.36, ys: .40, sp: -.036, a: .18, w: 0.8, tk: 12, gl: 0 },
     { r: 1.18, ys: .30, sp:  .060, a: .28, w: 1.0, tk: 10, gl: 0, bright: true },
-    { r: 1.12, ys: .56, sp: -.066, a: .34, w: 1.2, tk: 10, gl: 0 },
-    { r: 1.06, ys: .50, sp: -.078, a: .42, w: 1.4, tk:  9, gl: 0, bright: true },
+    { r: 1.06, ys: .52, sp: -.072, a: .42, w: 1.4, tk:  9, gl: 0, bright: true },
     { r: .980, ys: .072,sp: -.028, a: .90, w: 3.0, tk:  8, dt: 6, gl: 6, bright: true, prime: true },
     { r: .910, ys: .44, sp:  .058, a: .70, w: 2.0, tk:  8, dt: 5, gl: 0, bright: true },
-    { r: .870, ys: .60, sp:  .070, a: .50, w: 1.3, tk:  7, gl: 0 },
-    { r: .840, ys: .32, sp: -.076, a: .55, w: 1.5, tk:  8, gl: 0 },
-    { r: .770, ys: .58, sp:  .092, a: .48, w: 1.2, tk:  6, gl: 0 },
-    { r: .730, ys: .40, sp:  .104, a: .44, w: 1.1, tk:  6, gl: 0 },
-    { r: .700, ys: .24, sp: -.112, a: .42, w: 1.0, tk:  6, gl: 0 },
+    { r: .840, ys: .34, sp: -.076, a: .55, w: 1.5, tk:  8, gl: 0 },
+    { r: .770, ys: .56, sp:  .092, a: .48, w: 1.2, tk:  6, gl: 0 },
+    { r: .700, ys: .26, sp: -.108, a: .42, w: 1.0, tk:  6, gl: 0 },
   ];
   RINGS.forEach((r, i) => { r._keep = (i*0.137+0.05)%1; });
+
+  /* ── precomputed iris tables (constant — built once, not per frame) ──── */
+  // 40 fibers: even radial spread (base angle i/N*2π), organic per-fiber length & alpha.
+  const NUM_FIB = 40;
+  const FIB = Array.from({ length: NUM_FIB }, (_, i) => ({
+    a:  (i/NUM_FIB)*Math.PI*2,
+    or: .55 + Math.sin(i*2.17+1.3)*.06 + Math.cos(i*3.7+.5)*.03,   // outer radius factor
+    al: .012 + Math.abs(Math.sin(i*.89+.4))*.013,                  // flat alpha
+  }));
+  // 12 concentric rings: even fractional spacing across the iris (no clumping).
+  const NUM_IRING = 12;
+  const IRING = Array.from({ length: NUM_IRING }, (_, i) => {
+    const major = i%3===0;
+    return {
+      frac: .16 + (i/(NUM_IRING-1))*.74,                           // even .16→.90 spread
+      al:   .022 + (major?.022:.006) + Math.abs(Math.sin(i*.75))*.008,
+      w:    major ? .65 : .28,
+    };
+  });
+  // 10 energy rays: even radial base angles (rotation added per frame).
+  const NUM_RAY = 10;
+  const RAY_A = Array.from({ length: NUM_RAY }, (_, i) => (i/NUM_RAY)*Math.PI*2);
 
   /* ── live params ──────────────────────────────────────────────── */
   const CUR = { hue:43, sat:.88, scanSp:.006, ringMul:.7, rayInt:.7, coreBri:.85, pulseRate:1.3, pulseAmp:.03, partMul:.6, jitter:0 };
@@ -151,20 +168,22 @@
     ctx.stroke(); ctx.shadowBlur = 0;
 
     if (ring.tk) {
-      const maj = Math.max(1, Math.round(ring.tk/6));
+      const maj = Math.max(1, Math.round(ring.tk/6)), step = Math.PI*2/ring.tk;
       for (let i = 0; i < ring.tk; i++) {
-        const ang = i/ring.tk*Math.PI*2, big = i%maj===0, tl = rr*(big?.045:.018);
+        const ang = i*step, cs = Math.cos(ang), sn = Math.sin(ang);
+        const big = i%maj===0, tl = rr*(big?.045:.018);
         ctx.beginPath();
-        ctx.moveTo(Math.cos(ang)*rr, Math.sin(ang)*rr);
-        ctx.lineTo(Math.cos(ang)*(rr+tl), Math.sin(ang)*(rr+tl));
+        ctx.moveTo(cs*rr, sn*rr);
+        ctx.lineTo(cs*(rr+tl), sn*(rr+tl));
         ctx.strokeStyle = C('mid', a*(big?.65:.25)); ctx.lineWidth = big?.8:.35; ctx.stroke();
       }
     }
     if (ring.dt) {
+      const step = Math.PI*2/ring.dt, dotR = prime?3.5:2.2;
+      ctx.fillStyle = prime ? C('hot', 1) : C('bri', Math.min(1, a*1.4));
       for (let i = 0; i < ring.dt; i++) {
-        const ang = i/ring.dt*Math.PI*2;
-        ctx.beginPath(); ctx.arc(Math.cos(ang)*rr, Math.sin(ang)*rr, prime?3.5:2.2, 0, Math.PI*2);
-        ctx.fillStyle = prime ? C('hot', 1) : C('bri', Math.min(1, a*1.4));
+        const ang = i*step;
+        ctx.beginPath(); ctx.arc(Math.cos(ang)*rr, Math.sin(ang)*rr, dotR, 0, Math.PI*2);
         ctx.fill();
       }
     }
@@ -198,23 +217,22 @@
     ctx.beginPath(); ctx.arc(ex, ey, R*.97, 0, Math.PI*2);
     ctx.fillStyle = ig; ctx.fill();
 
-    // 64 fibers — flat colour only (no per-fiber createLinearGradient, keeps perf)
-    const numFib = 64;
-    for (let i = 0; i < numFib; i++) {
-      const ang = (i/numFib)*Math.PI*2 + t*.003;
-      const ir = R*.12, or = R*(.55+Math.sin(i*2.17+1.3)*.06+Math.cos(i*3.7+.5)*.03);
-      const al = .012 + Math.abs(Math.sin(i*.89+.4))*.013;
+    // 40 fibers — flat colour, precomputed table (base angle/length/alpha are constant)
+    const fibIr = R*.12, fibSpin = t*.003;
+    ctx.lineWidth = .45;
+    for (let i = 0; i < NUM_FIB; i++) {
+      const f = FIB[i], ang = f.a + fibSpin, cs = Math.cos(ang), sn = Math.sin(ang), or = R*f.or;
       ctx.beginPath();
-      ctx.moveTo(ex+Math.cos(ang)*ir, ey+Math.sin(ang)*ir);
-      ctx.lineTo(ex+Math.cos(ang)*or, ey+Math.sin(ang)*or);
-      ctx.strokeStyle = C('deep', al); ctx.lineWidth = .45; ctx.stroke();
+      ctx.moveTo(ex+cs*fibIr, ey+sn*fibIr);
+      ctx.lineTo(ex+cs*or, ey+sn*or);
+      ctx.strokeStyle = C('deep', f.al); ctx.stroke();
     }
 
-    // 18 concentric iris rings — detailed iris
-    for (let i = 0; i < 18; i++) {
-      const frac = .14+(i/18)*.78, al = .022+(i%4===0?.022:.006)+Math.abs(Math.sin(i*.75))*.008;
-      ctx.beginPath(); ctx.arc(ex, ey, R*frac, 0, Math.PI*2);
-      ctx.strokeStyle = C('deep', al); ctx.lineWidth = i%4===0?.65:.28; ctx.stroke();
+    // 12 concentric iris rings — evenly spaced, no clumping
+    for (let i = 0; i < NUM_IRING; i++) {
+      const ir = IRING[i];
+      ctx.beginPath(); ctx.arc(ex, ey, R*ir.frac, 0, Math.PI*2);
+      ctx.strokeStyle = C('deep', ir.al); ctx.lineWidth = ir.w; ctx.stroke();
     }
 
     // Pupil
@@ -376,16 +394,17 @@
       g.addColorStop(1,   'transparent');
       ctx.beginPath(); ctx.arc(ex, ey, R*.18, 0, Math.PI*2); ctx.fillStyle = g; ctx.fill();
 
-      /* 8. energy rays — 16, flat stroke only (no per-ray createLinearGradient) */
-      const rays = 16;
-      for (let i = 0; i < rays; i++) {
-        const a = i/rays*Math.PI*2 + t*.040;
-        const ln = R*(.28+Math.sin(t*1.38+i*.68)*.045)*(0.7+CUR.rayInt*.45);
-        const al = (.22+Math.sin(t*1.12+i*.48)*.09)*CUR.rayInt*energy;
+      /* 8. energy rays — 10, evenly spread, flat stroke (precomputed base angles) */
+      const raySpin = t*.040, rayLenK = R*(0.7+CUR.rayInt*.45), rayAlK = CUR.rayInt*energy;
+      ctx.lineWidth = .7;
+      for (let i = 0; i < NUM_RAY; i++) {
+        const a = RAY_A[i] + raySpin;
+        const ln = (.28+Math.sin(t*1.38+i*.68)*.045)*rayLenK;
+        const al = (.22+Math.sin(t*1.12+i*.48)*.09)*rayAlK;
         ctx.beginPath();
         ctx.moveTo(ex, ey);
         ctx.lineTo(ex+Math.cos(a)*ln, ey+Math.sin(a)*ln);
-        ctx.strokeStyle = C('bri', al); ctx.lineWidth = .7; ctx.stroke();
+        ctx.strokeStyle = C('bri', al); ctx.stroke();
       }
 
       /* 9. corneal highlights — no shadowBlur */
