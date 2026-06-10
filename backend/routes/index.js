@@ -481,6 +481,11 @@ const ROUTE_REGISTRY = [
   { method: 'PATCH',  path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
   { method: 'DELETE', path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
 
+  // ── Companion Gateway ─────────────────────────────────────────────────────
+  { method: 'POST',   path: '/api/companion/message',               auth: true,        file: 'routes/companion.js' },
+  { method: 'GET',    path: '/api/companion/capabilities',          auth: true,        file: 'routes/companion.js' },
+  { method: 'GET',    path: '/api/companion/state',                 auth: true,        file: 'routes/companion.js' },
+
   // ── Settings ──────────────────────────────────────────────────────────────
   { method: 'GET',    path: '/api/settings',                        auth: true,        file: 'routes/settings.js' },
   { method: 'POST',   path: '/api/settings',                        auth: true,        file: 'routes/settings.js' },

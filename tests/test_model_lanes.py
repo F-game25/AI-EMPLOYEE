@@ -101,3 +101,118 @@ def test_upgrade_options_offers_both_paid_paths():
     targets = {o["target"] for o in opts}
     assert targets == {ml.TARGET_EXTERNAL_API, ml.TARGET_RENTED_REMOTE}
     assert all(o["requires_approval"] and o["requires_payment"] for o in opts)
+
+
+# ── DeepSeek / OpenAI-compatible external provider selection ──────────────────
+
+def test_default_external_provider_is_anthropic_for_code():
+    """No COMPANION_EXTERNAL_PROVIDER → CODE external target stays anthropic."""
+    prior = os.environ.pop("COMPANION_EXTERNAL_PROVIDER", None)
+    try:
+        provider, model = ml.external_api_model_for(ml.TIER_CODE)
+        assert provider == "anthropic"
+        assert model  # concrete claude coder model
+    finally:
+        if prior is not None:
+            os.environ["COMPANION_EXTERNAL_PROVIDER"] = prior
+
+
+def test_companion_external_provider_deepseek_routes_code_to_deepseek_coder():
+    """COMPANION_EXTERNAL_PROVIDER=deepseek → CODE external provider is deepseek + a coder model."""
+    prior = os.environ.get("COMPANION_EXTERNAL_PROVIDER")
+    os.environ["COMPANION_EXTERNAL_PROVIDER"] = "deepseek"
+    try:
+        provider, model = ml.external_api_model_for(ml.TIER_CODE)
+        assert provider == "deepseek"
+        assert "coder" in model.lower()
+        # And the full resolve_target path agrees (paid + approval unchanged).
+        r = ml.resolve_target(ml.TIER_CODE, prefer=ml.TARGET_EXTERNAL_API, allow_paid=True)
+        assert r["target"] == ml.TARGET_EXTERNAL_API
+        assert r["provider"] == "deepseek"
+        assert "coder" in r["model"].lower()
+        assert r["requires_approval"] is True and r["requires_payment"] is True
+    finally:
+        if prior is None:
+            os.environ.pop("COMPANION_EXTERNAL_PROVIDER", None)
+        else:
+            os.environ["COMPANION_EXTERNAL_PROVIDER"] = prior
+
+
+def test_companion_external_provider_deepseek_routes_deep_and_heavy_to_reasoner():
+    """DEEP/HEAVY under deepseek → deepseek-reasoner (not the coder)."""
+    prior = os.environ.get("COMPANION_EXTERNAL_PROVIDER")
+    os.environ["COMPANION_EXTERNAL_PROVIDER"] = "deepseek"
+    try:
+        for tier in (ml.TIER_DEEP, ml.TIER_HEAVY):
+            provider, model = ml.external_api_model_for(tier)
+            assert provider == "deepseek"
+            assert "reasoner" in model.lower()
+    finally:
+        if prior is None:
+            os.environ.pop("COMPANION_EXTERNAL_PROVIDER", None)
+        else:
+            os.environ["COMPANION_EXTERNAL_PROVIDER"] = prior
+
+
+def test_explicit_provider_arg_overrides_env():
+    """external_api_model_for(provider=...) overrides COMPANION_EXTERNAL_PROVIDER."""
+    prior = os.environ.get("COMPANION_EXTERNAL_PROVIDER")
+    os.environ["COMPANION_EXTERNAL_PROVIDER"] = "anthropic"
+    try:
+        provider, model = ml.external_api_model_for(ml.TIER_CODE, provider="deepseek")
+        assert provider == "deepseek" and "coder" in model.lower()
+    finally:
+        if prior is None:
+            os.environ.pop("COMPANION_EXTERNAL_PROVIDER", None)
+        else:
+            os.environ["COMPANION_EXTERNAL_PROVIDER"] = prior
+
+
+def test_deepseek_code_and_reasoner_models_are_env_overridable():
+    prior = os.environ.get("COMPANION_EXTERNAL_PROVIDER")
+    prior_code = os.environ.get("DEEPSEEK_CODE_MODEL")
+    prior_reasoner = os.environ.get("DEEPSEEK_REASONER_MODEL")
+    os.environ["COMPANION_EXTERNAL_PROVIDER"] = "deepseek"
+    os.environ["DEEPSEEK_CODE_MODEL"] = "deepseek-coder-v2"
+    os.environ["DEEPSEEK_REASONER_MODEL"] = "deepseek-r1"
+    try:
+        assert ml.external_api_model_for(ml.TIER_CODE) == ("deepseek", "deepseek-coder-v2")
+        assert ml.external_api_model_for(ml.TIER_DEEP) == ("deepseek", "deepseek-r1")
+    finally:
+        for k, v in (
+            ("COMPANION_EXTERNAL_PROVIDER", prior),
+            ("DEEPSEEK_CODE_MODEL", prior_code),
+            ("DEEPSEEK_REASONER_MODEL", prior_reasoner),
+        ):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_provider_key_present_handles_deepseek():
+    prior = os.environ.get("DEEPSEEK_API_KEY")
+    try:
+        os.environ.pop("DEEPSEEK_API_KEY", None)
+        assert ml._provider_key_present("deepseek") is False
+        os.environ["DEEPSEEK_API_KEY"] = "sk-test-deepseek"
+        assert ml._provider_key_present("deepseek") is True
+    finally:
+        if prior is None:
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+        else:
+            os.environ["DEEPSEEK_API_KEY"] = prior
+
+
+def test_normal_and_fast_external_stay_openai_under_deepseek():
+    """The companion switch governs only CODE/DEEP/HEAVY; NORMAL/FAST stay OpenAI."""
+    prior = os.environ.get("COMPANION_EXTERNAL_PROVIDER")
+    os.environ["COMPANION_EXTERNAL_PROVIDER"] = "deepseek"
+    try:
+        assert ml.external_api_model_for(ml.TIER_NORMAL)[0] == "openai"
+        assert ml.external_api_model_for(ml.TIER_FAST)[0] == "openai"
+    finally:
+        if prior is None:
+            os.environ.pop("COMPANION_EXTERNAL_PROVIDER", None)
+        else:
+            os.environ["COMPANION_EXTERNAL_PROVIDER"] = prior

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { useCompanionStore } from '../../store/companionStore'
 import { sendChatMessage } from '../../hooks/useWebSocket'
 import { enableDevMode, disableDevMode, isDevModeActive } from '../../hooks/useDevMode'
 import './ChatPanel.css'
@@ -12,6 +13,11 @@ export default function ChatPanel({ isOpen, onClose }) {
   const messages = useAppStore(s => s.chatMessages) || []
   const isTyping = useAppStore(s => s.isTyping)
   const addChatMessage = useAppStore(s => s.addChatMessage)
+  const activeSection = useAppStore(s => s.activeSection)
+  const companionThinking = useCompanionStore(s => s.thinking)
+  const companionMessages = useCompanionStore(s => s.messages)
+  const sendCompanionMessage = useCompanionStore(s => s.sendMessage)
+  const [companionMode, setCompanionMode] = useState(false)
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -19,7 +25,7 @@ export default function ChatPanel({ isOpen, onClose }) {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isTyping])
+  }, [messages, isTyping, companionMessages, companionThinking])
 
   useEffect(() => {
     if (isOpen) inputRef.current?.focus()
@@ -47,6 +53,18 @@ export default function ChatPanel({ isOpen, onClose }) {
       setInput('')
       return
     }
+    if (companionMode) {
+      // Route through the Companion Gateway with live page context.
+      addChatMessage?.({ role: 'user', content: text, ts: Date.now() })
+      sendCompanionMessage(text, {
+        current_page: activeSection || null,
+        selected_item: null,
+        recent_events: [],
+        active_task: null,
+      })
+      setInput('')
+      return
+    }
     addChatMessage?.({ role: 'user', content: text, ts: Date.now() })
     sendChatMessage(text)
     setInput('')
@@ -58,6 +76,17 @@ export default function ChatPanel({ isOpen, onClose }) {
       handleSend()
     }
   }
+
+  // Merge companion replies into the rendered log. User turns are already added
+  // to chatMessages by handleSend, so we only fold in companion-role replies to
+  // avoid duplicate user bubbles. Sorted by timestamp.
+  const renderedMessages = (() => {
+    const companionReplies = (companionMessages || [])
+      .filter(m => m.role === 'companion')
+      .map(m => ({ role: 'companion', content: m.text, ts: m.ts, source: 'companion', degraded: m.meta?.error }))
+    if (!companionReplies.length) return messages
+    return [...messages, ...companionReplies].sort((a, b) => (a.ts || 0) - (b.ts || 0))
+  })()
 
   const fmtTime = ts => {
     const d = new Date(ts || Date.now())
@@ -167,14 +196,14 @@ export default function ChatPanel({ isOpen, onClose }) {
       </div>
 
       <div className="chat-panel__messages" role="log" aria-live="polite">
-        {messages.length === 0 && !isTyping && (
+        {renderedMessages.length === 0 && !isTyping && !companionThinking && (
           <div className="chat-panel__empty">
             <span className="chat-panel__empty-text">How can I help you today?</span>
           </div>
         )}
 
         <AnimatePresence initial={false}>
-          {messages.map((msg, idx) => (
+          {renderedMessages.map((msg, idx) => (
             <motion.div
               key={`${msg.ts || idx}-${idx}`}
               initial={{ opacity: 0, y: 8 }}
@@ -193,7 +222,7 @@ export default function ChatPanel({ isOpen, onClose }) {
         </AnimatePresence>
 
         <AnimatePresence>
-          {isTyping && (
+          {(isTyping || companionThinking) && (
             <motion.div
               key="typing"
               initial={{ opacity: 0, y: 8 }}
@@ -221,13 +250,22 @@ export default function ChatPanel({ isOpen, onClose }) {
       </div>
 
       <div className="chat-panel__input-wrap">
+        <button
+          type="button"
+          className={`chat-panel__companion-toggle${companionMode ? ' chat-panel__companion-toggle--on' : ''}`}
+          onClick={() => setCompanionMode(v => !v)}
+          aria-pressed={companionMode}
+          title={companionMode ? 'Companion mode on — Enter routes to Companion Gateway' : 'Ask the Companion'}
+        >
+          ◉
+        </button>
         <label htmlFor={inputId} className="sr-only">Message your AI assistant</label>
         <input
           id={inputId}
           ref={inputRef}
           type="text"
           className="chat-panel__input"
-          placeholder="Enter command..."
+          placeholder={companionMode ? 'Ask the companion...' : 'Enter command...'}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}

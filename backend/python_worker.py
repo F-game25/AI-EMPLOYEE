@@ -266,6 +266,15 @@ def _dispatch(op: str, args: dict):
         m = _mod('ecom_agent')
         return m.genereer_ads_en_sla_op(args['id'])
 
+    # ── companion (conversation runtime + capability registry) ──────────────────
+    if op == 'companion.message':
+        m = _mod('companion.conversation_runtime')
+        return m.handle_message(args)
+
+    if op == 'companion.capabilities':
+        m = _mod('companion.capability_registry')
+        return {'capabilities': m.get_capability_registry().to_dicts()}
+
     raise ValueError(f'Unknown op: {op}')
 
 

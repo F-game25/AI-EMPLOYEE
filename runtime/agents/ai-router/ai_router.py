@@ -30,8 +30,15 @@ Auto-model selection (classify_task / query_ai_auto):
   best available provider without manual agent_type specification.
 
 Sub-agent provider inheritance (ACTIVE_AI_PROVIDER):
-  Set ACTIVE_AI_PROVIDER=gemma|ollama|nvidia_nim|anthropic|openai to force
+  Set ACTIVE_AI_PROVIDER=gemma|ollama|nvidia_nim|anthropic|openai|deepseek to force
   all sub-agents to use the same provider as the selected main AI.
+
+OpenAI-compatible providers (DeepSeek / Together / Groq / local servers):
+  Any endpoint that speaks the OpenAI chat-completions protocol can be used.
+  - Point the existing OpenAI path at it with OPENAI_BASE_URL (the openai SDK
+    accepts base_url=). Empty OPENAI_BASE_URL = real OpenAI (backward compatible).
+  - DeepSeek has a dedicated path (_try_deepseek) driven by DEEPSEEK_* envs; it
+    uses the same openai SDK against https://api.deepseek.com.
 
 Batch processing (query_ai_batch):
   Sends multiple prompts to Ollama concurrently (ThreadPoolExecutor), minimising
@@ -55,7 +62,7 @@ Usage (from any bot that adds this directory to sys.path):
 
     result = query_ai("Explain quantum computing in simple terms")
     print(result["answer"])    # the response text
-    print(result["provider"])  # "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | "error"
+    print(result["provider"])  # "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | "deepseek" | "error"
 
     # Auto-routing: classifies task and picks the best model automatically
     result = query_ai_auto("Write me a Python function to sort a list")
@@ -89,7 +96,7 @@ Environment variables (loaded from ~/.ai-employee/.env):
     GOOGLE_API_KEY           — Google AI Studio key for Gemma cloud fallback (free tier)
     GEMMA_CLOUD_MODEL        — Gemma model via Google AI Studio (default: gemma-3-27b-it)
     ACTIVE_AI_PROVIDER       — force all sub-agents to use this provider
-                               (ollama|gemma|nvidia_nim|anthropic|openai — empty=auto)
+                               (ollama|gemma|nvidia_nim|anthropic|openai|deepseek — empty=auto)
     NVIDIA_API_KEY           — NVIDIA NIM API key (free-tier cloud models)
     NIM_REASONING_MODEL      — reasoning model (default: nvidia/llama-3.3-nemotron-super-49b-v1)
     NIM_CODING_MODEL         — coding model    (default: qwen/qwen2.5-coder-32b-instruct)
@@ -99,6 +106,11 @@ Environment variables (loaded from ~/.ai-employee/.env):
     OPENAI_API_KEY           — OpenAI key (optional last-resort fallback)
     OPENAI_MODEL             — OpenAI model name (default: gpt-4o-mini)
     OPENAI_SALES_MODEL       — OpenAI model for sales agents (default: gpt-4o)
+    OPENAI_BASE_URL          — override OpenAI base URL to target any OpenAI-compatible
+                               endpoint (DeepSeek/Together/Groq/local). Empty=real OpenAI.
+    DEEPSEEK_API_KEY         — DeepSeek key (OpenAI-compatible cloud provider)
+    DEEPSEEK_BASE_URL        — DeepSeek API base URL (default: https://api.deepseek.com)
+    DEEPSEEK_MODEL           — DeepSeek model name (default: deepseek-chat)
     CLOUD_AI_TIMEOUT         — cloud request timeout in seconds (default: 30)
     TAVILY_API_KEY           — Tavily AI search key (optional, best quality)
     SERP_API_KEY             — SerpAPI key (optional)
@@ -202,7 +214,7 @@ GEMMA_TIMEOUT = int(os.environ.get("GEMMA_TIMEOUT", "120"))
 
 # ── Sub-agent provider inheritance ───────────────────────────────────────────
 # When set, ALL sub-agents will use this provider instead of their default.
-# Valid values: "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | ""
+# Valid values: "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | "deepseek" | ""
 ACTIVE_AI_PROVIDER: str = os.environ.get("ACTIVE_AI_PROVIDER", "").strip().lower()
 
 # ── NVIDIA NIM (free-tier cloud models) ───────────────────────────────────────
@@ -221,6 +233,16 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_MODEL_SALES = os.environ.get("OPENAI_MODEL_SALES", "gpt-4o")
 OPENAI_MODEL_CREATIVE = os.environ.get("OPENAI_MODEL_CREATIVE", "gpt-4o")
+# Empty = real OpenAI. Set to point the openai SDK at any OpenAI-compatible
+# endpoint (DeepSeek/Together/Groq/local server) without changing the code path.
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
+
+# ── DeepSeek (OpenAI-compatible cloud provider) ───────────────────────────────
+# Uses the same `openai` SDK with a custom base_url. Models: deepseek-chat,
+# deepseek-reasoner, deepseek-coder.
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
 CLOUD_AI_TIMEOUT = int(os.environ.get("CLOUD_AI_TIMEOUT", "30"))
 
@@ -641,7 +663,13 @@ def _try_openai(prompt: str, system_prompt: str, history: list, model: Optional[
         import openai
 
         use_model = model or OPENAI_MODEL
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        # base_url lets the same code path target any OpenAI-compatible endpoint
+        # (DeepSeek/Together/Groq/local). Empty OPENAI_BASE_URL → real OpenAI.
+        client = (
+            openai.OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+            if OPENAI_BASE_URL
+            else openai.OpenAI(api_key=OPENAI_API_KEY)
+        )
         messages = _build_messages(prompt, system_prompt, history)
         response = client.chat.completions.create(
             model=use_model,
@@ -664,6 +692,48 @@ def _try_openai(prompt: str, system_prompt: str, history: list, model: Optional[
     except Exception as exc:
         logger.debug("ai_router: OpenAI unavailable — %s", exc)
         _record_cloud_failure("openai")
+    return None
+
+
+def _try_deepseek(prompt: str, system_prompt: str, history: list, model: Optional[str] = None) -> Optional[dict]:
+    """Attempt to get a response from DeepSeek (OpenAI-compatible cloud provider).
+
+    Uses the standard `openai` SDK pointed at DEEPSEEK_BASE_URL. Mirrors
+    _try_openai exactly; only the api_key, base_url, default model and the
+    reported provider differ. Skipped entirely when offline or no key set.
+    """
+    if not DEEPSEEK_API_KEY:
+        return None
+    if not _is_online():
+        logger.debug("ai_router: offline — skipping DeepSeek")
+        return None
+    try:
+        import openai
+
+        use_model = model or DEEPSEEK_MODEL
+        client = openai.OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+        messages = _build_messages(prompt, system_prompt, history)
+        response = client.chat.completions.create(
+            model=use_model,
+            messages=messages,
+            max_tokens=4096,
+            timeout=CLOUD_AI_TIMEOUT,
+        )
+        answer = response.choices[0].message.content.strip()
+        logger.debug("ai_router: used DeepSeek (%s)", use_model)
+        return {
+            "answer": answer,
+            "provider": "deepseek",
+            "model": use_model,
+            "error": None,
+            "usage": {
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+            },
+        }
+    except Exception as exc:
+        logger.debug("ai_router: DeepSeek unavailable — %s", exc)
+        _record_cloud_failure("deepseek")
     return None
 
 
@@ -691,12 +761,17 @@ def _try_forced_provider(
         result = _try_anthropic(prompt, system_prompt, history)
     elif provider == "openai":
         result = _try_openai(prompt, system_prompt, history)
+    elif provider == "deepseek":
+        result = _try_deepseek(prompt, system_prompt, history)
     if result:
         return result
     # Forced provider unavailable — fall through to standard chain without
     # ACTIVE_AI_PROVIDER so we don't recurse infinitely.
     logger.debug("ai_router: forced provider=%s unavailable, using standard fallback", provider)
-    for fn in (_try_ollama, _try_gemma, _try_nvidia_nim, _try_anthropic, _try_openai):
+    fallback_fns = [_try_ollama, _try_gemma, _try_nvidia_nim, _try_anthropic, _try_openai]
+    if DEEPSEEK_API_KEY:
+        fallback_fns.append(_try_deepseek)
+    for fn in fallback_fns:
         r = fn(prompt, system_prompt, history)
         if r:
             return r
@@ -850,7 +925,7 @@ def query_ai(
     Returns:
         dict with keys:
             answer   (str)  — AI response text, empty string on failure
-            provider (str)  — "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | "error"
+            provider (str)  — "ollama" | "gemma" | "nvidia_nim" | "anthropic" | "openai" | "deepseek" | "error"
             model    (str)  — model identifier used
             error    (str|None) — error description if all providers failed
             usage    (dict|None) — token usage for cloud providers
@@ -914,6 +989,13 @@ def query_ai(
     if result:
         _turbo_log(result, _tq_cfg, prompt)
         return result
+
+    # 2c. DeepSeek (OpenAI-compatible — only when DEEPSEEK_API_KEY is set)
+    if DEEPSEEK_API_KEY:
+        result = _try_deepseek(prompt, system_prompt, history)
+        if result:
+            _turbo_log(result, _tq_cfg, prompt)
+            return result
 
     # All providers failed
     error_result = {
@@ -1161,6 +1243,15 @@ def query_ai_for_agent(
             result = result or _error_response()
             _turbo_log(result, _tq_cfg, prompt)
             return result
+        elif preferred_provider == "deepseek":
+            result = _try_deepseek(prompt, system_prompt, history, model=preferred_model)
+            if result:
+                _turbo_log(result, _tq_cfg, prompt)
+                return result
+            result = _try_anthropic(prompt, system_prompt, history) or _try_openai(prompt, system_prompt, history)
+            result = result or _error_response()
+            _turbo_log(result, _tq_cfg, prompt)
+            return result
         # nvidia_nim fallback → cloud
         result = _try_anthropic(prompt, system_prompt, history) or _try_openai(prompt, system_prompt, history)
         result = result or _error_response()
@@ -1227,6 +1318,20 @@ def query_ai_for_agent(
             _turbo_log(result, _tq_cfg, prompt)
             return result
 
+        if preferred_provider == "deepseek":
+            result = _try_deepseek(prompt, system_prompt, history, model=preferred_model)
+            if result:
+                _turbo_log(result, _tq_cfg, prompt)
+                return result
+            # Remaining cloud fallback
+            result = (
+                _try_anthropic(prompt, system_prompt, history)
+                or _try_openai(prompt, system_prompt, history)
+                or _error_response()
+            )
+            _turbo_log(result, _tq_cfg, prompt)
+            return result
+
         # Gemma / NIM / Ollama preferred (all already exhausted in Layer 1): try cloud
         result = _try_anthropic(prompt, system_prompt, history)
         if result:
@@ -1258,6 +1363,11 @@ def query_ai_for_agent(
         result = _try_anthropic(prompt, system_prompt, history, model=preferred_model)
         if result:
             logger.debug("ai_router: agent=%s used Anthropic/%s", agent_type, preferred_model)
+
+    elif preferred_provider == "deepseek" and DEEPSEEK_API_KEY:
+        result = _try_deepseek(prompt, system_prompt, history, model=preferred_model)
+        if result:
+            logger.debug("ai_router: agent=%s used DeepSeek/%s", agent_type, preferred_model)
 
     elif preferred_provider == "ollama":
         _tq_ollama_model = (

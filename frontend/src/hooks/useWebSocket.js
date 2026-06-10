@@ -9,6 +9,7 @@ import { useEconomyStore } from '../store/economyStore'
 import { useSecurityStore } from '../store/securityStore'
 import { useEventFeedStore } from '../store/eventFeedStore'
 import { useLearningStore } from '../store/learningStore'
+import { useCompanionStore } from '../store/companionStore'
 import { WS_URL as API_WS_URL } from '../config/api'
 
 const WS_URL = API_WS_URL
@@ -246,6 +247,9 @@ function dispatchWsMessage({ event, data }) {
       }
       if (event.startsWith('security:') || event.startsWith('blacklight:') || event.startsWith('auth:')) {
         return dispatchSecurityEvent(event, data)
+      }
+      if (event.startsWith('companion:')) {
+        return dispatchCompanionEvent(event, data)
       }
       if (event.startsWith('learning:') || event === 'topic:skill_updated') {
         return dispatchLearningEvent(event, data)
@@ -818,6 +822,35 @@ function dispatchSecurityEvent(event, data) {
       break
     case 'autonomy:status':
       sec.setAutonomyStatus(data)
+      break
+  }
+}
+
+// companion:* — low-frequency discrete avatar/orchestration signals from the
+// Companion Gateway. Immediate writes (no throttle): setAvatarState already
+// drives window.NX with the engine-supported mapping.
+function dispatchCompanionEvent(event, data = {}) {
+  const cmp = useCompanionStore.getState()
+  switch (event) {
+    case 'companion:avatar_state_changed':
+      if (data.state) cmp.setAvatarState(data.state)
+      break
+    case 'companion:thinking_started':
+      cmp.setThinking(true)
+      cmp.setAvatarState('thinking')
+      break
+    case 'companion:thinking_finished':
+      cmp.setThinking(false)
+      break
+    case 'companion:tool_started':
+      cmp.setAvatarState('executing')
+      break
+    case 'companion:tool_finished':
+      // Return to idle unless a later state event overrides it.
+      cmp.setAvatarState('idle')
+      break
+    case 'companion:approval_required':
+      cmp.setAvatarState('approval_needed')
       break
   }
 }

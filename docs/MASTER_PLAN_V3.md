@@ -115,15 +115,15 @@ P10 AI Company-Builder (CompanyOS)(full design now; build as final major phase)
 
 ---
 
-### P3 — Model Lanes & Warmup
+### P3 — Model Tiers & Warmup — DONE (bc727051, 56ee3443)
 
-**Goal:** Named lanes over the real router + warm models (nr2/nr7; decision: add lanes on top, don't replace).
+**Goal:** Hardware-dynamic tiers over the real router + warm models + paid execution targets.
 
-- **Named lanes layer:** Map task-type → model atop existing `model_routing.py`: FAST=llama3.2, DEFAULT=gemma3/qwen2.5:7b, CODE=qwen2.5-coder:14b, REASONING=qwen2.5:7b/qwen3.5, DEEP=llama3.3. Lanes resolve to existing tier/wavefield selection — no rewrite of canary/shadow.
-- **Ollama warmup:** Confirm/extend `warm_core_models()` (`keep_alive:-1` for llama3.2 + nomic-embed-text) from MASTER_PLAN Phase 5; add per-lane warmup hints.
-- **Remove subprocess spawns:** Audit found no `python3 -c` in model path; sweep for any remaining and route through `runtime/engine/api.py`.
+- **Tiers (FINAL names):** `FAST / NORMAL / HEAVY / DEEP_THINKING` size tiers + a separate `CODE` tier. **Nothing is a fixed LLM** — each tier is a candidate ladder; `resolve_tier` picks the biggest model that fits the live VRAM budget (ResourceManager), with CPU-offload headroom. `CODE` is ALWAYS a coder model (qwen2.5-coder 32b/14b/7b/3b/1.5b by VRAM) — never degrades to llama. `DEEP_THINKING` reaches for the biggest model the box supports (70b/32b on big GPUs). Env `MODEL_TIER_<NAME>` overrides. (`runtime/core/model_lanes.py`)
+- **Execution targets (paid, user-approved):** `resolve_target(tier, prefer, allow_paid)` returns `local` (free, default), `external_api` (Claude/GPT — paid), or `rented_remote` (rent a GPU to run a much bigger local model — paid). CODE/HEAVY/DEEP can upgrade to external API or rented compute. **Paid targets are never auto-selected** — they require `allow_paid` and are flagged `requires_approval+requires_payment`, cleared by SafetyGate/HITL + the compute-fabric estimate→approve→provision flow. `upgrade_options(tier)` lets the UI offer them.
+- **Warmup:** `warm_core_models()` keeps FAST+NORMAL resident (`hot_tier_models`), hardware-resolved; falls back to static core list if tiers unavailable.
 
-**DoD:** Each task type resolves to its lane (logged); hot models stay loaded (no cold-start latency on FAST); routing config hot-reload (`/api/models/reload`).
+**DoD:** ✅ tiers resolve hardware-dynamically; CODE always coder; paid external/rented paths gated; hot models warmed; 13 tests pass.
 
 ---
 

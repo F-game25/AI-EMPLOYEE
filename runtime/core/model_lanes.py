@@ -150,15 +150,58 @@ TARGET_LOCAL = "local"
 TARGET_EXTERNAL_API = "external_api"   # Claude / GPT etc. — paid
 TARGET_RENTED_REMOTE = "rented_remote"  # rent a GPU, run a big local model — paid
 
+# External-API provider for the companion's CODE / DEEP / HEAVY work.
+# COMPANION_EXTERNAL_PROVIDER selects which paid provider backs those tiers:
+#   anthropic (default) | openai | deepseek
+# NORMAL/FAST stay on OpenAI (cheap, fast) regardless — they are not the
+# heavy coding/reasoning lanes this switch governs.
+_DEFAULT_EXTERNAL_PROVIDER = "anthropic"
+
+
+def external_api_model_for(tier: str, provider: str | None = None) -> tuple[str, str]:
+    """Return (provider, model) for a tier's external-API target.
+
+    Pure + deterministic: reads env at call time, no module-level caching, so
+    tests can set os.environ and call this directly. ``provider`` overrides
+    COMPANION_EXTERNAL_PROVIDER for the heavy lanes (CODE/DEEP/HEAVY).
+    """
+    tier = (tier or TIER_NORMAL).strip().upper()
+    heavy_provider = (
+        provider
+        or os.environ.get("COMPANION_EXTERNAL_PROVIDER", _DEFAULT_EXTERNAL_PROVIDER)
+    ).strip().lower() or _DEFAULT_EXTERNAL_PROVIDER
+
+    # NORMAL/FAST: always cheap OpenAI, not governed by the heavy-lane switch.
+    if tier in (TIER_NORMAL, TIER_FAST):
+        return ("openai", os.environ.get("OPENAI_MODEL", "gpt-4o-mini"))
+
+    # Heavy lanes (CODE / DEEP / HEAVY) honour the selected provider.
+    if heavy_provider == "deepseek":
+        if tier == TIER_CODE:
+            return ("deepseek", os.environ.get("DEEPSEEK_CODE_MODEL", "deepseek-coder"))
+        # DEEP / HEAVY → reasoner
+        return ("deepseek", os.environ.get("DEEPSEEK_REASONER_MODEL", "deepseek-reasoner"))
+
+    if heavy_provider == "openai":
+        if tier == TIER_CODE:
+            return ("openai", os.environ.get("OPENAI_CODE_MODEL", os.environ.get("OPENAI_MODEL", "gpt-4o")))
+        return ("openai", os.environ.get("OPENAI_MODEL", "gpt-4o"))
+
+    # Default: anthropic
+    if tier == TIER_CODE:
+        return ("anthropic", os.environ.get("CLAUDE_CODE_MODEL", "claude-opus-4-6"))
+    return ("anthropic", os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"))
+
+
+def _build_external_api_models() -> dict[str, tuple[str, str]]:
+    """Build the per-tier external-API map honouring COMPANION_EXTERNAL_PROVIDER."""
+    return {tier: external_api_model_for(tier) for tier in ALL_TIERS}
+
+
 # Best external-API model per tier (env-overridable). Coder tier prefers a coding model.
-_EXTERNAL_API_MODELS: dict[str, tuple[str, str]] = {
-    # tier -> (provider, model)
-    TIER_CODE:   ("anthropic", os.environ.get("CLAUDE_CODE_MODEL", "claude-opus-4-6")),
-    TIER_DEEP:   ("anthropic", os.environ.get("CLAUDE_MODEL", "claude-opus-4-6")),
-    TIER_HEAVY:  ("anthropic", os.environ.get("CLAUDE_MODEL", "claude-opus-4-6")),
-    TIER_NORMAL: ("openai", os.environ.get("OPENAI_MODEL", "gpt-4o-mini")),
-    TIER_FAST:   ("openai", os.environ.get("OPENAI_MODEL", "gpt-4o-mini")),
-}
+# Built at import time from external_api_model_for(); resolve_target() rebuilds it
+# per-call so a runtime env change to COMPANION_EXTERNAL_PROVIDER takes effect.
+_EXTERNAL_API_MODELS: dict[str, tuple[str, str]] = _build_external_api_models()
 
 # Biggest model worth renting a GPU for, per tier (the "much heavier local model").
 _RENTED_REMOTE_MODELS: dict[str, str] = {
@@ -175,6 +218,8 @@ def _provider_key_present(provider: str) -> bool:
         return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY"))
     if provider == "openai":
         return bool(os.environ.get("OPENAI_API_KEY"))
+    if provider == "deepseek":
+        return bool(os.environ.get("DEEPSEEK_API_KEY"))
     return False
 
 
@@ -209,7 +254,8 @@ def resolve_target(
         tier = TIER_NORMAL
 
     if prefer == TARGET_EXTERNAL_API and allow_paid:
-        provider, model = _EXTERNAL_API_MODELS.get(tier, ("anthropic", "claude-opus-4-6"))
+        # Rebuild per-call so a runtime COMPANION_EXTERNAL_PROVIDER change is honoured.
+        provider, model = external_api_model_for(tier)
         return {
             "target": TARGET_EXTERNAL_API,
             "provider": provider,

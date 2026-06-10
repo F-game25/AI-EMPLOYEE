@@ -478,6 +478,48 @@
 }
 
 /* ────────────────────────────────────────────────────────
+   COMPANION TOGGLE
+   ──────────────────────────────────────────────────────── */
+
+.chat-panel__companion-toggle {
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  border-radius: var(--mc-radius-md);
+  background: rgba(15, 22, 41, 0.6);
+  color: var(--mc-text-muted);
+
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all var(--mc-duration-fast) var(--mc-easing-out);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.chat-panel__companion-toggle:hover {
+  border-color: rgba(0, 217, 255, 0.4);
+  color: var(--mc-cyan);
+}
+
+.chat-panel__companion-toggle--on {
+  border-color: rgba(168, 85, 247, 0.6);
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
+}
+
+.chat-panel__companion-toggle:focus-visible {
+  outline: 2px solid var(--mc-cyan);
+  outline-offset: 2px;
+}
+
+/* ────────────────────────────────────────────────────────
    SEND BUTTON
    ──────────────────────────────────────────────────────── */
 
