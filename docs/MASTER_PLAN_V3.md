@@ -209,17 +209,19 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 
 ---
 
-### P8 — UX Overhaul & Modes
+### P8 — UX Overhaul (ONE auto-adapting system — NO manual modes)
 
-**Goal:** Operational cockpit for normal + power users (nr5).
+**Goal:** Operational cockpit that is **one system which auto-adjusts to the user's PC**. (nr5)
 
-- **Information architecture:** Reduce sidebar sprawl (currently 5 groups × 30 items, many duplicates → SecurityPanel ×3, SystemHealthPage ×4). Merge duplicates; group logically.
-- **Progressive disclosure:** Beginner / Operator / Developer / Admin modes — per-mode visibility, extra confirmation on advanced actions. Build on existing `UserExperienceCenter` perspectives.
+**DECISION (corrected):** Manual beginner/operator/developer/admin **mode toggles are REMOVED from scope.** The user-mode idea predates hardware recognition; now it's redundant. The system already auto-detects hardware (`runtime/engine/compute/resource_manager.py` + `frontend/src/hooks/usePerformanceMode.js` tier high/medium/low from cores/RAM/GPU, applied via root `data-perf`) and scales models (`model_lanes` VRAM-dynamic). UX adapts **automatically to specs**, not to a manual complexity switch.
+
+- **Auto-adaptation (already the foundation):** keep + lean on `usePerformanceMode` (auto tier) + `data-perf` CSS; heavier panels/visuals downgrade themselves on weak hardware. No user-facing complexity toggle.
+- **Information architecture:** Reduce sidebar sprawl (5 groups × 30 items, many duplicates → SecurityPanel ×3, SystemHealthPage ×4). Merge duplicate routes; group logically. (Role/perspective for *job focus* may stay via existing `UserExperienceCenter` — but that's a view filter, not a capability gate.)
 - **Companion-first dashboard:** central avatar zone + command/voice input + active tasks + system status + approvals + recent results + quick actions.
-- **Design system:** colors, type scale, spacing, card/button/badge/modal/toast/empty/loading/error patterns. Reusable components from nr5 expanded list (CompanionPanel, TaskTimeline, LocalRemoteTaskMap, ComputeControlPanel, DataSyncPanel, VoiceControlPanel, ApprovalQueue, SafetyGateModal, EmptyState, LoadingSkeleton, ErrorRecoveryPanel, …).
-- **Page-by-page audit:** keep / merge / split / redesign / remove / move-to-advanced per page (47 pages).
+- **Design system:** colors, type scale, spacing, card/button/badge/modal/toast/empty/loading/error patterns. Reusable components (CompanionPanel, TaskTimeline, LocalRemoteTaskMap, ComputeControlPanel, DataSyncPanel, VoiceControlPanel, ApprovalQueue, SafetyGateModal, EmptyState, LoadingSkeleton, ErrorRecoveryPanel, …).
+- **Page-by-page audit:** keep / merge / split / redesign / remove per page (47 pages).
 
-**DoD:** new IA with fewer top-level items; mode toggle works (beginner hides advanced); every page has empty/loading/error states; design tokens applied consistently; no functionality lost.
+**DoD:** one system, no manual mode toggle; UI density/visuals auto-scale to detected hardware; fewer duplicate top-level nav entries; every page has empty/loading/error states; design tokens applied consistently; nothing lost.
 
 ---
 
