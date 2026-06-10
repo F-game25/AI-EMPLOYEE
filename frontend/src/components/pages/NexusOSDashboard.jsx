@@ -9,6 +9,7 @@ import { useSecurityStore } from '../../store/securityStore'
 import { useEventFeedStore } from '../../store/eventFeedStore'
 import { useSystemStore } from '../../store/systemStore'
 import { useChannelState, STATE_COLOR } from '../../hooks/useChannelState'
+import { usePerformanceMode } from '../../hooks/usePerformanceMode'
 import CognitiveEye from '../avatar/CognitiveEye'
 import NeuralActivityStrip from '../dashboard/NeuralActivityStrip'
 import AgentGridNew from '../dashboard/AgentGrid'
@@ -225,6 +226,11 @@ export default function NexusOSDashboard() {
     useShallow(s => ({ setActiveSection: s.setActiveSection, systemHealth: s.systemHealth, wsConnected: s.wsConnected }))
   )
   const systemHealth = _systemHealth || {}
+  // Auto-adapt to PC specs: heavy canvas avatar only on capable hardware.
+  // On low-tier machines fall back to the zero-canvas-cost SVG so the dashboard
+  // stays usable (functional before cool).
+  const { tier } = usePerformanceMode()
+  const avatarMode = tier === 'low' ? 'toolbar' : 'dashboard'
 
   const { reasoningSteps: _reasoningSteps, modelCalls: _modelCalls, memoryWrites: _memoryWrites, brainState: _brainState, brainActivity: _brainActivity } = useCognitiveStore(
     useShallow(s => ({ reasoningSteps: s.reasoningSteps, modelCalls: s.modelCalls, memoryWrites: s.memoryWrites, brainState: s.brainState, brainActivity: s.brainActivity }))
@@ -399,7 +405,7 @@ export default function NexusOSDashboard() {
           <div className="nxd__orbwrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <CognitiveEye
               size={480}
-              mode="dashboard"
+              mode={avatarMode}
               onClick={() => window.dispatchEvent(new CustomEvent('nx:companion:open'))}
             />
           </div>
