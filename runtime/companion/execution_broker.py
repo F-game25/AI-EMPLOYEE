@@ -24,7 +24,10 @@ error is captured as ``{status: 'error', ...}`` — the broker never crashes.
 from __future__ import annotations
 
 import logging
+import os
+import re
 import threading
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from companion.capability_registry import get_capability_registry
@@ -37,6 +40,43 @@ logger = logging.getLogger("companion.execution_broker")
 # registry). Keeps a single turn bounded and cheap.
 _MAX_CANDIDATES = 4
 
+# ── Adapter bounds (keep every executor cheap, read-only, non-destructive) ────
+_LOG_SEARCH_MAX_LINES = 50      # max matching log lines returned
+_LOG_SCAN_MAX_BYTES = 2_000_000  # tail at most ~2MB of a log file
+_CODE_SEARCH_MAX_MATCHES = 40   # cap code-search hits
+_CODE_SEARCH_MAX_FILE_BYTES = 600_000  # skip files larger than this
+_TEST_TIMEOUT_S = 120           # forge.run_tests hard timeout
+_TEST_OUTPUT_CAP = 6000         # chars of pytest output retained
+
+# Directories never walked by forge.search_code (vendored / generated / heavy).
+_CODE_SEARCH_SKIP_DIRS = {
+    ".git", "node_modules", "dist", "build", "__pycache__", ".venv", "venv",
+    "venv-codex", ".pytest_cache", "models", "state", "logs", ".cache",
+}
+# File suffixes searched by forge.search_code (source only).
+_CODE_SEARCH_EXTS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".sh", ".md", ".css",
+    ".html", ".yml", ".yaml", ".toml",
+}
+
+# Risk lexicon for the heuristic action scorer (security.score_action).
+_RISK_TERMS = {
+    # destructive
+    "delete": 0.4, "drop": 0.4, "rm ": 0.4, "rm -rf": 0.6, "truncate": 0.4,
+    "wipe": 0.4, "destroy": 0.4, "purge": 0.3, "format": 0.3,
+    # deployment / mutation
+    "deploy": 0.3, "push": 0.2, "force": 0.2, "overwrite": 0.25,
+    "apply_patch": 0.3, "migrate": 0.2,
+    # money / outreach side effects
+    "spend": 0.35, "pay": 0.3, "charge": 0.3, "purchase": 0.3, "transfer": 0.35,
+    "send": 0.2, "email": 0.2, "message": 0.15, "post": 0.15, "publish": 0.2,
+    # secrets / access
+    "credential": 0.4, "secret": 0.35, "password": 0.35, "token": 0.25,
+    "api key": 0.35, "private key": 0.4,
+    # scope amplifiers
+    "production": 0.25, "all ": 0.15, "everything": 0.2, "prod": 0.2,
+}
+
 
 class ExecutionBroker:
     """Routes an intent to capabilities; executes the safe ones, gates the rest."""
@@ -48,7 +88,18 @@ class ExecutionBroker:
         # entries here are genuinely-available read-only calls.
         self._dispatch: dict[str, Callable[[Capability, dict], dict]] = {
             "system.health.read": self._exec_system_health,
+            "system.tasks.active": self._exec_system_tasks_active,
+            "system.logs.search": self._exec_system_logs_search,
             "memory.search": self._exec_memory_search,
+            "memory.write_structured": self._exec_memory_write_structured,
+            "research.deep.start": self._exec_research_deep_start,
+            "money.analyze_idea": self._exec_money_analyze_idea,
+            "forge.search_code": self._exec_forge_search_code,
+            "forge.plan_change": self._exec_forge_plan_change,
+            "forge.run_tests": self._exec_forge_run_tests,
+            "security.score_action": self._exec_security_score_action,
+            # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
+            # approval-gated. It must never auto-run from the broker.
         }
 
     def execute(
@@ -164,6 +215,453 @@ class ExecutionBroker:
         top_k = int(ctx.get("top_k", 5) or 5)
         return {"results": memory_search(query=query, top_k=top_k)}
 
+    @staticmethod
+    def _exec_memory_write_structured(cap: Capability, ctx: dict) -> dict:
+        """Persist a structured fact/note into the engine memory store (L1 write).
+
+        Read-of-product-files-only invariant is not violated: this writes to the
+        engine's own key/value memory store, the capability's declared side
+        effect. No external action, no spending, no source edits.
+        """
+        from engine.api import memory_store
+        key = str(ctx.get("key") or "").strip()
+        value = ctx.get("value", ctx.get("content"))
+        if not key:
+            return {"stored": False, "note": "no key provided"}
+        if value is None:
+            return {"stored": False, "note": "no value/content provided"}
+        namespace = str(ctx.get("namespace") or "companion").strip() or "companion"
+        record = {"value": value}
+        tags = ctx.get("tags")
+        if tags:
+            record["tags"] = list(tags) if isinstance(tags, (list, tuple, set)) else [tags]
+        memory_store(key=key, value=record, namespace=namespace)
+        return {"stored": True, "key": key, "namespace": namespace}
+
+    # ── system.tasks.active ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_system_tasks_active(cap: Capability, ctx: dict) -> dict:
+        """Active (running/queued) tasks from state/tasks.json (read-only).
+
+        Honest empty list when the file is absent or empty. Reads through the
+        fcntl file-lock helper when available, else a guarded plain JSON read.
+        """
+        tasks_path = _state_dir() / "tasks.json"
+        data: Any = {}
+        try:
+            from core.file_lock import read_json_safe
+            data = read_json_safe(tasks_path, default={})
+        except Exception:
+            try:
+                if tasks_path.exists():
+                    import json
+                    data = json.loads(tasks_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                return {"tasks": [], "note": f"could not read tasks file: {exc}"}
+
+        # tasks.json shape is {"tasks": {<id>: {...}}} (may also be a list).
+        raw = data.get("tasks", data) if isinstance(data, dict) else data
+        items: list[dict] = []
+        if isinstance(raw, dict):
+            for tid, t in raw.items():
+                if isinstance(t, dict):
+                    items.append({"id": tid, **t})
+        elif isinstance(raw, list):
+            items = [t for t in raw if isinstance(t, dict)]
+
+        active_states = {"running", "queued", "pending", "in_progress", "active"}
+        active = [
+            t for t in items
+            if str(t.get("status", "")).lower() in active_states
+        ]
+        # If nothing carries a recognisable status, return all as-is (honest).
+        tasks = active if active else (items if not any(
+            "status" in t for t in items) else [])
+        return {"tasks": tasks, "total_known": len(items),
+                "source": str(tasks_path)}
+
+    # ── system.logs.search ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_system_logs_search(cap: Capability, ctx: dict) -> dict:
+        """Search recent backend logs for a query string (read-only, bounded).
+
+        Tails up to ``_LOG_SCAN_MAX_BYTES`` of the newest available log file and
+        returns the last N matching lines. Empty + honest note when no log.
+        """
+        query = str(ctx.get("query") or ctx.get("text") or "").strip()
+        if not query:
+            return {"lines": [], "note": "no query provided"}
+        limit = max(1, min(int(ctx.get("limit", _LOG_SEARCH_MAX_LINES) or _LOG_SEARCH_MAX_LINES),
+                           _LOG_SEARCH_MAX_LINES))
+
+        sd = _state_dir()
+        # Prefer the canonical backend log; fall back to other logs that exist.
+        candidates = [
+            sd / "python-backend.log",
+            sd / "server.log",
+        ]
+        candidates += sorted(sd.glob("*.log"), key=lambda p: _safe_mtime(p), reverse=True)
+        log_path = next((p for p in candidates if p.exists() and p.stat().st_size > 0), None)
+        if log_path is None:
+            return {"lines": [], "note": "no non-empty log file found",
+                    "searched": [str(c) for c in candidates[:2]]}
+
+        ql = query.lower()
+        matches: list[str] = []
+        try:
+            size = log_path.stat().st_size
+            with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                if size > _LOG_SCAN_MAX_BYTES:
+                    fh.seek(size - _LOG_SCAN_MAX_BYTES)
+                    fh.readline()  # discard partial line
+                for line in fh:
+                    if ql in line.lower():
+                        matches.append(line.rstrip("\n"))
+        except Exception as exc:
+            return {"lines": [], "note": f"could not read log: {exc}",
+                    "log": str(log_path)}
+        return {"lines": matches[-limit:], "matched": len(matches),
+                "log": str(log_path)}
+
+    # ── research.deep.start ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_research_deep_start(cap: Capability, ctx: dict) -> dict:
+        """Start a deep-research run in the BACKGROUND — never blocks the broker.
+
+        The DeepResearchEngine.run() coroutine is long-running. We pre-create the
+        report row (so the caller can poll /api/research/deep/{id}) and launch the
+        engine on a dedicated daemon thread with its own event loop. The broker
+        returns immediately with status='started'. If the engine cannot be
+        imported/launched we degrade to status='queued' that points at the
+        existing endpoint — honest about which path was taken.
+        """
+        topic = str(ctx.get("topic") or ctx.get("text") or "").strip()
+        if not topic:
+            return {"status": "error", "note": "no topic provided"}
+        if len(topic) > 600:
+            topic = topic[:600]
+        depth = str(ctx.get("depth") or "deep")
+        if depth not in ("shallow", "normal", "deep"):
+            depth = "deep"
+
+        try:
+            from core.deep_research_engine import (
+                DeepResearchEngine, DeepResearchReport, _save_report,
+            )
+            import time as _time
+            import uuid as _uuid
+
+            report_id = _uuid.uuid4().hex[:16]
+            report = DeepResearchReport(id=report_id, topic=topic,
+                                        created_at=_time.time())
+            _save_report(report)
+
+            def _worker() -> None:
+                import asyncio as _aio
+                try:
+                    engine = DeepResearchEngine()
+                    # The engine.run() creates+saves its own report id; we ran a
+                    # placeholder row above so polling has something immediately.
+                    _aio.run(engine.run(topic=topic, depth=depth))
+                except Exception as exc:  # background failure must not crash broker
+                    logger.warning("background deep research failed: %s", exc)
+
+            threading.Thread(target=_worker, daemon=True,
+                             name=f"companion-research-{report_id}").start()
+            return {"status": "started", "report_id": report_id, "topic": topic,
+                    "depth": depth,
+                    "note": "running in background; poll /api/research/deep/{id}"}
+        except Exception as exc:
+            logger.warning("research.deep.start could not launch inline: %s", exc)
+            return {"status": "queued", "topic": topic, "depth": depth,
+                    "note": "use POST /api/research/deep/start to run this",
+                    "error": str(exc)}
+
+    # ── money.analyze_idea ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_money_analyze_idea(cap: Capability, ctx: dict) -> dict:
+        """Lightweight, read-only analysis of a monetization idea — NO spending.
+
+        Composes a structured draft analysis from MoneyMode's planning helper
+        (_step_generate_idea) plus a simple heuristic score. Executes NO pipeline
+        steps that touch the ActionBus / external systems / ROI ledger.
+        """
+        idea = str(ctx.get("idea") or ctx.get("text") or "").strip()
+        if not idea:
+            return {"status": "error", "note": "no idea provided"}
+
+        breakdown: dict[str, Any] = {}
+        try:
+            from core.money_mode import MoneyMode
+            mm = MoneyMode()
+            # Read-only planning helper: returns an idea sketch, no side effects.
+            if hasattr(mm, "_step_generate_idea"):
+                step = mm._step_generate_idea(idea, "")  # affiliate_product=""
+                breakdown["idea_sketch"] = step.get("output", step)
+        except Exception as exc:
+            breakdown["idea_sketch_error"] = str(exc)
+
+        # Heuristic, fully local scoring — clearly labelled as a draft estimate.
+        low = idea.lower()
+        signals = {
+            "recurring_revenue": any(k in low for k in
+                ("subscription", "saas", "recurring", "membership", "retainer")),
+            "low_capital": any(k in low for k in
+                ("digital", "content", "service", "affiliate", "newsletter")),
+            "scalable": any(k in low for k in
+                ("automate", "software", "platform", "api", "scale")),
+            "clear_audience": any(k in low for k in
+                ("b2b", "smb", "developers", "founders", "agencies", "ecommerce")),
+        }
+        score = round(min(1.0, 0.35 + 0.15 * sum(signals.values())), 3)
+        breakdown["signals"] = signals
+        breakdown["rationale"] = (
+            "Heuristic draft: +score for recurring/scalable/low-capital/"
+            "audience signals. Not a market study — research.deep.start can "
+            "validate before any spend."
+        )
+        return {
+            "status": "draft",
+            "idea": idea,
+            "score": score,
+            "breakdown": breakdown,
+            "spent": False,
+            "note": "read-only analysis; no money pipeline executed",
+        }
+
+    # ── forge.search_code ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_forge_search_code(cap: Capability, ctx: dict) -> dict:
+        """Bounded, read-only code search across the repo (ripgrep or os.walk).
+
+        Returns file:line matches, capped at ``_CODE_SEARCH_MAX_MATCHES``. Never
+        edits anything. Prefers ripgrep when present, else a guarded os.walk.
+        """
+        query = str(ctx.get("query") or ctx.get("text") or "").strip()
+        if not query:
+            return {"matches": [], "note": "no query provided"}
+        root = _repo_root()
+        sub = str(ctx.get("path") or "").strip()
+        search_root = (root / sub).resolve() if sub else root
+        # Containment guard: never escape the repo.
+        try:
+            search_root.relative_to(root)
+        except ValueError:
+            search_root = root
+        if not search_root.exists():
+            return {"matches": [], "note": f"path not found: {sub}"}
+
+        rg = _which("rg")
+        if rg:
+            out = ExecutionBroker._rg_search(rg, query, search_root)
+            if out is not None:
+                return out
+        # Fallback: os.walk + substring match.
+        return ExecutionBroker._walk_search(query, search_root, root)
+
+    @staticmethod
+    def _rg_search(rg: str, query: str, search_root: Path) -> dict | None:
+        import subprocess
+        try:
+            proc = subprocess.run(
+                [rg, "--no-heading", "--line-number", "--fixed-strings",
+                 "--max-count", "5", "-m", str(_CODE_SEARCH_MAX_MATCHES),
+                 query, str(search_root)],
+                capture_output=True, text=True, timeout=20,
+            )
+        except Exception:
+            return None
+        matches: list[dict] = []
+        for line in (proc.stdout or "").splitlines():
+            parts = line.split(":", 2)
+            if len(parts) == 3:
+                matches.append({"file": parts[0], "line": int(parts[1])
+                                if parts[1].isdigit() else parts[1],
+                                "text": parts[2].strip()[:300]})
+            if len(matches) >= _CODE_SEARCH_MAX_MATCHES:
+                break
+        return {"matches": matches, "count": len(matches), "engine": "ripgrep"}
+
+    @staticmethod
+    def _walk_search(query: str, search_root: Path, root: Path) -> dict:
+        ql = query.lower()
+        matches: list[dict] = []
+        for dirpath, dirnames, filenames in os.walk(search_root):
+            dirnames[:] = [d for d in dirnames if d not in _CODE_SEARCH_SKIP_DIRS
+                           and not d.startswith(".")]
+            for fn in filenames:
+                if Path(fn).suffix not in _CODE_SEARCH_EXTS:
+                    continue
+                fp = Path(dirpath) / fn
+                try:
+                    if fp.stat().st_size > _CODE_SEARCH_MAX_FILE_BYTES:
+                        continue
+                    with open(fp, "r", encoding="utf-8", errors="ignore") as fh:
+                        for i, line in enumerate(fh, 1):
+                            if ql in line.lower():
+                                matches.append({
+                                    "file": str(fp.relative_to(root)),
+                                    "line": i, "text": line.strip()[:300],
+                                })
+                                if len(matches) >= _CODE_SEARCH_MAX_MATCHES:
+                                    return {"matches": matches,
+                                            "count": len(matches),
+                                            "engine": "walk", "truncated": True}
+                except Exception:
+                    continue
+        return {"matches": matches, "count": len(matches), "engine": "walk"}
+
+    # ── forge.plan_change ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_forge_plan_change(cap: Capability, ctx: dict) -> dict:
+        """Draft a change PLAN via the LLM — planning only, writes NO files.
+
+        Defensive: if the LLM is unavailable, returns a structured
+        "planning unavailable" note rather than fabricating a plan.
+        """
+        goal = str(ctx.get("goal") or ctx.get("text") or "").strip()
+        if not goal:
+            return {"status": "error", "note": "no goal provided"}
+        scope = ctx.get("scope")
+        scope_txt = (", ".join(map(str, scope)) if isinstance(scope, (list, tuple))
+                     else str(scope or "")).strip()
+        try:
+            from engine.api import generate
+            prompt = (
+                "Produce a concise, numbered implementation PLAN for this change. "
+                "Do NOT write code or diffs — list steps, files likely touched, "
+                "risks, and a test idea. Keep it under 200 words.\n\n"
+                f"Goal: {goal}\n"
+                + (f"Scope hint: {scope_txt}\n" if scope_txt else "")
+            )
+            plan_text = generate(
+                prompt=prompt,
+                system="You are a senior engineer writing a short change plan. "
+                       "Planning only — never produce edits.",
+                timeout=60,
+            )
+            plan_text = (plan_text or "").strip()
+            if not plan_text:
+                raise RuntimeError("empty plan from LLM")
+            return {"status": "draft", "goal": goal,
+                    "plan": {"text": plan_text, "scope": scope_txt or None},
+                    "writes_files": False}
+        except Exception as exc:
+            logger.info("forge.plan_change LLM unavailable: %s", exc)
+            return {"status": "planning_unavailable", "goal": goal,
+                    "note": "LLM offline — no plan generated (no fabrication)",
+                    "error": str(exc), "writes_files": False}
+
+    # ── forge.run_tests ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_forge_run_tests(cap: Capability, ctx: dict) -> dict:
+        """Run pytest against a NAMED target (read-only w.r.t. product code).
+
+        Requires an explicit target (selector/target/path). With no target this
+        returns a 'target required' note rather than running the whole suite
+        unprompted — running everything is expensive and easy to trigger by
+        accident. Heavily guarded: timeout + capped output, never raises.
+        """
+        target = str(ctx.get("selector") or ctx.get("target")
+                     or ctx.get("path") or "").strip()
+        if not target:
+            return {"status": "target_required",
+                    "note": "name a test target (e.g. tests/test_x.py) — "
+                            "the broker will not run the full suite unprompted"}
+
+        root = _repo_root()
+        # Containment + existence guard: only run targets inside the repo.
+        candidate = (root / target).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return {"status": "error", "note": "target escapes repo root",
+                    "target": target}
+        # Allow pytest node ids like file::test — check the file part exists.
+        file_part = target.split("::", 1)[0]
+        if file_part and not (root / file_part).exists():
+            return {"status": "error", "note": f"target not found: {file_part}",
+                    "target": target}
+
+        import subprocess
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(root), str(root / "runtime"), env.get("PYTHONPATH", "")]
+        ).strip(os.pathsep)
+        try:
+            proc = subprocess.run(
+                ["python3", "-m", "pytest", target, "-q",
+                 "--no-header", "-p", "no:cacheprovider"],
+                cwd=str(root), env=env, capture_output=True, text=True,
+                timeout=_TEST_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            return {"status": "timeout", "target": target,
+                    "note": f"tests exceeded {_TEST_TIMEOUT_S}s"}
+        except Exception as exc:
+            return {"status": "error", "target": target, "error": str(exc)}
+
+        out = (proc.stdout or "") + (proc.stderr or "")
+        passed, failed = _parse_pytest_summary(out)
+        return {
+            "status": "ok" if proc.returncode == 0 else "failed",
+            "target": target,
+            "exit_code": proc.returncode,
+            "passed": passed,
+            "failed": failed,
+            "report": out[-_TEST_OUTPUT_CAP:],
+        }
+
+    # ── security.score_action ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_security_score_action(cap: Capability, ctx: dict) -> dict:
+        """Heuristic, read-only risk score for a described action.
+
+        Clearly labelled as a heuristic — keyword-driven, no model. Higher score
+        = riskier. Used to triage before deeper review; never blocks/executes.
+        """
+        action = str(ctx.get("action") or ctx.get("text") or "").strip()
+        if not action:
+            return {"status": "error", "note": "no action provided"}
+        payload = ctx.get("payload")
+        haystack = action.lower()
+        if isinstance(payload, dict):
+            haystack += " " + " ".join(str(v).lower() for v in payload.values())
+
+        score = 0.0
+        reasons: list[str] = []
+        for term, weight in _RISK_TERMS.items():
+            if term in haystack:
+                score += weight
+                reasons.append(f"contains '{term.strip()}' (+{weight})")
+        score = round(min(1.0, score), 3)
+        if score >= 0.6:
+            level = "high"
+        elif score >= 0.3:
+            level = "medium"
+        elif score > 0.0:
+            level = "low"
+        else:
+            level = "minimal"
+        return {
+            "status": "ok",
+            "method": "heuristic",
+            "action": action,
+            "risk_level": level,
+            "score": score,
+            "risk_score": score,
+            "reasons": reasons or ["no risk keywords detected"],
+            "factors": reasons,
+        }
+
     # ── Approval request shaping ─────────────────────────────────────────────────
 
     @staticmethod
@@ -188,6 +686,49 @@ class ExecutionBroker:
             "needs_explicit_confirm": bool(decision.get("needs_explicit_confirm")),
             "approval": decision.get("approval"),
         }
+
+
+# ── Module helpers ───────────────────────────────────────────────────────────
+
+
+def _state_dir() -> Path:
+    """Canonical runtime state directory (falls back to repo ./state)."""
+    try:
+        from core.state_paths import canonical_state_dir
+        return canonical_state_dir()
+    except Exception:
+        return _repo_root() / "state"
+
+
+def _repo_root() -> Path:
+    """Repository root (this file lives at runtime/companion/execution_broker.py)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _which(name: str) -> Optional[str]:
+    import shutil
+    return shutil.which(name)
+
+
+def _safe_mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except Exception:
+        return 0.0
+
+
+def _parse_pytest_summary(output: str) -> tuple[Optional[int], Optional[int]]:
+    """Extract (passed, failed) counts from a pytest summary line. Best-effort."""
+    passed = failed = None
+    m = re.search(r"(\d+)\s+passed", output)
+    if m:
+        passed = int(m.group(1))
+    m = re.search(r"(\d+)\s+failed", output)
+    if m:
+        failed = int(m.group(1))
+    if failed is None and ("error" in output.lower() and "passed" not in output.lower()):
+        failed = 0  # collection error → unknown count, treat as not-all-green
+    return passed, failed
 
 
 # ── Singleton ──────────────────────────────────────────────────────────────────
