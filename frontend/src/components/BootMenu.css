@@ -1,0 +1,180 @@
+/* ═══════════════════════════════════════════════════════════════════
+   BOOT MENU — matches the BootSequence dark/gold AETERNUS NEXUS look.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.bootmenu {
+  position: fixed;
+  inset: 0;
+  z-index: 10010;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 38%, rgba(48, 36, 12, 0.55), transparent 70%),
+    #06070c;
+  color: #f0e9d2;
+  font-family: var(--nx-font-mono, 'JetBrains Mono', monospace);
+}
+
+.bootmenu__grid {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(240, 233, 210, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(240, 233, 210, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, #000 30%, transparent 75%);
+  pointer-events: none;
+}
+
+.bootmenu__panel {
+  position: relative;
+  width: min(520px, 92vw);
+  padding: 34px 38px 28px;
+  background: rgba(10, 12, 18, 0.86);
+  border: 1px solid rgba(229, 184, 11, 0.22);
+  border-radius: 10px;
+  box-shadow:
+    0 0 60px rgba(229, 184, 11, 0.06),
+    0 18px 60px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(240, 233, 210, 0.06);
+}
+
+.bootmenu__brand { text-align: center; margin-bottom: 18px; }
+.bootmenu__brand-title {
+  display: block;
+  font-size: 26px;
+  letter-spacing: 0.42em;
+  color: #e5b80b;
+  text-shadow: 0 0 22px rgba(229, 184, 11, 0.35);
+}
+.bootmenu__brand-sub {
+  display: block;
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.55em;
+  color: rgba(240, 233, 210, 0.45);
+}
+
+.bootmenu__statusrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: rgba(240, 233, 210, 0.6);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.bootmenu__dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  display: inline-block;
+  background: #555;
+  margin-left: 10px;
+}
+.bootmenu__dot:first-child { margin-left: 0; }
+.bootmenu__dot.ok   { background: #38d39f; box-shadow: 0 0 8px rgba(56, 211, 159, 0.6); }
+.bootmenu__dot.down { background: #e5484d; box-shadow: 0 0 8px rgba(229, 72, 77, 0.5); }
+.bootmenu__ver { margin-left: 14px; color: rgba(240, 233, 210, 0.4); }
+.bootmenu__update-badge {
+  margin-left: 10px;
+  padding: 2px 8px;
+  border: 1px solid rgba(229, 184, 11, 0.55);
+  border-radius: 3px;
+  color: #e5b80b;
+  animation: bootmenu-blink 1.4s ease-in-out infinite;
+}
+@keyframes bootmenu-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.bootmenu__countdown {
+  display: block;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  background: rgba(229, 184, 11, 0.08);
+  border: 1px dashed rgba(229, 184, 11, 0.4);
+  border-radius: 5px;
+  color: #e5b80b;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  text-align: center;
+}
+.bootmenu__countdown:hover { background: rgba(229, 184, 11, 0.14); }
+
+.bootmenu__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.bootmenu__actions .bootmenu__btn--primary { grid-column: 1 / -1; }
+
+.bootmenu__btn {
+  padding: 12px 14px;
+  background: rgba(240, 233, 210, 0.04);
+  border: 1px solid rgba(240, 233, 210, 0.16);
+  border-radius: 6px;
+  color: #f0e9d2;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  transition: background 140ms, border-color 140ms, transform 90ms;
+}
+.bootmenu__btn:hover:not(:disabled) {
+  background: rgba(229, 184, 11, 0.1);
+  border-color: rgba(229, 184, 11, 0.45);
+}
+.bootmenu__btn:active:not(:disabled) { transform: translateY(1px); }
+.bootmenu__btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.bootmenu__btn--primary {
+  background: linear-gradient(135deg, rgba(229, 184, 11, 0.18), rgba(229, 184, 11, 0.06));
+  border-color: rgba(229, 184, 11, 0.55);
+  color: #e5b80b;
+  font-size: 14px;
+  padding: 14px;
+  text-shadow: 0 0 14px rgba(229, 184, 11, 0.3);
+}
+
+.bootmenu__btn--warn.armed,
+.bootmenu__btn--danger.armed {
+  background: rgba(229, 72, 77, 0.16);
+  border-color: rgba(229, 72, 77, 0.65);
+  color: #ff8a8e;
+  animation: bootmenu-blink 0.8s ease-in-out infinite;
+}
+.bootmenu__btn--danger:hover:not(:disabled) {
+  border-color: rgba(229, 72, 77, 0.6);
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.bootmenu__console {
+  margin-top: 16px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(240, 233, 210, 0.1);
+  border-radius: 5px;
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+.bootmenu__stage {
+  color: #e5b80b;
+  letter-spacing: 0.2em;
+  margin-bottom: 6px;
+  font-size: 10px;
+}
+.bootmenu__logline {
+  color: rgba(240, 233, 210, 0.72);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 560px) {
+  .bootmenu__panel { padding: 24px 18px 20px; }
+  .bootmenu__actions { grid-template-columns: 1fr; }
+}

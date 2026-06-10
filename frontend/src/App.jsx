@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useAppStore } from './store/appStore'
 import BootSequence from './components/BootSequence'
+import BootMenu from './components/BootMenu'
 import ErrorScreen from './components/ErrorScreen'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useWebSocket, bootstrapWsStore } from './hooks/useWebSocket'
@@ -114,9 +115,13 @@ function AppContent() {
 
   // Fetch a session JWT on boot, then poll readiness with the token.
   // /api/readiness requires auth — we must have a token before the first call.
+  // Gated to boot-phase states: while the BootMenu ('menu') is showing, nothing
+  // may auto-transition the app — the user (or the menu's own countdown) decides.
   useEffect(() => {
+    if (appState !== 'connecting' && appState !== 'boot' && appState !== 'ready_check') return
     let cancelled = false
     const started = Date.now()
+    bootStartRef.current = Date.now()
 
     const check = (token) => {
       notifyBootPhase('readiness', 'Checking system readiness')
@@ -162,7 +167,7 @@ function AppContent() {
     })
 
     return () => { cancelled = true }
-  }, [setAppState, setPythonBackendReady, setReadiness])
+  }, [appState, setAppState, setPythonBackendReady, setReadiness])
 
   // Listen for system:ready WS event to update Python backend status
   useEffect(() => {
@@ -197,9 +202,11 @@ function AppContent() {
     return () => window.removeEventListener('nx:auth-expired', onExpired)
   }, [setAppState])
 
-  // Fallback: if still in boot/connecting after 8s, check for token
+  // Fallback: if still in boot/connecting after 8s, check for token.
+  // 'menu' is excluded — the BootMenu waits for the user (its own countdown
+  // handles unattended startups).
   useEffect(() => {
-    if (appState === 'dashboard' || appState === 'degraded' || appState === 'error' || appState === 'login') return
+    if (appState === 'menu' || appState === 'dashboard' || appState === 'degraded' || appState === 'error' || appState === 'login') return
     const t = setTimeout(() => {
       // If we have no token at all, go to login; otherwise degrade to dashboard
       if (!getStoredToken()) {
@@ -230,6 +237,13 @@ function AppContent() {
   const isBootPhase = appState === 'boot' || appState === 'connecting' || appState === 'ready_check'
   const bootSubState = appState === 'ready_check' ? 'initializing' : appState === 'connecting' ? 'connecting' : 'boot'
 
+  // BootMenu → BOOT: enter the boot phase (BootSequence animation → dashboard).
+  const handleMenuBoot = useCallback(() => {
+    bootStartRef.current = Date.now()
+    notifyBootPhase('menu', 'Boot requested from system menu')
+    setAppState('connecting')
+  }, [setAppState])
+
   return (
     <>
       {/* Boot/login/error keep their cross-fade. The Dashboard lives OUTSIDE
@@ -238,6 +252,7 @@ function AppContent() {
           zombie Dashboard mounted next to the new one — two full app trees,
           double WS hooks/intervals/panels. Outside presence, exactly one
           Dashboard can ever exist. */}
+      {appState === 'menu' && <BootMenu onBoot={handleMenuBoot} />}
       <AnimatePresence mode="sync">
         {isBootPhase && (
           <BootSequence key="boot" onComplete={handleBootComplete} subState={bootSubState} />

@@ -64,8 +64,11 @@ const DEFAULT_CAPABILITY_STATUS = {
 }
 
 export const useSystemStore = create((set, get) => ({
-  // App lifecycle
-  appState: 'connecting',
+  // App lifecycle.
+  // 'menu' = pre-boot system menu (Boot / Update / Refresh / Stop / Reboot);
+  // it transitions to 'connecting' (BootSequence animation) when BOOT is chosen
+  // or its auto-boot countdown elapses.
+  appState: 'menu',
   setAppState: (s) => set({ appState: s }),
 
   // Legacy single flag — kept as derived alias for backward compat with App.jsx & SystemBar
