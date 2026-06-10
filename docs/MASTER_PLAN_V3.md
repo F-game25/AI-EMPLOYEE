@@ -127,7 +127,7 @@ P10 AI Company-Builder (CompanyOS)(full design now; build as final major phase)
 
 ---
 
-### P4 — Companion Gateway (CORE SPINE)
+### P4 — Companion Gateway (CORE SPINE) — DONE (285ad957)
 
 **Goal:** The missing connective tissue (nr4). Avatar/voice/chat become one control layer; nothing in the frontend calls tools directly. **Decision: core spine, built early.**
 
@@ -153,7 +153,7 @@ backend/routes/companion.js  # POST /api/companion/message (+ streaming), /voice
 
 ---
 
-### P5 — Voice-First Teammate
+### P5 — Voice-First Teammate — DONE (2bd67875)
 
 **Goal:** Voice as a first-class gateway into the same runtime (nr4 §6).
 
@@ -166,7 +166,7 @@ backend/routes/companion.js  # POST /api/companion/message (+ streaming), /voice
 
 ---
 
-### P6 — Capability Adapters
+### P6 — Capability Adapters — DONE (6a26fe55)
 
 **Goal:** Every major subsystem registers typed capabilities so the companion routes dynamically instead of one giant prompt (nr4 §4, nr7 capability map).
 
@@ -182,7 +182,7 @@ Adapters (read-only first, then write w/ approval):
 
 ---
 
-### P7 — Evolution Engine
+### P7 — Evolution Engine — DONE (a0bcb6c6)
 
 **Goal:** Closed measured self-improvement loop (nr3). **Distillation already exists (Forge Phase 7/8) → wire as adapter, do not duplicate.**
 
