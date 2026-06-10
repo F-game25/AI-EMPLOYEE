@@ -10,10 +10,12 @@
   right: 0;
   width: auto;
   height: 360px;
-  /* Must float ABOVE page content AND the BottomDrawer (9998), but just below the
-     CommandDock bar (9999) so the dock/input toggle stays clickable. Previously 500,
-     which put the panel BEHIND the docks → it opened but was covered/overlapped. */
-  z-index: 9990;
+  /* Must float ABOVE page content AND the BottomDrawer (9998) INCLUDING its tab
+     chevron, which otherwise intercepts clicks on the send button. Same level as
+     the CommandDock bar (9999) is safe: the dock occupies bottom 0-80px and the
+     panel starts at 80px, so they never geometrically overlap. Previously 500
+     (behind everything), then 9990 (still under the drawer tab → send unclickable). */
+  z-index: 9999;
 
   display: flex;
   flex-direction: column;

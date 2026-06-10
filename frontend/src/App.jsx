@@ -231,21 +231,29 @@ function AppContent() {
   const bootSubState = appState === 'ready_check' ? 'initializing' : appState === 'connecting' ? 'connecting' : 'boot'
 
   return (
-    <AnimatePresence mode="sync">
-      {isBootPhase && (
-        <BootSequence key="boot" onComplete={handleBootComplete} subState={bootSubState} />
-      )}
-      {appState === 'login' && (
-        <LoginPage key="login" onSuccess={handleLoginSuccess} />
-      )}
+    <>
+      {/* Boot/login/error keep their cross-fade. The Dashboard lives OUTSIDE
+          AnimatePresence: with a non-motion child (Suspense), an appState
+          flicker (e.g. dashboard→connecting→dashboard on a WS bounce) left a
+          zombie Dashboard mounted next to the new one — two full app trees,
+          double WS hooks/intervals/panels. Outside presence, exactly one
+          Dashboard can ever exist. */}
+      <AnimatePresence mode="sync">
+        {isBootPhase && (
+          <BootSequence key="boot" onComplete={handleBootComplete} subState={bootSubState} />
+        )}
+        {appState === 'login' && (
+          <LoginPage key="login" onSuccess={handleLoginSuccess} />
+        )}
+        {appState === 'error' && <ErrorScreen key="error" />}
+      </AnimatePresence>
       {(appState === 'dashboard' || appState === 'degraded') && (
         <Suspense fallback={<AppLoadingFallback />}>
-          <Dashboard key="dashboard" degraded={appState === 'degraded'} />
+          <Dashboard degraded={appState === 'degraded'} />
         </Suspense>
       )}
-      {appState === 'error' && <ErrorScreen key="error" />}
       <ContextCheckModal />
-    </AnimatePresence>
+    </>
   )
 }
 

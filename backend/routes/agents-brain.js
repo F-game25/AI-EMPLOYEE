@@ -65,8 +65,12 @@ module.exports = function createAgentsBrainRouter(deps) {
 
   // ── /agents & /internal/agents ────────────────────────────────────────────────
 
-  router.get('/agents', requireAuth, (req, res) => {
-    res.json({ agents: getAgents() });
+  router.get('/agents', (req, res, next) => {
+    // Browser navigation to the SPA route /agents (Accept: text/html) must fall
+    // through to the SPA fallback — otherwise refreshing/deep-linking the Agents
+    // page returns raw JSON. API clients (fetch sends Accept: */*) still get JSON.
+    if (req.accepts(['json', 'html']) === 'html') return next();
+    return requireAuth(req, res, () => res.json({ agents: getAgents() }));
   });
 
   router.get('/internal/agents', requireLocalhost, (req, res) => {
