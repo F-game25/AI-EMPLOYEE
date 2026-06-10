@@ -150,7 +150,12 @@ const ROUTE_REGISTRY = [
   { method: 'POST',   path: '/api/autonomy/emergency-stop',         auth: true,        file: 'server.js' },
 
   // ── Evolution ─────────────────────────────────────────────────────────────
-  { method: 'GET',    path: '/api/evolution/status',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/evolution/status',                auth: true,        file: 'routes/evolution.js' },
+  { method: 'GET',    path: '/api/evolution/traces',                auth: true,        file: 'routes/evolution.js' },
+  { method: 'GET',    path: '/api/evolution/lessons',               auth: true,        file: 'routes/evolution.js' },
+  { method: 'GET',    path: '/api/evolution/candidates',            auth: true,        file: 'routes/evolution.js' },
+  { method: 'POST',   path: '/api/evolution/candidates/:id/promote',  auth: true,      file: 'routes/evolution.js' },
+  { method: 'POST',   path: '/api/evolution/candidates/:id/rollback', auth: true,      file: 'routes/evolution.js' },
   { method: 'POST',   path: '/api/evolution/mode',                  auth: true,        file: 'server.js' },
 
   // ── Brain ─────────────────────────────────────────────────────────────────

@@ -275,6 +275,27 @@ def _dispatch(op: str, args: dict):
         m = _mod('companion.capability_registry')
         return {'capabilities': m.get_capability_registry().to_dicts()}
 
+    # ── evolution (offline learning engine — controller.handle_evolution_op) ─────
+    # Controller supports exactly: status / traces / lessons / candidates /
+    # promote / rollback. We expose only those; no invented ops.
+    if op == 'evolution.status':
+        return _mod('evolution.controller').get_evolution_controller().handle_evolution_op('status', args)
+
+    if op == 'evolution.traces':
+        return _mod('evolution.controller').get_evolution_controller().handle_evolution_op('traces', args)
+
+    if op == 'evolution.lessons':
+        return _mod('evolution.controller').get_evolution_controller().handle_evolution_op('lessons', args)
+
+    if op == 'evolution.candidates':
+        return _mod('evolution.controller').get_evolution_controller().handle_evolution_op('candidates', args)
+
+    if op == 'evolution.candidate_promote':
+        return _mod('evolution.controller').get_evolution_controller().handle_evolution_op('promote', args)
+
+    if op == 'evolution.candidate_rollback':
+        return _mod('evolution.controller').get_evolution_controller().handle_evolution_op('rollback', args)
+
     raise ValueError(f'Unknown op: {op}')
 
 

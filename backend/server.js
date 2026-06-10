@@ -584,6 +584,9 @@ app.use('/api/orders', require('./routes/orders')(requireAuth));
 // Companion Gateway — conversation runtime + capability registry (Python worker)
 app.use('/api/companion', require('./routes/companion')(requireAuth));
 
+// Evolution Engine — offline learning: traces/lessons/candidates + promote/rollback (Python worker)
+app.use('/api/evolution', require('./routes/evolution')(requireAuth));
+
 // Serve generated demo HTML files — publicly accessible (no auth required).
 // Demo files are static HTML pages generated for customers to preview;
 // they contain no sensitive data and must be openable without a JWT token,
