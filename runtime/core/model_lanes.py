@@ -113,10 +113,11 @@ def _usable_vram_mb() -> int | None:
 
 
 def resolve_tier(tier: str) -> str:
-    """Resolve a tier to the best concrete model the hardware can run.
+    """Resolve a tier to the best concrete LOCAL model the hardware can run.
 
     Order: env override → largest candidate that fits live VRAM → smallest candidate.
-    A coder tier always returns a coder model.
+    A coder tier always returns a coder model. This is the free, no-approval path.
+    For paid external-API / rented-remote options use ``resolve_target``.
     """
     tier = (tier or TIER_NORMAL).strip().upper()
     if tier not in _LADDERS:
@@ -138,6 +139,118 @@ def resolve_tier(tier: str) -> str:
         if need <= vram or need <= vram * 2:
             return model
     return ladder[-1][0]
+
+
+# ── Execution targets (local / external API / rented remote) ──────────────────
+# Per requirement: CODE and heavy/deep work may also run on an EXTERNAL API
+# (Claude/GPT) or on RENTED remote compute (a much bigger local model on a rented
+# GPU). Both are PAID + require user approval — never auto-selected silently.
+
+TARGET_LOCAL = "local"
+TARGET_EXTERNAL_API = "external_api"   # Claude / GPT etc. — paid
+TARGET_RENTED_REMOTE = "rented_remote"  # rent a GPU, run a big local model — paid
+
+# Best external-API model per tier (env-overridable). Coder tier prefers a coding model.
+_EXTERNAL_API_MODELS: dict[str, tuple[str, str]] = {
+    # tier -> (provider, model)
+    TIER_CODE:   ("anthropic", os.environ.get("CLAUDE_CODE_MODEL", "claude-opus-4-6")),
+    TIER_DEEP:   ("anthropic", os.environ.get("CLAUDE_MODEL", "claude-opus-4-6")),
+    TIER_HEAVY:  ("anthropic", os.environ.get("CLAUDE_MODEL", "claude-opus-4-6")),
+    TIER_NORMAL: ("openai", os.environ.get("OPENAI_MODEL", "gpt-4o-mini")),
+    TIER_FAST:   ("openai", os.environ.get("OPENAI_MODEL", "gpt-4o-mini")),
+}
+
+# Biggest model worth renting a GPU for, per tier (the "much heavier local model").
+_RENTED_REMOTE_MODELS: dict[str, str] = {
+    TIER_CODE: "qwen2.5-coder:32b",
+    TIER_DEEP: "llama3.3:70b",
+    TIER_HEAVY: "qwen2.5:32b-instruct",
+    TIER_NORMAL: "qwen2.5:14b-instruct",
+    TIER_FAST: "qwen2.5:7b-instruct",
+}
+
+
+def _provider_key_present(provider: str) -> bool:
+    if provider == "anthropic":
+        return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY"))
+    if provider == "openai":
+        return bool(os.environ.get("OPENAI_API_KEY"))
+    return False
+
+
+def resolve_target(
+    tier: str,
+    *,
+    prefer: str = TARGET_LOCAL,
+    allow_paid: bool = False,
+) -> dict:
+    """Resolve a tier to a concrete execution target.
+
+    Returns a dict:
+      {
+        target: 'local'|'external_api'|'rented_remote',
+        provider: str|None,         # for external_api
+        model: str,
+        requires_approval: bool,    # paid targets always need approval
+        requires_payment: bool,
+        rationale: str,
+      }
+
+    Rules:
+      - ``prefer='local'`` (default) → always the free local model, no approval.
+      - ``prefer='external_api'`` / ``'rented_remote'`` are PAID; only honoured when
+        ``allow_paid=True`` (the user approved + will pay). Otherwise we fall back to
+        local and flag that a paid upgrade is available (so the UI can offer it).
+      - Paid targets always come back with requires_approval=True + requires_payment=True;
+        the SafetyGate / HITL + Compute approval flow must clear them before execution.
+    """
+    tier = (tier or TIER_NORMAL).strip().upper()
+    if tier not in _LADDERS:
+        tier = TIER_NORMAL
+
+    if prefer == TARGET_EXTERNAL_API and allow_paid:
+        provider, model = _EXTERNAL_API_MODELS.get(tier, ("anthropic", "claude-opus-4-6"))
+        return {
+            "target": TARGET_EXTERNAL_API,
+            "provider": provider,
+            "model": model,
+            "requires_approval": True,
+            "requires_payment": True,
+            "rationale": f"external API ({provider}:{model}) for {tier} — user-approved paid path"
+                         + ("" if _provider_key_present(provider) else " [WARNING: no API key set]"),
+        }
+
+    if prefer == TARGET_RENTED_REMOTE and allow_paid:
+        model = _RENTED_REMOTE_MODELS.get(tier, "qwen2.5:14b-instruct")
+        return {
+            "target": TARGET_RENTED_REMOTE,
+            "provider": None,
+            "model": model,
+            "requires_approval": True,
+            "requires_payment": True,
+            "rationale": f"rent remote GPU to run {model} for {tier} — user-approved paid path "
+                         f"(goes through compute fabric estimate→approve→provision)",
+        }
+
+    # Default / not-allowed-paid → free local model.
+    local_model = resolve_tier(tier)
+    paid_available = tier in (TIER_CODE, TIER_HEAVY, TIER_DEEP)
+    return {
+        "target": TARGET_LOCAL,
+        "provider": None,
+        "model": local_model,
+        "requires_approval": False,
+        "requires_payment": False,
+        "rationale": f"local {local_model} for {tier} (free)"
+                     + ("; paid external-API or rented-GPU upgrade available on approval" if paid_available else ""),
+    }
+
+
+def upgrade_options(tier: str) -> list[dict]:
+    """Paid upgrade options the UI can offer for a tier (always require approval+payment)."""
+    opts = [resolve_target(tier, prefer=TARGET_EXTERNAL_API, allow_paid=True),
+            resolve_target(tier, prefer=TARGET_RENTED_REMOTE, allow_paid=True)]
+    return opts
 
 
 def resolve_for_task(task_type: str | None) -> str:

@@ -1,0 +1,255 @@
+"""In-process registry of capabilities the companion can route to.
+
+Holds typed ``Capability`` descriptors only — no subsystem calls live here.
+The execution broker (later phase) is responsible for actually invoking a
+subsystem once routing + the safety gate have cleared a capability.
+"""
+from __future__ import annotations
+
+import threading
+from typing import Any
+
+from companion.schemas import (
+    Capability,
+    L0,
+    L1,
+    L3,
+)
+
+
+class CapabilityRegistry:
+    """Thread-safe registry of ``Capability`` descriptors."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._caps: dict[str, Capability] = {}
+
+    def register(self, cap: Capability) -> None:
+        with self._lock:
+            self._caps[cap.id] = cap
+
+    def get(self, cap_id: str) -> Capability | None:
+        with self._lock:
+            return self._caps.get(cap_id)
+
+    def all(self) -> list[Capability]:
+        with self._lock:
+            return list(self._caps.values())
+
+    def by_subsystem(self, name: str) -> list[Capability]:
+        with self._lock:
+            return [c for c in self._caps.values() if c.subsystem == name]
+
+    def find_for_intent(self, intent: str, task_type: str | None = None) -> list[Capability]:
+        """Keyword/subsystem match for an intent — no LLM (yet).
+
+        Scores each capability by overlap between the intent tokens and the
+        capability's id/name/description/subsystem, with a bonus when
+        ``task_type`` matches the subsystem. Returns matches best-first.
+        """
+        tokens = {t for t in _tokenize(intent) if t}
+        if not tokens:
+            return []
+        task = (task_type or "").strip().lower()
+
+        scored: list[tuple[int, Capability]] = []
+        with self._lock:
+            caps = list(self._caps.values())
+
+        for cap in caps:
+            hay = _tokenize(
+                f"{cap.id} {cap.name} {cap.description} {cap.subsystem}"
+            )
+            score = len(tokens & hay)
+            if task and (task == cap.subsystem or task in cap.id):
+                score += 2
+            if score > 0:
+                scored.append((score, cap))
+
+        scored.sort(key=lambda sc: sc[0], reverse=True)
+        return [cap for _score, cap in scored]
+
+    def to_dicts(self) -> list[dict[str, Any]]:
+        """Serialize for the ``/api/companion/capabilities`` endpoint."""
+        with self._lock:
+            return [c.to_dict() for c in self._caps.values()]
+
+
+def _tokenize(text: str) -> set[str]:
+    out: set[str] = set()
+    for raw in (text or "").lower().replace(".", " ").replace("_", " ").split():
+        tok = "".join(ch for ch in raw if ch.isalnum())
+        if tok:
+            out.add(tok)
+    return out
+
+
+# ── Seed descriptors (read-only / low-risk first) ────────────────────────────
+# Descriptors only — wiring to real subsystems is the execution broker's job.
+
+def _seed(reg: CapabilityRegistry) -> None:
+    caps = [
+        Capability(
+            id="system.health.read",
+            subsystem="system",
+            name="Read system health",
+            description="Current health, uptime and active-agent counts from the metrics collector.",
+            input_schema={},
+            output_schema={"uptime_ms": "int", "agents_active": "int", "status": "str"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["how is the system doing", "are all agents up"],
+        ),
+        Capability(
+            id="system.tasks.active",
+            subsystem="system",
+            name="List active tasks",
+            description="Currently running and queued tasks from the task orchestrator.",
+            input_schema={"status": "str?"},
+            output_schema={"tasks": "list"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["what's running right now", "show active tasks"],
+        ),
+        Capability(
+            id="system.logs.search",
+            subsystem="system",
+            name="Search logs",
+            description="Search the backend log for a query string (read-only).",
+            input_schema={"query": "str", "limit": "int?"},
+            output_schema={"lines": "list"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["find errors in the logs", "search logs for timeout"],
+        ),
+        Capability(
+            id="memory.search",
+            subsystem="memory",
+            name="Search memory",
+            description="Semantic/keyword search across the memory and knowledge store.",
+            input_schema={"query": "str", "top_k": "int?"},
+            output_schema={"results": "list"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["what do we know about X", "recall the pricing decision"],
+        ),
+        Capability(
+            id="memory.write_structured",
+            subsystem="memory",
+            name="Write structured memory",
+            description="Persist a structured fact/note into the memory store.",
+            input_schema={"key": "str", "value": "any", "tags": "list?"},
+            output_schema={"stored": "bool", "id": "str"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=["writes to memory store"],
+            examples=["remember that the launch is on Friday"],
+        ),
+        Capability(
+            id="research.deep.start",
+            subsystem="research",
+            name="Start deep research",
+            description="Kick off an adaptive-depth autonomous research session for a topic.",
+            input_schema={"topic": "str", "max_hops": "int?"},
+            output_schema={"session_id": "str"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=["network fetches", "writes findings to knowledge store"],
+            examples=["research the competitor landscape for X"],
+        ),
+        Capability(
+            id="money.analyze_idea",
+            subsystem="money",
+            name="Analyze monetization idea",
+            description="Score and break down a monetization idea (no execution).",
+            input_schema={"idea": "str"},
+            output_schema={"score": "float", "breakdown": "dict"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=[],
+            examples=["is selling lead lists worth it"],
+        ),
+        Capability(
+            id="forge.search_code",
+            subsystem="forge",
+            name="Search code",
+            description="Search the codebase for symbols, files or strings (read-only).",
+            input_schema={"query": "str", "path": "str?"},
+            output_schema={"matches": "list"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["where is the auth middleware", "find usages of require_approval"],
+        ),
+        Capability(
+            id="forge.plan_change",
+            subsystem="forge",
+            name="Plan a code change",
+            description="Produce a structured change plan (diff sketch) without writing files.",
+            input_schema={"goal": "str", "scope": "list?"},
+            output_schema={"plan": "dict"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=[],
+            examples=["plan adding rate limiting to the orders route"],
+        ),
+        Capability(
+            id="forge.run_tests",
+            subsystem="forge",
+            name="Run tests",
+            description="Execute the test suite (or a subset) and report results.",
+            input_schema={"selector": "str?"},
+            output_schema={"passed": "int", "failed": "int", "report": "str"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=["spawns test processes"],
+            examples=["run the companion tests"],
+        ),
+        Capability(
+            id="forge.apply_patch",
+            subsystem="forge",
+            name="Apply code patch",
+            description="Write a code patch to the working tree. Mutates source files.",
+            input_schema={"patch": "str", "files": "list"},
+            output_schema={"applied": "bool", "files": "list"},
+            risk_level=L3,
+            requires_approval=True,
+            side_effects=["modifies source files on disk"],
+            examples=["apply the rate-limit patch"],
+        ),
+        Capability(
+            id="security.score_action",
+            subsystem="security",
+            name="Score action risk",
+            description="Return an anomaly/risk score for a proposed action (read-only).",
+            input_schema={"action": "str", "payload": "dict?"},
+            output_schema={"risk_score": "float", "factors": "list"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["how risky is deleting the deals file"],
+        ),
+    ]
+    for c in caps:
+        reg.register(c)
+
+
+# ── Singleton ────────────────────────────────────────────────────────────────
+
+_instance: CapabilityRegistry | None = None
+_instance_lock = threading.Lock()
+
+
+def get_capability_registry() -> CapabilityRegistry:
+    """Return the process-wide seeded ``CapabilityRegistry`` singleton."""
+    global _instance
+    with _instance_lock:
+        if _instance is None:
+            reg = CapabilityRegistry()
+            _seed(reg)
+            _instance = reg
+    return _instance

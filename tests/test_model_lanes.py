@@ -66,3 +66,38 @@ def test_unknown_tier_falls_back_to_normal():
 def test_tiers_are_named_fast_normal_heavy_deep():
     """Lock the required tier names."""
     assert ml.SIZE_TIERS == ("FAST", "NORMAL", "HEAVY", "DEEP_THINKING")
+
+
+# ── Execution targets: local (free) vs external API / rented remote (paid) ────
+
+def test_default_target_is_free_local_no_approval():
+    r = ml.resolve_target(ml.TIER_CODE)
+    assert r["target"] == ml.TARGET_LOCAL
+    assert r["requires_approval"] is False
+    assert r["requires_payment"] is False
+
+
+def test_external_api_not_used_unless_paid_allowed():
+    r = ml.resolve_target(ml.TIER_CODE, prefer=ml.TARGET_EXTERNAL_API, allow_paid=False)
+    assert r["target"] == ml.TARGET_LOCAL  # falls back, never silently pays
+
+
+def test_external_api_when_allowed_is_paid_and_needs_approval():
+    r = ml.resolve_target(ml.TIER_CODE, prefer=ml.TARGET_EXTERNAL_API, allow_paid=True)
+    assert r["target"] == ml.TARGET_EXTERNAL_API
+    assert r["provider"] in ("anthropic", "openai")
+    assert r["requires_approval"] is True and r["requires_payment"] is True
+
+
+def test_rented_remote_when_allowed_is_paid_and_needs_approval():
+    r = ml.resolve_target(ml.TIER_DEEP, prefer=ml.TARGET_RENTED_REMOTE, allow_paid=True)
+    assert r["target"] == ml.TARGET_RENTED_REMOTE
+    assert r["requires_approval"] is True and r["requires_payment"] is True
+    assert r["model"]  # a concrete bigger model to run on the rented GPU
+
+
+def test_upgrade_options_offers_both_paid_paths():
+    opts = ml.upgrade_options(ml.TIER_CODE)
+    targets = {o["target"] for o in opts}
+    assert targets == {ml.TARGET_EXTERNAL_API, ml.TARGET_RENTED_REMOTE}
+    assert all(o["requires_approval"] and o["requires_payment"] for o in opts)
