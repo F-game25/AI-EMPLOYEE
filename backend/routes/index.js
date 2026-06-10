@@ -483,6 +483,8 @@ const ROUTE_REGISTRY = [
 
   // ── Companion Gateway ─────────────────────────────────────────────────────
   { method: 'POST',   path: '/api/companion/message',               auth: true,        file: 'routes/companion.js' },
+  { method: 'POST',   path: '/api/companion/voice-message',         auth: true,        file: 'routes/companion.js' },
+  { method: 'POST',   path: '/api/companion/voice-control',         auth: true,        file: 'routes/companion.js' },
   { method: 'GET',    path: '/api/companion/capabilities',          auth: true,        file: 'routes/companion.js' },
   { method: 'GET',    path: '/api/companion/state',                 auth: true,        file: 'routes/companion.js' },
 

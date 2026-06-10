@@ -163,6 +163,41 @@ def test_conversation_degrades_to_canned_reply_when_llm_offline(monkeypatch):
     assert "LLM offline" in r["reply"] or len(r["reply"]) > 0
 
 
+# ── Voice channel: concise spoken summary in meta.voice_summary ────────────────
+
+def test_voice_channel_populates_voice_summary(monkeypatch):
+    _force_llm_offline(monkeypatch)
+    r = handle_message({"text": "what is the system doing?",
+                        "session_id": "s1", "channel": "voice"})
+    assert r["ok"] is True
+    assert r["meta"]["channel"] == "voice"
+    vs = r["meta"].get("voice_summary")
+    assert isinstance(vs, str) and vs.strip()
+    # Short reply → spoken summary equals the reply (no needless truncation).
+    if len(r["reply"]) <= 280:
+        assert vs == r["reply"].strip() or vs in r["reply"]
+
+
+def test_non_voice_channel_has_no_voice_summary(monkeypatch):
+    _force_llm_offline(monkeypatch)
+    r = handle_message({"text": "what is the system doing?", "session_id": "s1"})
+    assert "voice_summary" not in r["meta"]
+
+
+def test_voice_summary_truncates_long_reply():
+    long_reply = (
+        "First, the orchestrator interprets intent and selects a skill. "
+        "Second, the skill builds an execution plan from its tools. "
+        "Third, tools run atomically and results are validated. "
+        "Fourth, the response is composed and streamed to the UI. "
+        "Fifth, memory is updated and the loop monitors for improvement."
+    )
+    summary = ConversationRuntime._voice_summary(long_reply)
+    assert summary
+    assert len(summary) <= len(long_reply)
+    assert "full details are in the chat" in summary.lower()
+
+
 # ── Avatar state engine ────────────────────────────────────────────────────────
 
 def test_avatar_state_for_maps_modes_and_phases():

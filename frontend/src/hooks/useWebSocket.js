@@ -852,6 +852,14 @@ function dispatchCompanionEvent(event, data = {}) {
     case 'companion:approval_required':
       cmp.setAvatarState('approval_needed')
       break
+    // Voice lifecycle — backend-driven speaking/idle states (no frontend timers).
+    case 'companion:voice_response_started':
+      cmp.setAvatarState('speaking')
+      break
+    case 'companion:voice_response_finished':
+    case 'companion:voice_interrupted':
+      cmp.setAvatarState('idle')
+      break
   }
 }
 

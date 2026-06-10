@@ -120,6 +120,44 @@ export const useCompanionStore = create((set, get) => ({
       setThinking(false)
     }
   },
+
+  // Voice path: STT transcript → companion gateway (channel='voice') → spoken
+  // reply. The full reply is folded into the chat panel exactly like
+  // sendMessage; TTS (concise meta.voice_summary) is driven server-side, and
+  // speaking/idle avatar states arrive over WS (companion:voice_response_*).
+  sendVoiceTranscript: async (transcript, context = {}) => {
+    const clean = String(transcript || '').trim()
+    if (!clean) return null
+    const { addUserMessage, addCompanionResponse, setThinking } = get()
+    addUserMessage(clean)
+    setThinking(true)
+    set({ avatarState: 'thinking' })
+    driveAvatar('thinking')
+    try {
+      const resp = await api.post('/api/companion/voice-message', {
+        transcript: clean,
+        session_id: get().sessionId,
+        context,
+        speak: true,
+      })
+      addCompanionResponse(resp || {})
+      return resp
+    } catch (err) {
+      set((state) => ({
+        messages: [...state.messages, {
+          role: 'companion',
+          text: `Companion voice unavailable: ${err?.message || 'request failed'}`,
+          ts: Date.now(),
+          meta: { error: true },
+        }].slice(-200),
+        avatarState: 'error',
+      }))
+      driveAvatar('error')
+      return null
+    } finally {
+      setThinking(false)
+    }
+  },
 }))
 
 export default useCompanionStore

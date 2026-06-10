@@ -27,6 +27,7 @@ failure yields ``ok=False`` with a safe error reply and ``avatar_state=error``
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from typing import Any, Optional
@@ -133,14 +134,7 @@ class ConversationRuntime:
 
         avatar_state = self._avatar.state_for(mode, phase)
 
-        return CompanionResponse(
-            ok=True,
-            mode=mode,
-            reply=reply,
-            actions=actions,
-            approvals_required=approvals,
-            avatar_state=avatar_state,
-            meta={
+        meta: dict[str, Any] = {
                 "intent": intent,
                 "resolution_confidence": resolved.get("confidence"),
                 "focus": resolved.get("focus"),
@@ -157,7 +151,21 @@ class ConversationRuntime:
                 "session_id": request.session_id,
                 "tenant_id": request.tenant_id,
                 "latency_ms": int((time.time() - t0) * 1000),
-            },
+        }
+
+        # Voice channel: also carry a short, spoken-friendly summary. The full
+        # `reply` still goes to chat/action panel; TTS speaks `voice_summary`.
+        if (request.channel or "").lower() == "voice":
+            meta["voice_summary"] = self._voice_summary(reply)
+
+        return CompanionResponse(
+            ok=True,
+            mode=mode,
+            reply=reply,
+            actions=actions,
+            approvals_required=approvals,
+            avatar_state=avatar_state,
+            meta=meta,
         )
 
     # ── Model selection ──────────────────────────────────────────────────────────
@@ -224,6 +232,45 @@ class ConversationRuntime:
         return (f"(LLM offline) I understood this as a {mode} request: "
                 f"\"{snippet}\". I can't generate a full reply right now, but "
                 f"nothing was executed.")
+
+    # ── Voice summary (cheap, no extra LLM call) ───────────────────────────────────
+
+    # Spoken summaries stay short: roughly two sentences / this many chars.
+    _VOICE_SUMMARY_MAX_CHARS = 280
+    _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+    @classmethod
+    def _voice_summary(cls, reply: str) -> str:
+        """A 1-2 sentence spoken-friendly synopsis of ``reply``.
+
+        Pure truncation/first-sentences heuristic — never calls an LLM, so it
+        adds no latency. Short replies are returned as-is. Code fences and list
+        markup are stripped so TTS doesn't read syntax aloud.
+        """
+        text = (reply or "").strip()
+        if not text:
+            return ""
+        # Drop fenced code blocks and inline markup that reads badly aloud.
+        text = re.sub(r"```[\s\S]*?```", " (code is on screen) ", text)
+        text = re.sub(r"`([^`]+)`", r"\1", text)
+        text = re.sub(r"[*_#>]+", "", text)
+        text = re.sub(r"^\s*[-+*]\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) <= cls._VOICE_SUMMARY_MAX_CHARS:
+            return text
+        sentences = cls._SENTENCE_SPLIT.split(text)
+        summary = ""
+        for sent in sentences[:2]:
+            candidate = (summary + " " + sent).strip() if summary else sent.strip()
+            if summary and len(candidate) > cls._VOICE_SUMMARY_MAX_CHARS:
+                break
+            summary = candidate
+        if not summary:
+            summary = text[: cls._VOICE_SUMMARY_MAX_CHARS].rsplit(" ", 1)[0]
+        if len(summary) < len(text):
+            summary = summary.rstrip(".!? ") + ". The full details are in the chat."
+        return summary
 
     # ── Result summarisers ───────────────────────────────────────────────────────
 
