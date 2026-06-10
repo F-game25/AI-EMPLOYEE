@@ -209,7 +209,7 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 
 ---
 
-### P8 — UX Overhaul (ONE auto-adapting system — NO manual modes)
+### P8 — UX Overhaul (ONE auto-adapting system) — DONE (cf65605a)
 
 **Goal:** Operational cockpit that is **one system which auto-adjusts to the user's PC**. (nr5)
 
@@ -221,7 +221,9 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 - **Design system:** colors, type scale, spacing, card/button/badge/modal/toast/empty/loading/error patterns. Reusable components (CompanionPanel, TaskTimeline, LocalRemoteTaskMap, ComputeControlPanel, DataSyncPanel, VoiceControlPanel, ApprovalQueue, SafetyGateModal, EmptyState, LoadingSkeleton, ErrorRecoveryPanel, …).
 - **Page-by-page audit:** keep / merge / split / redesign / remove per page (47 pages).
 
-**DoD:** one system, no manual mode toggle; UI density/visuals auto-scale to detected hardware; fewer duplicate top-level nav entries; every page has empty/loading/error states; design tokens applied consistently; nothing lost.
+**DoD:** one system, no manual mode toggle; UI density/visuals auto-scale to detected hardware; every page has empty/loading/error states; design tokens applied consistently; nothing lost.
+
+**Outcome (audit-corrected):** avatar auto-falls-back to zero-canvas SVG on low-tier hardware (one auto-adapting system, no manual modes). Nav was already healthy (all routes resolve, deep-link sub-views intentional) — no dedup needed. Design system already existed (`nexus-ui/`: Panel/EmptyState/ErrorState/LoadingSkeleton/AsyncPanel/Toaster/...). Filled the real gap: empty states on 5 data pages that rendered nothing when empty. Chat-panel overlap fixed.
 
 ---
 
