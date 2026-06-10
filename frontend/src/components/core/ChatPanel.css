@@ -5,12 +5,15 @@
 
 .chat-panel {
   position: fixed;
-  bottom: 80px;   /* above CommandDock */
+  bottom: 80px;   /* sits directly above the 80px CommandDock bar */
   left: var(--sidebar-width, 220px);  /* clear the sidebar */
   right: 0;
   width: auto;
   height: 360px;
-  z-index: 500;   /* below TopBar (z-index 60 is topbar but it's in flow, chat is fixed) — use 500 so it floats above page content but topbar stays in flow above it */
+  /* Must float ABOVE page content AND the BottomDrawer (9998), but just below the
+     CommandDock bar (9999) so the dock/input toggle stays clickable. Previously 500,
+     which put the panel BEHIND the docks → it opened but was covered/overlapped. */
+  z-index: 9990;
 
   display: flex;
   flex-direction: column;
@@ -23,7 +26,9 @@
     inset 0 1px 0 rgba(255, 230, 170, 0.08),
     0 -8px 24px rgba(0, 0, 0, 0.55);
 
-  transform: translateY(100%);
+  /* Hidden state: slide fully off-screen. translateY(100%) alone leaves an 80px
+     sliver (the bottom offset), so add the offset to clear the viewport entirely. */
+  transform: translateY(calc(100% + 80px));
   transition: transform var(--mc-duration-normal) var(--mc-easing-out);
   pointer-events: none;
 }
@@ -55,7 +60,7 @@
 }
 
 .chat-panel--closed {
-  transform: translateY(100%);
+  transform: translateY(calc(100% + 80px));
   pointer-events: none;
 }
 
@@ -582,6 +587,12 @@
 @media (max-width: 768px) {
   .chat-panel {
     height: 50vh;
+    left: 0;          /* sidebar is hidden/overlaid on mobile — span full width */
+    bottom: 60px;     /* mobile bottom nav is ~60px */
+    transform: translateY(calc(100% + 60px));
+  }
+  .chat-panel--open {
+    transform: translateY(0);
   }
 
   .message-content {
