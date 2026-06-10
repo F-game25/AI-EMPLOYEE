@@ -284,6 +284,8 @@ Full design captured (build deferred to final phase):
 
 **Excluded by safety policy:** autonomous self-replication (automaton), offensive/unauthorized security automation, jailbreak/prompt-bypass (GODMOD3), voice cloning without consent.
 
+> **Detailed expansion:** every row above is broken out into a buildable, reconciled capability phase in **§ Reference-Capability Layers** (below). (Source research lives at `/home/lf/Downloads/research.md`.)
+
 ---
 
 ## Cross-phase invariants
@@ -303,3 +305,132 @@ Full design captured (build deferred to final phase):
 - `docs/MASTER_PLAN.md` — **current/accurate** for compute & cluster (Phases 0–8 DONE, Phase 9 revenue NEXT). Kept; P9 here extends it.
 - `docs/V2_MASTER_PLAN.md` — **partly stale** (money-mode + route-auth claims outdated). Useful security/testing/observability phases folded into invariants + relevant phases.
 - `docs/SYSTEM_CONNECTIVITY_ROADMAP.md` — connectivity targets absorbed into P4/P6.
+
+---
+
+## Reference-Capability Layers (research.md — native rebuilds)
+
+> **Source:** `research.md` (28 reference repos, at `/home/lf/Downloads/research.md`). **Hard rule (carried from this plan's rule #1):** external repos are **reference architecture only** — extract patterns/interfaces/safety concepts, **rebuild natively** inside AI-EMPLOYEE. **No copy-pasting whole external systems.** This appendix expands the integration map above into reconciled, buildable capability phases. Each entry is marked **DONE / PARTIAL / NEW** against the 2026-06-09 audit; DONE/PARTIAL items cross-reference P1–P10 instead of re-planning.
+
+### Capability-status table
+
+| # | Capability | Reference repo (patterns only) | Status | Native location | Slots into |
+|---|---|---|---|---|---|
+| — | Model/Provider Router (named lanes, targets, providers) | 9router, pi, goose | **DONE** | `runtime/core/model_lanes.py`, `model_routing.py`, `runtime/agents/ai-router/ai_router.py` | P3 |
+| — | Avatar/Companion Gateway (multi-channel spine) | openclaw-2.0 | **DONE** | `runtime/companion/*`, `backend/routes/companion.js` | P4/P5 |
+| — | Capability adapters (system/memory/research/money/forge/security) | MCP spec, hexstrike (governed) | **DONE** | `runtime/companion/execution_broker.py` | P6 |
+| — | Distillation / self-improvement training | automaton (governed), cashclaw (study) | **DONE** (adapter target for P7) | `backend/services/forge_learning.js`, `forge_training.js`, `backend/forge_train.py` | P7 |
+| — | Remote compute (rent GPU) | vix (perf), goose | **DONE/PARTIAL** | `backend/compute_fabric/`, `runtime/engine/compute/compute_planner.py` | P9 |
+| 1 | **Browser Execution Service** | agent-browser | **NEW** | `runtime/tools/browser/` | extends P6 |
+| 2 | **Context Database Layer** | OpenViking, turbovec | **NEW** (on existing vector_store+bm25) | `runtime/memory/context_db/` | P7/P8 memory |
+| 3 | **Skill Lifecycle OS (Forge)** | agent-skills, taste-skill | **NEW** (formalizes Forge Phase5–9) | `runtime/forge/lifecycle/`, `runtime/forge/ui_quality/` | extends Forge / P8 |
+| 4 | **Work Acquisition + Delivery Engine** | cashclaw | **PARTIAL-upgrade** (on money_mode) | `runtime/money/work_engine/` | upgrades P10 MoneyMode |
+| 5 | **Content Factory + Creative Studio + Voice + Media Intake** | MoneyPrinterTurbo, Fooocus, VoxCPM, yt-dlp | **NEW** | `runtime/content/`, `runtime/voice/`, `runtime/media/` | P10 CompanyOS |
+| 6 | **FinanceOps Module** | financial-services | **NEW** | `runtime/finance/` | P10 CompanyOS |
+| 7 | **Business Swarm Layer** | openclaw-2 | **PARTIAL-upgrade** (on 59-agent catalog) | `runtime/agents/business_swarm/` | P10 CompanyOS |
+| 8 | **Research Quality Engine** | academic-research-skills | **PARTIAL-upgrade** (on deep_research_engine) | `runtime/research/quality/` | extends P7 |
+| 9 | **Blacklight Defensive Skill OS** | Anthropic-Cybersecurity-Skills, hexstrike (defensive) | **PARTIAL-upgrade** (on blacklight) | `runtime/security/skills/`, `runtime/security/tools/` | P9/P10 |
+| 10 | **Harness Compatibility Layer + Dev Kit** | ECC, goose, pi | **NEW** | `runtime/harness/`, `tools/ai_employee_cli/` | P8/P10 packaging |
+| 11 | **Reference Learning Library** | build-your-own-x | **NEW** (context-only) | `runtime/learning/reference_library/` | feeds Skill OS / Forge |
+| 12 | **Model Arena Mode** | GODMOD3 (SAFE parts only) | **NEW** | `runtime/core/arena/` | extends P3 + feeds P7 |
+
+**Counts:** DONE 4 (+1 DONE/PARTIAL compute) · PARTIAL-upgrade 4 · NEW 7.
+
+> Deferred/excluded from research.md: native C++ runtime (`vix`) → folded into **P9.5 Hybrid Rust** (profile-first); web crawler (`scrapy`, repo unverified) → deferred behind Browser Exec + robots/rate-limit gating; `pi` sandbox/state patterns → already covered by Forge sandbox + `safety_gate.py`.
+
+### Module 1 — Browser Execution Service  *(NEW — extends P6)*
+- **Ref:** agent-browser (stable refs, accessibility-tree snapshots, action contracts). **Builds on:** existing `runtime/browsers/playwright` + CloakBrowser — adds the agent-facing tool service, doesn't replace Playwright.
+- **Paths:** `runtime/tools/browser/{browser_service,browser_session,tool_contracts,accessibility_snapshot,action_executor,screenshot_service,browser_sandbox,browser_events}.py`; `backend/routes/browser.js`; registered as a companion capability.
+- **Interfaces:** `open(url,profile) -> session_id`; `snapshot(s) -> {tree,refs}`; `act(s,action,ref,value)`; `extract(s,kind,ref)`; `capture(s,kind)`; `eval(s,js)` (read-only default). WS: `browser:status/action_started/finished/approval_required`.
+- **Governance:** nav/snapshot/extract = L0 free; **L3 approval** for submit/purchase/account-change/outreach/download/writing eval. Sandboxed per-task profiles; every action logs snapshot+screenshot.
+- **DoD:** open→snapshot→click-ref→screenshot read path free; side-effecting actions produce approval cards; profile isolation verified.
+
+### Module 2 — Context Database Layer  *(NEW — on existing retrieval; P7/P8)*
+- **Ref:** OpenViking (filesystem context, L0/L1/L2, retrieval trajectories) + turbovec (hybrid retrieve, stable IDs, allowlist). **Builds on** `vector_store.py`/`bm25.py`/`memory_router.py` — does NOT replace them.
+- **Paths:** `runtime/memory/context_db/{context_tree,context_node,context_loader,recursive_retriever,retrieval_trace,session_compressor,memory_writer,context_permissions}.py`; `backend/routes/context.js`.
+- **Tree:** `/project/{goals,decisions,tasks,code,skills,memory,reports,feedback}` + `/user/{preferences,goals,constraints}`.
+- **Interfaces:** `retrieve(query,project,levels,filters) -> {nodes,trace}`; `compress_session(s) -> memory_refs`; `write(path,content,validate)`; `delete(path)`.
+- **Governance:** retrieval read-only; writes validated; tenant/project ACL via allowlist; **trace always returned** (debuggable); exact-search fallback for critical scopes.
+- **DoD:** tiered nodes + visible trace using existing stores (no 2nd store); session compression → durable memory; ACL respected.
+
+### Module 3 — Skill Lifecycle OS for Forge  *(NEW — formalizes Forge Phase5–9 / P8)*
+- **Ref:** agent-skills (spec→plan→build→test→review→simplify→ship, auto-select) + taste-skill (UI quality, anti-slop, image-to-code, no-placeholder). **Builds on** existing Forge routes/controller/sandbox.
+- **Paths:** `runtime/forge/lifecycle/{spec,planning,implementation,test,review,simplify,ship}_engine.py + skill_selector.py + acceptance_criteria.py`; `runtime/forge/ui_quality/{ui_auditor,design_language_inferer,component_quality_checker,image_to_code_pipeline,frontend_preflight}.py`.
+- **Interfaces:** `select_skills(task,type,risk,max) -> [skill]`; `run_lifecycle(goal) -> {spec,acceptance,plan,slices,tests,review,ship_checklist}` (machine-checkable per stage); `ui_audit(target) -> {design_map,violations,placeholders}`.
+- **Governance:** plan/spec/review/tests L0/L1; `apply_patch`/merge stays **L3** (already enforced). Anti-rationalization gate blocks ship until criteria+tests pass; UI gate blocks placeholders.
+- **DoD:** full spec→ship lifecycle with gate per stage; skill auto-select works; UI gate fails a placeholder build; apply still approval-gated.
+
+### Module 4 — Work Acquisition + Delivery Engine  *(PARTIAL-upgrade on money_mode; P10)*
+- **Ref:** cashclaw. **Builds on** `runtime/core/money_mode.py` + approvals/HITL — lifecycle upgrade, not replacement.
+- **Paths:** `runtime/money/work_engine/{opportunity_ingestion,fit_evaluator,pricing_estimator,work_task_lifecycle,client_message_engine,deliverable_builder,submission_queue,feedback_collector,study_session_runner,money_memory}.py + marketplace_adapters/`.
+- **Lifecycle (external steps approval-gated):** found → eval(fit/value/risk) → quote → **approve** → execute → stage → **approve** → submit → feedback → study.
+- **Governance:** **no autonomous client messaging / marketplace action / wallet movement without approval.** Anti-spam throttle. Study loop feeds P7/Forge distillation, async only.
+- **DoD:** opportunity → eval → quote → (approve) → execute → stage → (approve) → submit with two hard gates; feedback stored; offline study lessons.
+
+### Module 5 — Content Factory + Creative Studio + Voice + Media Intake  *(NEW — P10)*
+- **Ref:** MoneyPrinterTurbo, Fooocus, VoxCPM, yt-dlp. **Builds on** existing voice services for TTS plumbing.
+- **Paths:** `runtime/content/video/*`, `runtime/content/image/*`, `runtime/voice/{tts_router,voice_design,voice_clone_gate,streaming_tts,avatar_voice_controller}.py`, `runtime/media/{media_intake_service,source_permission_checker,transcript_extractor,subtitle_service,media_to_memory_pipeline}.py`.
+- **Interfaces:** `make_video(brief) -> {assets,draft,publish_request}`; `gen_image(prompt,style)`; `synthesize(text,voice)`; `clone_voice(ref,consent_token)`; `ingest_media(url,rights_token) -> {transcript,metadata}`.
+- **Governance:** **all publish/post approval-gated** (publish_queue stages, never auto-posts). **Voice cloning only with consent token; synthetic voice labeled.** Media only with rights confirmation + license metadata. No face cloning/impersonation.
+- **DoD:** topic→script→assets→TTS→subtitles→rendered draft staged (not posted); image+brand assets; consented clone gated; media ingest with license metadata.
+
+### Module 6 — FinanceOps  *(NEW — P10, advisory only)*
+- **Ref:** financial-services. **Paths:** `runtime/finance/{finance_agent_registry,business_model_builder,market_researcher,financial_model_drafter,pricing_analyzer,pitch_memo_builder,revenue_forecaster,human_review_gate}.py`.
+- **Interfaces:** `draft_business_model`, `draft_financial_model`, `price_analysis`, `build_pitch_memo` — **all return `requires_human_signoff`**.
+- **Governance:** **advisory only.** No transaction/trade execution, no final tax/legal/accounting advice. All staged through human_review_gate. Feeds P10 Validation Engine.
+- **DoD:** cashflow/pricing/comps/memo drafts marked advisory + sign-off; no money/trade action executable.
+
+### Module 7 — Business Swarm Layer  *(PARTIAL-upgrade on 59-agent catalog; P10)*
+- **Ref:** openclaw-2. **Builds on** `agent_capabilities.json` + `backend/agents/index.js` — formalizes contracts; P10 orchestrator consumes it.
+- **Paths:** `runtime/agents/business_swarm/{registry,capability_profiles,task_decomposer,assignment_engine,parallel_executor,dependency_manager,result_aggregator,agent_contracts}.py`.
+- **Contract:** `{id,capabilities[],tools_allowed[],memory_scope[],risk_level,requires_approval_for[],output_contract,success_metrics,escalation_rules}`.
+- **Governance:** no fake autonomy — real tools/memory/metrics/contracts per agent. Risky caps → `requires_approval_for` → HITL; tool perms via `safety_gate.py`.
+- **DoD:** each agent has a typed contract; goal decompose→assign→parallel→aggregate; approval-gated caps can't fire without HITL.
+
+### Module 8 — Research Quality Engine  *(PARTIAL-upgrade on deep_research_engine; extends P7)*
+- **Ref:** academic-research-skills. **Builds on** `deep_research_engine.py` + search.
+- **Paths:** `runtime/research/quality/{research_planner,source_collector,source_verifier,claim_auditor,citation_anchor,integrity_gate,reviewer_panel,report_builder,material_passport}.py`.
+- **Interfaces:** `plan(topic)`; `verify_source(ref) -> {valid,provenance}`; `audit_claims(draft) -> {anchored,unsupported,fabricated}`; `review_panel(report)`; `integrity_gate(report) -> pass|block`.
+- **Governance:** **no hallucinated sources** — verified sources separated from reasoning; fabricated-ref detection blocks ship; reproducibility metadata attached. Heavy review async.
+- **DoD:** report carries citation anchors, claim audit (no unsupported/fabricated through gate), review scores, reproducibility metadata.
+
+### Module 9 — Blacklight Defensive Skill OS  *(PARTIAL-upgrade on blacklight; P9/P10)*
+- **Ref:** Anthropic-Cybersecurity-Skills (progressive disclosure, MITRE/NIST/ATLAS/D3FEND), hexstrike (defensive parts: registry, risk cards, process mgmt). **Builds on** existing blacklight tools/routes.
+- **Paths:** `runtime/security/skills/{security_skill_registry,skill_frontmatter_index,framework_mapper,security_skill_loader,defensive_workflow_runner,verification_engine,report_templates,scope_gate}.py`; `runtime/security/tools/{security_tool_registry,tool_scope_validator,process_manager,risk_card_generator,authorization_gate}.py`.
+- **Skill contract:** `{skill_id,domain,allowed_use:"defensive_authorized",frameworks{...},requires_scope:true,requires_approval:true,verification_steps[]}`.
+- **Governance:** **defensive/authorized only.** Default = defensive analysis/lab/internal hardening/remediation. **Active scans require signed scope + ownership + approval** (scope_gate + authorization_gate). No offensive automation, no exploit generation as autonomous feature.
+- **DoD:** progressive discovery returns framework-tagged defensive skills; active scan blocked without signed scope + approval; defensive report templates with MITRE/NIST mappings.
+
+### Module 10 — Harness Compatibility Layer + Dev Kit  *(NEW — P8/P10 packaging)*
+- **Ref:** ECC, goose, pi. **Paths:** `runtime/harness/{harness_registry,claude_exporter,codex_exporter,cursor_exporter,opencode_exporter,gemini_exporter,copilot_exporter,rules_compiler,hook_manager,mcp_config_generator}.py`; `tools/ai_employee_cli/{start,stop,doctor,task,agent,logs,install-extension,export-config}`; `runtime/extensions/{extension_registry,mcp_adapter,install_manager,permission_manifest,extension_health}.py`.
+- **Interfaces:** `export(harness,profile) -> config_bundle` (one canonical source → per-harness); `install_extension(manifest)`; CLI `doctor`.
+- **Governance:** **one canonical internal source** — export, never hand-maintain copies. **Secrets never in exported prompts/configs.** Extension installs permission-reviewed; diagnostics scrub secrets.
+- **DoD:** export to Claude Code/Codex/Cursor produces valid secret-free configs from one source; CLI works; extension install permission-gated.
+
+### Module 11 — Reference Learning Library  *(NEW — context-only; feeds Skill OS/Forge)*
+- **Ref:** build-your-own-x. **Paths:** `runtime/learning/reference_library/{guide_index,architecture_patterns,first_principles_planner,build_template_generator,skill_recommender,forge_reference_loader}.py`.
+- **Interfaces:** `find_patterns(tech) -> [pattern]`; `plan_from_first_principles(target) -> build_plan`; consumed by Forge Skill OS.
+- **Governance:** **context-only, not a runtime dependency.** Sources validated; used as research context, never direct code source (no-copy rule).
+- **DoD:** Forge queries a pattern for a build target → first-principles plan; read-only reference, no runtime coupling.
+
+### Module 12 — Model Arena Mode  *(NEW — extends P3, feeds P7)*
+- **Ref:** GODMOD3 — **SAFE parts only** (multi-model race, composite scoring, context-adaptive sampling, EMA feedback). **EXCLUDE** jailbreak/prompt-bypass/refusal-evasion/obfuscation. **Builds on** `model_lanes.py`/`model_routing.py`.
+- **Paths:** `runtime/core/arena/{model_race,output_scorer,routing_feedback,sampling_autotune,response_normalizer,model_benchmark_store}.py`.
+- **Interfaces:** `race(prompt,models,constraints) -> [responses]`; `score(responses) -> ranked` (transparent); `learn(result) -> routing_pref_update` (feeds router + P7).
+- **Governance:** transparent scoring; racing is **cost-aware** (gated by `allow_paid` + budget) and opt-in; **no bypass features.**
+- **DoD:** arena races N models, transparent composite ranking, picks best, updates routing pref within budget gates; no bypass behavior.
+
+### 3-phase implementation order (mirrors research.md)
+- **Phase 1 — Capability foundation:** Browser Exec (1), Context DB (2), Skill Lifecycle OS (3); *Model Router DONE (P3); Companion Gateway DONE (P4/P5).*
+- **Phase 2 — Money / real-world:** Work Engine (4), Content Factory+Creative+Voice+Media (5), Analytics dashboards (PARTIAL-upgrade on `runtime/core/observability/*`), FinanceOps (6), Business Swarm (7).
+- **Phase 3 — Self-improve / security / packaging:** Evolution Engine (*P7*; Research Quality Engine (8) extends it), Blacklight Skill OS (9), Harness Compat (10), Reference Library (11), Model Arena (12).
+
+### Explicit EXCLUSIONS (non-negotiable)
+- No whole-system copying — reference only, rebuilt natively with own contracts/tests/governance.
+- No autonomous self-replication (automaton) — propose, humans approve.
+- No unapproved/unauthorized security scanning — active scans require signed scope + ownership + approval; default defensive only; no autonomous exploit generation.
+- No financial transaction execution — FinanceOps advisory; no trade/payment/wallet movement; human sign-off.
+- No jailbreak/prompt-bypass/refusal-evasion/obfuscation (GODMOD3) — safe eval ideas only.
+- Voice cloning only with explicit consent; synthetic voice labeled; no impersonation.
+- No autonomous external send/spend/publish/post/deploy — gated through `safety_gate.py` + HITL (invariant #3).
+- No fake autonomy — every swarm agent has real tools/memory/metrics/contracts.
