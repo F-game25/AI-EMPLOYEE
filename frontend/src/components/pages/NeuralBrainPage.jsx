@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useBrainStore } from '../../store/brainStore'
 import { Panel, Badge, StatCard } from '../ui/primitives'
+import { EmptyState } from '../nexus-ui'
 
 const BOT_WIDTH = 12
 const BOT_HEIGHT = 16
@@ -99,6 +100,7 @@ export default function NeuralBrainPage() {
       <div style={{ width: 260, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
         <Panel title="Agents">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {agents.length === 0 && <EmptyState icon="[]" title="No agents loaded" sub="Agent activity feeds the neural map once the backend reports an agent roster." />}
             {agents.slice(0, 20).map(a => (
               <div key={a.id} onClick={() => setSelected(a.id === selected?.id ? null : a)} style={{
                 padding: '8px 10px', borderRadius: 6, background: selected?.id === a.id ? 'rgba(229,199,107,0.1)' : 'rgba(32,214,199,0.04)',

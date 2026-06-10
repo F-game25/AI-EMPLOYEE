@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Panel, SectionLabel } from '../nexus-ui'
+import { Panel, SectionLabel, EmptyState } from '../nexus-ui'
 import { useLiveData } from '../../hooks/useLiveData'
 import { useAgentStore } from '../../store/agentStore'
 import { toastSuccess, toastError } from '../nexus-ui/Toaster'
@@ -77,6 +77,7 @@ function BrainInspectorTab() {
     <div className="int-tab-content">
       {/* Cost breakdown */}
       <Panel title="Per-Agent Cost Breakdown (24h)">
+        {costEntries.length === 0 && <EmptyState icon="[]" title="No model spend recorded yet" sub="Per-agent cost appears once agents make LLM calls in the last 24h." />}
         <div className="int-cost-list">
           {costEntries.slice(0, 8).map(([agent, cost]) => (
             <div key={agent} className="int-cost-row">
@@ -94,9 +95,12 @@ function BrainInspectorTab() {
       <Panel title="Live LLM Call Log" right={
         <button className="int-btn int-btn--sm" onClick={refresh} aria-label="Refresh LLM call log" title="Refresh">↻</button>
       }>
+        {list.length === 0 && <EmptyState icon="[]" title="No LLM calls in this window" sub="Live model calls stream here as agents and the main AI run tasks." />}
+        {list.length > 0 && (
         <div className="int-call-head">
           <span>Model</span><span>Agent</span><span>ms</span><span>Tokens</span><span>Cost</span><span>Status</span>
         </div>
+        )}
         <div className="int-call-list">
           {list.map(c => (
             <div

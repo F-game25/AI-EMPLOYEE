@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { Panel, Badge, StatCard, MiniBar, DataRow } from '../ui/primitives'
+import { EmptyState } from '../nexus-ui'
 import api from '../../api/client'
 
 const FLAG_C = { empty_prompt:'#EF4444', empty_output:'#EF4444', generic_output:'#F59E0B', missing_context:'#F59E0B', error:'#EF4444' }
@@ -75,6 +76,8 @@ export default function PromptInspectorPage() {
       <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:10, flex:1, minHeight:0 }}>
         <div style={{ display:'flex', flexDirection:'column', gap:10, minHeight:0 }}>
           <Panel title="Prompt Traces" badge={<Badge label="LIVE INSPECTION" variant="teal"/>} bodyStyle={{ padding:8 }}>
+            {loading && <EmptyState icon="..." title="Loading prompt traces" />}
+            {!loading && traces.length === 0 && <EmptyState icon="[]" title="No prompt traces yet" sub="Prompts and outputs are captured here once the main AI or agents make LLM calls." />}
             <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
               {traces.map(t => (
                 <div key={t.id} onClick={() => { setSel(t); setEditText(t.prompt) }} style={{ padding:'9px 10px', borderRadius:7, border:`1px solid ${selT?.id===t.id?'rgba(229,199,107,0.4)':'rgba(229,199,107,0.08)'}`, background:selT?.id===t.id?'rgba(229,199,107,0.06)':'var(--bg-elevated,#12141F)', cursor:'pointer' }}>

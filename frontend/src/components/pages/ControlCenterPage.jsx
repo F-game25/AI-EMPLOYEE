@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { Panel, Badge, StatCard, DataRow } from '../ui/primitives'
+import { EmptyState } from '../nexus-ui'
 import api from '../../api/client'
 
 const FALLBACK_RULES = [
@@ -168,6 +169,7 @@ export default function ControlCenterPage() {
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, flex:1, minHeight:0 }}>
         <div style={{ display:'flex', flexDirection:'column', gap:10, minHeight:0 }}>
           <Panel title="Automation Rules" badge={<Badge label={`${activeRules} active`} variant="teal"/>} bodyStyle={{ padding:8 }}>
+            {automationRules.length === 0 && <EmptyState icon="[]" title="No automation rules" sub="All rules have been removed. Create a rule to auto-trigger sweeps, restarts or alerts on conditions." />}
             {automationRules.map(r => (
               <div key={r.id} onClick={() => setSel(r)} style={{ padding:'9px 10px', borderRadius:7, marginBottom:4, border:`1px solid ${selR?.id===r.id?'rgba(229,199,107,0.4)':'rgba(229,199,107,0.08)'}`, background:selR?.id===r.id?'rgba(229,199,107,0.06)':'var(--bg-elevated,#12141F)', cursor:'pointer' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>

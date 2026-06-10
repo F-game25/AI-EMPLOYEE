@@ -121,6 +121,8 @@ export default function BlacklightPage() {
           <BLPanel title="Rule Engine" style={{ flex:1 }}>
             {loading ? (
               <div style={{ fontSize:11, color:'rgba(168,85,247,0.4)', fontFamily:'monospace' }}>Loading rules…</div>
+            ) : !rules.length ? (
+              <div style={{ fontSize:11, color:'rgba(168,85,247,0.4)', fontFamily:'monospace' }}>No detection rules registered — the anomaly responder has not published a rule set yet.</div>
             ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
               {rules.map(r => (
