@@ -98,7 +98,14 @@ class ExecutionBroker:
             "forge.plan_change": self._exec_forge_plan_change,
             "forge.run_tests": self._exec_forge_run_tests,
             "security.score_action": self._exec_security_score_action,
+            "browser.open": self._exec_browser_open,
+            "browser.snapshot": self._exec_browser_snapshot,
+            "browser.extract": self._exec_browser_extract,
+            "browser.capture": self._exec_browser_capture,
+            "browser.close": self._exec_browser_close,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
+            # approval-gated. It must never auto-run from the broker.
+            # NOTE: browser.act is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
         }
 
@@ -661,6 +668,112 @@ class ExecutionBroker:
             "reasons": reasons or ["no risk keywords detected"],
             "factors": reasons,
         }
+
+    # ── browser.* (defensive: browser missing → honest status, never throw) ──────
+
+    @staticmethod
+    def _exec_browser_open(cap: Capability, ctx: dict) -> dict:
+        """Open a URL in a fresh ephemeral browser session (URL-guarded).
+
+        The URL policy runs BEFORE any chromium launch — a blocked URL is a
+        structured ``{status: 'refused'}``, never an exception or a fetch.
+        """
+        url = str(ctx.get("url") or ctx.get("text") or "").strip()
+        if not url:
+            return {"status": "error", "note": "no url provided"}
+        try:
+            from tools.browser.browser_service import check_url, get_browser_service
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"browser service not importable: {exc}"}
+        err = check_url(url)
+        if err:
+            return {"status": "refused", "url": url, "note": err}
+        try:
+            return {"status": "ok",
+                    **get_browser_service().open(url, profile=str(
+                        ctx.get("profile") or "ephemeral"))}
+        except Exception as exc:
+            return {"status": "error", "url": url, "error": str(exc)}
+
+    @staticmethod
+    def _exec_browser_snapshot(cap: Capability, ctx: dict) -> dict:
+        """Stable-ref accessibility snapshot of an open session (read-only)."""
+        sid = str(ctx.get("session_id") or "").strip()
+        if not sid:
+            return {"status": "error", "note": "no session_id provided"}
+        try:
+            from tools.browser.accessibility_snapshot import snapshot
+            from tools.browser.browser_service import get_browser_service
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"browser service not importable: {exc}"}
+        sess = get_browser_service().get_session(sid)
+        if sess is None:
+            return {"status": "error", "note": f"unknown session: {sid}"}
+        try:
+            return {"status": "ok", **snapshot(sess)}
+        except Exception as exc:
+            return {"status": "error", "session_id": sid, "error": str(exc)}
+
+    @staticmethod
+    def _exec_browser_extract(cap: Capability, ctx: dict) -> dict:
+        """Bounded content extraction from an open session (read-only)."""
+        sid = str(ctx.get("session_id") or "").strip()
+        if not sid:
+            return {"status": "error", "note": "no session_id provided"}
+        try:
+            from tools.browser.browser_service import get_browser_service
+            from tools.browser.extract import extract
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"browser service not importable: {exc}"}
+        sess = get_browser_service().get_session(sid)
+        if sess is None:
+            return {"status": "error", "note": f"unknown session: {sid}"}
+        try:
+            out = extract(sess, str(ctx.get("kind") or "text"),
+                          ctx.get("target") or ctx.get("selector"))
+            return {"status": "ok" if out.get("ok") else "error", **out}
+        except Exception as exc:
+            return {"status": "error", "session_id": sid, "error": str(exc)}
+
+    @staticmethod
+    def _exec_browser_capture(cap: Capability, ctx: dict) -> dict:
+        """Screenshot/PDF of an open session into the rotated captures dir."""
+        sid = str(ctx.get("session_id") or "").strip()
+        if not sid:
+            return {"status": "error", "note": "no session_id provided"}
+        try:
+            from tools.browser.browser_service import get_browser_service
+            from tools.browser.capture import capture
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"browser service not importable: {exc}"}
+        sess = get_browser_service().get_session(sid)
+        if sess is None:
+            return {"status": "error", "note": f"unknown session: {sid}"}
+        try:
+            out = capture(sess, str(ctx.get("kind") or "screenshot"))
+            return {"status": "ok" if out.get("ok") else "error", **out}
+        except Exception as exc:
+            return {"status": "error", "session_id": sid, "error": str(exc)}
+
+    @staticmethod
+    def _exec_browser_close(cap: Capability, ctx: dict) -> dict:
+        """Close one session, or all sessions when no session_id is given."""
+        try:
+            from tools.browser.browser_service import get_browser_service
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"browser service not importable: {exc}"}
+        sid = str(ctx.get("session_id") or "").strip()
+        try:
+            svc = get_browser_service()
+            out = svc.close(sid) if sid else svc.close_all()
+            return {"status": "ok", **out}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
 
     # ── Approval request shaping ─────────────────────────────────────────────────
 
