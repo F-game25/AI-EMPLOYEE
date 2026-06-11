@@ -406,6 +406,8 @@ function cacheKey(text, options, language, voice) {
       emotion: planned.emotion || options.emotion || null,
       intensity: planned.emotion_intensity ?? options.emotion_intensity ?? null,
       speed: planned.speaking_rate ?? options.speaking_rate ?? options.speed ?? null,
+      warmth: planned.warmth ?? options.warmth ?? options.persona?.warmth ?? null,
+      energy: planned.energy ?? options.energy ?? options.persona?.energy ?? null,
     }))
     .digest('hex');
 }

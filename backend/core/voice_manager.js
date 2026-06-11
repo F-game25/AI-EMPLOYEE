@@ -5,6 +5,7 @@ const path = require('path');
 const ttsEngine = require('../services/voice/tts_engine');
 const callEngine = require('../services/voice/call_engine');
 const { pipeline: sharedPipeline, PRE_ROLL_SYSTEM, PRE_ROLL_CUSTOMER } = require('../services/voice/stream_pipeline');
+const voiceTeammate = require('../services/voice/voice_teammate_service');
 
 const VOICE_CONFIG_PATH = path.resolve(__dirname, '../../config/voice.json');
 const MAX_CACHEABLE_PHRASE_LENGTH = 120;
@@ -124,10 +125,16 @@ const DEFAULT_CONFIG = {
     gender: 'female',
     emotion: 'warm_confident',
     emotionIntensity: 0.35,
+    warmth: 0.55,
+    energy: 0.55,
     speakingRate: 1.0,
     threads: 4,
     timeoutMs: 30000,
     localFallback: false,
+  },
+  voiceProfiles: {
+    internal: { ...voiceTeammate.INTERNAL_DEFAULT_PROFILE },
+    external: { ...voiceTeammate.EXTERNAL_DEFAULT_PROFILE },
   },
   events: {
     system_boot:         true,
@@ -163,18 +170,34 @@ function loadConfig() {
     const raw = fs.readFileSync(VOICE_CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
+      const baseForProfiles = {
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        identity: { ...DEFAULT_CONFIG.identity, ...(parsed.identity || {}) },
+        voiceCore: { ...DEFAULT_CONFIG.voiceCore, ...(parsed.voiceCore || {}) },
+        customer: { ...DEFAULT_CUSTOMER_CONFIG, ...(parsed.customer || {}) },
+      };
+      const voiceProfiles = voiceTeammate.normalizeVoiceProfiles(parsed.voiceProfiles || {}, baseForProfiles);
       config = {
         ...DEFAULT_CONFIG,
         ...parsed,
         provider: parsed.provider || DEFAULT_CONFIG.provider,
-        identity: { ...DEFAULT_CONFIG.identity, ...(parsed.identity || {}) },
-        voiceCore: { ...DEFAULT_CONFIG.voiceCore, ...(parsed.voiceCore || {}) },
+        identity: baseForProfiles.identity,
+        voiceProfiles,
+        voiceCore: {
+          ...DEFAULT_CONFIG.voiceCore,
+          ...(parsed.voiceCore || {}),
+          ...voiceTeammate.profileToVoiceCore(voiceProfiles.internal, parsed.voiceCore || {}),
+        },
         voiceLite: { ...DEFAULT_CONFIG.voiceLite, ...(parsed.voiceLite || {}) },
         fishSpeech: { ...DEFAULT_CONFIG.fishSpeech, ...(parsed.fishSpeech || {}) },
         events: { ...DEFAULT_CONFIG.events, ...(parsed.events || {}) },
         customer: {
           ...DEFAULT_CUSTOMER_CONFIG,
           ...(parsed.customer || {}),
+          voiceProfile: voiceProfiles.external,
+          warmth: voiceProfiles.external.warmth,
+          speed: voiceProfiles.external.speakingRate,
           events: { ...DEFAULT_CUSTOMER_CONFIG.events, ...(parsed.customer?.events || {}) },
         },
       };
@@ -186,6 +209,7 @@ function loadConfig() {
       identity: { ...DEFAULT_CONFIG.identity },
       voiceCore: { ...DEFAULT_CONFIG.voiceCore },
       voiceLite: { ...DEFAULT_CONFIG.voiceLite },
+      voiceProfiles: voiceTeammate.normalizeVoiceProfiles(DEFAULT_CONFIG.voiceProfiles, DEFAULT_CONFIG),
       customer: { ...DEFAULT_CUSTOMER_CONFIG },
     };
   }
@@ -204,18 +228,40 @@ function getConfig() {
 }
 
 function applyConfig(patch) {
+  const identity = { ...config.identity, ...(patch.identity || {}) };
+  const mergedVoiceCore = { ...config.voiceCore, ...(patch.voiceCore || {}) };
+  const mergedCustomer = {
+    ...config.customer,
+    ...(patch.customer || {}),
+    events: { ...config.customer.events, ...(patch.customer?.events || {}) },
+  };
+  const voiceProfiles = voiceTeammate.normalizeVoiceProfiles(
+    patch.voiceProfiles || config.voiceProfiles || {},
+    {
+      ...config,
+      ...patch,
+      identity,
+      voiceCore: mergedVoiceCore,
+      customer: mergedCustomer,
+    },
+  );
   config = {
     ...config,
     ...patch,
-    identity: { ...config.identity, ...(patch.identity || {}) },
-    voiceCore: { ...config.voiceCore, ...(patch.voiceCore || {}) },
+    identity,
+    voiceProfiles,
+    voiceCore: {
+      ...mergedVoiceCore,
+      ...voiceTeammate.profileToVoiceCore(voiceProfiles.internal, mergedVoiceCore),
+    },
     voiceLite: { ...config.voiceLite, ...(patch.voiceLite || {}) },
     fishSpeech: { ...config.fishSpeech, ...(patch.fishSpeech || {}) },
     events: { ...config.events, ...(patch.events || {}) },
     customer: {
-      ...config.customer,
-      ...(patch.customer || {}),
-      events: { ...config.customer.events, ...(patch.customer?.events || {}) },
+      ...mergedCustomer,
+      voiceProfile: voiceProfiles.external,
+      warmth: voiceProfiles.external.warmth,
+      speed: voiceProfiles.external.speakingRate,
     },
   };
   saveConfig();
@@ -228,6 +274,7 @@ function applyConfig(patch) {
     tone: config.tone,
     voiceStyle: config.voiceStyle,
     voiceCore: config.voiceCore,
+    voiceProfile: config.voiceProfiles?.internal,
     voiceLite: config.voiceLite,
     fishSpeech: config.fishSpeech,
   });
@@ -245,7 +292,15 @@ function setMode(mode) {
   const profile = activeMode === 'customer'
     ? (config.customer?.profile || 'customer_default')
     : (config.profile || 'default_futuristic');
-  void ttsEngine.reconfigure({ profile, channel: activeMode });
+  const voiceProfile = activeMode === 'customer'
+    ? voiceTeammate.normalizeVoiceProfile(config.voiceProfiles?.external || {}, config, 'external')
+    : voiceTeammate.normalizeVoiceProfile(config.voiceProfiles?.internal || {}, config, 'internal');
+  void ttsEngine.reconfigure({
+    profile,
+    channel: activeMode,
+    voiceProfile,
+    voiceCore: voiceTeammate.profileToVoiceCore(voiceProfile, config.voiceCore),
+  });
   console.log(`[VOICE] Mode → ${activeMode} (profile: ${profile})`);
 }
 
@@ -332,6 +387,7 @@ async function init() {
     voiceStyle: config.voiceStyle,
     channel: 'system',
     voiceCore: config.voiceCore,
+    voiceProfile: config.voiceProfiles?.internal,
     voiceLite: config.voiceLite,
     fishSpeech: config.fishSpeech,
   });
@@ -443,8 +499,21 @@ function batchTaskCreated(data) {
  */
 async function triggerCall(sessionId, options = {}) {
   if (!config.customer?.enabled) return false;
+  const externalProfile = voiceTeammate.normalizeVoiceProfile(
+    options.voiceProfile || config.voiceProfiles?.external || {},
+    config,
+    'external',
+  );
   const callOptions = {
     profile: config.customer?.profile || 'customer_default',
+    voiceProfile: externalProfile,
+    voiceCore: voiceTeammate.profileToVoiceCore(externalProfile, config.voiceCore),
+    restoreVoice: {
+      provider: config.provider,
+      profile: config.profile,
+      voiceCore: config.voiceCore,
+      voiceProfile: config.voiceProfiles?.internal,
+    },
     maxDurationMs: config.customer?.maxCallDurationMs || 600000,
     ...options,
   };
@@ -463,6 +532,13 @@ async function triggerCall(sessionId, options = {}) {
  */
 async function stopCall(sessionId) {
   await callEngine.endCall(sessionId, 'manual_override');
+  await ttsEngine.reconfigure({
+    provider: config.provider,
+    profile: config.profile,
+    channel: 'system',
+    voiceCore: config.voiceCore,
+    voiceProfile: config.voiceProfiles?.internal,
+  });
 }
 
 // ── Control functions ─────────────────────────────────────────────────────────

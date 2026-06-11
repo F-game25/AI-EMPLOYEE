@@ -41,6 +41,8 @@ function publicSession(session) {
     updated_at: session.updated_at,
     interrupted_at: session.interrupted_at,
     runtime: session.runtime,
+    voice_profile: session.meta?.voice_profile || null,
+    voice_mode: session.meta?.voice_mode || null,
     event_count: session.events.length,
   };
 }
@@ -76,6 +78,8 @@ function createSession(meta = {}) {
       source: meta.source || 'voice',
       user_id: meta.user_id || null,
       tenant_id: meta.tenant_id || null,
+      voice_profile: meta.voice_profile || null,
+      voice_mode: meta.voice_mode || meta.voice_profile?.mode || null,
     },
   };
   sessions.set(id, session);
@@ -85,6 +89,20 @@ function createSession(meta = {}) {
     runtime: session.runtime,
   });
   return session;
+}
+
+function setMeta(sessionId, meta = {}) {
+  const session = getSession(sessionId);
+  if (!session) return null;
+  session.meta = {
+    ...session.meta,
+    ...meta,
+  };
+  touch(session);
+  return emit(session.id, 'session.meta', {
+    session: publicSession(session),
+    meta: session.meta,
+  });
 }
 
 function getSession(id) {
@@ -257,6 +275,7 @@ module.exports = {
   subscribe,
   emit,
   setRuntime,
+  setMeta,
   setPhase,
   setTranscript,
   appendReplyChunk,

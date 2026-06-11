@@ -7,10 +7,10 @@ const TONES = ['warm_confident','calm','focused','curious','concerned','firm','u
 const PRESETS = [
   { name:'Executive',     gender:'male',    tone:'firm',           pitch:0.9, speed:0.95, articulation:0.85, friendliness:0.45 },
   { name:'Warm Advisor',  gender:'female',  tone:'warm_confident', pitch:1.1, speed:1.0, articulation:0.65, friendliness:0.65 },
-  { name:'Calm Guide',    gender:'neutral', tone:'calm',          pitch:1.0, speed:0.9, articulation:0.7,  friendliness:0.7 },
+  { name:'Calm Guide',    gender:'female',  tone:'calm',          pitch:1.0, speed:0.9, articulation:0.7,  friendliness:0.7 },
   { name:'Energetic',     gender:'female',  tone:'subtle_excited', pitch:1.2, speed:1.08, articulation:0.75, friendliness:0.6 },
   { name:'Analyst',       gender:'male',    tone:'focused',        pitch:1.0, speed:1.05, articulation:0.9,  friendliness:0.45 },
-  { name:'Concerned',     gender:'neutral', tone:'concerned',      pitch:1.0, speed:0.92, articulation:0.75, friendliness:0.55 },
+  { name:'Concerned',     gender:'female',  tone:'concerned',      pitch:1.0, speed:0.92, articulation:0.75, friendliness:0.55 },
 ]
 
 const BARS = [12,18,28,42,55,38,62,71,58,44,32,25,38,48,60,72,65,50,38,28,18,12,8,14]
@@ -45,14 +45,27 @@ export default function VoicePage() {
   const [active, setActive] = useState(false)
 
   // Persona params
-  const [gender, setGender] = useState('neutral')
+  const [gender, setGender] = useState('female')
   const [tone, setTone] = useState('warm_confident')
   const [pitch, setPitch] = useState(1.0)
   const [speed, setSpeed] = useState(1.0)
   const [articulation, setArticulation] = useState(0.7)
   const [friendliness, setFriendliness] = useState(0.6)
+  const [energy, setEnergy] = useState(0.55)
 
-  const persona = { provider: 'voice_core_local', gender, tone, emotion: tone, emotion_intensity: friendliness * 0.7, speaking_rate: speed, pitch, articulation, friendliness }
+  const voiceProfile = {
+    mode: 'internal',
+    gender,
+    tone: tone === 'warm_confident' ? 'warm' : tone,
+    warmth: friendliness,
+    emotion: tone,
+    emotionIntensity: friendliness * 0.7,
+    speakingRate: speed,
+    energy,
+    addressUserAs: 'Chief Lars',
+    approvalMode: 'approval_gates',
+  }
+  const persona = { provider: 'voice_core_local', ...voiceProfile, emotion_intensity: voiceProfile.emotionIntensity, speaking_rate: voiceProfile.speakingRate, pitch, articulation, friendliness }
 
   useEffect(() => {
     api.voice.runtime().then(setBackendStatus).catch(() => setBackendStatus({ ok: false }))
@@ -62,6 +75,7 @@ export default function VoicePage() {
     setGender(p.gender); setTone(p.tone)
     setPitch(p.pitch);   setSpeed(p.speed)
     setArticulation(p.articulation); setFriendliness(p.friendliness)
+    setEnergy(Math.max(0.2, Math.min(0.8, p.friendliness)))
   }
 
   const handleTest = async () => {
@@ -77,10 +91,16 @@ export default function VoicePage() {
         body: JSON.stringify({
           text: testText.trim(),
           provider: 'voice_core_local',
-          voice: 'default',
+          mode: 'internal',
+          voiceProfile,
+          voice: gender,
+          gender,
+          tone: voiceProfile.tone,
+          warmth: voiceProfile.warmth,
           emotion: tone,
           emotion_intensity: friendliness * 0.7,
           speaking_rate: speed,
+          energy,
           persona,
         }),
       })
@@ -111,7 +131,7 @@ export default function VoicePage() {
     <div style={{ display:'flex', flexDirection:'column', gap:10, height:'100%' }}>
       {/* Stats row */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
-        <StatCard label="Backend"    value={backendStatus?.ok ? 'ONLINE' : 'OFFLINE'} color={backendStatus?.ok ? '#22C55E' : '#ef4444'} sub="Local voice runtime"/>
+        <StatCard label="Backend"    value={backendStatus ? 'ONLINE' : 'OFFLINE'} color={backendStatus ? '#22C55E' : '#ef4444'} sub="Local voice runtime"/>
         <StatCard label="Model"      value={backendStatus?.tts?.voice_core_local?.state || 'unknown'} color="var(--gold,#E5C76B)" sub="Default Human Voice"/>
         <StatCard label="Emotions"   value={`${TONES.length}`} color="var(--teal,#20D6C7)" sub="Subtle styles"/>
       </div>
@@ -130,7 +150,7 @@ export default function VoicePage() {
             <div style={{ marginBottom:12 }}>
               <div style={{ fontSize:9, fontFamily:'monospace', color:'rgba(255,255,255,0.35)', marginBottom:6 }}>GENDER</div>
               <div style={{ display:'flex', gap:6 }}>
-                {['male','female','neutral'].map(g => (
+                {['male','female'].map(g => (
                   <button key={g} onClick={() => setGender(g)} style={{
                     flex:1, padding:'5px 0', borderRadius:5, fontSize:10, fontFamily:'monospace', textTransform:'uppercase',
                     background: gender === g ? 'rgba(229,199,107,0.15)' : 'transparent',
@@ -159,7 +179,8 @@ export default function VoicePage() {
             <Slider label="PITCH" value={pitch} min={0.5} max={2.0} step={0.05} color="var(--gold,#E5C76B)" onChange={setPitch} format={v => `${v.toFixed(2)}×`}/>
             <Slider label="SPEED" value={speed} min={0.5} max={2.0} step={0.05} color="var(--teal,#20D6C7)" onChange={setSpeed} format={v => `${v.toFixed(2)}×`}/>
             <Slider label="ARTICULATION" value={articulation} min={0} max={1} step={0.05} color="#a855f7" onChange={setArticulation} format={v => `${Math.round(v*100)}%`}/>
-            <Slider label="FRIENDLINESS" value={friendliness} min={0} max={1} step={0.05} color="#f97316" onChange={setFriendliness} format={v => `${Math.round(v*100)}%`}/>
+            <Slider label="WARMTH" value={friendliness} min={0} max={1} step={0.05} color="#f97316" onChange={setFriendliness} format={v => `${Math.round(v*100)}%`}/>
+            <Slider label="ENERGY" value={energy} min={0.2} max={0.8} step={0.05} color="#22C55E" onChange={setEnergy} format={v => `${Math.round(v*100)}%`}/>
 
             {/* Current persona summary */}
             <div style={{ marginTop:8, padding:'8px 10px', borderRadius:6, background:'rgba(229,199,107,0.04)', border:'1px solid rgba(229,199,107,0.12)', fontSize:10, fontFamily:'monospace' }}>
@@ -211,6 +232,7 @@ export default function VoicePage() {
                 <>
                   <DataRow label="Default voice" value={backendStatus.tts?.voice_core_local?.state || 'unknown'} color={backendStatus.tts?.voice_core_local?.state === 'ready' ? '#22C55E' : '#ef4444'}/>
                   <DataRow label="EN voice"     value={backendStatus.tts?.voice_core_local?.tts_en_ready ? backendStatus.tts?.voice_core_local?.active_voice?.voice || 'af_heart' : 'missing'}/>
+                  <DataRow label="EN male"      value={backendStatus.tts?.voice_core_local?.tts_piper_en_male_ready ? 'en_US-ryan-high' : 'missing'}/>
                   <DataRow label="NL voice"     value={backendStatus.tts?.voice_core_local?.tts_nl_ready ? 'nl_NL-mls-medium' : 'missing'}/>
                   <DataRow label="No install"   value={backendStatus.tts?.voice_core_local?.requires_installation === false ? 'YES' : 'NO'}/>
                   {backendStatus.tts?.voice_core_local?.state !== 'ready' && (

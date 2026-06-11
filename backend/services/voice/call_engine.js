@@ -103,6 +103,8 @@ async function startCall(sessionId, options = {}) {
   const session = {
     sessionId,
     profile,
+    voiceProfile: options.voiceProfile || null,
+    restoreVoice: options.restoreVoice || null,
     startedAt: nowIso(),
     endedAt: null,
     active: true,
@@ -113,10 +115,15 @@ async function startCall(sessionId, options = {}) {
   sessions.set(sessionId, session);
 
   // Apply customer voice profile to TTS engine
-  await ttsEngine.reconfigure({ profile, channel: 'customer' });
+  await ttsEngine.reconfigure({
+    profile,
+    channel: 'customer',
+    voiceProfile: options.voiceProfile || null,
+    voiceCore: options.voiceCore || null,
+  });
 
-  appendLog(session, { ts: nowIso(), role: 'system', event: 'call_started', profile });
-  callEvents.emit('call:started', { sessionId, profile });
+  appendLog(session, { ts: nowIso(), role: 'system', event: 'call_started', profile, voiceProfile: session.voiceProfile });
+  callEvents.emit('call:started', { sessionId, profile, voiceProfile: session.voiceProfile });
   console.log(`[CALL] Session started: ${sessionId} (profile: ${profile})`);
 
   // Auto-end safety timer
@@ -215,7 +222,10 @@ async function endCall(sessionId, reason = 'user_ended') {
   sessions.delete(sessionId);
 
   // Restore system voice profile
-  await ttsEngine.reconfigure({ channel: 'system' });
+  await ttsEngine.reconfigure({
+    channel: 'system',
+    ...(session.restoreVoice || {}),
+  });
 
   console.log(`[CALL] Session ended: ${sessionId} (reason: ${reason})`);
 }

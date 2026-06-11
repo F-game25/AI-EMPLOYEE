@@ -111,7 +111,11 @@
       "Bash(awk '{print $6, $7, $NF}')",
       "Bash(git -C /home/lf/AI-EMPLOYEE show \"stash@{0}:backend/routes/services.js\")",
       "Bash(git -C /home/lf/AI-EMPLOYEE log --all --oneline --follow -- backend/routes/services.js)",
-      "Bash(EVOLUTION_MODE=OFF bash start.sh)"
+      "Bash(EVOLUTION_MODE=OFF bash start.sh)",
+      "Bash(sed -n '1,40p' /home/lf/AI-EMPLOYEE/tests/test_model_lanes.py)",
+      "Bash(sed -n '1,60p' /home/lf/AI-EMPLOYEE/tests/test_companion_adapters.py)",
+      "Bash(PYTHONPATH=__TRACKED_VAR__:__TRACKED_VAR__/runtime python3 -m pytest tests/test_context_db.py -q --no-cov -p no:cacheprovider)",
+      "Bash(git -C /home/lf/AI-EMPLOYEE status --porcelain)"
     ],
     "additionalDirectories": [
       "/tmp"

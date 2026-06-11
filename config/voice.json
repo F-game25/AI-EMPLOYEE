@@ -55,10 +55,38 @@
     "gender": "female",
     "emotion": "warm_confident",
     "emotionIntensity": 0.35,
+    "warmth": 0.55,
+    "energy": 0.55,
     "speakingRate": 1,
     "threads": 4,
     "timeoutMs": 30000,
     "localFallback": false
+  },
+  "voiceProfiles": {
+    "internal": {
+      "mode": "internal",
+      "gender": "female",
+      "tone": "warm",
+      "warmth": 0.55,
+      "emotion": "warm_confident",
+      "emotionIntensity": 0.35,
+      "speakingRate": 1,
+      "energy": 0.55,
+      "addressUserAs": "Chief Lars",
+      "approvalMode": "approval_gates"
+    },
+    "external": {
+      "mode": "external",
+      "gender": "female",
+      "tone": "warm",
+      "warmth": 0.7,
+      "emotion": "warm_confident",
+      "emotionIntensity": 0.32,
+      "speakingRate": 1,
+      "energy": 0.5,
+      "addressUserAs": "customer",
+      "approvalMode": "approval_gates"
+    }
   },
   "events": {
     "system_boot": true,

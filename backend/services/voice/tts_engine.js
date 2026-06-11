@@ -264,12 +264,22 @@ async function runSpeak(text, channel) {
         const result = await voiceCore.synthesize(normalized, {
           language: engineVoiceCoreOptions.language,
           voice: engineVoiceCoreOptions.voice || 'default',
+          gender: engineVoiceCoreOptions.gender,
+          tone: engineVoiceCoreOptions.tone || engineTone,
+          warmth: engineVoiceCoreOptions.warmth,
           emotion: engineVoiceCoreOptions.emotion || engineTone || 'warm_confident',
           emotion_intensity: engineVoiceCoreOptions.emotionIntensity,
           speaking_rate: engineVoiceCoreOptions.speakingRate || engineSpeed,
+          energy: engineVoiceCoreOptions.energy,
           threads: engineVoiceCoreOptions.threads,
           timeoutMs: engineVoiceCoreOptions.timeoutMs,
-          persona: { speed: engineSpeed, tone: engineTone },
+          persona: {
+            speed: engineVoiceCoreOptions.speakingRate || engineSpeed,
+            tone: engineVoiceCoreOptions.tone || engineTone,
+            warmth: engineVoiceCoreOptions.warmth,
+            energy: engineVoiceCoreOptions.energy,
+            gender: engineVoiceCoreOptions.gender,
+          },
         });
         lastArtifact = voiceCore.saveArtifact(result.audioBuf);
         const played = await playAudioFile(lastArtifact.path).catch((err) => {

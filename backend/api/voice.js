@@ -12,6 +12,7 @@ const personaplex = require('../services/voice/nvidia_personaplex');
 const fishSpeech = require('../services/voice/fish_speech');
 const voiceSessions = require('../services/voice/session_manager');
 const voiceRuntime = require('../services/voice/voice_runtime_manager');
+const voiceTeammate = require('../services/voice/voice_teammate_service');
 const { splitSentences } = require('../services/voice/stream_pipeline');
 
 const router = Router();
@@ -73,6 +74,20 @@ function extractReply(payload) {
   return String(payload.reply || payload.assistant_reply || payload.content || payload.message || '').trim();
 }
 
+function requestBodyObject(req) {
+  return req.body && !Buffer.isBuffer(req.body) && typeof req.body === 'object' ? req.body : {};
+}
+
+function resolveRequestVoiceProfile(req, session = null, forcedMode = null) {
+  const cfg = voiceManager.getConfig();
+  const body = requestBodyObject(req);
+  const requested = body.voiceProfile || body.voice_profile || body.profile ||
+    body.context?.voiceProfile || body.context?.voice_profile || session?.meta?.voice_profile || {};
+  const mode = forcedMode || body.voiceMode || body.voice_mode || body.mode ||
+    body.context?.voiceMode || body.context?.voice_mode || session?.meta?.voice_mode || requested.mode || 'internal';
+  return voiceTeammate.normalizeVoiceProfile(requested, cfg, mode);
+}
+
 function getVoiceIdentity() {
   const cfg = voiceManager.getConfig();
   const identity = cfg.identity || {};
@@ -98,33 +113,25 @@ function buildVoiceAgentInstructions(identity = getVoiceIdentity()) {
   ].join('\n');
 }
 
-async function callChatPipeline(req, message, sessionId) {
+async function callChatPipeline(req, message, sessionId, voiceProfile) {
   const proto = req.protocol || 'http';
   const host = req.get('host') || `localhost:${process.env.PORT || 8787}`;
-  const requestBody = req.body && !Buffer.isBuffer(req.body) && typeof req.body === 'object' ? req.body : {};
-  const identity = getVoiceIdentity();
-  const voiceInstructions = buildVoiceAgentInstructions(identity);
+  const requestBody = requestBodyObject(req);
   const headers = {
     'Content-Type': 'application/json',
     'X-Session-Id': sessionId,
   };
   if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+  const context = voiceTeammate.buildVoiceContext({
+    existingContext: requestBody.context && typeof requestBody.context === 'object' ? requestBody.context : {},
+    transcript: message,
+    sessionId,
+    profile: voiceProfile,
+  });
 
   const body = JSON.stringify({
     message,
-    context: {
-      ...(requestBody.context && typeof requestBody.context === 'object' ? requestBody.context : {}),
-      modality: 'voice',
-      voice_session_id: sessionId,
-      raw_transcript: message,
-      voice_user_name: identity.userName,
-      voice_user_rank: identity.rank,
-      voice_address: identity.address,
-      voice_command_mode: true,
-      voice_instructions: voiceInstructions,
-      requires_approval_for_sensitive_actions: true,
-      use_turn_runner: requestBody.context?.use_turn_runner !== false,
-    },
+    context,
   });
   const candidates = [
     { source: 'node_chat', url: `${proto}://${host}/chat`, headers },
@@ -165,7 +172,7 @@ async function callChatPipeline(req, message, sessionId) {
       chat_unavailable: true,
       failures,
     },
-    reply: buildLocalVoiceFallback(message, identity),
+    reply: voiceTeammate.buildLocalFallback(message, voiceProfile),
   };
 }
 
@@ -233,21 +240,35 @@ async function processVoiceTextTurn(req, res, session, text) {
   voiceSessions.setPhase(session.id, voiceSessions.VOICE_PHASES.THINKING);
 
   try {
-    const { payload, reply } = await callChatPipeline(req, transcript, session.id);
-    const identity = getVoiceIdentity();
-    const spokenReply = formatVoiceSpokenReply(reply, transcript, payload, identity);
+    const voiceProfile = resolveRequestVoiceProfile(req, session);
+    voiceSessions.setMeta(session.id, {
+      voice_profile: voiceProfile,
+      voice_mode: voiceProfile.mode,
+    });
+    const { payload, reply } = await callChatPipeline(req, transcript, session.id, voiceProfile);
+    const latencyMs = Date.now() - started;
+    const turnResult = voiceTeammate.buildTurnResult({
+      transcript,
+      payload,
+      reply,
+      profile: voiceProfile,
+      latencyMs,
+    });
+    const spokenReply = turnResult.spoken_reply;
     if (!voiceSessions.isTurnCurrent(session.id, epoch)) {
       return res.json({ ok: false, interrupted: true, session: voiceSessions.publicSession(session) });
     }
 
     const chunks = splitSentences(spokenReply);
     chunks.forEach((chunk, index) => voiceSessions.appendReplyChunk(session.id, chunk, index, chunks.length));
-    const latencyMs = Date.now() - started;
     voiceSessions.setReply(session.id, spokenReply, latencyMs, {
       source: payload.source || payload.model || 'chat_pipeline',
       taskId: payload.taskId || null,
       workflow_run: payload.workflow_run || null,
-      structured_reply: reply,
+      structured_result: turnResult.structured_result,
+      execution_state: turnResult.execution_state,
+      approval_required: turnResult.approval_required,
+      voice_profile_used: turnResult.voice_profile_used,
     });
     voiceSessions.setPhase(session.id, voiceSessions.VOICE_PHASES.IDLE, {
       reply_ready: true,
@@ -257,8 +278,7 @@ async function processVoiceTextTurn(req, res, session, text) {
     return res.json({
       ok: true,
       session: voiceSessions.publicSession(voiceSessions.getSession(session.id)),
-      reply: spokenReply,
-      content: spokenReply,
+      ...turnResult,
       latency_ms: latencyMs,
       chat: {
         source: payload.source || null,
@@ -266,6 +286,7 @@ async function processVoiceTextTurn(req, res, session, text) {
         workflow_run: payload.workflow_run || null,
         memory_router: payload.memory_router || null,
         structured_reply: reply,
+        structured_result: turnResult.structured_result,
       },
     });
   } catch (err) {
@@ -574,11 +595,14 @@ router.post('/custom-voice/activate', (req, res) => {
 router.post('/sessions', async (req, res) => {
   try {
     const runtime = await getVoiceRuntimeStatus();
+    const voiceProfile = resolveRequestVoiceProfile(req, null);
     const session = voiceSessions.createSession({
       source: req.body?.source || 'voice_modal',
       user_id: req.jwtPayload?.sub || req.user?.id || null,
       tenant_id: req.tenant?.id || req.jwtPayload?.tenant_id || null,
       runtime,
+      voice_profile: voiceProfile,
+      voice_mode: voiceProfile.mode,
     });
     res.status(201).json({ ok: true, session: voiceSessions.publicSession(session), runtime });
   } catch (err) {
@@ -656,8 +680,16 @@ router.get('/config', async (_req, res) => {
   fishSpeech.configure(cfg.fishSpeech || {});
   const fishAvailable = await fishSpeech.checkAvailability();
   const runtime = await getVoiceRuntimeStatus(cfg);
+  const voiceProfiles = voiceTeammate.normalizeVoiceProfiles(cfg.voiceProfiles || {}, cfg);
   res.json({
     config: cfg,
+    voice_profiles: voiceProfiles,
+    voice_controls: {
+      genders: ['male', 'female'],
+      tones: ['calm', 'warm', 'focused', 'authoritative', 'concerned', 'urgent', 'professional', 'firm'],
+      emotions: ['neutral', 'calm', 'warm_confident', 'focused', 'curious', 'concerned', 'firm', 'urgent', 'subtle_excited'],
+      approval_modes: ['approval_gates'],
+    },
     profiles: profiles.filter((p) => !p.startsWith('customer_')),
     customer_profiles: profiles.filter((p) => p.startsWith('customer_')),
     tones: ['futuristic', 'neutral', 'calm', 'sharp'],
@@ -712,11 +744,39 @@ router.get('/config', async (_req, res) => {
 
 // POST /api/voice/config
 router.post('/config', (req, res) => {
-  const patch = req.body;
+  const patch = { ...(req.body || {}) };
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     return res.status(400).json({ ok: false, error: 'Body must be a JSON object.' });
   }
   try {
+    if (patch.voice_profiles && !patch.voiceProfiles) patch.voiceProfiles = patch.voice_profiles;
+    const current = voiceManager.getConfig();
+    if (patch.voiceProfiles || patch.voiceCore || patch.customer || patch.identity) {
+      const voiceProfiles = voiceTeammate.normalizeVoiceProfiles(
+        patch.voiceProfiles || current.voiceProfiles || {},
+        {
+          ...current,
+          ...patch,
+          identity: { ...(current.identity || {}), ...(patch.identity || {}) },
+          voiceCore: { ...(current.voiceCore || {}), ...(patch.voiceCore || {}) },
+          customer: { ...(current.customer || {}), ...(patch.customer || {}) },
+        },
+      );
+      patch.voiceProfiles = voiceProfiles;
+      patch.voiceCore = {
+        ...(patch.voiceCore || {}),
+        ...voiceTeammate.profileToVoiceCore(voiceProfiles.internal, {
+          ...(current.voiceCore || {}),
+          ...(patch.voiceCore || {}),
+        }),
+      };
+      patch.customer = {
+        ...(patch.customer || {}),
+        voiceProfile: voiceProfiles.external,
+        warmth: voiceProfiles.external.warmth,
+        speed: voiceProfiles.external.speakingRate,
+      };
+    }
     voiceManager.applyConfig(patch);
     // If pipeline settings are included, apply them too
     if (patch.pipeline && typeof patch.pipeline === 'object') {
@@ -830,9 +890,11 @@ router.post('/calls/start', async (req, res) => {
   }
 
   try {
+    const externalProfile = resolveRequestVoiceProfile(req, null, 'external');
     const session = await voiceManager.triggerCall(sessionId, {
       greeting,
       profile: profile || cfg.customer?.profile || 'customer_default',
+      voiceProfile: externalProfile,
     });
     res.json({ ok: true, session: session || { sessionId } });
   } catch (err) {
@@ -891,9 +953,18 @@ router.post('/calls/test', async (req, res) => {
   }
   const sid = `test-${Date.now()}`;
   try {
+    const externalProfile = resolveRequestVoiceProfile(req, null, 'external');
     await callEngine.startCall(sid, {
       profile: cfg.customer?.profile || 'customer_default',
-      greeting: 'Hello! This is a customer voice test. Everything sounds great.',
+      voiceProfile: externalProfile,
+      voiceCore: voiceTeammate.profileToVoiceCore(externalProfile, cfg.voiceCore || {}),
+      restoreVoice: {
+        provider: cfg.provider,
+        profile: cfg.profile,
+        voiceCore: cfg.voiceCore,
+        voiceProfile: cfg.voiceProfiles?.internal,
+      },
+      greeting: req.body?.greeting || 'Hello, this is a customer voice test. I can help in a warm, professional voice.',
     });
     await callEngine.endCall(sid, 'user_ended');
     res.json({ ok: true, message: 'Customer voice test dispatched.' });
@@ -908,25 +979,60 @@ router.post('/calls/test', async (req, res) => {
 // Body: { text: string, provider?: 'voice_core_local'|'voice_lite'|'fish_speech'|'personaplex', persona?: {...} }
 // Returns audio/wav binary on success, or JSON error.
 router.post('/synthesize', async (req, res) => {
-  const { text, persona = {}, provider, language, voice, gender, emotion, emotion_intensity, speaking_rate, energy, pause_style } = req.body || {};
+  const {
+    text,
+    persona = {},
+    provider,
+    language,
+    voice,
+    gender,
+    mode,
+    voiceProfile,
+    voice_profile,
+    tone,
+    warmth,
+    emotion,
+    emotion_intensity,
+    emotionIntensity,
+    speaking_rate,
+    speakingRate,
+    energy,
+    pause_style,
+  } = req.body || {};
   if (!text || typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ ok: false, error: 'text is required.' });
   }
   const cfg = voiceManager.getConfig();
   const selectedProvider = provider || persona.provider || cfg.provider || 'voice_core_local';
+  const selectedVoiceProfile = voiceTeammate.normalizeVoiceProfile({
+    ...(voiceProfile || voice_profile || {}),
+    ...persona,
+    mode: mode || persona.mode,
+    voice: voice || persona.voice || (voiceProfile || voice_profile || {}).voice,
+    gender: gender || persona.gender || (voiceProfile || voice_profile || {}).gender,
+    tone: tone || persona.tone || (voiceProfile || voice_profile || {}).tone,
+    warmth: warmth ?? persona.warmth ?? (voiceProfile || voice_profile || {}).warmth,
+    emotion: emotion || persona.emotion || (voiceProfile || voice_profile || {}).emotion,
+    emotionIntensity: emotionIntensity ?? emotion_intensity ?? persona.emotionIntensity ?? persona.emotion_intensity ?? (voiceProfile || voice_profile || {}).emotionIntensity,
+    speakingRate: speakingRate ?? speaking_rate ?? persona.speakingRate ?? persona.speaking_rate ?? (voiceProfile || voice_profile || {}).speakingRate,
+    energy: energy ?? persona.energy ?? (voiceProfile || voice_profile || {}).energy,
+  }, cfg, mode || persona.mode || 'internal');
+  const profileSynth = voiceTeammate.profileToSynthesisOptions(selectedVoiceProfile, { persona });
 
   if (selectedProvider === 'voice_core_local' || selectedProvider === 'voice_core' || selectedProvider === 'default_voice') {
     try {
       const synth = await voiceRuntime.synthesizeVoiceCore(text.trim(), {
         language: language || persona.language,
-        voice: voice || persona.voice || 'default',
-        gender: gender || persona.gender,
-        emotion: emotion || persona.emotion || persona.tone,
-        emotion_intensity: emotion_intensity ?? persona.emotion_intensity,
-        speaking_rate: speaking_rate ?? persona.speaking_rate ?? persona.speed,
-        energy: energy ?? persona.energy,
+        voice: profileSynth.voice,
+        gender: profileSynth.gender,
+        tone: profileSynth.tone,
+        warmth: profileSynth.warmth,
+        emotion: profileSynth.emotion,
+        emotion_intensity: profileSynth.emotion_intensity,
+        speaking_rate: profileSynth.speaking_rate,
+        energy: profileSynth.energy,
         pause_style: pause_style || persona.pause_style,
-        persona,
+        persona: profileSynth.persona,
         threads: persona?.voiceCore?.threads || persona?.voiceLite?.threads,
         timeoutMs: persona?.voiceCore?.timeoutMs || persona?.voiceLite?.timeoutMs,
       });
@@ -938,6 +1044,8 @@ router.post('/synthesize', async (req, res) => {
       res.setHeader('X-Voice-Provider', 'voice_core_local');
       res.setHeader('X-Voice-Language', meta.language || language || '');
       res.setHeader('X-Voice-Voice', meta.voice || voice || '');
+      res.setHeader('X-Voice-Profile-Mode', selectedVoiceProfile.mode);
+      res.setHeader('X-Voice-Gender', selectedVoiceProfile.gender);
       if (meta.speech_plan?.emotion) res.setHeader('X-Voice-Emotion', meta.speech_plan.emotion);
       if (meta.rtf != null) res.setHeader('X-Voice-RTF', String(meta.rtf));
       if (meta.ttfa_ms != null) res.setHeader('X-Voice-TTFA', String(meta.ttfa_ms));
@@ -963,12 +1071,15 @@ router.post('/synthesize', async (req, res) => {
       const synth = await voiceRuntime.synthesizeVoiceLite(text.trim(), {
         language: language || persona.language,
         voice: voice || persona.voice || (selectedProvider === 'voice_lite_base' ? 'base' : 'custom'),
-        emotion: emotion || persona.emotion || persona.tone,
-        emotion_intensity: emotion_intensity ?? persona.emotion_intensity,
-        speaking_rate: speaking_rate ?? persona.speaking_rate ?? persona.speed,
-        energy: energy ?? persona.energy,
+        gender: profileSynth.gender,
+        tone: profileSynth.tone,
+        warmth: profileSynth.warmth,
+        emotion: profileSynth.emotion,
+        emotion_intensity: profileSynth.emotion_intensity,
+        speaking_rate: profileSynth.speaking_rate,
+        energy: profileSynth.energy,
         pause_style: pause_style || persona.pause_style,
-        persona,
+        persona: profileSynth.persona,
         threads: persona?.voiceLite?.threads,
         timeoutMs: persona?.voiceLite?.timeoutMs,
       });
@@ -980,6 +1091,8 @@ router.post('/synthesize', async (req, res) => {
       res.setHeader('X-Voice-Provider', 'voice_lite_cpu');
       res.setHeader('X-Voice-Language', meta.language || language || '');
       res.setHeader('X-Voice-Voice', meta.voice || voice || '');
+      res.setHeader('X-Voice-Profile-Mode', selectedVoiceProfile.mode);
+      res.setHeader('X-Voice-Gender', selectedVoiceProfile.gender);
       if (meta.rtf != null) res.setHeader('X-Voice-RTF', String(meta.rtf));
       if (meta.ttfa_ms != null) res.setHeader('X-Voice-TTFA', String(meta.ttfa_ms));
       res.setHeader('X-Voice-Artifact-Id', artifact.id);

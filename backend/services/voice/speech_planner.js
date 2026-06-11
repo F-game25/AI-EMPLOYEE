@@ -121,8 +121,9 @@ function planSpeech(text, options = {}) {
     1.15,
     preset.speaking_rate,
   );
-  const energy = clamp(options.energy ?? persona.energy, 0.2, 0.8, preset.energy);
-  const pauseStyle = String(options.pause_style || options.pauseStyle || persona.pause_style || preset.pause_style || 'natural');
+  const warmth = clamp(options.warmth ?? persona.warmth, 0, 1, 0.5);
+  const energy = clamp(options.energy ?? persona.energy, 0.2, 0.8, preset.energy + ((warmth - 0.5) * 0.08));
+  const pauseStyle = String(options.pause_style || options.pauseStyle || persona.pause_style || (warmth > 0.65 ? 'natural' : preset.pause_style) || 'natural');
   const cleaned = applyNaturalPauses(cleanMarkdown(text), pauseStyle);
   const chunks = splitSentences(cleaned);
   return {
@@ -131,6 +132,7 @@ function planSpeech(text, options = {}) {
     emotion,
     emotion_intensity: emotionIntensity,
     speaking_rate: speakingRate,
+    warmth,
     energy,
     pause_style: pauseStyle,
     supported_emotions: SUPPORTED_EMOTIONS.slice(),

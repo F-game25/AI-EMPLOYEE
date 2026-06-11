@@ -4,11 +4,11 @@ import { setVoiceAnalyser } from '../../hooks/useVoiceLipSync'
 import { VOICE_PHASES, useVoiceStore } from '../../store/voiceStore'
 import './VoiceModal.css'
 
-const GENDERS = ['NEUTRAL', 'MALE', 'FEMALE']
-const TONES = ['CALM', 'PROFESSIONAL', 'WARM', 'AUTHORITATIVE']
+const GENDERS = ['MALE', 'FEMALE']
+const TONES = ['CALM', 'WARM', 'FOCUSED', 'AUTHORITATIVE', 'CONCERNED', 'URGENT', 'PROFESSIONAL']
 const EMOTIONS = ['warm_confident', 'calm', 'focused', 'curious', 'concerned', 'firm', 'urgent', 'subtle_excited']
 const PRESETS = [
-  { id: 'analyst', label: 'ANALYST', gender: 'NEUTRAL', tone: 'PROFESSIONAL' },
+  { id: 'analyst', label: 'ANALYST', gender: 'FEMALE', tone: 'PROFESSIONAL' },
   { id: 'concierge', label: 'CONCIERGE', gender: 'FEMALE', tone: 'WARM' },
   { id: 'sentinel', label: 'SENTINEL', gender: 'MALE', tone: 'AUTHORITATIVE' },
 ]
@@ -49,6 +49,15 @@ function genderLabelFromConfig(value) {
   if (normalized === 'male' || normalized === 'masculine') return 'MALE'
   if (normalized === 'female' || normalized === 'feminine') return 'FEMALE'
   return 'NEUTRAL'
+}
+
+function toneLabelFromConfig(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'firm') return 'AUTHORITATIVE'
+  if (normalized === 'warm_confident') return 'WARM'
+  return ['calm', 'warm', 'focused', 'authoritative', 'concerned', 'urgent', 'professional'].includes(normalized)
+    ? normalized.toUpperCase()
+    : 'WARM'
 }
 
 function chooseRecorderMimeType() {
@@ -151,12 +160,17 @@ export default function VoiceModal() {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('persona')
   const [gender, setGender] = useState('FEMALE')
-  const [tone, setTone] = useState('PROFESSIONAL')
+  const [tone, setTone] = useState('WARM')
   const [userName, setUserName] = useState('Lars')
   const [userRank, setUserRank] = useState('Chief')
+  const [voiceMode, setVoiceMode] = useState('internal')
+  const [voiceProfiles, setVoiceProfiles] = useState(null)
+  const [externalEnabled, setExternalEnabled] = useState(false)
   const [provider, setProvider] = useState('voice_core_local')
   const [emotion, setEmotion] = useState('warm_confident')
   const [emotionIntensity, setEmotionIntensity] = useState(0.35)
+  const [warmth, setWarmth] = useState(0.55)
+  const [energy, setEnergy] = useState(0.55)
   const [voiceLanguage, setVoiceLanguage] = useState('auto')
   const [voiceCoreSettings, setVoiceCoreSettings] = useState({
     voice: 'female',
@@ -193,6 +207,7 @@ export default function VoiceModal() {
   const [lastArtifact, setLastArtifact] = useState(null)
   const [runtimeStatus, setRuntimeStatus] = useState(null)
   const [recordingMode, setRecordingMode] = useState('idle')
+  const [lastTurnMeta, setLastTurnMeta] = useState(null)
 
   const voiceSessionId = useVoiceStore(state => state.sessionId)
   const voicePhase = useVoiceStore(state => state.phase)
@@ -225,6 +240,23 @@ export default function VoiceModal() {
   const micStreamRef = useRef(null)
   const micSourceRef = useRef(null)
   const micRafRef = useRef(0)
+
+  const buildVoiceProfile = useCallback((modeOverride = voiceMode, overrides = {}) => {
+    const mode = modeOverride === 'external' ? 'external' : 'internal'
+    const address = `${userRank.trim() || 'Chief'} ${userName.trim() || 'Lars'}`
+    return {
+      mode,
+      gender: voiceGenderFromLabel(overrides.gender || gender),
+      tone: String(overrides.tone || tone || 'WARM').toLowerCase(),
+      warmth: Number(overrides.warmth ?? warmth),
+      emotion: overrides.emotion || emotion,
+      emotionIntensity: Number(overrides.emotionIntensity ?? emotionIntensity),
+      speakingRate: Number(overrides.speakingRate ?? voiceCoreSettings.speakingRate ?? 1),
+      energy: Number(overrides.energy ?? energy),
+      addressUserAs: mode === 'external' ? 'customer' : address,
+      approvalMode: 'approval_gates',
+    }
+  }, [emotion, emotionIntensity, energy, gender, tone, userName, userRank, voiceCoreSettings.speakingRate, voiceMode, warmth])
 
   const getAudioContext = useCallback(async () => {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext
@@ -321,17 +353,21 @@ export default function VoiceModal() {
     return analyser
   }, [getAudioContext, setVoiceAudioLevel])
 
-  const ensureSession = useCallback(async () => {
+  const ensureSession = useCallback(async (forceNew = false) => {
     const current = useVoiceStore.getState().sessionId
-    if (current) return current
-    const data = await api.voice.createSession({ source: 'voice_modal' })
+    if (current && !forceNew) return current
+    const data = await api.voice.createSession({
+      source: 'voice_modal',
+      voiceMode,
+      voiceProfile: buildVoiceProfile(),
+    })
     if (data.runtime) setVoiceRuntime(data.runtime)
     if (data.session) {
       setVoiceSession(data.session)
       return data.session.id
     }
     throw new Error('Voice session did not start.')
-  }, [setVoiceRuntime, setVoiceSession])
+  }, [buildVoiceProfile, setVoiceRuntime, setVoiceSession, voiceMode])
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -342,6 +378,8 @@ export default function VoiceModal() {
       const fish = cfg.fishSpeech || {}
       const voiceCore = cfg.voiceCore || {}
       const voiceLite = cfg.voiceLite || {}
+      const profiles = data.voice_profiles || cfg.voiceProfiles || {}
+      const activeProfile = profiles[voiceMode] || profiles.internal || {}
       const configuredProvider = cfg.provider === 'voice_core_local'
         ? 'voice_core_local'
         : cfg.provider === 'voice_lite'
@@ -350,10 +388,15 @@ export default function VoiceModal() {
       setProvider(configuredProvider)
       setUserName(identity.userName || 'Lars')
       setUserRank(identity.rank || 'Chief')
-      setGender(genderLabelFromConfig(voiceCore.gender || voiceCore.voice || identity.voiceGender || 'female'))
+      setVoiceProfiles(profiles)
+      setExternalEnabled(Boolean(cfg.customer?.enabled))
+      setGender(genderLabelFromConfig(activeProfile.gender || voiceCore.gender || voiceCore.voice || identity.voiceGender || 'female'))
+      setTone(toneLabelFromConfig(activeProfile.tone || voiceCore.tone || 'warm'))
       setVoiceLanguage(voiceCore.language || voiceLite.language || 'auto')
-      setEmotion(voiceCore.emotion || 'warm_confident')
-      setEmotionIntensity(Number(voiceCore.emotionIntensity ?? 0.35))
+      setEmotion(activeProfile.emotion || voiceCore.emotion || 'warm_confident')
+      setEmotionIntensity(Number(activeProfile.emotionIntensity ?? voiceCore.emotionIntensity ?? 0.35))
+      setWarmth(Number(activeProfile.warmth ?? voiceCore.warmth ?? 0.55))
+      setEnergy(Number(activeProfile.energy ?? voiceCore.energy ?? 0.55))
       setVoiceCoreSettings(prev => ({ ...prev, ...voiceCore }))
       setVoiceLiteSettings(prev => ({ ...prev, ...voiceLite }))
       setFishSettings(prev => ({ ...prev, ...fish, seed: fish.seed ?? '' }))
@@ -379,7 +422,7 @@ export default function VoiceModal() {
       setStatus({ connected: false, backend: 'offline', detail: e.message })
       setVoiceError(e.message)
     }
-  }, [setVoiceError, setVoiceRuntime])
+  }, [setVoiceError, setVoiceRuntime, voiceMode])
 
   useEffect(() => {
     const openHandler = () => setOpen(true)
@@ -405,6 +448,25 @@ export default function VoiceModal() {
   }, [ensureSession, open, refreshStatus, setVoiceError])
 
   useEffect(() => {
+    const profile = voiceProfiles?.[voiceMode]
+    if (!profile) return
+    setGender(genderLabelFromConfig(profile.gender))
+    setTone(toneLabelFromConfig(profile.tone))
+    setEmotion(profile.emotion || 'warm_confident')
+    setEmotionIntensity(Number(profile.emotionIntensity ?? 0.35))
+    setWarmth(Number(profile.warmth ?? (voiceMode === 'external' ? 0.7 : 0.55)))
+    setEnergy(Number(profile.energy ?? 0.55))
+    setVoiceCoreSettings(prev => ({
+      ...prev,
+      voice: voiceGenderFromLabel(profile.gender),
+      gender: voiceGenderFromLabel(profile.gender),
+      speakingRate: Number(profile.speakingRate ?? prev.speakingRate ?? 1),
+      warmth: Number(profile.warmth ?? prev.warmth ?? 0.55),
+      energy: Number(profile.energy ?? prev.energy ?? 0.55),
+    }))
+  }, [voiceMode, voiceProfiles])
+
+  useEffect(() => {
     if (!open || !voiceSessionId) return undefined
     const controller = new AbortController()
     api.voice.subscribeSessionEvents(voiceSessionId, applyVoiceEvent, { signal: controller.signal })
@@ -427,7 +489,7 @@ export default function VoiceModal() {
   }, [])
 
   const startRecording = useCallback(async () => {
-    const sessionId = await ensureSession().catch(e => {
+    const sessionId = await ensureSession(true).catch(e => {
       setVoiceError(e.message)
       return null
     })
@@ -626,13 +688,14 @@ export default function VoiceModal() {
     window.speechSynthesis.speak(utterance)
   }, [gender, setVoiceAudioLevel, setVoiceError, setVoicePhase, setVoiceSpeaking])
 
-  const playBackendVoice = useCallback(async (text) => {
+  const playBackendVoice = useCallback(async (text, overrides = {}) => {
     stopAudioPlayback()
     setPlayback('synthesizing local voice...')
     setLastArtifact(null)
     setVoicePhase(VOICE_PHASES.THINKING)
     const selectedLanguage = voiceLanguage === 'auto' ? detectReplyLanguage(text) : voiceLanguage
-    const selectedVoiceGender = voiceGenderFromLabel(gender)
+    const selectedProfile = buildVoiceProfile(overrides.mode || voiceMode, overrides)
+    const selectedVoiceGender = selectedProfile.gender
     const selectedVoice = provider === 'voice_core_local'
       ? selectedVoiceGender
       : provider === 'voice_lite_base'
@@ -648,25 +711,37 @@ export default function VoiceModal() {
       body: JSON.stringify({
         text,
         provider,
+        mode: selectedProfile.mode,
+        voiceProfile: selectedProfile,
         language: selectedLanguage,
         voice: selectedVoice,
         gender: selectedVoiceGender,
-        emotion,
-        emotion_intensity: Number(emotionIntensity),
-        speaking_rate: Number(voiceCoreSettings.speakingRate || 1),
+        tone: selectedProfile.tone,
+        warmth: selectedProfile.warmth,
+        emotion: selectedProfile.emotion,
+        emotion_intensity: selectedProfile.emotionIntensity,
+        speaking_rate: selectedProfile.speakingRate,
+        energy: selectedProfile.energy,
         persona: {
           provider,
+          mode: selectedProfile.mode,
           language: selectedLanguage,
           voice: selectedVoice,
           gender: selectedVoiceGender,
-          tone: tone.toLowerCase(),
-          emotion,
-          emotion_intensity: Number(emotionIntensity),
-          speaking_rate: Number(voiceCoreSettings.speakingRate || 1),
+          tone: selectedProfile.tone,
+          warmth: selectedProfile.warmth,
+          emotion: selectedProfile.emotion,
+          emotion_intensity: selectedProfile.emotionIntensity,
+          speaking_rate: selectedProfile.speakingRate,
+          energy: selectedProfile.energy,
+          addressUserAs: selectedProfile.addressUserAs,
+          approvalMode: selectedProfile.approvalMode,
           voiceCore: {
             ...voiceCoreSettings,
             voice: selectedVoiceGender,
             gender: selectedVoiceGender,
+            warmth: selectedProfile.warmth,
+            energy: selectedProfile.energy,
             threads: Number(voiceCoreSettings.threads || 4),
             timeoutMs: Number(voiceCoreSettings.timeoutMs || 30000),
           },
@@ -723,21 +798,19 @@ export default function VoiceModal() {
     return true
   }, [
     attachPlaybackAnalyser,
+    buildVoiceProfile,
     cleanupAudioAnalyser,
     fishSettings,
-    emotion,
-    emotionIntensity,
-    gender,
     provider,
     setVoiceError,
     setVoicePhase,
     setVoiceSpeaking,
     speakBrowserFallback,
     stopAudioPlayback,
-    tone,
     voiceCoreSettings,
     voiceLanguage,
     voiceLiteSettings,
+    voiceMode,
   ])
 
   useEffect(() => {
@@ -749,17 +822,30 @@ export default function VoiceModal() {
   const testVoice = useCallback(() => {
     const address = `${userRank.trim() || 'Chief'} ${userName.trim() || 'Lars'}`
     const sample = `${address}, command voice link established. Default human voice ready in ${voiceGenderFromLabel(gender)} mode. I can converse, plan with you, and route approved voice commands through the local system.`
-    playBackendVoice(sample).catch((e) => {
+    playBackendVoice(sample, { mode: 'internal' }).catch((e) => {
       setPlayback(`backend error: ${e.message}. Browser fallback used.`)
       if (provider === 'local' || voiceLiteSettings.localFallback || voiceCoreSettings.localFallback || fishSettings.localFallback) speakBrowserFallback(sample)
     })
   }, [fishSettings.localFallback, gender, playBackendVoice, provider, speakBrowserFallback, userName, userRank, voiceCoreSettings.localFallback, voiceLiteSettings.localFallback])
+
+  const testExternalVoice = useCallback(() => {
+    const sample = 'Hello, this is the external customer voice. I can help clearly and professionally while keeping internal system details private.'
+    playBackendVoice(sample, { mode: 'external' }).catch((e) => {
+      setPlayback(`external voice test failed: ${e.message}`)
+    })
+  }, [playBackendVoice])
 
   const saveVoiceConfig = useCallback(async () => {
     setSaving(true)
     setPlayback('')
     try {
       const selectedVoiceGender = voiceGenderFromLabel(gender)
+      const activeProfile = buildVoiceProfile()
+      const nextVoiceProfiles = {
+        internal: voiceProfiles?.internal || buildVoiceProfile('internal'),
+        external: voiceProfiles?.external || buildVoiceProfile('external'),
+        [activeProfile.mode]: activeProfile,
+      }
       const payload = {
         provider: provider.startsWith('voice_lite') ? 'voice_lite' : provider,
         identity: {
@@ -768,15 +854,19 @@ export default function VoiceModal() {
           addressStyle: 'command',
           startupStyle: 'soldier',
         },
+        voiceProfiles: nextVoiceProfiles,
         voiceCore: {
           ...voiceCoreSettings,
           enabled: true,
           language: voiceLanguage === 'auto' ? 'en' : voiceLanguage,
           voice: selectedVoiceGender,
           gender: selectedVoiceGender,
-          emotion,
-          emotionIntensity: Number(emotionIntensity),
-          speakingRate: Number(voiceCoreSettings.speakingRate || 1),
+          tone: activeProfile.tone,
+          warmth: activeProfile.warmth,
+          emotion: activeProfile.emotion,
+          emotionIntensity: activeProfile.emotionIntensity,
+          speakingRate: activeProfile.speakingRate,
+          energy: activeProfile.energy,
           localFallback: Boolean(voiceCoreSettings.localFallback),
           threads: Number(voiceCoreSettings.threads || 4),
           timeoutMs: Number(voiceCoreSettings.timeoutMs || 30000),
@@ -801,6 +891,13 @@ export default function VoiceModal() {
           maxNewTokens: Number(fishSettings.maxNewTokens),
           seed: fishSettings.seed === '' ? null : Number(fishSettings.seed),
         },
+        customer: {
+          enabled: Boolean(externalEnabled),
+          profile: 'customer_default',
+          warmth: nextVoiceProfiles.external.warmth,
+          speed: nextVoiceProfiles.external.speakingRate,
+          voiceProfile: nextVoiceProfiles.external,
+        },
       }
       await api.voice.saveConfig(payload)
       setPlayback('voice config saved')
@@ -811,7 +908,7 @@ export default function VoiceModal() {
     } finally {
       setSaving(false)
     }
-  }, [emotion, emotionIntensity, fishSettings, gender, provider, refreshStatus, setVoiceError, userName, userRank, voiceCoreSettings, voiceLanguage, voiceLiteSettings])
+  }, [buildVoiceProfile, externalEnabled, fishSettings, gender, provider, refreshStatus, setVoiceError, userName, userRank, voiceCoreSettings, voiceLanguage, voiceLiteSettings, voiceProfiles])
 
   const updateFish = useCallback((key, value) => {
     setFishSettings(prev => ({ ...prev, [key]: value }))
@@ -829,10 +926,20 @@ export default function VoiceModal() {
     setVoiceTranscript(text)
     setVoicePhase(VOICE_PHASES.TRANSCRIBING)
     try {
-      const sessionId = await ensureSession()
+      const profile = buildVoiceProfile()
+      const sessionId = await ensureSession(true)
       setVoicePhase(VOICE_PHASES.THINKING)
-      const data = await api.voice.sendSessionText(sessionId, text)
-      const reply = data.reply || data.message || data.content || 'No response'
+      const data = await api.voice.sendSessionText(sessionId, text, {
+        voiceProfile: profile,
+        voice_mode: profile.mode,
+      })
+      setLastTurnMeta({
+        source: data.chat?.source || data.structured_result?.source || 'unknown',
+        execution_state: data.execution_state || 'unknown',
+        approval_required: Boolean(data.approval_required),
+        fallback_reason: data.fallback_reason || '',
+      })
+      const reply = data.spoken_reply || data.reply || data.message || data.content || 'No response'
       setAiResponse(reply)
       setVoiceReply(reply, data.latency_ms ?? null)
       await playBackendVoice(reply).catch(() => speakBrowserFallback(reply))
@@ -844,6 +951,7 @@ export default function VoiceModal() {
     }
   }, [
     ensureSession,
+    buildVoiceProfile,
     playBackendVoice,
     sending,
     setVoiceError,
@@ -949,6 +1057,15 @@ export default function VoiceModal() {
                   </button>
                 ))}
               </div>
+              <div className="vm-label">MODE</div>
+              <div className="vm-options">
+                <button className={`vm-opt ${voiceMode === 'internal' ? 'active' : ''}`} onClick={() => setVoiceMode('internal')}>INTERNAL</button>
+                <button className={`vm-opt ${voiceMode === 'external' ? 'active' : ''}`} onClick={() => setVoiceMode('external')}>EXTERNAL</button>
+              </div>
+              <label className="vm-check">
+                <input type="checkbox" checked={Boolean(externalEnabled)} onChange={e => setExternalEnabled(e.target.checked)} />
+                Enable external customer voice
+              </label>
               <div className="vm-label">ADDRESS</div>
               <div className="vm-grid">
                 <label>
@@ -984,9 +1101,27 @@ export default function VoiceModal() {
                   >{t}</button>
                 ))}
               </div>
+              <div className="vm-grid">
+                <label>
+                  Warmth
+                  <input type="range" min="0" max="1" step="0.05" value={warmth} onChange={e => setWarmth(e.target.value)} />
+                  <span>{Number(warmth).toFixed(2)}</span>
+                </label>
+                <label>
+                  Energy
+                  <input type="range" min="0.2" max="0.8" step="0.05" value={energy} onChange={e => setEnergy(e.target.value)} />
+                  <span>{Number(energy).toFixed(2)}</span>
+                </label>
+              </div>
               <div className="vm-actions">
-                <button className="vm-action" onClick={testVoice}>TEST VOICE</button>
+                <button className="vm-action" onClick={testVoice}>SPEAK INTERNAL</button>
+                <button className="vm-action" onClick={testExternalVoice}>SPEAK EXTERNAL</button>
                 <button className="vm-action vm-action--ghost" onClick={interruptVoice}>INTERRUPT</button>
+              </div>
+              <div className="vm-actions">
+                <button className="vm-action vm-action--ghost" onClick={() => handleSendToAI('Make a short plan with me for testing this voice teammate.')}>FULL TURN</button>
+                <button className="vm-action vm-action--ghost" onClick={() => handleSendToAI('Create a safe local task to check voice command routing.')}>SAFE COMMAND</button>
+                <button className="vm-action vm-action--ghost" onClick={() => handleSendToAI('Send a client outreach message for Money Mode.')}>APPROVAL TEST</button>
               </div>
               {playback && <div className="vm-status-line">{playback}</div>}
             </div>
@@ -1035,6 +1170,14 @@ export default function VoiceModal() {
               {aiResponse && (
                 <div className="vm-ai-response">
                   <div className="vm-label">AI RESPONSE</div>
+                  {lastTurnMeta && (
+                    <div className="vm-runtime-state">
+                      <span>Source: {lastTurnMeta.source}</span>
+                      <span>Execution: {lastTurnMeta.execution_state}</span>
+                      <span>Approval: {lastTurnMeta.approval_required ? 'required' : 'not required'}</span>
+                      {lastTurnMeta.fallback_reason && <span>Fallback: {lastTurnMeta.fallback_reason}</span>}
+                    </div>
+                  )}
                   <div className="vm-response-text">{aiResponse}</div>
                   <button className="vm-action vm-action--ghost" onClick={() => playBackendVoice(aiResponse)}>REPLAY</button>
                 </div>
