@@ -103,6 +103,9 @@ class ExecutionBroker:
             "browser.extract": self._exec_browser_extract,
             "browser.capture": self._exec_browser_capture,
             "browser.close": self._exec_browser_close,
+            "context.retrieve": self._exec_context_retrieve,
+            "context.write": self._exec_context_write,
+            "context.compress_session": self._exec_context_compress_session,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -771,6 +774,82 @@ class ExecutionBroker:
         try:
             svc = get_browser_service()
             out = svc.close(sid) if sid else svc.close_all()
+            return {"status": "ok", **out}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+
+    # ── context.* (defensive: context_db missing → honest status, never throw) ──
+
+    @staticmethod
+    def _exec_context_retrieve(cap: Capability, ctx: dict) -> dict:
+        """Hybrid L0/L1 retrieval over the context tree — read-only, traced."""
+        query = str(ctx.get("query") or ctx.get("text") or "").strip()
+        if not query:
+            return {"status": "error", "note": "no query provided"}
+        try:
+            from memory.context_db.recursive_retriever import retrieve
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"context_db not importable: {exc}"}
+        try:
+            filters = ctx.get("filters")
+            out = retrieve(
+                query,
+                project_id=str(ctx.get("project_id") or "default"),
+                filters=filters if isinstance(filters, dict) else None,
+                top_k=int(ctx.get("top_k", 8) or 8),
+            )
+            return {"status": "ok", **out}
+        except Exception as exc:
+            return {"status": "error", "query": query, "error": str(exc)}
+
+    @staticmethod
+    def _exec_context_write(cap: Capability, ctx: dict) -> dict:
+        """Write one validated node into the context tree (L1 write).
+
+        Unsafe paths (traversal / bad root) come back as a structured
+        ``{status: 'refused'}`` — never an exception, never a write.
+        """
+        path = str(ctx.get("path") or "").strip()
+        content = ctx.get("content", ctx.get("value"))
+        if not path:
+            return {"status": "error", "note": "no path provided"}
+        if content is None:
+            return {"status": "error", "note": "no content provided"}
+        try:
+            from memory.context_db.context_tree import ContextTree
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"context_db not importable: {exc}"}
+        try:
+            tenant = str(ctx.get("tenant") or "default")
+            metadata = ctx.get("metadata")
+            node_id = ContextTree(tenant=tenant).write(
+                path, str(content),
+                metadata=metadata if isinstance(metadata, dict) else None)
+            return {"status": "ok", "node_id": node_id, "path": path,
+                    "tenant": tenant}
+        except ValueError as exc:
+            return {"status": "refused", "path": path, "note": str(exc)}
+        except Exception as exc:
+            return {"status": "error", "path": path, "error": str(exc)}
+
+    @staticmethod
+    def _exec_context_compress_session(cap: Capability, ctx: dict) -> dict:
+        """Compress a conversation into durable context nodes (heuristic)."""
+        messages = ctx.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return {"status": "error",
+                    "note": "messages must be a non-empty list"}
+        try:
+            from memory.context_db.session_compressor import compress_session
+        except Exception as exc:
+            return {"status": "unavailable",
+                    "note": f"context_db not importable: {exc}"}
+        try:
+            out = compress_session(
+                messages, project_id=str(ctx.get("project_id") or "default"),
+                tenant=str(ctx.get("tenant") or "default"))
             return {"status": "ok", **out}
         except Exception as exc:
             return {"status": "error", "error": str(exc)}
