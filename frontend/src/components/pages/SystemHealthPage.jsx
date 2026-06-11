@@ -3,6 +3,7 @@ import { useAppStore } from '../../store/appStore'
 import { useSystemStore } from '../../store/systemStore'
 import { useLiveData } from '../../hooks/useLiveData'
 import api from '../../api/client'
+import { StatusPill, EmptyState, NxButton, toastSuccess, toastError } from '../nexus-ui'
 import './SystemHealthPage.css'
 
 // Doctor diagnostics — restored from the removed DoctorPage. Backend live at
@@ -590,6 +591,166 @@ function LogStreamPanel() {
   )
 }
 
+// ── Service Control (P9) ────────────────────────────────────────────
+// Per-service status from /api/services/status (15s poll) + real actions:
+// Ollama start (existing endpoint), Python restart (arm/confirm like BootMenu).
+const _svcTone = (up) => (up === true ? 'success' : up === false ? 'alert' : 'idle')
+const _svcLabel = (up) => (up === true ? 'UP' : up === false ? 'DOWN' : 'N/A')
+
+function ServiceControlPanel() {
+  const { data, error, refresh } = useLiveData({ endpoint: '/api/services/status', pollMs: 15000 })
+  const [armed, setArmed] = useState(false)       // double-click-to-confirm for python restart
+  const [busy, setBusy] = useState(null)          // 'python' | 'ollama'
+  const [actionErr, setActionErr] = useState(null)
+  const armTimer = useRef(null)
+  useEffect(() => () => clearTimeout(armTimer.current), [])
+
+  const svc = data?.services || {}
+
+  const startOllama = useCallback(async () => {
+    setBusy('ollama'); setActionErr(null)
+    try {
+      const r = await api.post('/api/ollama/start', {})
+      if (r?.ok === false) throw new Error(r.error || 'Ollama did not start')
+      toastSuccess('Ollama started')
+    } catch (e) {
+      setActionErr(`Ollama: ${e.message}`); toastError(`Ollama start failed: ${e.message}`)
+    } finally { setBusy(null); refresh() }
+  }, [refresh])
+
+  const restartPython = useCallback(async () => {
+    if (!armed) {                                  // first click arms; second within 4s executes
+      setArmed(true)
+      clearTimeout(armTimer.current)
+      armTimer.current = setTimeout(() => setArmed(false), 4000)
+      return
+    }
+    clearTimeout(armTimer.current); setArmed(false)
+    setBusy('python'); setActionErr(null)
+    try {
+      const r = await api.post('/api/services/python/restart', {})
+      if (r?.ok === false) throw new Error(r.error || 'restart failed')
+      toastSuccess(`Python backend restarted (pid ${r.pid})`)
+    } catch (e) {
+      // 501 = not wired on this install, 503/502 = honest failure — never fake success.
+      setActionErr(`Python: ${e.message}`); toastError(`Python restart failed: ${e.message}`)
+    } finally { setBusy(null); refresh() }
+  }, [armed, refresh])
+
+  const rows = [
+    {
+      id: 'node', name: 'Node.js backend', up: svc.node ? true : null,
+      meta: svc.node ? `:${svc.node.port} · up ${fmtUptime(svc.node.uptime_s)}` : '—',
+      action: <span className="infra-svc-hint">restart via Emergency Controls</span>,
+    },
+    {
+      id: 'python', name: 'Python AI backend', up: svc.python?.up ?? null,
+      meta: svc.python ? `:${svc.python.port}${svc.python.latency_ms != null ? ` · ${svc.python.latency_ms}ms` : ''}` : '—',
+      action: (
+        <NxButton size="sm" variant={armed ? 'danger' : 'warn'} loading={busy === 'python'} onClick={restartPython}>
+          {armed ? 'CONFIRM RESTART?' : 'RESTART'}
+        </NxButton>
+      ),
+    },
+    {
+      id: 'ollama', name: 'Ollama (local AI)', up: svc.ollama?.up ?? null,
+      meta: svc.ollama ? `${svc.ollama.host || ''}${svc.ollama.detail ? ` · ${svc.ollama.detail}` : ''}` : '—',
+      action: svc.ollama?.up === false
+        ? <NxButton size="sm" variant="primary" loading={busy === 'ollama'} onClick={startOllama}>START</NxButton>
+        : <span className="infra-svc-hint">managed by start.sh</span>,
+    },
+    {
+      id: 'neo4j', name: 'Neo4j (brain graph)', up: svc.neo4j?.up ?? null,
+      meta: svc.neo4j?.note || '—',
+      action: <span className="infra-svc-hint">optional — SQLite graph is the floor</span>,
+    },
+  ]
+
+  return (
+    <div className="infra-svc-panel">
+      <div className="infra-diag-head">
+        <span className="infra-diag-title">SERVICE CONTROL</span>
+        <button className="infra-diag-runall" onClick={refresh}>↻ REFRESH</button>
+      </div>
+      {error && <div className="infra-live-note infra-live-note--warn">Service status unavailable: {error.message || String(error)}</div>}
+      <div className="infra-svc-rows">
+        {rows.map((s) => (
+          <div key={s.id} className="infra-svc-row">
+            <StatusPill size="sm" tone={_svcTone(s.up)} label={_svcLabel(s.up)} pulse={s.up === true} />
+            <span className="infra-svc-name">{s.name}</span>
+            <span className="infra-svc-meta">{s.meta}</span>
+            <span className="infra-svc-action">{s.action}</span>
+          </div>
+        ))}
+      </div>
+      {actionErr && <div className="infra-svc-err">{actionErr}</div>}
+    </div>
+  )
+}
+
+// ── Compute Router Status (P9) ──────────────────────────────────────
+// Tier → resolved local model from runtime/core/model_lanes.py via the
+// Python worker (/api/services/routing). Paid upgrades are display-only.
+const TIER_ORDER = ['FAST', 'NORMAL', 'HEAVY', 'DEEP_THINKING', 'CODE']
+const _provLabel = (u) => (u.provider ? `${u.provider}:${u.model}` : `${u.model} (rented GPU)`)
+
+function ComputeRouterStatus() {
+  const { data, error } = useLiveData({ endpoint: '/api/services/routing', pollMs: 30000 })
+  const tiers = data?.tiers || {}
+  const upgrades = data?.upgrades || {}
+  const budget = data?.budget
+
+  return (
+    <div className="infra-route-panel">
+      <div className="infra-diag-head">
+        <span className="infra-diag-title">COMPUTE ROUTER</span>
+        {budget?.gpu_name && (
+          <span className="infra-svc-meta">
+            {budget.gpu_name}{budget.vram_total_mb ? ` · ${Math.round((budget.vram_free_mb ?? 0) / 1024)}/${Math.round(budget.vram_total_mb / 1024)} GB VRAM free` : ''}
+          </span>
+        )}
+      </div>
+      {error || !data ? (
+        <EmptyState
+          icon="◎"
+          title="Compute router offline"
+          sub="The AI backend (port 18790) is not reachable — tier routing is unavailable."
+        />
+      ) : (
+        <table className="infra-table">
+          <thead>
+            <tr>
+              <th className="infra-table__th">TIER</th>
+              <th className="infra-table__th">LOCAL MODEL (FREE)</th>
+              <th className="infra-table__th">PAID UPGRADES</th>
+            </tr>
+          </thead>
+          <tbody>
+            {TIER_ORDER.map((t) => (
+              <tr key={t} className="infra-table__row">
+                <td className="infra-table__name">{t}</td>
+                <td className="infra-table__name">{tiers[t] || '—'}</td>
+                <td>
+                  {(upgrades[t] || []).length === 0
+                    ? <span className="infra-svc-hint">—</span>
+                    : (upgrades[t] || []).map((u, i) => (
+                        <div key={i} className="infra-route-upgrade">
+                          <span>{_provLabel(u)}</span>
+                          {(u.requires_approval || u.requires_payment) && (
+                            <span className="infra-route-badge">APPROVAL + PAYMENT</span>
+                          )}
+                        </div>
+                      ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ────────────────────────────────────────────────────────
 export default function SystemHealthPage() {
   const systemHealth  = useAppStore(s => s.systemHealth)
@@ -654,6 +815,12 @@ export default function SystemHealthPage() {
       <div className="infra-ops-row">
         <DiagnosticsPanel />
         <EmergencyPanel />
+      </div>
+
+      {/* Service control + compute routing (P9) */}
+      <div className="infra-ops-row">
+        <ServiceControlPanel />
+        <ComputeRouterStatus />
       </div>
 
       {/* Container grid */}

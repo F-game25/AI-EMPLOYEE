@@ -493,6 +493,11 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/api/companion/capabilities',          auth: true,        file: 'routes/companion.js' },
   { method: 'GET',    path: '/api/companion/state',                 auth: true,        file: 'routes/companion.js' },
 
+  // ── Service Control & Compute Routing (P9) ───────────────────────────────
+  { method: 'GET',    path: '/api/services/status',                 auth: true,        file: 'routes/services.js' },
+  { method: 'GET',    path: '/api/services/routing',                auth: true,        file: 'routes/services.js' },
+  { method: 'POST',   path: '/api/services/python/restart',         auth: true,        file: 'routes/services.js' },
+
   // ── Settings ──────────────────────────────────────────────────────────────
   { method: 'GET',    path: '/api/settings',                        auth: true,        file: 'routes/settings.js' },
   { method: 'POST',   path: '/api/settings',                        auth: true,        file: 'routes/settings.js' },

@@ -275,6 +275,20 @@ def _dispatch(op: str, args: dict):
         m = _mod('companion.capability_registry')
         return {'capabilities': m.get_capability_registry().to_dicts()}
 
+    # ── service control / compute routing visibility (P9) ───────────────────────
+    if op == 'lanes.status':
+        lanes = _mod('core.model_lanes')
+        try:
+            budget = _mod('engine.compute.resource_manager').get_resource_manager().to_dict()
+        except Exception:
+            budget = None
+        return {
+            'ok': True,
+            'tiers': lanes.tier_models(),
+            'upgrades': {t: lanes.upgrade_options(t) for t in ('CODE', 'HEAVY', 'DEEP_THINKING')},
+            'budget': budget,
+        }
+
     # ── evolution (offline learning engine — controller.handle_evolution_op) ─────
     # Controller supports exactly: status / traces / lessons / candidates /
     # promote / rollback. We expose only those; no invented ops.

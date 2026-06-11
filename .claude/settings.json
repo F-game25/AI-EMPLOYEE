@@ -105,7 +105,13 @@
       "Bash(awk '{s+=$1} END {print s\" KB\"}')",
       "Bash(grep -E '\\(__pycache__/|\\\\.pyc$|\\\\.pid$|state/.*\\\\.\\(db|db-shm|db-wal|jsonl\\)$|state/artifacts/|state/codex_cache/|state/agents\\\\.json\\)')",
       "Bash(grep -iE '^\\(README|LICENSE|CLAUDE|CONTRIBUTING|SECURITY|INSTALL|START_HERE|QUICKSTART|GETTING_STARTED|WINDOWS|AGENTS\\)\\\\.md$')",
-      "Bash(grep -iE '\\\\.\\(md|txt\\)$')"
+      "Bash(grep -iE '\\\\.\\(md|txt\\)$')",
+      "Bash(curl -s -w '\\\\nHTTP %{http_code}\\\\n' -H 'Authorization: Bearer __CMDSUB_OUTPUT__' http://localhost:8787/api/services/routing)",
+      "Bash(ps -o etime= -p 173444)",
+      "Bash(awk '{print $6, $7, $NF}')",
+      "Bash(git -C /home/lf/AI-EMPLOYEE show \"stash@{0}:backend/routes/services.js\")",
+      "Bash(git -C /home/lf/AI-EMPLOYEE log --all --oneline --follow -- backend/routes/services.js)",
+      "Bash(EVOLUTION_MODE=OFF bash start.sh)"
     ],
     "additionalDirectories": [
       "/tmp"

@@ -584,6 +584,9 @@ app.use('/api/orders', require('./routes/orders')(requireAuth));
 // Companion Gateway — conversation runtime + capability registry (Python worker)
 app.use('/api/companion', require('./routes/companion')(requireAuth));
 
+// Service Control & Compute Routing — per-service status/restart + model-lane visibility (P9)
+app.use('/api/services', require('./routes/services')(requireAuth));
+
 // Evolution Engine — offline learning: traces/lessons/candidates + promote/rollback (Python worker)
 app.use('/api/evolution', require('./routes/evolution')(requireAuth));
 
