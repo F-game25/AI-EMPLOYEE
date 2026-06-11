@@ -14,6 +14,7 @@ const voiceSessions = require('../services/voice/session_manager');
 const voiceRuntime = require('../services/voice/voice_runtime_manager');
 const voiceTeammate = require('../services/voice/voice_teammate_service');
 const { splitSentences } = require('../services/voice/stream_pipeline');
+const { getWorker } = require('../py_worker_client');
 
 const router = Router();
 const audioBodyParser = raw({
@@ -143,6 +144,35 @@ async function callChatPipeline(req, message, sessionId, voiceProfile) {
     },
   ];
   const failures = [];
+
+  // ── ONE BRAIN: companion runtime first ──────────────────────────────────────
+  // Voice turns route through the same conversation runtime as chat (intent
+  // classification, context resolution, capability execution, approval gates).
+  // The HTTP chat chain below remains as fallback when the Python worker is down.
+  try {
+    const comp = await getWorker().call('companion.message', {
+      text: message,
+      channel: 'voice',
+      session_id: sessionId,
+      context,
+    }, 60_000);
+    if (comp && comp.ok !== false && (comp.reply || comp.meta?.voice_summary)) {
+      const approvals = Array.isArray(comp.approvals_required) ? comp.approvals_required : [];
+      return {
+        payload: {
+          ...comp,
+          source: 'companion_runtime',
+          approval_required: approvals.length > 0,
+          status: approvals.length > 0 ? 'waiting_approval' : (comp.mode || 'ok'),
+        },
+        reply: comp.meta?.voice_summary || comp.reply,
+      };
+    }
+    failures.push({ source: 'companion_runtime', error: comp?.reply || 'empty companion reply' });
+  } catch (err) {
+    failures.push({ source: 'companion_runtime', error: String(err.message || err) });
+  }
+
   for (const candidate of candidates) {
     try {
       const response = await fetch(candidate.url, { method: 'POST', headers: candidate.headers, body });
