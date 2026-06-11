@@ -227,7 +227,9 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 
 ---
 
-### P9 — Remote / Voice / PC Control Layer
+### P9 — Remote / Voice / PC Control Layer — PARTIAL (cc865062, 6d24630a)
+
+**Done:** unified `/api/services` (status probes node/python/ollama/neo4j, lanes.status routing, safe pid-verified python restart), ServiceControlPanel + ComputeRouterStatus on Infrastructure page, pre-boot SYSTEM MENU (Boot/Update/Refresh/Reboot/Stop + auto-update). **Remaining:** live remote-GPU provisioning (needs provider keys — fabric is dry-run-gated by design), artifact sync-back, data-sync panel.
 
 **Goal:** Make local/remote/voice/compute a unified, visible operational layer (nr5 extra context).
 
@@ -342,7 +344,7 @@ Full design captured (build deferred to final phase):
 
 > Deferred/excluded from research.md: native C++ runtime (`vix`) → folded into **P9.5 Hybrid Rust** (profile-first); web crawler (`scrapy`, repo unverified) → deferred behind Browser Exec + robots/rate-limit gating; `pi` sandbox/state patterns → already covered by Forge sandbox + `safety_gate.py`.
 
-### Module 1 — Browser Execution Service  *(NEW — extends P6)*
+### Module 1 — Browser Execution Service  *(DONE — c01dc68b; extends P6)*
 - **Ref:** agent-browser (stable refs, accessibility-tree snapshots, action contracts). **Builds on:** existing `runtime/browsers/playwright` + CloakBrowser — adds the agent-facing tool service, doesn't replace Playwright.
 - **Paths:** `runtime/tools/browser/{browser_service,browser_session,tool_contracts,accessibility_snapshot,action_executor,screenshot_service,browser_sandbox,browser_events}.py`; `backend/routes/browser.js`; registered as a companion capability.
 - **Interfaces:** `open(url,profile) -> session_id`; `snapshot(s) -> {tree,refs}`; `act(s,action,ref,value)`; `extract(s,kind,ref)`; `capture(s,kind)`; `eval(s,js)` (read-only default). WS: `browser:status/action_started/finished/approval_required`.
