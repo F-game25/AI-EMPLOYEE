@@ -77,6 +77,118 @@
 
 @keyframes nxd-blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
+/* Forge operational runtime card */
+.nxd-forge {
+  border: 1px solid rgba(229,199,107,0.16);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(13,16,26,0.88), rgba(5,7,13,0.94));
+  box-shadow: inset 0 1px 0 rgba(255,230,170,0.06);
+  padding: 12px;
+}
+.nxd-forge__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.nxd-forge__kicker {
+  color: rgba(200,212,232,0.48);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+.nxd-forge__title {
+  color: #F5D26B;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.nxd-forge__state {
+  border: 1px solid rgba(200,212,232,0.18);
+  border-radius: 3px;
+  color: #C8D4E8;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  padding: 4px 6px;
+  text-transform: uppercase;
+}
+.nxd-forge__state--live { color: #00FF88; border-color: rgba(0,255,136,0.24); }
+.nxd-forge__state--degraded { color: #F59E0B; border-color: rgba(245,158,11,0.28); }
+.nxd-forge__run {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(229,199,107,0.12);
+  border-radius: 4px;
+  background: rgba(255,184,0,0.045);
+  color: #C8D4E8;
+  padding: 9px;
+  cursor: pointer;
+}
+.nxd-forge__run span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nxd-forge__run b {
+  display: block;
+  color: rgba(200,212,232,0.48);
+  font-size: 9px;
+  margin-top: 4px;
+}
+.nxd-forge__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.nxd-forge__grid button {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(200,212,232,0.10);
+  border-radius: 4px;
+  color: #C8D4E8;
+  cursor: pointer;
+  min-height: 46px;
+  padding: 7px;
+  text-align: left;
+}
+.nxd-forge__grid span,
+.nxd-forge__meta span {
+  color: rgba(200,212,232,0.44);
+  display: block;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+.nxd-forge__grid b,
+.nxd-forge__meta b {
+  color: #F5D26B;
+  display: block;
+  font-size: 12px;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.nxd-forge__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+.nxd-forge__report,
+.nxd-forge__error {
+  border-top: 1px solid rgba(200,212,232,0.10);
+  color: rgba(200,212,232,0.72);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 10px;
+  padding-top: 9px;
+}
+.nxd-forge__error { color: #F87171; }
+
 /* ── The stage — orb arena with corner panels ───────────────────────────────*/
 .nxd__stage {
   flex: 0 0 clamp(560px, 66vh, 820px);
@@ -814,3 +926,20 @@ html[data-perf="medium"] .snode {
   .nxd__stage { height: 320px; }
   .snode { display: none; } /* corner panels too complex for mobile */
 }
+
+/* ── Banners ────────────────────────────────────────────────────────────────*/
+.nxd__banner{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;font-size:12px;font-weight:600;letter-spacing:.04em;z-index:100}
+.nxd__banner--amber{background:rgba(245,158,11,.15);border-bottom:1px solid rgba(245,158,11,.4);color:#F59E0B}
+.nxd__banner--red{background:rgba(239,68,68,.15);border-bottom:1px solid rgba(239,68,68,.4);color:#EF4444}
+.nxd__banner__dismiss{cursor:pointer;opacity:.6;margin-left:12px}
+.nxd__banner__dismiss:hover{opacity:1}
+
+/* ── Node detail panel ───────────────────────────────────────────────────── */
+.nxd__node-overlay{position:fixed;inset:0;z-index:200}
+.nxd__node-detail{position:fixed;right:0;top:0;bottom:0;width:300px;background:var(--nxd-surface,#111);border-left:1px solid rgba(255,255,255,.1);padding:24px;z-index:201;display:flex;flex-direction:column;gap:16px;animation:nxd-slide-in .2s ease}
+@keyframes nxd-slide-in{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.nxd__node-detail__header{display:flex;justify-content:space-between;align-items:flex-start}
+.nxd__node-detail__close{cursor:pointer;opacity:.6;font-size:18px}
+.nxd__node-detail__close:hover{opacity:1}
+.nxd__node-detail__badge{font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(34,197,94,.2);color:#22C55E}
+.nxd__node-detail__run{margin-top:auto;padding:10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;cursor:pointer;color:inherit;font-size:12px;font-family:inherit;letter-spacing:.1em}

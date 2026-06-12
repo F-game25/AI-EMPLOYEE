@@ -69,9 +69,11 @@ async function _fetch(method, path, body, opts = {}) {
     }
     const text = await res.text().catch(() => '');
     let detail = text;
-    try { detail = JSON.parse(text)?.error ?? text; } catch { /* ignore */ }
+    let parsed = null;
+    try { parsed = JSON.parse(text); detail = parsed?.error ?? text; } catch { /* ignore */ }
     const err = new Error(detail || `HTTP ${res.status}`);
     err.status = res.status;
+    if (parsed) err.body = parsed;
     throw err;
   }
 
@@ -135,10 +137,13 @@ const api = {
 
   // ── Forge ─────────────────────────────────────────────────────────────────
   forge: {
+    runtime:  (query = '')      => api.get(`/api/forge/runtime${typeof query === 'string' ? query : ''}`),
+    diagnostics: ()            => api.get('/api/forge/diagnostics'),
+    getReports: (pid)          => api.get(`/api/forge/reports${pid ? `?project_id=${encodeURIComponent(pid)}` : ''}`),
     getProject: (id)         => api.get(`/api/forge/projects/${id}`),
-    submit:    (goal, opts)  => api.post('/api/forge/submit', { goal, ...opts }),
-    approve:   (id, by)      => api.post(`/api/forge/approve/${id}`, { approved_by: by }),
-    reject:    (id, reason)  => api.post(`/api/forge/reject/${id}`, { reason }),
+    submit:    (goal, opts)  => api.post('/api/forge/submit', typeof goal === 'object' && goal !== null ? goal : { goal, ...opts }),
+    approve:   (id, by)      => api.post(`/api/forge/approve/${id}`, typeof by === 'object' && by !== null ? by : { approved_by: by }),
+    reject:    (id, reason)  => api.post(`/api/forge/reject/${id}`, typeof reason === 'object' && reason !== null ? reason : { reason }),
     rollback:  (snapshot_id) => api.post('/api/forge/rollback', { snapshot_id }),
     queue:     ()            => api.get('/api/forge/queue'),
     snapshots: ()            => api.get('/api/forge/snapshots'),
@@ -244,14 +249,70 @@ const api = {
       consultHelperAdvisory:      (pid, payload)   => api.post(`/api/forge/projects/${pid}/helper-advisory/consult`, payload),
     },
 
-    // ── Phase 5 — Metrics / Replay / Patches / Approvals ────────────
+    // ── V5 — Project Runtime ────────────────────────────────────────
+	    v5: {
+	      startProject:       (body)       => api.post('/api/forge/v5/projects/start', body),
+	      getBrief:           (pid)        => api.get(`/api/forge/v5/projects/${pid}/brief`),
+	      getResearch:        (pid)        => api.get(`/api/forge/v5/projects/${pid}/research`),
+	      getGoals:           (pid)        => api.get(`/api/forge/v5/projects/${pid}/goals`),
+      executeGoal:        (pid, gid, body) => api.post(`/api/forge/v5/projects/${pid}/goals/${gid}/execute`, body || {}),
+      getQualityGate:     (gid)        => api.get(`/api/forge/v5/goals/${gid}/quality-gate`),
+      writeQualityGate:   (gid, body)  => api.post(`/api/forge/v5/goals/${gid}/quality-gate`, body || {}),
+      getReport:          (pid)        => api.get(`/api/forge/v5/projects/${pid}/report`),
+	      getComputeBackends: ()           => api.get('/api/forge/v5/compute/backends'),
+	      getModels:          ()           => api.get('/api/forge/v5/models'),
+	    },
+
+	    github: {
+	      status:             (pid)        => api.get(`/api/forge/projects/${pid}/github/status`),
+	      prepare:            (pid, body)  => api.post(`/api/forge/projects/${pid}/github/prepare`, body || {}),
+	      publish:            (pid, body)  => api.post(`/api/forge/projects/${pid}/github/publish`, body || {}),
+	    },
+
+	    v7: {
+	      getExecutionState:   (pid)            => api.get(`/api/forge/v7/projects/${pid}/execution-state`),
+	      getWorkspace:        (wid)            => api.get(`/api/forge/v7/workspaces/${wid}`),
+	      proposePatch:        (pid, gid, body) => api.post(`/api/forge/v7/projects/${pid}/goals/${gid}/propose-patch`, body || {}),
+	      createSandbox:       (pid, gid, body) => api.post(`/api/forge/v7/projects/${pid}/goals/${gid}/sandbox`, body || {}),
+	      applyPatchSandbox:   (wid, body)      => api.post(`/api/forge/v7/workspaces/${wid}/apply-patch`, body || {}),
+	      validateWorkspace:   (wid, body)      => api.post(`/api/forge/v7/workspaces/${wid}/validate`, body || {}),
+	      requestApply:        (pid, gid, body) => api.post(`/api/forge/v7/projects/${pid}/goals/${gid}/request-apply`, body || {}),
+	      approveApply:        (aid, body)      => api.post(`/api/forge/v7/approvals/${aid}/approve`, body || {}),
+	      rejectApply:         (aid, body)      => api.post(`/api/forge/v7/approvals/${aid}/reject`, body || {}),
+	      applyToWorkspace:    (pid, gid, body) => api.post(`/api/forge/v7/projects/${pid}/goals/${gid}/apply`, body || {}),
+	      postValidate:        (pid, gid, body) => api.post(`/api/forge/v7/projects/${pid}/goals/${gid}/post-validate`, body || {}),
+	      rollback:            (pid, gid, body) => api.post(`/api/forge/v7/projects/${pid}/goals/${gid}/rollback`, body || {}),
+	    },
+
+	    // ── Phase 5 — Metrics / Replay / Patches / Approvals ────────────
     getForgeMetrics:     (pid)       => api.get(`/api/forge/projects/${pid}/forge-metrics`),
+    getRun:              (rid)       => api.get(`/api/forge/runs/${rid}`),
+    pauseRun:            (rid)       => api.post(`/api/forge/runs/${rid}/pause`, {}),
+    resumeRun:           (rid)       => api.post(`/api/forge/runs/${rid}/resume`, {}),
+    cancelRun:           (rid)       => api.post(`/api/forge/runs/${rid}/cancel`, {}),
+    verifyRun:           (rid, body) => api.post(`/api/forge/runs/${rid}/verify`, body || {}),
+    applyRun:            (rid, body) => api.post(`/api/forge/runs/${rid}/apply`, body || {}),
+    getRunAudit:         (rid)       => api.get(`/api/forge/runs/${rid}/audit`),
+    getRunReport:        (rid)       => api.get(`/api/forge/runs/${rid}/report`),
     getRunReplay:        (rid)       => api.get(`/api/forge/runs/${rid}/replay`),
     getRunPatches:       (rid)       => api.get(`/api/forge/runs/${rid}/patches`),
     getPendingApprovals: (rid)       => api.get(`/api/forge/runs/${rid}/pending-approvals`),
     approveRunAction:    (rid, body) => api.post(`/api/forge/runs/${rid}/approve-action`, body),
     rejectRunAction:     (rid, body) => api.post(`/api/forge/runs/${rid}/reject-action`, body),
     continueRun:         (rid)       => api.post(`/api/forge/runs/${rid}/continue`, {}),
+
+    // ── V5 flat aliases ──────────────────────────────────────────────
+    v5StartProject:      (body)       => api.post('/api/forge/v5/projects/start', body),
+    v5GetBrief:          (id)         => api.get(`/api/forge/v5/projects/${id}/brief`),
+    v5GetResearch:       (id)         => api.get(`/api/forge/v5/projects/${id}/research`),
+    v5RunResearch:       (id)         => api.post(`/api/forge/v5/projects/${id}/research`),
+    v5GetGoals:          (id)         => api.get(`/api/forge/v5/projects/${id}/goals`),
+    v5PlanGoals:         (id)         => api.post(`/api/forge/v5/projects/${id}/goals/plan`),
+    v5ExecuteGoal:       (gid, body)  => api.post(`/api/forge/v5/goals/${gid}/execute`, body),
+    v5GetQualityGate:    (gid)        => api.get(`/api/forge/v5/goals/${gid}/quality-gate`),
+    v5GetReport:         (id)         => api.get(`/api/forge/v5/projects/${id}/report`),
+    v5GetCompute:        ()           => api.get('/api/forge/v5/compute/backends'),
+    v5GetModels:         ()           => api.get('/api/forge/v5/models'),
   },
 
   // ── System ────────────────────────────────────────────────────────────────

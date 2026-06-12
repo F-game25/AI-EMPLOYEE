@@ -134,6 +134,42 @@ module.exports = function createOrdersRouter(requireAuth) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // POST /api/orders/:id/betaald — confirm payment with PayPal transaction ID
+  r.post('/:id/betaald', requireAuth, async (req, res) => {
+    try {
+      const { referentie = '' } = req.body || {};
+      const result = await w().call('orders.betaald', { id: req.params.id, referentie }, 15_000);
+      res.status(result?.ok ? 200 : 400).json(result);
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // POST /api/orders/:id/demo-quality — heuristic quality gate on generated demo HTML
+  r.post('/:id/demo-quality', requireAuth, async (req, res) => {
+    try {
+      const result = await w().call('orders.demo_quality', { id: req.params.id }, 30_000);
+      res.status(result?.ok ? 200 : 500).json(result);
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // GET /api/orders/:id/resource-plan — compute backend recommendation for Forge build
+  r.get('/:id/resource-plan', requireAuth, async (req, res) => {
+    try {
+      const result = await w().call('orders.resource_plan', { id: req.params.id }, 15_000);
+      res.status(result?.ok ? 200 : 500).json(result);
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // POST /api/orders/:id/forge-handoff — create Ascend Forge V5 project from approved order
+  // Body: { override_payment?: boolean } — set true to send to Forge even without betaald status
+  r.post('/:id/forge-handoff', requireAuth, async (req, res) => {
+    try {
+      const host = (process.env.BASE_URL || '').replace(/\/$/, '') || (req.protocol + '://' + req.get('host'));
+      const overridePayment = !!(req.body?.override_payment);
+      const result = await w().call('orders.forge_handoff', { id: req.params.id, base_url: host, override_payment: overridePayment }, 120_000);
+      res.status(result?.ok ? 200 : 400).json(result);
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // POST /api/orders/:id/status
   r.post('/:id/status', requireAuth, async (req, res) => {
     try {

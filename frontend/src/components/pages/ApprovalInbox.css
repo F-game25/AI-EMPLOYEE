@@ -84,6 +84,12 @@
   color: #ffb1b1;
 }
 
+.approval-btn--ghost {
+  border-color: rgba(229, 199, 107, 0.18);
+  background: rgba(255, 255, 255, 0.035);
+  color: #f5d26b;
+}
+
 .approval-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr));

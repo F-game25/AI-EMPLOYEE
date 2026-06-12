@@ -9,11 +9,13 @@ import PendingReviewQueue from '../memory/PendingReviewQueue'
 import LearnTopicWizard from '../knowledge/LearnTopicWizard'
 import { useLearningStore } from '../../store/learningStore'
 import { useBrainStore, GROUP_COLORS } from '../../store/brainStore'
+import { useForgeStore } from '../../store/forgeStore'
 import './MemoryPage.css'
 
 const API = '/api/memory'
 const tabs = [
   ['facts', 'Personal Facts'],
+  ['knowledge', 'Knowledge Base'],
   ['conversations', 'Conversation History'],
   ['semantic', 'Semantic Store'],
   ['standing-topics', 'Standing Topics'],
@@ -495,6 +497,84 @@ function MemoryHero() {
   )
 }
 
+function ForgeLessonsPanel() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
+  const lessons = useForgeStore(s => s.memoryLessons)
+  const activeRun = useForgeStore(s => s.activeRun)
+  const refresh = useForgeStore(s => s.refresh)
+
+  useEffect(() => {
+    refresh({ silent: true, reason: 'memory_forge_lessons' }).catch(() => {})
+  }, [refresh])
+
+  if (!lessons?.length && !activeRun) return null
+
+  return (
+    <Panel title="Forge Lessons" className="mem-forge">
+      <div className="mem-forge__head">
+        <div>
+          <div className="mem-forge__title">{lessons?.length || 0} lesson candidates</div>
+          <div className="mem-forge__sub">Distilled from Forge run reports and audit trails.</div>
+        </div>
+        <button className="mem-btn mem-btn--xs" type="button" onClick={() => setActiveSection('ascend-forge')}>
+          Open Forge
+        </button>
+      </div>
+      <div className="mem-forge__list">
+        {(lessons || []).slice(0, 5).map((lesson, index) => (
+          <div key={lesson.lesson_id || lesson.id || index} className="mem-convo">
+            <div className="mem-convo__head">
+              <div className="mem-convo__title">{lesson.title || lesson.summary || lesson.category || 'Forge lesson'}</div>
+              <div className="mem-convo__meta">
+                <span>{lesson.confidence != null ? `confidence ${lesson.confidence}` : 'candidate'}</span>
+                <span>{lesson.source_run_id || lesson.run_id || activeRun?.run_id || 'no run link'}</span>
+              </div>
+            </div>
+            <div className="mem-convo__body">
+              <div className="mem-convo__summary">{lesson.content || lesson.text || lesson.rationale || 'No lesson body supplied.'}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
+function KnowledgeBase() {
+  const { data, loading, error } = useLiveData({
+    endpoint: '/api/knowledge/search',
+    wsEvent: 'memory:write',
+    transform: (d) => d.entries || [],
+  })
+  const entries = (data || []).slice(0, 50)
+  return (
+    <div className="mem-main">
+      <Panel title="Knowledge Base">
+        {loading && <LoadingSkeleton variant="list" rows={4} />}
+        {error && <ErrorState title="Knowledge base unavailable" message={error} />}
+        {!loading && !error && !entries.length && (
+          <EmptyState icon="◈" title="No knowledge entries yet" sub="Entries are added automatically as the system researches and learns." />
+        )}
+        <div className="mem-facts">
+          {entries.map((e, i) => (
+            <div key={e.id || `kb-${i}`} className="mem-fact-row">
+              <div className="mem-fact-key">{e.topic || 'Entry'}</div>
+              <div className="mem-fact-val">{e.content || '—'}</div>
+              <div className="mem-fact-meta">
+                <span>
+                  {e.source || 'system'}
+                  {e.importance != null ? ` · ${Math.round(e.importance * 100)}%` : ''}
+                  {e.tags?.length ? ` · ${e.tags.join(', ')}` : ''}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
 export default function MemoryPage() {
   const [tab, setTab] = useState('facts')
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -515,7 +595,9 @@ export default function MemoryPage() {
       </div>
       <MemoryHero />
       <MemoryHealth />
+      <ForgeLessonsPanel />
       {tab === 'facts' && <PersonalFacts />}
+      {tab === 'knowledge' && <KnowledgeBase />}
       {tab === 'conversations' && <ConversationHistory />}
       {tab === 'semantic' && <SemanticStore />}
       {tab === 'standing-topics' && (

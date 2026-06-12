@@ -271,6 +271,137 @@ function PitchBox({ order, onStatusChange }) {
   )
 }
 
+// ── Demo Quality Gate panel ───────────────────────────────────────────────────
+function DemoQualityPanel({ orderId }) {
+  const [result, setResult] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  async function run() {
+    setBusy(true); setErr(null)
+    try {
+      const res = await api.post(`/api/orders/${orderId}/demo-quality`, {})
+      if (res.ok) setResult(res)
+      else setErr(res.error || 'Quality check mislukt')
+    } catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+
+  const statusColor = result ? (result.status === 'passed' ? '#22c55e' : result.status === 'partially_passed' ? '#f59e0b' : '#ef4444') : null
+  return (
+    <div className="op-quality">
+      <div className="op-quality__header">
+        <span>Demo kwaliteitscheck</span>
+        {result && <span className="op-quality__badge" style={{ color: statusColor }}>{result.status === 'passed' ? '✓ Geslaagd' : result.status === 'partially_passed' ? '⚠ Gedeeltelijk' : '✗ Gefaald'} ({result.passed_dimensions}/{result.total_dimensions})</span>}
+        <button onClick={run} disabled={busy} className="op-quality__btn">{busy ? 'Checken…' : result ? 'Opnieuw' : 'Check kwaliteit'}</button>
+      </div>
+      {result && result.blocking_issues?.length > 0 && (
+        <ul className="op-quality__issues">
+          {result.blocking_issues.map((i, idx) => <li key={idx}>⚠ {i}</li>)}
+        </ul>
+      )}
+      {result && result.status === 'passed' && <p className="op-quality__ok">Demo is klaar voor pitch.</p>}
+      {err && <p className="op-err">{err}</p>}
+    </div>
+  )
+}
+
+// ── Resource Plan panel ───────────────────────────────────────────────────────
+function ResourcePlanPanel({ orderId }) {
+  const [plan, setPlan] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  async function load() {
+    setBusy(true); setErr(null)
+    try {
+      const res = await api.get(`/api/orders/${orderId}/resource-plan`)
+      if (res.ok) setPlan(res)
+      else setErr(res.error || 'Resource plan ophalen mislukt')
+    } catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="op-resource">
+      <div className="op-resource__header">
+        <span>Build resource plan</span>
+        <button onClick={load} disabled={busy} className="op-resource__btn">{busy ? 'Laden…' : plan ? 'Vernieuwen' : 'Bekijk resource plan'}</button>
+      </div>
+      {plan && (
+        <div className="op-resource__details">
+          <p><strong>Aanbevolen route:</strong> {plan.recommended_route} ({plan.recommended_compute_backend})</p>
+          <p><strong>Redenering:</strong> {plan.reasoning}</p>
+          {plan.approval_required && <p className="op-resource__warn">⚠ Goedkeuring vereist voor betaalde compute/API</p>}
+          {plan.risks?.map((r, i) => <p key={i} className="op-resource__risk">⚠ {r}</p>)}
+        </div>
+      )}
+      {err && <p className="op-err">{err}</p>}
+    </div>
+  )
+}
+
+// ── Forge Handoff panel ───────────────────────────────────────────────────────
+function ForgeHandoffPanel({ order, onOrderUpdate }) {
+  const [result, setResult] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [override, setOverride] = useState(false)
+
+  const existingProjectId = order.forge_project_id
+
+  async function sendToForge() {
+    setBusy(true); setErr(null)
+    try {
+      const res = await api.post(`/api/orders/${order.id}/forge-handoff`, { override_payment: override })
+      if (res.ok) {
+        setResult(res)
+        if (onOrderUpdate) onOrderUpdate()
+      } else {
+        setErr(res.error || 'Forge handoff mislukt')
+      }
+    } catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+
+  if (existingProjectId || result?.forge_project_id) {
+    const pid = existingProjectId || result.forge_project_id
+    return (
+      <div className="op-forge op-forge--done">
+        <span>✓ Ascend Forge project aangemaakt</span>
+        <a href={`#forge/${pid}`} className="op-forge__link" onClick={e => { e.preventDefault(); window.location.hash = `forge/${pid}` }}>Open in Forge ↗</a>
+        <code className="op-forge__id">{pid}</code>
+      </div>
+    )
+  }
+
+  const canSend = ['akkoord', 'betaald', 'live'].includes(order.status)
+  return (
+    <div className="op-forge">
+      <div className="op-forge__header">
+        <span>Stuur naar Ascend Forge</span>
+        {order.status === 'akkoord' && (
+          <label className="op-forge__override">
+            <input type="checkbox" checked={override} onChange={e => setOverride(e.target.checked)} />
+            Doorzenden zonder betaling
+          </label>
+        )}
+        <button
+          onClick={sendToForge}
+          disabled={busy || !canSend}
+          className="op-forge__btn"
+          title={!canSend ? 'Eerst akkoord/betaald status vereist' : ''}
+        >
+          {busy ? 'Versturen…' : 'Stuur naar Ascend Forge →'}
+        </button>
+      </div>
+      {!canSend && <p className="op-forge__hint">Beschikbaar na akkoord of betaling.</p>}
+      {result?.message && <p className="op-forge__msg">{result.message}</p>}
+      {err && <p className="op-err">{err}</p>}
+    </div>
+  )
+}
+
 function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
   const [order, setOrder] = useState(initialOrder)
   const [busy, setBusy] = useState(false)
@@ -475,6 +606,18 @@ function OrderCard({ order: initialOrder, onRefresh, onDelete }) {
 
       {(showPitch || order.pitch_tekst) && (
         <PitchBox order={order} onStatusChange={o => { setOrder(o); onRefresh() }} />
+      )}
+
+      {order.demo_pad && statusIdx(s) >= statusIdx('ter_review') && (
+        <DemoQualityPanel orderId={order.id} />
+      )}
+
+      {statusIdx(s) >= statusIdx('akkoord') && (
+        <ResourcePlanPanel orderId={order.id} />
+      )}
+
+      {statusIdx(s) >= statusIdx('akkoord') && (
+        <ForgeHandoffPanel order={order} onOrderUpdate={onRefresh} />
       )}
 
       {err && <p className="op-err">{err}</p>}

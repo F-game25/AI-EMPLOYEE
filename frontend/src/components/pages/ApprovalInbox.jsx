@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import api from '../../api/client'
+import { useForgeStore } from '../../store/forgeStore'
+import { useAppStore } from '../../store/appStore'
 import './ApprovalInbox.css'
 
 const FILTERS = ['pending', 'approved', 'rejected', 'all']
@@ -18,7 +20,7 @@ function riskTone(level = '') {
   return 'low'
 }
 
-function ApprovalCard({ item, onDecide, busy }) {
+function ApprovalCard({ item, onDecide, busy, onOpenForge }) {
   const [reason, setReason] = useState('')
   const pending = item.status === 'pending'
   return (
@@ -47,6 +49,18 @@ function ApprovalCard({ item, onDecide, busy }) {
           <span>Requested by</span>
           <b>{item.requested_by || 'system'}</b>
         </div>
+        {item.run_id && (
+          <div>
+            <span>Forge run</span>
+            <b>{item.run_id}</b>
+          </div>
+        )}
+        {item.action_id && (
+          <div>
+            <span>Action</span>
+            <b>{item.action_id}</b>
+          </div>
+        )}
       </div>
 
       <div className="approval-section">
@@ -78,6 +92,11 @@ function ApprovalCard({ item, onDecide, busy }) {
           <button type="button" className="approval-btn" disabled={busy} onClick={() => onDecide(item, 'approve', reason)}>
             Approve
           </button>
+          {item.run_id && (
+            <button type="button" className="approval-btn approval-btn--ghost" disabled={busy} onClick={() => onOpenForge(item)}>
+              Open Forge
+            </button>
+          )}
         </div>
       ) : (
         <div className="approval-decision">
@@ -89,6 +108,10 @@ function ApprovalCard({ item, onDecide, busy }) {
 }
 
 export default function ApprovalInbox() {
+  const setActiveSection = useAppStore(s => s.setActiveSection)
+  const forgePendingApprovals = useForgeStore(s => s.pendingApprovals)
+  const forgeRefresh = useForgeStore(s => s.refresh)
+  const forgeSelectRun = useForgeStore(s => s.selectRun)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -97,23 +120,56 @@ export default function ApprovalInbox() {
   const [busyId, setBusyId] = useState(null)
   const [notice, setNotice] = useState(null)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      setData(await api.get('/api/approvals/inbox'))
+      const [inbox] = await Promise.all([
+        api.get('/api/approvals/inbox'),
+        forgeRefresh({ silent: true, reason: 'approval_inbox_load' }).catch(() => null),
+      ])
+      setData(inbox)
     } catch (err) {
       setError(err?.message || 'Approval Inbox unavailable')
     } finally {
       setLoading(false)
     }
-  }
+  }, [forgeRefresh])
 
   useEffect(() => {
     load()
-  }, [])
+  }, [load])
 
-  const items = Array.isArray(data?.items) ? data.items : []
+  useEffect(() => {
+    const handler = event => {
+      const type = event.detail?.type || ''
+      if (type.startsWith('approval:') || type.startsWith('forge:approval_')) load()
+    }
+    window.addEventListener('ws:event', handler)
+    return () => window.removeEventListener('ws:event', handler)
+  }, [load])
+
+  const forgeItems = useMemo(() => (forgePendingApprovals || []).map(item => ({
+    id: item.id || item.action_id,
+    source: 'forge',
+    status: ['approved', 'rejected'].includes(item.status) ? item.status : 'pending',
+    requested_action: item.summary || item.action_type || 'Forge action approval',
+    source_task: item.run_id || item.project_id || 'Forge run',
+    requested_at: item.created_at || item.updated_at,
+    requested_by: 'forge',
+    risk_level: item.risk || item.risk_level || 'medium',
+    expected_external_effect: item.file_path ? `Modify ${item.file_path} inside a Forge run workspace.` : 'Approve a staged Forge action.',
+    dry_run_preview: item.unified_diff || item.summary || 'Forge staged action requires owner approval.',
+    run_id: item.run_id,
+    action_id: item.action_id || item.id,
+    proof: item.file_path ? [{ label: item.file_path, type: 'file' }] : [],
+    _forge: item,
+  })), [forgePendingApprovals])
+  const items = useMemo(() => {
+    const base = Array.isArray(data?.items) ? data.items : []
+    const seen = new Set(base.map(item => item.id))
+    return [...base, ...forgeItems.filter(item => !seen.has(item.id))]
+  }, [data?.items, forgeItems])
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return items.filter(item => {
@@ -133,6 +189,7 @@ export default function ApprovalInbox() {
       const result = await api.post(`/api/approvals/${encodeURIComponent(item.id)}/${action}`, { reason })
       setNotice(result?.execution?.details || `Approval ${result.decision}`)
       await load()
+      await forgeRefresh({ silent: true, reason: `approval_${action}` }).catch(() => null)
     } catch (err) {
       setError(err?.message || `Could not ${action} approval`)
     } finally {
@@ -141,6 +198,17 @@ export default function ApprovalInbox() {
   }
 
   const counts = data?.counts || {}
+  const displayCounts = {
+    pending: items.filter(item => item.status === 'pending').length,
+    approved: items.filter(item => item.status === 'approved').length,
+    rejected: items.filter(item => item.status === 'rejected').length,
+    total: items.length,
+  }
+
+  const openForge = (item) => {
+    if (item.run_id) forgeSelectRun(item.run_id)
+    setActiveSection('ascend-forge')
+  }
 
   return (
     <main className="approval-inbox">
@@ -156,10 +224,10 @@ export default function ApprovalInbox() {
       </section>
 
       <section className="approval-metrics">
-        <div><span>Pending</span><b>{counts.pending || 0}</b></div>
-        <div><span>Approved</span><b>{counts.approved || 0}</b></div>
-        <div><span>Rejected</span><b>{counts.rejected || 0}</b></div>
-        <div><span>Total</span><b>{counts.total || items.length}</b></div>
+        <div><span>Pending</span><b>{displayCounts.pending || counts.pending || 0}</b></div>
+        <div><span>Approved</span><b>{displayCounts.approved || counts.approved || 0}</b></div>
+        <div><span>Rejected</span><b>{displayCounts.rejected || counts.rejected || 0}</b></div>
+        <div><span>Total</span><b>{displayCounts.total || counts.total || items.length}</b></div>
       </section>
 
       {notice && <div className="approval-alert approval-alert--ok">{notice}</div>}
@@ -190,7 +258,7 @@ export default function ApprovalInbox() {
           <div className="approval-empty"><b>Loading approvals…</b></div>
         )}
         {filtered.map(item => (
-          <ApprovalCard key={item.id} item={item} onDecide={decide} busy={busyId === item.id} />
+          <ApprovalCard key={item.id} item={item} onDecide={decide} busy={busyId === item.id} onOpenForge={openForge} />
         ))}
         {!loading && !filtered.length && (
           <div className="approval-empty">

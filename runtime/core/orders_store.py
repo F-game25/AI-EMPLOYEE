@@ -60,11 +60,13 @@ def _init_table() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)")
         # Idempotent migrations for columns added after initial schema
         for col, definition in (
-            ("pitch_tekst",      "TEXT DEFAULT ''"),
-            ("vervolg_tekst",    "TEXT DEFAULT ''"),
-            ("live_url",         "TEXT DEFAULT ''"),
-            ("research_data",    "TEXT DEFAULT ''"),
-            ("betaal_referentie","TEXT DEFAULT ''"),
+            ("pitch_tekst",       "TEXT DEFAULT ''"),
+            ("vervolg_tekst",     "TEXT DEFAULT ''"),
+            ("live_url",          "TEXT DEFAULT ''"),
+            ("research_data",     "TEXT DEFAULT ''"),
+            ("betaal_referentie", "TEXT DEFAULT ''"),
+            ("forge_project_id",  "TEXT DEFAULT ''"),
+            ("demo_quality",      "TEXT DEFAULT ''"),
         ):
             try:
                 conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {definition}")
@@ -155,6 +157,25 @@ def betaalreferentie_opslaan(order_id: str, referentie: str) -> dict[str, Any]:
             (referentie.strip(), order_id),
         )
     return {"ok": True, "order": order_ophalen(order_id)}
+
+
+def forge_project_opslaan(order_id: str, forge_project_id: str) -> dict[str, Any]:
+    """Store the linked Forge project ID on an order."""
+    with _conn() as conn:
+        row = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+        conn.execute("UPDATE orders SET forge_project_id=? WHERE id=?", (forge_project_id, order_id))
+    return {"ok": True, "order": order_ophalen(order_id)}
+
+
+def demo_quality_opslaan(order_id: str, quality_json: str) -> None:
+    """Store serialized demo quality result on an order (best-effort)."""
+    try:
+        with _conn() as conn:
+            conn.execute("UPDATE orders SET demo_quality=? WHERE id=?", (quality_json, order_id))
+    except Exception:
+        pass
 
 
 def pitch_bijwerken(order_id: str, pitch_tekst: str) -> dict[str, Any]:

@@ -1496,6 +1496,28 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
     }
   })
 
+  r.get('/ollama/ps', requireAuth, async (_req, res) => {
+    try { res.json(await ollamaAdmin.listRunning()) }
+    catch (e) { res.status(502).json({ ok: false, models: [], error: e.message }) }
+  })
+
+  r.post('/ollama/load', requireAuth, async (req, res) => {
+    const name = String((req.body || {}).name || '').trim()
+    if (!name) return res.status(400).json({ ok: false, error: 'name required' })
+    if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' })
+    const keepAlive = Number((req.body || {}).keep_alive ?? -1)
+    try { res.json(await ollamaAdmin.loadModel(name, keepAlive)) }
+    catch (e) { res.status(502).json({ ok: false, error: e.message }) }
+  })
+
+  r.post('/ollama/evict', requireAuth, async (req, res) => {
+    const name = String((req.body || {}).name || '').trim()
+    if (!name) return res.status(400).json({ ok: false, error: 'name required' })
+    if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' })
+    try { res.json(await ollamaAdmin.evictModel(name)) }
+    catch (e) { res.status(502).json({ ok: false, error: e.message }) }
+  })
+
   // ── MAIN MODEL SWITCHER ─────────────────────────────────────────────────────
   // Persists to model-routing.json (read by runtime/core/llm_router.py at LLMClient init)
   const ROUTING_FILE = path.join(STATE_DIR, 'model-routing.json')
