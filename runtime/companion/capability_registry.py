@@ -341,6 +341,30 @@ def _seed(reg: CapabilityRegistry) -> None:
             side_effects=[],
             examples=["how risky is deleting the deals file"],
         ),
+        Capability(
+            id="forge.lifecycle_plan",
+            subsystem="forge",
+            name="Spec-driven lifecycle plan",
+            description="Run the spec->plan->review->ship-gate lifecycle for a build goal (planning only; no file edits, no apply).",
+            input_schema={"goal": "str", "context": "dict?"},
+            output_schema={"spec": "dict", "plan": "dict", "ship": "dict", "status": "str"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=[],
+            examples=["plan how to build the orders export feature", "spec out the new login flow"],
+        ),
+        Capability(
+            id="research.audit_quality",
+            subsystem="research",
+            name="Audit research quality",
+            description="Run citation anchoring, fabricated-reference detection and the integrity gate over a research report (read-only).",
+            input_schema={"report": "dict"},
+            output_schema={"quality": "dict", "publishable": "bool"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["check this research report for fabricated sources", "is this report publishable"],
+        ),
     ]
     for c in caps:
         reg.register(c)

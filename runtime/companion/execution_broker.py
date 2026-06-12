@@ -106,6 +106,8 @@ class ExecutionBroker:
             "context.retrieve": self._exec_context_retrieve,
             "context.write": self._exec_context_write,
             "context.compress_session": self._exec_context_compress_session,
+            "forge.lifecycle_plan": self._exec_forge_lifecycle_plan,
+            "research.audit_quality": self._exec_research_audit_quality,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -851,6 +853,41 @@ class ExecutionBroker:
                 messages, project_id=str(ctx.get("project_id") or "default"),
                 tenant=str(ctx.get("tenant") or "default"))
             return {"status": "ok", **out}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+
+    @staticmethod
+    def _exec_forge_lifecycle_plan(cap: Capability, ctx: dict) -> dict:
+        """Run the spec->plan->ship-gate lifecycle for a goal — planning only, no edits."""
+        goal = str(ctx.get("goal") or ctx.get("text") or "").strip()
+        if not goal:
+            return {"status": "error", "note": "no goal provided"}
+        try:
+            from forge.lifecycle.lifecycle import run_lifecycle
+        except Exception as exc:
+            return {"status": "unavailable", "note": f"forge lifecycle not importable: {exc}"}
+        try:
+            out = run_lifecycle(goal, context=ctx.get("context") if isinstance(ctx.get("context"), dict) else None)
+            return {"status": "ok", **out}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+
+    @staticmethod
+    def _exec_research_audit_quality(cap: Capability, ctx: dict) -> dict:
+        """Audit a research report for fabricated refs + run the integrity gate (read-only)."""
+        report = ctx.get("report")
+        if not isinstance(report, dict) or not report:
+            return {"status": "error", "note": "report must be a non-empty dict"}
+        try:
+            from research.quality.report_builder import finalize
+        except Exception as exc:
+            return {"status": "unavailable", "note": f"research quality not importable: {exc}"}
+        try:
+            out = finalize(report)
+            quality = out.get("quality", {})
+            return {"status": "ok",
+                    "quality": quality,
+                    "publishable": bool(quality.get("publishable", quality.get("gate", {}).get("passed", False)))}
         except Exception as exc:
             return {"status": "error", "error": str(exc)}
 
