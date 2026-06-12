@@ -50,6 +50,9 @@ SecurityPolicy, get_security_policy = _load_security_policy()
 class AgentController:
     """Application-layer orchestrator with deterministic data flow."""
 
+    _agent_caps_cache: dict | None = None
+    _agent_caps_lock = __import__('threading').Lock()
+
     def __init__(
         self,
         *,
@@ -123,6 +126,37 @@ class AgentController:
         except Exception:
             return None
 
+    def _keyword_route_agent(self, goal: str) -> str | None:
+        import json, os
+        with AgentController._agent_caps_lock:
+            if AgentController._agent_caps_cache is None:
+                caps_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'agent_capabilities.json')
+                try:
+                    with open(os.path.normpath(caps_path)) as f:
+                        data = json.load(f)
+                    AgentController._agent_caps_cache = data.get('agents', data) if isinstance(data, dict) else {}
+                except Exception:
+                    AgentController._agent_caps_cache = {}
+        caps = AgentController._agent_caps_cache
+        if not caps:
+            return None
+        tokens = set(goal.lower().split())
+        best_id, best_score = None, 0
+        for agent_id, meta in caps.items():
+            if not isinstance(meta, dict):
+                continue
+            corpus = ' '.join([
+                meta.get('description', ''),
+                meta.get('category', ''),
+                ' '.join(meta.get('skills', [])),
+                ' '.join(meta.get('commands', [])),
+                ' '.join(meta.get('specialties', [])),
+            ]).lower()
+            score = sum(1 for t in tokens if t in corpus)
+            if score > best_score:
+                best_score, best_id = score, agent_id
+        return best_id if best_score > 0 else None
+
     def run_goal(
         self,
         goal: str,
@@ -152,12 +186,23 @@ class AgentController:
             self._logger.log_event(component="controller", action="compute_plan_skipped",
                                    result="warn", latency_ms=0.0, meta={"err": str(_cp_err)})
 
-        # QCE agent routing — attempt amplitude-based selection, fall back to planner
+        # QCE agent routing — attempt amplitude-based selection, fall back to keyword router
         _qce_agent: str | None = None
+        _log = logging.getLogger(__name__)
         try:
             _qce_agent = asyncio.run(self._qce_route_agent(goal, preferred_agent_id))
+            if _qce_agent:
+                _log.debug("agent routing: QCE selected '%s'", _qce_agent)
+            else:
+                raise ValueError("QCE returned None")
         except Exception:
-            _qce_agent = preferred_agent_id
+            _kw_agent = self._keyword_route_agent(goal)
+            if _kw_agent:
+                _log.debug("agent routing: keyword fallback selected '%s'", _kw_agent)
+                _qce_agent = _kw_agent
+            else:
+                _qce_agent = preferred_agent_id
+                _log.debug("agent routing: no match, using preferred_agent_id='%s'", preferred_agent_id)
 
         if self._research.is_learn_command(goal):
             return self._run_learn_topic_goal(goal=goal, run_id=run_id, start=start, persist_task=persist_task)

@@ -30,6 +30,12 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-dot-env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EVOLUTION_MODE: ${EVOLUTION_MODE:-SAFE}
+      NIM_API_KEY: ${NIM_API_KEY:-}
+      NIM_ENDPOINT: ${NIM_ENDPOINT:-}
+      NIM_MODEL: ${NIM_MODEL:-}
+      REMOTE_COMPUTE_HOST: ${REMOTE_COMPUTE_HOST:-}
+      REMOTE_COMPUTE_USER: ${REMOTE_COMPUTE_USER:-}
+      REMOTE_COMPUTE_KEY: ${REMOTE_COMPUTE_KEY:-}
     volumes:
       - ai-state-dev:/app/data
     healthcheck:

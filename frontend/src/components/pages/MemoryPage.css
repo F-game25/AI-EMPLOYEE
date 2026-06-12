@@ -170,6 +170,34 @@
 .mem-btn--danger { border-color: rgba(220,38,38,0.4); color: var(--nx-danger); }
 .mem-btn--danger:hover:not(:disabled) { background: rgba(220,38,38,0.08); }
 
+/* ── Forge lessons bridge ───────────────────────────────────────────── */
+.mem-forge {
+  margin-bottom: 12px;
+}
+.mem-forge__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.mem-forge__title {
+  color: var(--nx-gold);
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.mem-forge__sub {
+  color: var(--nx-text-dim);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.mem-forge__list {
+  display: grid;
+  gap: 8px;
+}
+
 /* ── Graph tab ───────────────────────────────────────────────────────── */
 .mem-graph-wrap {
   display: flex;

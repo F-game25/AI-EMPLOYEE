@@ -1393,17 +1393,38 @@ def select_model(
         vram_est   = vram_estimate_gb(params_b, quant)
         catalogue_key = money_key
 
-    # If estimated VRAM exceeds budget and the provider is local, downgrade to money tier
+    # If estimated VRAM exceeds budget and the provider is local:
+    # — prefer OpenRouter free tier over quality-degrading local downgrade
+    #   (only when OPENROUTER_API_KEY is set, not offline, non-trivial task)
+    # — fall back to money tier if OpenRouter unavailable / offline / trivial
     if vram_est > VRAM_BUDGET_GB and spec["provider"] == "ollama" and catalogue_key != money_key:
-        logger.warning(
-            "VRAM budget exceeded (%.1f GB > %.1f GB) — downgrading to MONEY tier.",
-            vram_est,
-            VRAM_BUDGET_GB,
+        _has_openrouter = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+        _use_overflow = (
+            _has_openrouter
+            and not _offline_mode
+            and complexity >= LOW_COMPLEXITY_THRESHOLD   # not a trivial classify/routing call
         )
-        spec     = _MODEL_CATALOGUE[money_key]
-        params_b = spec["params_b"]
-        quant    = spec["quant"]
-        vram_est = vram_estimate_gb(params_b, quant)
+        if _use_overflow:
+            overflow_key = "or_free_big" if complexity >= MID_COMPLEXITY_THRESHOLD else "or_free_general"
+            logger.info(
+                "VRAM overflow (%.1f GB > %.1f GB) — routing to OpenRouter free tier (key=%s).",
+                vram_est, VRAM_BUDGET_GB, overflow_key,
+            )
+            spec     = _MODEL_CATALOGUE[overflow_key]
+            params_b = spec["params_b"]
+            quant    = spec["quant"]
+            vram_est = 0.0   # cloud model — no local VRAM consumed
+            catalogue_key = overflow_key
+        else:
+            logger.warning(
+                "VRAM budget exceeded (%.1f GB > %.1f GB) — downgrading to MONEY tier%s.",
+                vram_est, VRAM_BUDGET_GB,
+                " (offline)" if _offline_mode else " (no OPENROUTER_API_KEY)" if not _has_openrouter else "",
+            )
+            spec     = _MODEL_CATALOGUE[money_key]
+            params_b = spec["params_b"]
+            quant    = spec["quant"]
+            vram_est = vram_estimate_gb(params_b, quant)
 
     rationale = (
         f"mode={effective_mode}, complexity={complexity:.2f}, "

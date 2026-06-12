@@ -254,6 +254,34 @@ module.exports = function createForgeOpsRouter(deps) {
     res.json(result);
   });
 
+  // ── GET /api/ollama/ps — currently loaded models ─────────────────────────────
+
+  router.get('/ollama/ps', requireAuth, async (req, res) => {
+    const result = await ollamaAdmin.listRunning().catch(e => ({ ok: false, models: [], error: e.message }))
+    res.json(result)
+  })
+
+  // ── POST /api/ollama/load — warm a model into VRAM ───────────────────────────
+
+  router.post('/ollama/load', requireAuth, async (req, res) => {
+    const name = String((req.body || {}).name || '').trim()
+    if (!name) return res.status(400).json({ ok: false, error: 'name required' })
+    if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' })
+    const keepAlive = Number((req.body || {}).keep_alive ?? -1)
+    const result = await ollamaAdmin.loadModel(name, keepAlive).catch(e => ({ ok: false, error: e.message }))
+    res.json(result)
+  })
+
+  // ── POST /api/ollama/evict — unload a model from VRAM ────────────────────────
+
+  router.post('/ollama/evict', requireAuth, async (req, res) => {
+    const name = String((req.body || {}).name || '').trim()
+    if (!name) return res.status(400).json({ ok: false, error: 'name required' })
+    if (!/^[a-z0-9:._\-]+$/.test(name)) return res.status(400).json({ ok: false, error: 'invalid model name format' })
+    const result = await ollamaAdmin.evictModel(name).catch(e => ({ ok: false, error: e.message }))
+    res.json(result)
+  })
+
   // ── GET /api/system/manifest ─────────────────────────────────────────────────
 
   router.get('/system/manifest', requireAuth, (req, res) => {

@@ -4,6 +4,9 @@
  * Real API integration preserved from original implementation.
  */
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import api from '../../api/client'
+import { useForgeStore } from '../../store/forgeStore'
 import { toastSuccess, toastError } from '../nexus-ui/Toaster'
 import './AscendForgePage.css'
 import {
@@ -145,15 +148,13 @@ function Risk({ level }) {
   return <span className={`af2-risk af2-risk--${level}`}>{map[level] || level}</span>
 }
 
-/* ── Hooks ─────────────────────────────────────────────────────── */
-function useRollingSpark({ len = 24, base = 50, amp = 30 }) {
-  const [data, setData] = useState(() => Array.from({ length: len }, (_, i) => base + Math.sin(i * 0.6) * amp + Math.random() * 8))
-  useEffect(() => {
-    let i = len
-    const t = setInterval(() => { i++; setData(d => [...d.slice(1), base + Math.sin(i * 0.6) * amp + Math.random() * amp * 0.4]) }, 1200)
-    return () => clearInterval(t)
-  }, [])
-  return data
+/* ── Deterministic mini charts ─────────────────────────────────── */
+function stableSpark({ len = 24, base = 50, amp = 30, seed = 0 }) {
+  return Array.from({ length: len }, (_, i) => Math.max(0, base + Math.sin((i + seed) * 0.55) * amp))
+}
+
+function idxFromId(id = '') {
+  return String(id).split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 17
 }
 
 function useClock() {
@@ -192,6 +193,10 @@ function ForgeMark({ size = 32 }) {
 /* ── TopBar ────────────────────────────────────────────────────── */
 function ForgeTopBar({ activeView, project, runState, onToggleRun, onPaletteOpen, pendingCount }) {
   const time = useClock()
+  const normalizedRunState = String(runState || 'idle').toLowerCase()
+  const running = ['running', 'planning', 'testing', 'executing', 'in_progress', 'agentic', 'reviewing'].includes(normalizedRunState)
+  const paused = normalizedRunState === 'paused'
+  const runnable = running || paused
   return (
     <header className="af2-topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -238,11 +243,11 @@ function ForgeTopBar({ activeView, project, runState, onToggleRun, onPaletteOpen
       <div className="af2-divider-v"/>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Pill tone={runState === 'running' ? 'success' : runState === 'paused' ? 'warn' : 'idle'}>
-          {runState === 'running' ? 'LIVE' : runState === 'paused' ? 'PAUSED' : 'IDLE'}
+        <Pill tone={running ? 'success' : paused ? 'warn' : 'idle'}>
+          {running ? 'LIVE' : paused ? 'PAUSED' : (normalizedRunState === 'idle' ? 'IDLE' : normalizedRunState.toUpperCase())}
         </Pill>
-        <Btn variant="ghost" sm icon={runState === 'running' ? 'pause' : 'play'} onClick={onToggleRun}>
-          {runState === 'running' ? 'Pause' : 'Resume'}
+        <Btn variant="ghost" sm icon={running ? 'pause' : 'play'} onClick={onToggleRun} disabled={!runnable} title={runnable ? undefined : 'No backend run can be controlled right now'}>
+          {running ? 'Pause' : paused ? 'Resume' : 'No Run'}
         </Btn>
         <IconBtn icon="settings" title="Settings"/>
       </div>
@@ -254,10 +259,17 @@ function ForgeTopBar({ activeView, project, runState, onToggleRun, onPaletteOpen
 const VIEWS = [
   { id: 'projects', icon: 'projects', label: 'Projects' },
   { id: 'compose',  icon: 'compose',  label: 'Compose'  },
+  { id: 'queue',    icon: 'bell',     label: 'Queue'    },
   { id: 'activity', icon: 'activity', label: 'Activity' },
   { id: 'review',   icon: 'diff',     label: 'Review'   },
   { id: 'approvals',icon: 'check',    label: 'Approvals'},
   { id: 'pipeline', icon: 'pipeline', label: 'Pipeline' },
+  { id: 'v5_project', icon: 'spark', label: 'V5 Project' },
+  { id: 'v5_goals', icon: 'branch', label: 'V5 Goals' },
+  { id: 'v5_reasoning', icon: 'search', label: 'V5 Reasoning' },
+  { id: 'v5_quality', icon: 'check', label: 'V5 Quality' },
+  { id: 'v7_execution', icon: 'zap', label: 'V7 Execute' },
+  { id: 'github', icon: 'branch', label: 'GitHub' },
   { id: 'files',    icon: 'files',    label: 'Files'    },
   { id: 'history',  icon: 'history',  label: 'History'  },
   { id: 'agents',   icon: 'agents',   label: 'Agents'   },
@@ -270,7 +282,7 @@ function LeftRail({ active, onChange, pendingCount }) {
       {VIEWS.map((v, i) => (
         <button key={v.id} className={`af2-rail-item${active === v.id ? ' af2-rail-item--active' : ''}`} onClick={() => onChange(v.id)} title={v.label}>
           <Icon name={v.icon} size={17}/>
-          {v.id === 'approvals' && pendingCount > 0 && (
+          {(v.id === 'approvals' || v.id === 'queue') && pendingCount > 0 && (
             <span className="af2-rail-badge">{pendingCount}</span>
           )}
           <span className="af2-rail-tip">{v.label}<span style={{ marginLeft: 8, opacity: 0.5, font: '500 8px var(--af2-mono)' }}>{i + 1}</span></span>
@@ -638,6 +650,7 @@ function ComputePlanBadge({ plan }) {
 }
 
 function ActivityView({ messages, termLines, sending, agents, computePlan }) {
+  const activitySpark = stableSpark({ len: 28, base: Math.max(10, messages.length + termLines.length), amp: Math.max(4, agents.length * 8), seed: messages.length })
   const logRef = useRef(null)
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -685,7 +698,7 @@ function ActivityView({ messages, termLines, sending, agents, computePlan }) {
           </div>
         </Panel>
         <Panel title="Token flow" tone="gold">
-          <Spark data={useRollingSpark({ len: 28, base: 60, amp: 22 })} color="#E89A4F" w={252} h={48} fill/>
+          <Spark data={activitySpark} color="#E89A4F" w={252} h={48} fill/>
         </Panel>
       </div>
     </div>
@@ -1145,7 +1158,7 @@ function AgentsView({ agents }) {
                 <div style={{ font: '500 10px var(--af2-mono)', color: 'var(--af2-muted)', marginTop: 3, textTransform: 'uppercase' }}>{a.model || 'claude-sonnet'}</div>
                 {a.task && <div style={{ font: '400 11.5px var(--af2-mono)', color: 'var(--af2-secondary)', marginTop: 6 }}>{a.task}</div>}
               </div>
-              <Spark data={useRollingSpark({ len: 24, base: 50, amp: 30 })} color="#CD7F32" w={100} h={28}/>
+              <Spark data={stableSpark({ len: 24, base: Math.max(8, (a.task || '').length), amp: a.status === 'unavailable' ? 3 : 12, seed: idxFromId(a.id) })} color="#CD7F32" w={100} h={28}/>
             </div>
           ))}
           {agents.length === 0 && (
@@ -1191,15 +1204,596 @@ function TerminalView({ termLines }) {
   )
 }
 
+function useV5ProjectData(projectId) {
+  const [data, setData] = useState({ brief: null, researchPack: null, goals: [], reasoning: null, report: null, loading: false, error: null })
+  const refresh = useCallback(async () => {
+    if (!projectId) return null
+    setData(prev => ({ ...prev, loading: true, error: null }))
+    try {
+      const [brief, research, goals, report] = await Promise.all([
+        api.forge.v5.getBrief(projectId).catch(() => ({})),
+        api.forge.v5.getResearch(projectId).catch(() => ({})),
+        api.forge.v5.getGoals(projectId).catch(() => ({})),
+        api.forge.v5.getReport(projectId).catch(() => ({})),
+      ])
+      const next = {
+        brief: brief.brief || null,
+        researchPack: research.research_pack || null,
+        goals: goals.goals || [],
+        reasoning: goals.reasoning || null,
+        report: report.report || null,
+        loading: false,
+        error: null,
+      }
+      setData(next)
+      return next
+    } catch (err) {
+      setData(prev => ({ ...prev, loading: false, error: err?.message || 'V5 unavailable' }))
+      return null
+    }
+  }, [projectId])
+
+  useEffect(() => { refresh() }, [refresh])
+  return { data, setData, refresh }
+}
+
+function V5ProjectView({ project, onPrepared }) {
+  const [rawInput, setRawInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const { data, setData, refresh } = useV5ProjectData(project?.id)
+  const isHandoff = Boolean(project?.handoff || project?.target_type === 'orders_handoff')
+
+  const start = async () => {
+    if (isHandoff) {
+      toastError('Import or convert this handoff before preparing executable V5 work')
+      return
+    }
+    if (!rawInput.trim() || busy) return
+    setBusy(true)
+    try {
+      const result = await api.forge.v5.startProject({ raw_input: rawInput, project_id: project?.id })
+      if (result.project) onPrepared?.(result.project)
+      setData({
+        brief: result.brief || null,
+        researchPack: result.research_pack || null,
+        goals: result.goals || [],
+        reasoning: result.reasoning || null,
+        report: result.report || null,
+        loading: false,
+        error: null,
+      })
+      toastSuccess('V5 project prepared')
+    } catch (err) {
+      toastError(err?.message || 'V5 prepare failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+	  return (
+	    <div className="af2-grid af2-grid--2">
+	      <Panel title="Project Runtime" icon="spark" actions={<Btn sm variant="ghost" onClick={refresh} disabled={!project}>Refresh</Btn>}>
+	        {isHandoff && <Pill tone="warn" pulse={false}>ORDERS HANDOFF READ ONLY</Pill>}
+	        {isHandoff && <div style={{ margin: '10px 0', color: 'var(--af2-muted)', font: '400 12.5px/1.6 var(--af2-sans)' }}>This project was created by the Orders handoff. Brief, research, goals, and report state can be viewed here; execution and publishing require importing it as a normal local Forge project.</div>}
+	        <textarea value={rawInput} onChange={e => setRawInput(e.target.value)} placeholder={isHandoff ? 'Import this handoff before preparing executable V5 work' : 'Project intent'} className="af2-input" style={{ minHeight: 130, marginBottom: 12, resize: 'vertical' }} disabled={isHandoff}/>
+	        <Btn variant="primary" icon="spark" onClick={start} disabled={isHandoff || !rawInput.trim() || busy}>{isHandoff ? 'Import Required' : busy ? 'Preparing' : 'Prepare V5'}</Btn>
+        <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
+          <Pill tone={data.brief ? 'success' : 'idle'}>{data.brief ? 'BRIEF READY' : 'BRIEF UNAVAILABLE'}</Pill>
+          <Pill tone={data.researchPack ? 'success' : 'idle'}>{data.researchPack ? 'RESEARCH READY' : 'RESEARCH UNAVAILABLE'}</Pill>
+          <Pill tone={data.goals.length ? 'success' : 'idle'}>{data.goals.length} GOALS</Pill>
+        </div>
+      </Panel>
+      <Panel title="Brief" icon="files">
+        <div style={{ font: '600 18px var(--af2-sans)', color: 'var(--af2-text)', marginBottom: 8 }}>{data.brief?.title || 'Unavailable'}</div>
+        <div style={{ font: '400 13px/1.6 var(--af2-sans)', color: 'var(--af2-muted)' }}>{data.brief?.summary || 'No V5 brief has been prepared for this project.'}</div>
+        <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {(data.brief?.constraints || []).slice(0, 4).map(item => <Pill key={item} sm tone="warn" pulse={false}>{item.slice(0, 42)}</Pill>)}
+        </div>
+      </Panel>
+      <Panel title="Research Pack" icon="search">
+        {(data.researchPack?.codebase_findings || []).slice(0, 5).map((item, idx) => (
+          <div key={idx} className="af2-row"><span style={{ color: 'var(--af2-text)', font: '500 12.5px var(--af2-sans)' }}>{item}</span></div>
+        ))}
+	        {!data.researchPack && <div style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>{isHandoff ? 'Research has not run for this handoff project.' : 'Unavailable'}</div>}
+      </Panel>
+      <Panel title="Report" icon="history">
+        <div style={{ font: '600 22px var(--af2-mono)', color: 'var(--af2-bronze-bright)' }}>{data.report?.goals_prepared ?? data.goals.length}</div>
+        <div style={{ color: 'var(--af2-muted)', font: '500 11px var(--af2-mono)', textTransform: 'uppercase' }}>Prepared goals</div>
+      </Panel>
+    </div>
+  )
+}
+
+function V5GoalsView({ project, onRun }) {
+  const { data, refresh } = useV5ProjectData(project?.id)
+  const [busy, setBusy] = useState({})
+  const isHandoff = Boolean(project?.handoff || project?.target_type === 'orders_handoff')
+  const execute = async (goal) => {
+    if (isHandoff) {
+      toastError('Import or convert this handoff before executing V5 goals')
+      return
+    }
+    if (!project?.id || !goal?.goal_id || busy[goal.goal_id]) return
+    setBusy(prev => ({ ...prev, [goal.goal_id]: true }))
+    try {
+      const result = await api.forge.v5.executeGoal(project.id, goal.goal_id, { max_iterations: goal.max_iterations || 3 })
+      onRun?.(result.run_result?.run || result.run_result)
+      toastSuccess('V5 goal execution started')
+      await refresh()
+    } catch (err) {
+      toastError(err?.message || 'V5 goal execution failed')
+    } finally {
+      setBusy(prev => { const next = { ...prev }; delete next[goal.goal_id]; return next })
+    }
+  }
+  return (
+    <Panel title="V5 Goals" icon="branch" actions={<Btn sm variant="ghost" onClick={refresh} disabled={!project}>Refresh</Btn>}>
+      <div style={{ display: 'grid', gap: 10 }}>
+        {data.goals.map(goal => (
+	          <div key={goal.goal_id || goal.title} className="af2-row" style={{ alignItems: 'flex-start' }}>
+            <Hex tone={goal.status === 'completed' ? 'success' : goal.status === 'failed' ? 'danger' : 'bronze'} size="sm"><Icon name="branch" size={12}/></Hex>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: 'var(--af2-text)', font: '600 13px var(--af2-sans)' }}>{goal.title}</div>
+              <div style={{ color: 'var(--af2-muted)', font: '400 12px/1.5 var(--af2-sans)', marginTop: 4 }}>{goal.description}</div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <Pill sm tone="idle" pulse={false}>{String(goal.status || 'proposed').toUpperCase()}</Pill>
+                <Pill sm tone={goal.risk_level === 'high' ? 'danger' : goal.risk_level === 'medium' ? 'warn' : 'success'} pulse={false}>{String(goal.risk_level || 'low').toUpperCase()}</Pill>
+              </div>
+            </div>
+	            <Btn sm variant="primary" icon="play" onClick={() => execute(goal)} disabled={isHandoff || busy[goal.goal_id] || ['in_progress', 'completed'].includes(goal.status) || !goal.goal_id}>
+	              {isHandoff ? 'Import First' : busy[goal.goal_id] ? 'Starting' : 'Execute'}
+	            </Btn>
+          </div>
+        ))}
+        {!data.goals.length && <div style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>No V5 goals prepared.</div>}
+      </div>
+    </Panel>
+  )
+}
+
+function V5ReasoningView({ project }) {
+  const { data, refresh } = useV5ProjectData(project?.id)
+  const paths = data.reasoning?.paths_considered || data.goals.flatMap(goal => goal.qce_paths_considered || [])
+  return (
+    <div className="af2-grid af2-grid--2">
+      <Panel title="QCE Paths Considered" icon="search" actions={<Btn sm variant="ghost" onClick={refresh} disabled={!project}>Refresh</Btn>}>
+        <div style={{ display: 'grid', gap: 10 }}>
+          {paths.slice(0, 8).map((pathItem, idx) => (
+            <div key={`${pathItem.name || 'path'}-${idx}`} className="af2-row" style={{ alignItems: 'flex-start' }}>
+              <Hex tone={idx === 0 ? 'success' : 'bronze'} size="sm"><Icon name="pipeline" size={12}/></Hex>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: 'var(--af2-text)', font: '600 13px var(--af2-sans)' }}>{pathItem.name || `Path ${idx + 1}`}</div>
+                <div style={{ color: 'var(--af2-muted)', font: '400 12px/1.5 var(--af2-sans)' }}>{pathItem.rationale || 'No rationale recorded.'}</div>
+              </div>
+              <span style={{ font: '600 11px var(--af2-mono)', color: 'var(--af2-bronze-bright)' }}>{Math.round((pathItem.confidence || 0) * 100)}%</span>
+            </div>
+          ))}
+          {!paths.length && <div style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>Unavailable</div>}
+        </div>
+      </Panel>
+      <Panel title="Selected Route" icon="agents">
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div className="af2-row"><span>Mode</span><Pill sm pulse={false}>{data.reasoning?.selected_mode || 'unavailable'}</Pill></div>
+          <div className="af2-row"><span>Model</span><Pill sm pulse={false}>{data.reasoning?.model_used || 'unavailable'}</Pill></div>
+          <div className="af2-row"><span>Complexity</span><Pill sm pulse={false}>{data.reasoning?.complexity || 'unavailable'}</Pill></div>
+          <div className="af2-row"><span>Agents</span><span style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>{(data.reasoning?.agents || []).join(', ') || 'unavailable'}</span></div>
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+function V5QualityView({ project }) {
+  const { data, refresh } = useV5ProjectData(project?.id)
+  const [gates, setGates] = useState({})
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      const entries = await Promise.all((data.goals || []).map(async goal => {
+        const result = await api.forge.v5.getQualityGate(goal.goal_id).catch(() => ({}))
+        return [goal.goal_id, result.quality_gate || null]
+      }))
+      if (alive) setGates(Object.fromEntries(entries))
+    }
+    load()
+    return () => { alive = false }
+  }, [data.goals])
+  const dimensions = ['functional_correctness', 'safety', 'efficiency', 'usability', 'reliability', 'integration_quality', 'maintainability']
+  return (
+    <Panel title="Quality Gates" icon="check" actions={<Btn sm variant="ghost" onClick={refresh} disabled={!project}>Refresh</Btn>}>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {data.goals.map(goal => {
+          const gate = gates[goal.goal_id]
+          return (
+            <div key={goal.goal_id} className="af2-row" style={{ display: 'block' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                <span style={{ color: 'var(--af2-text)', font: '600 13px var(--af2-sans)' }}>{goal.title}</span>
+                <Pill sm tone={gate?.status === 'passed' ? 'success' : gate?.status === 'failed' ? 'danger' : 'idle'} pulse={false}>{gate?.status || 'unavailable'}</Pill>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+                {dimensions.map(dim => {
+                  const status = gate?.[dim]?.status || 'unavailable'
+                  return <Pill key={dim} sm tone={status === 'passed' ? 'success' : status === 'failed' ? 'danger' : 'idle'} pulse={false}>{dim.replace(/_/g, ' ')} · {status}</Pill>
+                })}
+              </div>
+            </div>
+          )
+        })}
+        {!data.goals.length && <div style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>No quality gates available.</div>}
+      </div>
+    </Panel>
+  )
+}
+
+function ForgeQueueView({ project }) {
+  const [tab, setTab] = useState('approvals')
+  const [goal, setGoal] = useState('')
+  const [busy, setBusy] = useState(false)
+  const queue = useForgeStore(useShallow(s => s.queue))
+  const refreshQueue = useForgeStore(s => s.refreshQueue)
+  const submitQueueItem = useForgeStore(s => s.submitQueueItem)
+  const approveQueueItem = useForgeStore(s => s.approveQueueItem)
+  const rejectQueueItem = useForgeStore(s => s.rejectQueueItem)
+
+  useEffect(() => { refreshQueue?.().catch(() => {}) }, [refreshQueue])
+
+  const items = queue?.items || []
+  const submit = async () => {
+    if (!goal.trim() || busy) return
+    setBusy(true)
+    try {
+      await submitQueueItem({ goal, project_id: project?.handoff ? null : project?.id, title: goal.slice(0, 90), mode: 'builder' })
+      setGoal('')
+      toastSuccess('Queue item submitted')
+    } catch (err) {
+      toastError(err?.message || 'Queue submit failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const decide = async (item, action) => {
+    const id = item.id || item.action_id
+    if (!id) return
+    try {
+      if (action === 'approve') {
+        await approveQueueItem(id, { note: 'Approved from AscendForge Queue' })
+        toastSuccess('Queue item approved')
+      } else {
+        await rejectQueueItem(id, { reason: 'Rejected from AscendForge Queue' })
+        toastSuccess('Queue item rejected')
+      }
+    } catch (err) {
+      toastError(err?.message || `Queue ${action} failed`)
+    }
+  }
+
+  return (
+    <div className="af2-grid af2-grid--2">
+      <Panel title="Forge Queue" icon="bell" actions={
+        <>
+          {['approvals', 'builder', 'evolution'].map(name => (
+            <Btn key={name} sm variant={tab === name ? 'primary' : 'ghost'} onClick={() => setTab(name)}>{name}</Btn>
+          ))}
+          <Btn sm variant="ghost" onClick={() => refreshQueue?.().catch(() => {})}>Refresh</Btn>
+        </>
+      }>
+        {tab === 'approvals' && (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {items.map(item => (
+              <div key={item.id || item.action_id} className="af2-row" style={{ alignItems: 'flex-start' }}>
+                <Hex tone={item.status === 'approved' ? 'success' : 'bronze'} size="sm"><Icon name="bell" size={12}/></Hex>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: 'var(--af2-text)', font: '600 13px var(--af2-sans)' }}>{item.label || item.title || 'Queued Forge item'}</div>
+                  <div style={{ color: 'var(--af2-muted)', font: '400 12px/1.5 var(--af2-sans)', marginTop: 4 }}>{item.description || item.goal || 'No description recorded.'}</div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                    <Pill sm tone={item.status === 'approved' ? 'success' : 'warn'} pulse={false}>{String(item.status || 'proposed').toUpperCase()}</Pill>
+                    <Pill sm tone="idle" pulse={false}>{String(item.risk || 'review').toUpperCase()}</Pill>
+                  </div>
+                </div>
+                <Btn sm variant="primary" icon="check" onClick={() => decide(item, 'approve')} disabled={item.status === 'approved'}>Approve</Btn>
+                <Btn sm variant="ghost" icon="cross" onClick={() => decide(item, 'reject')}>Reject</Btn>
+              </div>
+            ))}
+            {!items.length && <div style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>Queue is empty.</div>}
+          </div>
+        )}
+        {tab === 'builder' && (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {project?.handoff && <Pill tone="warn" pulse={false}>HANDOFF PROJECTS MUST BE IMPORTED BEFORE EXECUTION</Pill>}
+            <textarea value={goal} onChange={e => setGoal(e.target.value)} placeholder="Queue a supervised builder task" className="af2-input" style={{ minHeight: 120, resize: 'vertical' }}/>
+            <Btn variant="primary" icon="send" onClick={submit} disabled={!goal.trim() || busy}>{busy ? 'Submitting' : 'Submit to Queue'}</Btn>
+          </div>
+        )}
+        {tab === 'evolution' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+            <div className="af2-row" style={{ display: 'block' }}><div className="af2-label">Queued</div><div style={{ font: '600 28px var(--af2-mono)', color: 'var(--af2-bronze-bright)' }}>{items.length}</div></div>
+            <div className="af2-row" style={{ display: 'block' }}><div className="af2-label">Approved</div><div style={{ font: '600 28px var(--af2-mono)', color: '#4ADE80' }}>{items.filter(i => i.status === 'approved').length}</div></div>
+            <div className="af2-row" style={{ display: 'block' }}><div className="af2-label">Mode</div><Pill tone="idle" pulse={false}>CANONICAL STORE</Pill></div>
+          </div>
+        )}
+      </Panel>
+      <Panel title="Queue Contract" icon="pipeline">
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div className="af2-row"><span>State source</span><Pill sm pulse={false}>forgeStore</Pill></div>
+          <div className="af2-row"><span>Events</span><Pill sm pulse={false}>forge:queue_update</Pill></div>
+          <div className="af2-row"><span>Execution</span><Pill sm tone="warn" pulse={false}>explicit Forge run only</Pill></div>
+          <div style={{ color: 'var(--af2-muted)', font: '400 12.5px/1.6 var(--af2-sans)' }}>Queue approval records intent and review state. Code execution still runs through the existing Forge run and approval paths.</div>
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+function GitHubPublishView({ project }) {
+  const github = useForgeStore(useShallow(s => s.github))
+  const refreshGithubStatus = useForgeStore(s => s.refreshGithubStatus)
+  const prepareGithubPublish = useForgeStore(s => s.prepareGithubPublish)
+  const publishGithubDraft = useForgeStore(s => s.publishGithubDraft)
+  const [draftInput, setDraftInput] = useState({ title: '', body: '', branch_name: '', commit_message: '' })
+  const [busy, setBusy] = useState(false)
+  const [confirmPublish, setConfirmPublish] = useState(false)
+  const isHandoff = Boolean(project?.handoff || project?.target_type === 'orders_handoff')
+
+  useEffect(() => {
+    if (project?.id && !isHandoff) refreshGithubStatus?.(project.id).catch(() => {})
+  }, [project?.id, isHandoff, refreshGithubStatus])
+
+  const status = github.status
+  const draft = github.draft
+  const result = github.result
+  const changed = status?.git?.dirty_files || []
+
+  const prepare = async () => {
+    if (!project?.id || isHandoff || busy) return
+    setBusy(true)
+    try {
+      await prepareGithubPublish(project.id, draftInput)
+      toastSuccess('GitHub publish draft prepared')
+    } catch (err) {
+      toastError(err?.message || 'GitHub prepare failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const publish = async () => {
+    if (!project?.id || isHandoff || busy) return
+    if (!draft?.publish_id) { toastError('Prepare a draft before publishing'); return }
+    if (!confirmPublish) { toastError('Confirm the push + PR first'); return }
+    setBusy(true)
+    try {
+      const response = await publishGithubDraft(project.id, { draft, confirm: true, publish_id: draft.publish_id })
+      toastSuccess(response.pr?.url ? 'GitHub PR created' : 'GitHub branch pushed')
+      setConfirmPublish(false)
+    } catch (err) {
+      const code = err?.body?.error || err?.error || err?.message
+      if (code === 'publish_id_mismatch') {
+        toastError('Draft changed since you prepared it — click Prepare again, then confirm.')
+        setConfirmPublish(false)
+      } else if (code === 'publish_requires_confirmation') {
+        toastError('Tick the confirmation box before publishing.')
+      } else if (code === 'publish_requires_prepared_draft') {
+        toastError('Prepare a draft first, then publish.')
+      } else {
+        toastError(err?.message || 'GitHub publish failed')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (isHandoff) {
+    return (
+      <Panel title="GitHub Publish" icon="branch">
+        <Pill tone="warn" pulse={false}>HANDOFF READ ONLY</Pill>
+        <div style={{ marginTop: 12, color: 'var(--af2-muted)', font: '400 13px/1.6 var(--af2-sans)' }}>Orders handoff projects can be read in V5, but they must be imported or converted into a normal local Forge project before branch and PR publishing.</div>
+      </Panel>
+    )
+  }
+
+  return (
+    <div className="af2-grid af2-grid--2">
+      <Panel title="GitHub Status" icon="branch" actions={<Btn sm variant="ghost" onClick={() => project?.id && refreshGithubStatus?.(project.id).catch(() => {})} disabled={!project}>Refresh</Btn>}>
+        {!project && <div style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>Select a project to inspect GitHub status.</div>}
+        {project && (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div className="af2-row"><span>Remote</span><span style={{ color: 'var(--af2-muted)', font: '500 11px var(--af2-mono)' }}>{status?.remote?.url || 'unavailable'}</span></div>
+            <div className="af2-row"><span>Branch</span><Pill sm pulse={false}>{status?.git?.current_branch || 'unavailable'}</Pill></div>
+            <div className="af2-row"><span>Token</span><Pill sm tone={status?.auth?.token_available ? 'success' : 'warn'} pulse={false}>{status?.auth?.token_available ? 'AVAILABLE' : 'NO TOKEN'}</Pill></div>
+            <div className="af2-row"><span>Changed files</span><Pill sm tone={changed.length ? 'warn' : 'idle'} pulse={false}>{changed.length}</Pill></div>
+            {(status?.blockers || []).map(blocker => <Pill key={blocker} tone="warn" pulse={false}>{blocker}</Pill>)}
+          </div>
+        )}
+      </Panel>
+      <Panel title="Publish Draft" icon="send">
+        <div style={{ display: 'grid', gap: 9 }}>
+          <input className="af2-input" value={draftInput.branch_name} onChange={e => setDraftInput(v => ({ ...v, branch_name: e.target.value }))} placeholder="Branch name, optional"/>
+          <input className="af2-input" value={draftInput.title} onChange={e => setDraftInput(v => ({ ...v, title: e.target.value }))} placeholder="PR title, optional"/>
+          <input className="af2-input" value={draftInput.commit_message} onChange={e => setDraftInput(v => ({ ...v, commit_message: e.target.value }))} placeholder="Commit message, optional"/>
+          <textarea className="af2-input" value={draftInput.body} onChange={e => setDraftInput(v => ({ ...v, body: e.target.value }))} placeholder="PR body, optional" style={{ minHeight: 90, resize: 'vertical' }}/>
+          {draft && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--af2-muted)', font: '500 12px var(--af2-sans)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={confirmPublish} onChange={e => setConfirmPublish(e.target.checked)}/>
+              I confirm pushing branch <strong style={{ color: 'var(--af2-bronze-bright)' }}>{draft.branch_name}</strong> and opening a PR
+            </label>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Btn variant="primary" icon="spark" onClick={prepare} disabled={!project || busy || !changed.length}>Prepare</Btn>
+            <Btn variant="primary" icon="send" onClick={publish} disabled={!project || busy || !draft || !confirmPublish}>Publish Branch + PR</Btn>
+          </div>
+        </div>
+      </Panel>
+      <Panel title="Changed Files" icon="files">
+        <div style={{ display: 'grid', gap: 7 }}>
+          {changed.slice(0, 30).map(file => <div key={file.raw || file.path} className="af2-row"><span>{file.path}</span><Pill sm pulse={false}>{file.status}</Pill></div>)}
+          {!changed.length && <div style={{ color: 'var(--af2-muted)', font: '400 12px var(--af2-sans)' }}>No changed files detected.</div>}
+        </div>
+      </Panel>
+      <Panel title="Publish Result" icon="history">
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div className="af2-row"><span>State</span><Pill sm tone={result?.state === 'published' ? 'success' : result?.state === 'partial' ? 'warn' : 'idle'} pulse={false}>{result?.state || github.phase || 'idle'}</Pill></div>
+          <div className="af2-row"><span>Branch</span><span style={{ color: 'var(--af2-muted)', font: '500 11px var(--af2-mono)' }}>{result?.branch_name || draft?.branch_name || 'unavailable'}</span></div>
+          {result?.pr?.url && <a href={result.pr.url} target="_blank" rel="noreferrer" style={{ color: 'var(--af2-bronze-bright)', font: '600 12px var(--af2-sans)' }}>Open pull request</a>}
+          {result?.pr?.reason && <div style={{ color: '#F59E0B', font: '400 12px/1.5 var(--af2-sans)' }}>{result.pr.reason}</div>}
+          {github.error && <div style={{ color: '#F87171', font: '400 12px/1.5 var(--af2-sans)' }}>{github.error}</div>}
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+function V7ExecutionView({ project }) {
+  const { data: v5Data, refresh: refreshV5 } = useV5ProjectData(project?.id)
+  const v7 = useForgeStore(useShallow(s => s.v7))
+  const setMode = useForgeStore(s => s.setV7ExecutionMode)
+  const refreshV7 = useForgeStore(s => s.refreshV7ExecutionState)
+  const proposePatch = useForgeStore(s => s.v7ProposePatch)
+  const createSandbox = useForgeStore(s => s.v7CreateSandbox)
+  const applySandbox = useForgeStore(s => s.v7ApplyPatchSandbox)
+  const validateWorkspace = useForgeStore(s => s.v7ValidateWorkspace)
+  const requestApply = useForgeStore(s => s.v7RequestApply)
+  const approveApply = useForgeStore(s => s.v7ApproveApply)
+  const rejectApply = useForgeStore(s => s.v7RejectApply)
+  const applyWorkspace = useForgeStore(s => s.v7ApplyToWorkspace)
+  const postValidate = useForgeStore(s => s.v7PostValidate)
+  const rollback = useForgeStore(s => s.v7Rollback)
+  const [goalId, setGoalId] = useState('')
+  const [summary, setSummary] = useState('')
+  const [filesJson, setFilesJson] = useState('[{\"path\":\"README.md\",\"content\":\"# Updated by AscendForge V7\\n\"}]')
+  const [diff, setDiff] = useState('')
+  const [busy, setBusy] = useState('')
+
+  const isHandoff = Boolean(project?.handoff || project?.target_type === 'orders_handoff')
+  const goals = v5Data.goals || []
+  const selectedGoal = goals.find(goal => goal.goal_id === goalId) || goals[0] || null
+  const gid = selectedGoal?.goal_id || goalId
+  const proposal = v7.patchProposals[0] || null
+  const workspace = v7.workspaces[0] || null
+  const validation = v7.sandboxRuns[0] || null
+  const approval = v7.applyApprovals[0] || null
+  const applied = v7.appliedChanges[0] || null
+  const rollbackArtifact = v7.rollbackArtifacts[0] || null
+  const mode = Number(v7.executionMode || 0)
+
+  useEffect(() => {
+    if (goals[0]?.goal_id && !goalId) setGoalId(goals[0].goal_id)
+  }, [goals, goalId])
+
+  useEffect(() => {
+    if (project?.id && !isHandoff) refreshV7(project.id).catch(() => {})
+  }, [project?.id, isHandoff, refreshV7])
+
+  const run = async (key, fn) => {
+    if (busy) return
+    setBusy(key)
+    try {
+      await fn()
+      toastSuccess('V7 step completed')
+      if (project?.id) refreshV7(project.id).catch(() => {})
+    } catch (err) {
+      toastError(err?.message || 'V7 step failed')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const parseFiles = () => {
+    try {
+      const parsed = JSON.parse(filesJson || '[]')
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      toastError('File patch JSON is invalid')
+      return null
+    }
+  }
+
+  const canUse = project?.id && gid && !isHandoff
+
+  return (
+    <div className="af2-grid af2-grid--2">
+      <Panel title="Execution Mode" icon="zap" actions={<Btn sm variant="ghost" onClick={() => { refreshV5(); project?.id && refreshV7(project.id).catch(() => {}) }} disabled={!project}>Refresh</Btn>}>
+        {isHandoff && <Pill tone="warn" pulse={false}>IMPORT REQUIRED BEFORE EXECUTION</Pill>}
+        <div style={{ display: 'grid', gap: 10, marginTop: isHandoff ? 12 : 0 }}>
+          <select className="af2-input" value={mode} onChange={e => setMode(Number(e.target.value))}>
+            <option value={0}>Level 0 - read-only / plan-only</option>
+            <option value={1}>Level 1 - proposal mode</option>
+            <option value={2}>Level 2 - sandbox apply</option>
+            <option value={3}>Level 3 - approved apply</option>
+            <option value={4}>Level 4 - GitHub publish</option>
+          </select>
+          <select className="af2-input" value={gid || ''} onChange={e => setGoalId(e.target.value)} disabled={!goals.length}>
+            {!goals.length && <option value="">No V5 goals available</option>}
+            {goals.map(goal => <option key={goal.goal_id || goal.title} value={goal.goal_id}>{goal.title || goal.goal_id}</option>)}
+          </select>
+          <div style={{ color: 'var(--af2-muted)', font: '400 12.5px/1.6 var(--af2-sans)' }}>Level 0 can only read/plan. Level 1 creates proposals. Level 2 applies only in an isolated workspace. Level 3 still requires an approved apply request before the real workspace changes. GitHub publish remains a separate confirmation flow.</div>
+        </div>
+      </Panel>
+
+      <Panel title="Patch Proposal" icon="diff">
+        <div style={{ display: 'grid', gap: 9 }}>
+          <input className="af2-input" value={summary} onChange={e => setSummary(e.target.value)} placeholder="Patch summary"/>
+          <textarea className="af2-input" value={filesJson} onChange={e => setFilesJson(e.target.value)} style={{ minHeight: 120, resize: 'vertical', fontFamily: 'var(--af2-mono)' }} placeholder="File patch JSON: [{ path, content }]"/>
+          <textarea className="af2-input" value={diff} onChange={e => setDiff(e.target.value)} style={{ minHeight: 90, resize: 'vertical', fontFamily: 'var(--af2-mono)' }} placeholder="Unified diff, optional"/>
+          <Btn variant="primary" icon="spark" disabled={!canUse || mode < 1 || busy === 'propose'} onClick={() => run('propose', async () => {
+            const files = parseFiles()
+            if (!files) return
+            await proposePatch(project.id, gid, { goal: selectedGoal, summary: summary || selectedGoal?.title, files, diff, risk_level: 'SAFE' })
+          })}>{busy === 'propose' ? 'Proposing' : 'Propose Patch'}</Btn>
+          {proposal && <div className="af2-row"><span>{proposal.title}</span><Pill sm tone={proposal.risk_level === 'SAFE' ? 'success' : 'warn'} pulse={false}>{proposal.risk_level}</Pill></div>}
+        </div>
+      </Panel>
+
+      <Panel title="Sandbox Validation" icon="pipeline">
+        <div style={{ display: 'grid', gap: 9 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Btn sm variant="primary" icon="files" disabled={!canUse || mode < 2 || !proposal || busy === 'sandbox'} onClick={() => run('sandbox', () => createSandbox(project.id, gid, { goal: selectedGoal, patch_artifact_id: proposal.artifact_id }))}>Create Sandbox</Btn>
+            <Btn sm variant="primary" icon="diff" disabled={mode < 2 || !workspace || busy === 'apply_sandbox'} onClick={() => run('apply_sandbox', () => applySandbox(workspace.workspace_id))}>Apply In Sandbox</Btn>
+            <Btn sm variant="primary" icon="check" disabled={mode < 2 || !workspace || busy === 'validate'} onClick={() => run('validate', () => validateWorkspace(workspace.workspace_id))}>Validate</Btn>
+          </div>
+          <div className="af2-row"><span>Workspace</span><Pill sm pulse={false}>{workspace?.mode || 'unavailable'}</Pill></div>
+          <div className="af2-row"><span>Status</span><Pill sm tone={workspace?.status === 'validated' ? 'success' : 'idle'} pulse={false}>{workspace?.status || 'unavailable'}</Pill></div>
+          {(validation?.commands || []).slice(0, 6).map(cmd => <div key={cmd.id} className="af2-row"><span>{cmd.label}</span><Pill sm tone={cmd.status === 'passed' ? 'success' : cmd.status === 'failed' ? 'danger' : 'idle'} pulse={false}>{cmd.status}</Pill></div>)}
+        </div>
+      </Panel>
+
+      <Panel title="Apply Approval" icon="check">
+        <div style={{ display: 'grid', gap: 9 }}>
+          <Btn variant="primary" icon="bell" disabled={!canUse || mode < 2 || !workspace || busy === 'request'} onClick={() => run('request', () => requestApply(project.id, gid, { goal: selectedGoal, stage_only: false }))}>Request Apply Approval</Btn>
+          {approval && <>
+            <div className="af2-row"><span>{approval.summary}</span><Pill sm tone={approval.status === 'approved' ? 'success' : approval.status === 'rejected' ? 'danger' : 'warn'} pulse={false}>{approval.status}</Pill></div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Btn sm variant="primary" icon="check" disabled={busy === 'approve' || approval.status !== 'pending'} onClick={() => run('approve', () => approveApply(approval.approval_id))}>Approve</Btn>
+              <Btn sm variant="ghost" icon="cross" disabled={busy === 'reject' || approval.status !== 'pending'} onClick={() => run('reject', () => rejectApply(approval.approval_id, { reason: 'Rejected from V7 panel' }))}>Reject</Btn>
+              <Btn sm variant="primary" icon="play" disabled={mode < 3 || approval.status !== 'approved' || busy === 'apply'} onClick={() => run('apply', () => applyWorkspace(project.id, gid, { goal: selectedGoal, approval_id: approval.approval_id }))}>Apply To Workspace</Btn>
+            </div>
+          </>}
+        </div>
+      </Panel>
+
+      <Panel title="Applied Changes & Rollback" icon="history">
+        <div style={{ display: 'grid', gap: 9 }}>
+          <div className="af2-row"><span>Applied files</span><Pill sm tone={applied?.files_applied?.length ? 'success' : 'idle'} pulse={false}>{applied?.files_applied?.length || 0}</Pill></div>
+          <Btn sm variant="primary" icon="check" disabled={!canUse || !applied || busy === 'post'} onClick={() => run('post', () => postValidate(project.id, gid, { goal: selectedGoal }))}>Post-Apply Validate</Btn>
+          <div className="af2-row"><span>Rollback</span><Pill sm tone={rollbackArtifact?.status === 'available' ? 'warn' : rollbackArtifact?.status === 'applied' ? 'success' : 'idle'} pulse={false}>{rollbackArtifact?.status || 'unavailable'}</Pill></div>
+          <Btn sm variant="ghost" icon="history" disabled={!canUse || rollbackArtifact?.status !== 'available' || busy === 'rollback'} onClick={() => run('rollback', () => rollback(project.id, gid, { goal: selectedGoal, rollback_id: rollbackArtifact.rollback_id, confirm: true }))}>Rollback With Confirmation</Btn>
+          {v7.error && <div style={{ color: '#F87171', font: '400 12px/1.5 var(--af2-sans)' }}>{v7.error}</div>}
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
 /* ── Footer ────────────────────────────────────────────────────── */
 function ForgeFooter({ runState, project, agents }) {
   const activeCount = agents.filter(a => a.status && a.status !== 'idle').length
+  const activeRun = ['running', 'planning', 'testing', 'executing', 'in_progress', 'agentic', 'reviewing'].includes(String(runState || '').toLowerCase())
   return (
     <footer className="af2-footer">
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span className={`af2-status-dot af2-status-dot--${runState === 'running' ? 'running' : 'pending'}`} style={{ animation: 'af2Pulse 2s ease-in-out infinite' }}/>
-          <span style={{ color: runState === 'running' ? '#4ADE80' : '#F59E0B' }}>{runState === 'running' ? 'FORGE ACTIVE' : 'IDLE'}</span>
+          <span className={`af2-status-dot af2-status-dot--${activeRun ? 'running' : 'pending'}`} style={{ animation: 'af2Pulse 2s ease-in-out infinite' }}/>
+          <span style={{ color: activeRun ? '#4ADE80' : '#F59E0B' }}>{activeRun ? 'FORGE ACTIVE' : (runState || 'IDLE').toUpperCase()}</span>
         </span>
         <span style={{ color: 'var(--af2-dim)' }}>·</span>
         <span><span style={{ color: 'var(--af2-bronze-bright)' }}>{activeCount}</span> AGENTS</span>
@@ -1242,9 +1836,68 @@ export default function AscendForgePage() {
   const [activeRun, setActiveRun] = useState(null)
   const [runBusy, setRunBusy]     = useState(false)
   const [provider, setProvider]   = useState('anthropic')
+  const forge = useForgeStore(useShallow(s => ({
+    activeRun: s.activeRun,
+    actions: s.actions,
+    pendingApprovals: s.pendingApprovals,
+    unsupportedActions: s.unsupportedActions,
+    refresh: s.refresh,
+    ensurePolling: s.ensurePolling,
+    applyForgeEvent: s.applyForgeEvent,
+    selectProject: s.selectProject,
+    selectRun: s.selectRun,
+  })))
 
   const addTerm = (text, type = 'out') => setTermLines(p => [...p.slice(-400), { text, type, ts: Date.now() }])
   const mergeActions = useCallback((items) => setActions(prev => mergeActionLists(prev, items)), [])
+
+  useEffect(() => {
+    forge.ensurePolling?.()
+    forge.refresh?.({ silent: true, reason: 'forge_page_mount' }).catch(() => {})
+  }, [forge.ensurePolling, forge.refresh])
+
+	  useEffect(() => {
+	    if (project?.id) forge.selectProject?.(project.id)
+	  }, [project?.id, forge.selectProject])
+
+	  useEffect(() => {
+	    let alive = true
+	    const openHandoffFromHash = async () => {
+	      const hash = String(window.location.hash || '')
+	      const match = hash.match(/(?:^#?\/?forge\/|forge_project_id=)([A-Za-z0-9._:-]+)/)
+	      if (!match) return
+	      const projectId = match[1]
+	      try {
+	        const result = await api.forge.v5.getBrief(projectId)
+	        if (!alive || !result?.brief) return
+	        setProject({
+	          id: projectId,
+	          name: result.brief.title || `Orders handoff ${compactId(projectId)}`,
+	          target_type: 'orders_handoff',
+	          write_access: false,
+	          handoff: true,
+	          source: 'orders',
+	        })
+	        setView('v5_project')
+	      } catch {
+	        // Unknown hashes are ignored by AscendForge.
+	      }
+	    }
+	    openHandoffFromHash()
+	    window.addEventListener('hashchange', openHandoffFromHash)
+	    return () => { alive = false; window.removeEventListener('hashchange', openHandoffFromHash) }
+	  }, [])
+
+  useEffect(() => {
+    if (forge.activeRun) {
+      setActiveRun(forge.activeRun)
+      setRunState(forge.activeRun.status || 'idle')
+    }
+  }, [forge.activeRun])
+
+  useEffect(() => {
+    if (forge.actions?.length) mergeActions(forge.actions)
+  }, [forge.actions, mergeActions])
 
   useEffect(() => {
     const handler = e => {
@@ -1292,7 +1945,11 @@ export default function AscendForgePage() {
       })
       const d = await resp.json()
       if (!resp.ok || d.ok === false) throw new Error(d.error || `HTTP ${resp.status}`)
-      if (d.run) { setActiveRun(d.run); mergeActions(d.run.actions || []) }
+      if (d.run) {
+        setActiveRun(d.run)
+        forge.applyForgeEvent?.('forge:run_updated', { run: d.run })
+        mergeActions(d.run.actions || [])
+      }
       if (d.final_report) {
         const report = d.final_report
         addTerm(`Auto run complete — ${report.applied?.length || 0} file(s) applied`, 'success')
@@ -1315,7 +1972,7 @@ export default function AscendForgePage() {
     } finally {
       setSending(false)
     }
-  }, [project, sending, provider, mergeActions])
+  }, [project, sending, provider, mergeActions, forge.applyForgeEvent])
 
   const sendGoal = useCallback(async (text, opts = {}) => {
     if (!sessionId || !text.trim() || sending) return
@@ -1351,11 +2008,13 @@ export default function AscendForgePage() {
             if (evtName === 'run' || d.run) {
               const run = d.run || d
               setActiveRun(run)
+              forge.applyForgeEvent?.('forge:run_updated', { run })
               addTerm(`Run started: ${run.run_id || ''}`, 'info')
               if (d.actions?.length) mergeActions(d.actions)
             } else if (evtName === 'done' || d.run_id) {
               setRunState('idle')
               addTerm('Run complete.', 'success')
+              forge.refresh?.({ silent: true, reason: 'stream_done', run_id: activeRun?.run_id || activeRun?.id }).catch(() => {})
               if (d.actions) mergeActions(d.actions)
             } else if (evtName === 'error') {
               addTerm(`Forge error: ${d.error}`, 'err')
@@ -1363,6 +2022,7 @@ export default function AscendForgePage() {
             } else if (evtName === 'progress') {
               addTerm(d.message || d.stage || 'Working…', 'info')
             } else if (d.type === 'action') {
+              forge.applyForgeEvent?.('forge:action_updated', { action: d.action })
               mergeActions([d.action])
             } else if (d.type === 'message') {
               setMessages(p => [...p, { role: 'assistant', content: d.content || d.message }])
@@ -1380,31 +2040,39 @@ export default function AscendForgePage() {
     } finally {
       setSending(false)
     }
-  }, [sessionId, sending, project, provider, mergeActions, activeRun])
+  }, [sessionId, sending, project, provider, mergeActions, activeRun, forge.applyForgeEvent, forge.refresh])
 
   const handleApprove = useCallback(async (action) => {
     const id = action.id || action.action_id
     if (!id || busyActions[id]) return
     setBusyActions(p => ({ ...p, [id]: true }))
     try {
-      await JPOST(`/api/forge/actions/${id}/approve`, { run_id: activeRun?.run_id })
-      mergeActions([{ ...action, status: 'applied' }])
+      const resp = await JPOST(`/api/forge/actions/${id}/approve`, { run_id: activeRun?.run_id })
+      const data = await resp.json().catch(() => ({}))
+      const updatedAction = data.action || { ...action, status: data.ok === false ? 'failed' : 'completed' }
+      mergeActions([updatedAction])
+      forge.applyForgeEvent?.('forge:action_updated', { action: updatedAction })
+      forge.refresh?.({ silent: true, reason: 'action_approved', run_id: activeRun?.run_id || activeRun?.id }).catch(() => {})
       addTerm(`Approved: ${action.description || id}`, 'success')
-      toastSuccess('Action approved')
+      toastSuccess(data.output || 'Action approved')
     } catch (e) {
       toastError(`Approve failed: ${e.message}`)
     } finally {
       setBusyActions(p => { const n = { ...p }; delete n[id]; return n })
     }
-  }, [busyActions, activeRun, mergeActions])
+  }, [busyActions, activeRun, mergeActions, forge.applyForgeEvent, forge.refresh])
 
   const handleReject = useCallback(async (action) => {
     const id = action.id || action.action_id
     if (!id || busyActions[id]) return
     setBusyActions(p => ({ ...p, [id]: true }))
     try {
-      await JPOST(`/api/forge/actions/${id}/reject`, { run_id: activeRun?.run_id })
-      mergeActions([{ ...action, status: 'rejected' }])
+      const resp = await JPOST(`/api/forge/actions/${id}/reject`, { run_id: activeRun?.run_id })
+      const data = await resp.json().catch(() => ({}))
+      const updatedAction = data.action || { ...action, status: 'rejected' }
+      mergeActions([updatedAction])
+      forge.applyForgeEvent?.('forge:action_updated', { action: updatedAction })
+      forge.refresh?.({ silent: true, reason: 'action_rejected', run_id: activeRun?.run_id || activeRun?.id }).catch(() => {})
       addTerm(`Rejected: ${action.description || id}`, 'warn')
       toastSuccess('Action rejected')
     } catch (e) {
@@ -1412,26 +2080,74 @@ export default function AscendForgePage() {
     } finally {
       setBusyActions(p => { const n = { ...p }; delete n[id]; return n })
     }
-  }, [busyActions, activeRun, mergeActions])
+  }, [busyActions, activeRun, mergeActions, forge.applyForgeEvent, forge.refresh])
 
-  const pendingCount = useMemo(() => actions.filter(needsOperatorDecision).length, [actions])
+	  const pendingCount = useMemo(() => Math.max(actions.filter(needsOperatorDecision).length, forge.pendingApprovals?.length || 0), [actions, forge.pendingApprovals])
 
-  // Mock agents data (real agent presence would come from WS)
   const agents = useMemo(() => {
-    const base = [
-      { id: 'planner', name: 'Planner', model: 'claude-opus-4', status: runState === 'running' ? 'thinking' : 'idle', load: 0.42, task: 'Orchestrating plan' },
-      { id: 'coder', name: 'Coder', model: 'claude-sonnet-4', status: runState === 'running' ? 'writing' : 'idle', load: 0.78, task: 'Implementing changes' },
-    ]
-    return base
-  }, [runState])
+    const run = forge.activeRun || activeRun
+    const transcript = run?.final_report?.transcript || []
+    const last = transcript[transcript.length - 1] || null
+    if (last) {
+      return ['planner', 'coder', 'tester', 'security', 'reviewer']
+        .map(key => last[key] ? {
+          id: key,
+          name: key.charAt(0).toUpperCase() + key.slice(1),
+          model: last[key].model || run?.provider || 'forge-agent',
+          status: last[key].status || 'done',
+          load: 0,
+          task: last[key].output?.summary || last[key].summary || `${key} stage evidence available`,
+        } : null)
+        .filter(Boolean)
+    }
+    const state = String(run?.status || runState || 'idle').toLowerCase()
+    if (['running', 'planning', 'testing', 'executing', 'reviewing'].includes(state)) {
+      return [{ id: 'telemetry', name: 'Agent Telemetry', model: run?.provider || 'forge', status: 'unavailable', load: 0, task: 'Backend run is active; per-agent telemetry is unavailable.' }]
+    }
+    return []
+  }, [forge.activeRun, activeRun, runState])
 
-  const handleSelectProject = (p) => {
-    setProject(p)
+  const effectiveRunState = (forge.activeRun || activeRun)?.status || runState
+
+  const handleToggleRun = useCallback(async () => {
+    const run = forge.activeRun || activeRun
+    const runId = run?.run_id || run?.id
+    if (!runId) {
+      toastError('No backend run selected')
+      return
+    }
+    const state = String(run.status || '').toLowerCase()
+    const isRunning = ['running', 'planning', 'testing', 'executing', 'in_progress', 'agentic', 'reviewing'].includes(state)
+    const action = state === 'paused' ? 'resume' : isRunning ? 'pause' : null
+    if (!action) {
+      const reason = forge.unsupportedActions?.pause?.reason || forge.unsupportedActions?.resume?.reason || `Run control unsupported in status ${run.status || 'unknown'}`
+      toastError(reason)
+      return
+    }
+    setRunBusy(true)
+    try {
+      const result = action === 'pause' ? await api.forge.pauseRun(runId) : await api.forge.resumeRun(runId)
+      if (result.run) {
+        setActiveRun(result.run)
+        setRunState(result.run.status || 'idle')
+        forge.applyForgeEvent?.('forge:run_updated', { run: result.run })
+      }
+      forge.refresh?.({ silent: true, reason: `run_${action}`, run_id: runId }).catch(() => {})
+      toastSuccess(action === 'pause' ? 'Run paused' : 'Run resumed')
+    } catch (err) {
+      toastError(err?.message || `Run ${action} failed`)
+    } finally {
+      setRunBusy(false)
+    }
+  }, [activeRun, forge])
+
+	  const handleSelectProject = (p) => {
+	    setProject(p)
     setView('compose')
     setMessages([])
     setActions([])
     setActiveRun(null)
-  }
+	  }
 
   const handleNewProject = (p) => {
     setProject(p)
@@ -1446,11 +2162,11 @@ export default function AscendForgePage() {
       <div className="af2-grain"/>
       <div className="af2-scanlines"/>
 
-      <ForgeTopBar
+        <ForgeTopBar
         activeView={view}
         project={project}
-        runState={runState}
-        onToggleRun={() => setRunState(s => s === 'running' ? 'paused' : s === 'paused' ? 'running' : 'running')}
+        runState={effectiveRunState}
+        onToggleRun={handleToggleRun}
         onPaletteOpen={() => setPaletteOpen(true)}
         pendingCount={pendingCount}
       />
@@ -1459,20 +2175,32 @@ export default function AscendForgePage() {
         <LeftRail active={view} onChange={setView} pendingCount={pendingCount}/>
 
         <main className="af2-main">
-          {view === 'projects'  && <ProjectsView onSelect={handleSelectProject} onNew={() => setShowNewProj(true)}/>}
-          {view === 'compose'   && <ComposeView project={project} onSubmit={(goal, opts) => sendGoal(goal, opts)} onAutoRun={(goal, opts) => sendAutoRun(goal, opts)} onSwitchProject={() => setView('projects')}/>}
-          {view === 'activity'  && <ActivityView messages={messages} termLines={termLines} sending={sending} agents={agents} computePlan={computePlan}/>}
+	          {view === 'projects'  && <ProjectsView onSelect={handleSelectProject} onNew={() => setShowNewProj(true)}/>}
+	          {view === 'compose'   && <ComposeView project={project} onSubmit={(goal, opts) => sendGoal(goal, opts)} onAutoRun={(goal, opts) => sendAutoRun(goal, opts)} onSwitchProject={() => setView('projects')}/>}
+	          {view === 'queue'     && <ForgeQueueView project={project}/>}
+	          {view === 'activity'  && <ActivityView messages={messages} termLines={termLines} sending={sending} agents={agents} computePlan={computePlan}/>}
           {view === 'review'    && <ReviewView actions={actions} onApprove={handleApprove} onReject={handleReject}/>}
           {view === 'approvals' && <ApprovalsView actions={actions} onApprove={handleApprove} onReject={handleReject}/>}
           {view === 'pipeline'  && <PipelineView activeRun={activeRun}/>}
-          {view === 'files'     && <FilesView project={project}/>}
+          {view === 'v5_project' && <V5ProjectView project={project} onPrepared={p => { if (p) setProject(p) }}/>}
+          {view === 'v5_goals' && <V5GoalsView project={project} onRun={run => {
+            if (run) {
+              setActiveRun(run)
+              forge.applyForgeEvent?.('forge:run_updated', { run })
+            }
+          }}/>}
+	          {view === 'v5_reasoning' && <V5ReasoningView project={project}/>}
+	          {view === 'v5_quality' && <V5QualityView project={project}/>}
+	          {view === 'v7_execution' && <V7ExecutionView project={project}/>}
+	          {view === 'github' && <GitHubPublishView project={project}/>}
+	          {view === 'files'     && <FilesView project={project}/>}
           {view === 'history'   && <HistoryView project={project}/>}
           {view === 'agents'    && <AgentsView agents={agents}/>}
           {view === 'terminal'  && <TerminalView termLines={termLines}/>}
         </main>
       </div>
 
-      <ForgeFooter runState={runState} project={project} agents={agents}/>
+      <ForgeFooter runState={effectiveRunState} project={project} agents={agents}/>
 
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} onSelectView={v => { setView(v); setPaletteOpen(false) }}/>}
       {showNewProj && <NewProjectModal onClose={() => setShowNewProj(false)} onCreate={handleNewProject}/>}

@@ -847,8 +847,9 @@ export default function WorkflowsPage() {
 
   async function runWorkflow(id) {
     try {
-      await request(`/api/workflows/${encodeURIComponent(id)}/run`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) })
-      toastSuccess('Workflow run queued through main AI')
+      const result = await request(`/api/workflows/${encodeURIComponent(id)}/run`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) })
+      const state = result?.run?.state || result?.run?.status || result?.workflow?.state || result?.status || 'submitted'
+      toastSuccess(`Workflow ${String(state).replace(/_/g, ' ')}`)
       const d = await request('/api/workflows/runs')
       setRuns(d.runs || [])
     } catch (err) {

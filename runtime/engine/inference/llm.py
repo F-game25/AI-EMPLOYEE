@@ -191,6 +191,79 @@ def _build_ollama_options(model: str) -> dict:
 
 _CORE_MODELS = [DEFAULT_MODEL, DEFAULT_EMBED_MODEL]
 
+# Approximate VRAM (MB) per model — used by ensure_model_ready to decide whether to evict.
+_MODEL_VRAM_MB: dict[str, int] = {
+    "llama3.2":             2000,
+    "llama3.2:latest":      2000,
+    "gemma3":               3300,
+    "gemma3:latest":        3300,
+    "qwen2.5:7b-instruct":  4700,
+    "qwen2.5-coder:14b":    9000,
+    "llava":                4700,
+    "llava:latest":         4700,
+    "nomic-embed-text":      300,
+}
+# Models that should stay resident forever (keep_alive=-1)
+_PERMANENT_MODELS: frozenset[str] = frozenset({DEFAULT_MODEL, DEFAULT_EMBED_MODEL, "llama3.2", "llama3.2:latest", "nomic-embed-text"})
+
+
+def _ollama_get(endpoint: str, timeout: int) -> dict:
+    """GET the Ollama API and return parsed JSON."""
+    url = f"{OLLAMA_HOST.rstrip('/')}/{endpoint.lstrip('/')}"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Ollama not reachable at {OLLAMA_HOST}: {exc}") from exc
+
+
+def _evict_idle_models(keep: frozenset[str] | None = None) -> None:
+    """Unload non-permanent models from Ollama VRAM (keep_alive=0).
+
+    Called before loading a heavy model when VRAM headroom is tight.
+    Permanent models (llama3.2, nomic-embed-text) are never evicted.
+    """
+    keep_set = keep if keep is not None else _PERMANENT_MODELS
+    try:
+        resp = _ollama_get("/api/ps", timeout=8)
+        for m in resp.get("models", []):
+            name = m.get("name", "")
+            if name and name not in keep_set:
+                logger.info("evict_idle model=%s", name)
+                _ollama_unloader(name)()
+    except Exception as exc:
+        logger.debug("evict_idle_models skipped: %s", exc)
+
+
+def ensure_model_ready(model: str) -> bool:
+    """Warm *model* into VRAM, evicting idle models first if headroom is tight.
+
+    Permanent models (llama3.2, nomic-embed-text) get keep_alive=-1 so Ollama
+    never evicts them between calls.  On-demand heavy models get keep_alive=300s.
+    Returns True on success, False if Ollama is unreachable.
+    """
+    if not model:
+        return False
+    needed_mb = _MODEL_VRAM_MB.get(model, 5000)
+    try:
+        from neural_brain.models.lifecycle_manager import _free_vram_mb
+        free_mb = _free_vram_mb() or 0
+        if needed_mb > free_mb * 0.85:
+            logger.info("ensure_model_ready: low VRAM (%d MB free, need %d) — evicting idle models", free_mb, needed_mb)
+            _evict_idle_models(keep=_PERMANENT_MODELS | {model})
+    except Exception as exc:
+        logger.debug("ensure_model_ready vram check skipped: %s", exc)
+
+    keep_alive: int = -1 if model in _PERMANENT_MODELS else 300
+    try:
+        _ollama_post("/api/generate", {"model": model, "prompt": " ", "keep_alive": keep_alive, "stream": False}, 30)
+        logger.info("model_ready model=%s keep_alive=%s", model, keep_alive)
+        return True
+    except Exception as exc:
+        logger.debug("ensure_model_ready failed model=%s: %s", model, exc)
+        return False
+
 
 def _warm_targets() -> list[str]:
     """Embed model + the always-hot tier models (FAST/NORMAL), deduped.
@@ -305,6 +378,7 @@ def generate(
             logger.warning("ai_router failed (%s) — falling back to direct Ollama", exc)
 
     mgr, _ = _enforce_lifecycle(chosen_model)
+    ensure_model_ready(chosen_model)
     offload_opts = _build_ollama_options(chosen_model)
     payload = {
         "model": chosen_model,
