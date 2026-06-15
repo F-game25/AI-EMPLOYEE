@@ -486,7 +486,7 @@ def decompose_to_tasks(
 
 # ── Fix 4 — Real execution verification ──────────────────────────────────────
 
-# Patterns that indicate a placeholder/simulated result rather than real execution
+# Exact-match outputs that indicate a placeholder result rather than real execution
 _SIMULATED_OUTPUT_PATTERNS = frozenset({
     "task completed",
     "successfully completed",
@@ -495,6 +495,24 @@ _SIMULATED_OUTPUT_PATTERNS = frozenset({
     "success",
     "",
 })
+
+# Substrings that unambiguously mark fabricated/placeholder output even when the
+# surrounding text is long. Any match → the task is NOT a real execution and its
+# claimed success is downgraded so it never shows as a real outcome.
+_PLACEHOLDER_MARKERS = (
+    "completed deterministic local execution",
+    "simulated execution of",
+    "[ceo simulated response]",
+    "placeholder",
+    "not yet implemented",
+    "not_implemented",
+    "todo: implement",
+    "lorem ipsum",
+)
+
+
+def _has_placeholder_marker(out_text: str) -> bool:
+    return any(m in out_text for m in _PLACEHOLDER_MARKERS)
 
 
 def _is_real_execution(result: dict[str, Any]) -> bool:
@@ -517,6 +535,8 @@ def _is_real_execution(result: dict[str, Any]) -> bool:
         out_text = str(out.get("output") or out.get("text") or "").strip().lower()
     else:
         out_text = str(out).strip().lower()
+    if _has_placeholder_marker(out_text):
+        return False
     return out_text not in _SIMULATED_OUTPUT_PATTERNS and len(out_text) > 10
 
 
@@ -551,7 +571,21 @@ def execute_tasks(
                 "output": task_info.get("output"),
             }
             result["real_execution"] = _is_real_execution(result)
-            if not result["real_execution"]:
+            # Downgrade CONFIRMED fabricated output (placeholder markers) so a
+            # fake-success never propagates as a real success. Generic short
+            # outputs are only annotated (real_execution flag), not failed.
+            out = result.get("output")
+            out_text = (str(out.get("output") or out.get("text") or "") if isinstance(out, dict)
+                        else str(out or "")).strip().lower()
+            if result.get("status") == "success" and _has_placeholder_marker(out_text):
+                result["status"] = "simulated"
+                result["success"] = False
+                result["execution_warning"] = "output matched a placeholder marker — not a real execution"
+                logger.warning(
+                    "[EXECUTION CHECK] task_id=%s skill=%s downgraded success→simulated (placeholder output)",
+                    result["task_id"], result["skill"],
+                )
+            elif not result["real_execution"]:
                 logger.debug(
                     "[EXECUTION CHECK] task_id=%s skill=%s appears simulated",
                     result["task_id"],

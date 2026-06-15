@@ -1214,3 +1214,17 @@ class TestDegradedFlag:
 
         latest = list(up._TRACE_STORE)[-1]
         assert latest.get("degraded") is True
+
+
+# ── Fake-success enforcement (System Reality Audit) ──────────────────────────
+def test_placeholder_markers_are_not_real_execution():
+    from core.unified_pipeline import _is_real_execution, _has_placeholder_marker
+    assert _has_placeholder_marker("x completed deterministic local execution for: y")
+    assert _has_placeholder_marker("simulated execution of market_research")
+    assert not _has_placeholder_marker("A genuine detailed answer, well over ten chars.")
+    # success + placeholder output → not a real execution
+    assert _is_real_execution({"task_id": "t", "status": "success",
+                               "output": "completed deterministic local execution"}) is False
+    # success + real output → real execution
+    assert _is_real_execution({"task_id": "t", "status": "success",
+                               "output": "A real, substantive result string."}) is True
