@@ -430,6 +430,22 @@ def _seed(reg: CapabilityRegistry) -> None:
                       "should we build a meal-prep app — validate demand first",
                       "is this business idea worth building"],
         ),
+        Capability(
+            id="company.refine",
+            subsystem="company",
+            name="Refine a weak idea into a buildable one (CompanyOS)",
+            description=("Turn a weak business idea into a usable one: validates it, then proposes "
+                         "concrete pivots targeting its weakest dimensions (demand/competition/"
+                         "monetization/feasibility) plus an improved idea statement."),
+            input_schema={"idea": "str"},
+            output_schema={"suggestions": "list", "improved_idea": "str", "weak_dimensions": "list"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["this idea seems weak, how do we make it work",
+                      "turn 'a social app for cats' into something buildable",
+                      "improve my business idea"],
+        ),
     ]
     for c in caps:
         reg.register(c)

@@ -366,6 +366,10 @@ def _dispatch(op: str, args: dict):
         cos = _mod('companyos').get_companyos()
         return cos.validate_company(args['id'])
 
+    if op == 'company.refine':
+        cos = _mod('companyos').get_companyos()
+        return cos.refine_idea(args.get('idea') or '')
+
     if op == 'company.build':
         cos = _mod('companyos').get_companyos()
         return cos.begin_build(args['id'], override=bool(args.get('override')),

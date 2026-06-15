@@ -546,6 +546,7 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/api/company',                         auth: true,        file: 'routes/company.js' },
   { method: 'GET',    path: '/api/company/:id',                     auth: true,        file: 'routes/company.js' },
   { method: 'POST',   path: '/api/company/:id/validate',            auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/refine',                  auth: true,        file: 'routes/company.js' },
   { method: 'POST',   path: '/api/company/:id/build',               auth: true,        file: 'routes/company.js' },
 
   // ── Service Control & Compute Routing (P9) ───────────────────────────────

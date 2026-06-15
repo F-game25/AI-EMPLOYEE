@@ -93,6 +93,52 @@ def test_build_override_requires_reason_and_is_logged(monkeypatch):
     assert any(d["what"] == "build_override" for d in c["decisions"])
 
 
+def test_refiner_suggests_pivots_for_weak_idea(monkeypatch):
+    """Teammate move: weak validation must yield concrete pivot suggestions."""
+    co = _fresh(monkeypatch)
+    import companyos.validation_engine as ve
+    import companyos.idea_refiner as ir
+    monkeypatch.setattr(ve, "_llm_json", lambda *a, **k: {
+        "demand": 2, "competition_gap": 3, "monetization": 2, "feasibility": 6,
+        "confidence": 0.6, "reasons": ["weak demand"], "strongest_objection": "nobody asked"})
+    monkeypatch.setattr(ir, "_llm_json", lambda *a, **k: None)  # force heuristic playbook
+    cos = co.get_companyos()
+    cid = cos.start_company(name="Weak", idea="a social app for cats",
+                            answers={"target_customer": "cat owners", "problem": "boredom",
+                                     "monetization": "ads"})["company"]["id"]
+    v = cos.validate_company(cid)
+    assert v["can_build"] is False
+    ref = v["refinement"]
+    assert ref and ref["suggestions"], "weak idea must get pivot suggestions"
+    # suggestions target the weakest dimensions (demand/monetization scored lowest)
+    targeted = {s["targets"] for s in ref["suggestions"]}
+    assert targeted & {"demand", "monetization", "competition_gap"}
+    assert ref["improved_idea"]
+
+
+def test_refine_idea_standalone(monkeypatch):
+    co = _fresh(monkeypatch)
+    import companyos.idea_refiner as ir
+    monkeypatch.setattr(ir, "_llm_json", lambda *a, **k: None)
+    out = co.get_companyos().refine_idea("a generic to-do app")
+    assert out["ok"] is True
+    assert out["suggestions"] and out["weak_dimensions"]
+
+
+def test_companion_company_refine_capability(monkeypatch):
+    _fresh(monkeypatch)
+    import companyos.validation_engine as ve
+    import companyos.idea_refiner as ir
+    monkeypatch.setattr(ve, "_llm_json", lambda *a, **k: None)
+    monkeypatch.setattr(ir, "_llm_json", lambda *a, **k: None)
+    from companion.capability_registry import get_capability_registry
+    from companion.execution_broker import get_execution_broker
+    cap = get_capability_registry().get("company.refine")
+    assert cap is not None and cap.risk_level == "L0"
+    out = get_execution_broker()._exec_company_refine(cap, {"idea": "a social app for cats"})
+    assert out["status"] == "ok" and out["suggestions"]
+
+
 def test_companion_company_validate_capability(monkeypatch):
     _fresh(monkeypatch)
     import companyos.validation_engine as ve

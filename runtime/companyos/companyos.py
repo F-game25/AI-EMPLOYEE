@@ -11,6 +11,7 @@ import threading
 from .company_store import get_company_store
 from .founder_intake import get_founder_intake
 from .validation_engine import get_validation_engine
+from .idea_refiner import get_idea_refiner
 
 
 class CompanyOS:
@@ -18,6 +19,7 @@ class CompanyOS:
         self._store = get_company_store()
         self._intake = get_founder_intake()
         self._validator = get_validation_engine()
+        self._refiner = get_idea_refiner()
 
     # 1) Intake — idea → brief (surfaces gaps; doesn't build).
     def start_company(self, *, name: str, idea: str, answers: dict | None = None) -> dict:
@@ -34,16 +36,33 @@ class CompanyOS:
         if c is None:
             return {"ok": False, "error": "company not found"}
         self._store.update(company_id, {"status": "validating"})
-        verdict = self._validator.validate(c.get("brief") or {})
+        brief = c.get("brief") or {}
+        verdict = self._validator.validate(brief)
         new_status = "validated" if verdict["verdict"] == "build" else (
             "rejected" if verdict["verdict"] == "reject" else "intake")
-        self._store.update(company_id, {"validation": verdict, "status": new_status})
+        # Teammate move: when the idea isn't strong enough, don't just stop —
+        # propose concrete pivots that turn it into a buildable one.
+        refinement = None
+        if verdict["verdict"] != "build":
+            refinement = self._refiner.refine(brief, verdict)
+        self._store.update(company_id, {"validation": verdict, "status": new_status,
+                                        "refinement": refinement})
         self._store.log_decision(
             company_id, what=f"validation:{verdict['verdict']}",
             why=f"composite={verdict['composite']} conf={verdict['confidence']} — {verdict['recommendation']}")
         return {"ok": True, "company_id": company_id, "validation": verdict,
                 "status": new_status,
-                "can_build": verdict["verdict"] == "build"}
+                "can_build": verdict["verdict"] == "build",
+                "refinement": refinement}
+
+    # Standalone refiner — turn a weak idea into a usable one (no company needed).
+    def refine_idea(self, idea: str, validation: dict | None = None) -> dict:
+        brief = {"idea": (idea or "").strip()}
+        if not brief["idea"]:
+            return {"ok": False, "error": "idea required"}
+        v = validation or self._validator.validate(brief)
+        out = self._refiner.refine(brief, v)
+        return {"ok": True, "validation": v, **out}
 
     # 3) Build gate — STRUCTURALLY blocks until validated 'build' (or explicit override).
     def begin_build(self, company_id: str, *, override: bool = False, override_reason: str = "") -> dict:

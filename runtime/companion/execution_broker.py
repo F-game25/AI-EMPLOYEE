@@ -124,6 +124,7 @@ class ExecutionBroker:
             "content.produce": self._exec_content_produce,
             "finance.draft": self._exec_finance_draft,
             "company.validate": self._exec_company_validate,
+            "company.refine": self._exec_company_refine,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -1026,6 +1027,22 @@ class ExecutionBroker:
                 brief.update(ans)
             out = get_validation_engine().validate(brief)
             return {"status": "ok", **out}
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": str(exc)}
+
+    @staticmethod
+    def _exec_company_refine(cap: Capability, ctx: dict) -> dict:
+        """Turn a weak idea into a buildable one (validate + pivot suggestions)."""
+        idea = str(ctx.get("idea") or ctx.get("goal") or ctx.get("text") or "").strip()
+        if not idea:
+            return {"status": "error", "note": "no idea provided"}
+        try:
+            from companyos import get_companyos
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "note": f"companyos not importable: {exc}"}
+        try:
+            out = get_companyos().refine_idea(idea)
+            return {"status": "ok" if out.get("ok") else "error", **out}
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "error": str(exc)}
 

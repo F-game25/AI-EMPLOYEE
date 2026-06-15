@@ -58,6 +58,16 @@ module.exports = function createCompanyRouter(requireAuth) {
     }
   });
 
+  // POST /api/company/refine — turn a weak idea into a buildable one (no company needed)
+  r.post('/refine', requireAuth, async (req, res) => {
+    try {
+      const result = await w().call('company.refine', { idea: (req.body || {}).idea || '' }, 120_000);
+      res.status(result && result.ok === false ? 502 : 200).json(result);
+    } catch (err) {
+      res.status(503).json({ ..._offline, detail: err.message });
+    }
+  });
+
   // POST /api/company/:id/build — blocked unless validated 'build' or explicit override
   r.post('/:id/build', requireAuth, async (req, res) => {
     try {
