@@ -10401,10 +10401,11 @@ async def ceo_chat(payload: dict):
             logger.warning("CEO agent call failed", exc_info=True)
             response_text = "[CEO Agent unavailable — Ollama or AI provider not running]"
     else:
+        # Honest: no AI provider wired — do NOT fabricate a CEO acknowledgement
+        # that reads as if the directive was actioned.
         response_text = (
-            f"[CEO simulated response] Mission acknowledged. "
-            f"I have received your message: '{message[:80]}'. "
-            f"Coordinating team to execute on this directive."
+            "[CEO Agent unavailable — no AI provider configured. "
+            "Start Ollama or set an API key to get a real response.]"
         )
 
     # Store as a ticket for traceability
