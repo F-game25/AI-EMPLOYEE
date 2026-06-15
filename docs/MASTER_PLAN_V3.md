@@ -227,9 +227,10 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 
 ---
 
-### P9 — Remote / Voice / PC Control Layer — PARTIAL (cc865062, 6d24630a)
+### P9 — Remote / Voice / PC Control Layer — CORE VERIFIED WORKING (cc865062, 6d24630a; verified 2026-06-15)
 
-**Done:** unified `/api/services` (status probes node/python/ollama/neo4j, lanes.status routing, safe pid-verified python restart), ServiceControlPanel + ComputeRouterStatus on Infrastructure page, pre-boot SYSTEM MENU (Boot/Update/Refresh/Reboot/Stop + auto-update). **Remaining:** live remote-GPU provisioning (needs provider keys — fabric is dry-run-gated by design), artifact sync-back, data-sync panel.
+**Done + LIVE-VERIFIED:** unified `/api/services` (status probes node/python/ollama/neo4j, lanes.status routing, safe pid-verified python restart), ServiceControlPanel + ComputeRouterStatus on Infrastructure page, pre-boot SYSTEM MENU (Boot/Update/Refresh/Reboot/Stop + auto-update). **Compute fabric (`backend/compute_fabric/` + `/api/compute/*`) verified end-to-end live:** real GPU telemetry (nvidia-smi), job lifecycle (start/stop = kill switch), **artifact sync-back with sha256-verified manifest**, `unsynced_warning` (outputs not yet synced), heartbeat + checkpoints + `recover` (resume after remote shutdown), spend tracking with daily/total caps. This is the artifact-sync-back / data-persistence / kill-switch the plan called for — it already exists and works (not fake).
+**Only remaining:** **live paid remote-GPU provisioning** — intentionally gated (`COMPUTE_FABRIC_LIVE=0`, no Vast/RunPod adapters/keys) so a real charge is physically impossible by default. Enabling it requires the owner's provider credentials + a verified single-use approval token; the dry-run framework + sync-back are ready to receive real jobs once a provider adapter + keys are added.
 
 **Goal:** Make local/remote/voice/compute a unified, visible operational layer (nr5 extra context).
 
