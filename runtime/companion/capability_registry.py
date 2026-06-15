@@ -382,6 +382,22 @@ def _seed(reg: CapabilityRegistry) -> None:
                       "create a press release for our launch", "write product descriptions",
                       "research the market for AI note-takers", "write a linkedin post about hiring"],
         ),
+        Capability(
+            id="content.produce",
+            subsystem="content",
+            name="Produce multi-platform content (Content Factory)",
+            description=("Generate real content for one or more platforms (blog/twitter/linkedin/"
+                         "instagram/tiktok), save artifacts, and stage them in the approval-gated "
+                         "publish queue. Supports batches/variants. Never auto-publishes."),
+            input_schema={"topic": "str", "platforms": "list?", "content_type": "str?", "variants": "int?"},
+            output_schema={"artifacts": "list", "queued": "list", "real_drafts": "int"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=["writes content artifacts; stages items in the publish queue (no posting)"],
+            examples=["make a content batch about our launch for twitter and linkedin",
+                      "produce 3 blog variants about ai pricing",
+                      "create a content calendar piece for instagram"],
+        ),
     ]
     for c in caps:
         reg.register(c)

@@ -121,6 +121,7 @@ class ExecutionBroker:
             "forge.lifecycle_plan": self._exec_forge_lifecycle_plan,
             "research.audit_quality": self._exec_research_audit_quality,
             "skills.run": self._exec_skills_run,
+            "content.produce": self._exec_content_produce,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -965,6 +966,26 @@ class ExecutionBroker:
                     "match_score": skill.get("match_score")}
         except Exception as exc:
             return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
+
+    @staticmethod
+    def _exec_content_produce(cap: Capability, ctx: dict) -> dict:
+        """Produce multi-platform content via the Content Factory (staged for approval)."""
+        topic = str(ctx.get("topic") or ctx.get("goal") or ctx.get("text") or "").strip()
+        if not topic:
+            return {"status": "error", "note": "no topic provided"}
+        try:
+            from content.content_factory import get_content_factory
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "note": f"content factory not importable: {exc}"}
+        try:
+            brief = {"topic": topic,
+                     "platforms": ctx.get("platforms"),
+                     "content_type": ctx.get("content_type"),
+                     "variants": ctx.get("variants")}
+            out = get_content_factory().produce(brief)
+            return {"status": "ok" if out.get("ok") else "error", **out}
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": str(exc)}
 
     # ── Approval request shaping ─────────────────────────────────────────────────
 
