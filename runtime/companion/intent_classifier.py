@@ -95,6 +95,23 @@ _EXEC_GENERIC = (
     "optimise", "apply",
 )
 
+# ── Browser / computer-use (drive a web page like a human) ─────────────────────
+# Phrases that mean "use the browser" → execution, task_type='browser', so the
+# runtime routes to the browser.* capabilities (gated by Computer-Use mode).
+_BROWSER_VERBS = (
+    "browse to", "navigate to", "go to the website", "go to the site", "go to ",
+    "visit ", "open the browser", "open a browser", "open the website",
+    "open the page", "open the url", "open the site", "on the page",
+    "fill in the", "fill out the", "click the", "click on", "scroll the page",
+    "screenshot the page", "take a screenshot of the page", "type into the",
+    "search the web and open", "log in to", "sign in to",
+)
+# A URL or bare domain (example.com, https://…, www.…) strongly implies browser use.
+_URL_RE = re.compile(r"(https?://|www\.|\b[a-z0-9-]+\.(com|org|net|io|ai|co|dev|app|gov|edu)\b)", re.I)
+# Generic verbs that only mean "browser" when paired with a URL/web cue.
+# (bare tokens — _starts_with_verb compares the first word)
+_BROWSER_OPEN_VERBS = ("open", "load", "read", "check", "visit", "fetch")
+
 # ── Planning ───────────────────────────────────────────────────────────────────
 _PLAN = (
     "plan", "roadmap", "strategy", "how should we", "how do we", "how to",
@@ -191,6 +208,14 @@ class IntentClassifier:
         if (d := _hit(t, _DEBUG)):
             return self._result(MODE_DEBUGGING, "analysis", 0.9, False,
                                  f"debugging cue: '{d}'")
+
+        # 3.5) Browser / computer-use — "browse to X", "open <url>", "click the…".
+        #      Routes to browser.* (themselves gated by Computer-Use mode).
+        has_url = bool(_URL_RE.search(t))
+        browser_cue = _hit(t, _BROWSER_VERBS)
+        if browser_cue or (has_url and _starts_with_verb(t, _BROWSER_OPEN_VERBS)):
+            return self._result(MODE_EXECUTION, "browser", 0.85, True,
+                                 f"browser cue: '{browser_cue or 'url'}'")
 
         # 4) Execution — imperative leading verb ⇒ is_command.
         for verbs, ttype in ((_EXEC_CODE, "code"),

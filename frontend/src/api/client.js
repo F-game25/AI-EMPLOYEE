@@ -122,6 +122,12 @@ const api = {
     get:    ()      => api.get('/api/mode'),
   },
 
+  // ── Computer-Use mode (browser/desktop master switch) ──────────────────────
+  computerUse: {
+    getMode: ()        => api.get('/api/computer-use/mode'),
+    setMode: (enabled) => api.post('/api/computer-use/mode', { enabled }),
+  },
+
   // ── Agents ────────────────────────────────────────────────────────────────
   agents: {
     list:   ()              => api.get('/api/agents'),

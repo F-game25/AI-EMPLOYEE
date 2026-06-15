@@ -149,6 +149,10 @@ const ROUTE_REGISTRY = [
   { method: 'POST',   path: '/api/autonomy/mode',                   auth: true,        file: 'server.js' },
   { method: 'POST',   path: '/api/autonomy/emergency-stop',         auth: true,        file: 'server.js' },
 
+  // ── Computer-Use mode (browser/desktop master switch) ───────────────────────
+  { method: 'GET',    path: '/api/computer-use/mode',               auth: true,        file: 'routes/security-ops.js' },
+  { method: 'POST',   path: '/api/computer-use/mode',               auth: true,        file: 'routes/security-ops.js' },
+
   // ── Evolution ─────────────────────────────────────────────────────────────
   { method: 'GET',    path: '/api/evolution/status',                auth: true,        file: 'routes/evolution.js' },
   { method: 'GET',    path: '/api/evolution/traces',                auth: true,        file: 'routes/evolution.js' },

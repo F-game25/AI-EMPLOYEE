@@ -2336,6 +2336,36 @@ try:
 except Exception as _priv_err:
     logger.warning("⚠️  Privacy/Telemetry/Updates failed: %s", _priv_err)
 
+# ── Computer-Use mode + RPA browser-control router ──────────────────
+# Master switch (default OFF) gating the teammate's browser/desktop use, plus
+# the RPA FastAPI router (was built but never mounted → /api/rpa/* was dead).
+try:
+    from pydantic import BaseModel as _CUBaseModel
+
+    class _ComputerUseModeBody(_CUBaseModel):
+        enabled: bool
+
+    @app.get("/api/computer-use/mode", tags=["computer-use"])
+    def _get_computer_use_mode():
+        from companion.computer_use_mode import get_mode
+        return get_mode()
+
+    @app.post("/api/computer-use/mode", tags=["computer-use"])
+    def _set_computer_use_mode(body: _ComputerUseModeBody):
+        from companion.computer_use_mode import set_mode
+        return set_mode(body.enabled)
+
+    logger.info("✅ Computer-Use mode endpoints loaded")
+except Exception as _cu_err:  # noqa: BLE001
+    logger.warning("⚠️  Computer-Use mode endpoints failed: %s", _cu_err)
+
+try:
+    from infra.rpa.rpa_routes import router as _rpa_router
+    app.include_router(_rpa_router, prefix="/rpa")
+    logger.info("✅ RPA browser-control router mounted at /rpa")
+except Exception as _rpa_err:  # noqa: BLE001
+    logger.warning("⚠️  RPA router mount failed: %s", _rpa_err)
+
 # ── Privacy-safe operational telemetry middleware ────────────────
 try:
     from core.telemetry import PrivacyTelemetryMiddleware as _PrivTelMW

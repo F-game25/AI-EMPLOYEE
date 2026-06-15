@@ -40,6 +40,18 @@ logger = logging.getLogger("companion.execution_broker")
 # registry). Keeps a single turn bounded and cheap.
 _MAX_CANDIDATES = 4
 
+# Subsystems gated behind the master Computer-Use mode toggle.
+_COMPUTER_USE_SUBSYSTEMS = frozenset({"browser", "desktop"})
+
+
+def _computer_use_on() -> bool:
+    """Master Computer-Use switch (fails safe → OFF if unreadable)."""
+    try:
+        from companion.computer_use_mode import computer_use_enabled
+        return computer_use_enabled()
+    except Exception:  # noqa: BLE001
+        return False
+
 # ── Adapter bounds (keep every executor cheap, read-only, non-destructive) ────
 _LOG_SEARCH_MAX_LINES = 50      # max matching log lines returned
 _LOG_SCAN_MAX_BYTES = 2_000_000  # tail at most ~2MB of a log file
@@ -163,6 +175,18 @@ class ExecutionBroker:
         candidates = candidates[:_MAX_CANDIDATES]
 
         for cap in candidates:
+            # Master Computer-Use switch: browser/desktop capabilities are refused
+            # entirely until the user enables Computer-Use mode from the UI. This is
+            # a hard gate (not an approval) — both voice and chat inherit it because
+            # both flow through this broker.
+            if cap.subsystem in _COMPUTER_USE_SUBSYSTEMS and not _computer_use_on():
+                blocked.append(cap.id)
+                results.append({
+                    "status": "disabled", "cap": cap.id, "subsystem": cap.subsystem,
+                    "reason": "Computer Use mode is off — enable it from the UI to let "
+                              "the teammate use a browser/computer.",
+                })
+                continue
             try:
                 decision = self._gate.evaluate(cap, ctx)
             except Exception as exc:  # gate itself failing → block, never run

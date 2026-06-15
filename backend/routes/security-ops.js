@@ -146,6 +146,35 @@ module.exports = function createSecurityOpsRouter(deps) {
     r.end();
   });
 
+  // ── Computer-Use mode (master switch for browser/desktop control) ────────────
+
+  router.get('/api/computer-use/mode', requireAuth, async (req, res) => {
+    try {
+      const data = await requestPythonJSON('/api/computer-use/mode', 'GET');
+      if (data._http_status && data._http_status >= 400) throw new Error(`py_${data._http_status}`);
+      res.json(data);
+    } catch {
+      res.json({ enabled: false, desktop_available: false, updated_at: null });
+    }
+  });
+
+  router.post('/api/computer-use/mode', requireAuth, async (req, res) => {
+    const body = validate(SCHEMAS.computerUseMode, req, res);
+    if (!body) return;
+    const enabled = body.enabled === true;
+    try {
+      const data = await requestPythonJSON('/api/computer-use/mode', 'POST', { enabled });
+      const result = (data && !data._http_status) ? data : { enabled, desktop_available: false };
+      addActivity(`[COMPUTER USE] Mode → ${enabled ? 'ON' : 'OFF'}`, 'system');
+      try { require('../events/broadcaster').broadcast('computer-use:status', result); } catch { /* best-effort */ }
+      res.json(result);
+    } catch {
+      const result = { enabled, desktop_available: false };
+      try { require('../events/broadcaster').broadcast('computer-use:status', result); } catch { /* */ }
+      res.json(result);
+    }
+  });
+
   // ── Evolution ────────────────────────────────────────────────────────────────
 
   router.get('/api/evolution/status', requireAuth, async (req, res) => {

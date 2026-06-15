@@ -44,6 +44,23 @@ def test_execution_command_is_command():
     assert out["task_type"] == "code"
 
 
+def test_browser_intent_routes_to_execution_browser():
+    """Web phrasings → execution/browser so the runtime drives browser.* caps."""
+    for phrase in ("open example.com and read the page title",
+                   "browse to example.com and click login",
+                   "go to https://news.com and screenshot the page"):
+        out = _clf().classify(phrase)
+        assert out["mode"] == MODE_EXECUTION, phrase
+        assert out["task_type"] == "browser", phrase
+        assert out["is_command"] is True, phrase
+
+
+def test_non_browser_open_is_not_browser():
+    """'open the file' / 'read the report' must NOT be misrouted to browser."""
+    assert _clf().classify("open the file config.py")["task_type"] != "browser"
+    assert _clf().classify("read the quarterly report")["task_type"] != "browser"
+
+
 def test_approval():
     out = _clf().classify("approve")
     assert out["mode"] == MODE_APPROVAL

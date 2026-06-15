@@ -50,6 +50,10 @@ export const useSecurityStore = create((set, get) => ({
   },
   setAutonomyStatus: (a) => set({ autonomyStatus: a }),
 
+  // Computer-Use mode — master switch for the teammate driving a browser/desktop.
+  computerUseStatus: { enabled: false, desktop_available: false, updated_at: null },
+  setComputerUseStatus: (s) => set({ computerUseStatus: { ...get().computerUseStatus, ...s } }),
+
   // Derived: threat level color
   getThreatColor: () => {
     const score = get().securityStatus.threat_score
