@@ -74,6 +74,16 @@ Router now mounted + mode-gated, but `makeProxy('RPA')` doesn't forward a Python
 
 ---
 
+## STATUS (2026-06-15 remediation pass)
+- **R1 Money Mode** — FIXED (`15ab0ab7`): real artifacts via content_publish_track / data_scrape_filter_store; projections labelled `estimates:true`.
+- **R4** — FALSE ALARM: the "Sample Leads (Simulated)" text is prompt input to a real LLM, honestly labelling examples. No change.
+- **R5/R7** — FIXED (`20f17e62`): neural-brain node + CEO endpoint return honest failures instead of "Simulated execution"/"[CEO simulated response]".
+- **System-wide enforcement** — FIXED (`185fc2f2`): `unified_pipeline.execute_tasks` downgrades any placeholder-marked output from success→simulated.
+- **R6 RPA chain** — FIXED (`88cb046b`): proxy forwards JWT; OPERATOR role defined; AGENTS_EXECUTE used; RBAC fails closed. Live: mode OFF→403, mode ON→real browser session.
+- **R2 degraded badges** — ALREADY SATISFIED (verified): Doctor/Memory/NeuralNetwork/SelfImprovement/Autonomy/SystemHealth panels all render a visible "⚠ DEGRADED — simulated data" / "○ SIM" badge when `data_source==='simulated'`.
+- **R3 mobile mocks** — DEFERRED to a later phase (phone app), per owner.
+- **R8 OpenClaw** — no action (disabled reference, expected).
+
 ## Remediation plan (priority order)
 1. **R1 Money Mode → real pipelines** (highest: it's the "does it make money" core). Wire endpoints to the artifact pipelines; retire arithmetic or mark `dry_run`.
 2. **R4/R5/R7 honest failures** — replace simulated fallbacks in agents/workflows with real errors/empty states (small, high-trust).
