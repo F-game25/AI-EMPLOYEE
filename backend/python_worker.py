@@ -356,6 +356,29 @@ def _dispatch(op: str, args: dict):
         eng = _mod('money.work_engine').get_work_engine()
         return eng.deliver(args['id'], submitted_by=args.get('submitted_by', 'work-engine'))
 
+    # ── CompanyOS (P10) — validate-before-build company lifecycle ──
+    if op == 'company.start':
+        cos = _mod('companyos').get_companyos()
+        return cos.start_company(name=args.get('name') or 'Untitled', idea=args.get('idea') or '',
+                                 answers=args.get('answers') if isinstance(args.get('answers'), dict) else None)
+
+    if op == 'company.validate':
+        cos = _mod('companyos').get_companyos()
+        return cos.validate_company(args['id'])
+
+    if op == 'company.build':
+        cos = _mod('companyos').get_companyos()
+        return cos.begin_build(args['id'], override=bool(args.get('override')),
+                               override_reason=str(args.get('override_reason') or ''))
+
+    if op == 'company.get':
+        cos = _mod('companyos').get_companyos()
+        return cos.get_company(args['id'])
+
+    if op == 'company.list':
+        cos = _mod('companyos').get_companyos()
+        return cos.list_companies()
+
     raise ValueError(f'Unknown op: {op}')
 
 

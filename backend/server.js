@@ -587,6 +587,7 @@ app.use('/api/companion', require('./routes/companion')(requireAuth));
 
 // Work Acquisition + Delivery Engine — opportunity→evaluate→quote(HITL)→deliver(HITL) (Module 4)
 app.use('/api/work', require('./routes/work-engine')(requireAuth));
+app.use('/api/company', require('./routes/company')(requireAuth));
 
 // Service Control & Compute Routing — per-service status/restart + model-lane visibility (P9)
 app.use('/api/services', require('./routes/services')(requireAuth));

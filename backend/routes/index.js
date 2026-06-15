@@ -541,6 +541,13 @@ const ROUTE_REGISTRY = [
   { method: 'POST',   path: '/api/work/opportunities/:id/quote',    auth: true,        file: 'routes/work-engine.js' },
   { method: 'POST',   path: '/api/work/opportunities/:id/deliver',  auth: true,        file: 'routes/work-engine.js' },
 
+  // ── CompanyOS (P10) — validate-before-build company builder ──────────────────
+  { method: 'POST',   path: '/api/company',                         auth: true,        file: 'routes/company.js' },
+  { method: 'GET',    path: '/api/company',                         auth: true,        file: 'routes/company.js' },
+  { method: 'GET',    path: '/api/company/:id',                     auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/validate',            auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/build',               auth: true,        file: 'routes/company.js' },
+
   // ── Service Control & Compute Routing (P9) ───────────────────────────────
   { method: 'GET',    path: '/api/services/status',                 auth: true,        file: 'routes/services.js' },
   { method: 'GET',    path: '/api/services/routing',                auth: true,        file: 'routes/services.js' },

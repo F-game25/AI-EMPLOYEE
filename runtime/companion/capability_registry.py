@@ -414,6 +414,22 @@ def _seed(reg: CapabilityRegistry) -> None:
                       "pricing analysis for our pro tier", "revenue forecast for next year",
                       "write an investor pitch memo"],
         ),
+        Capability(
+            id="company.validate",
+            subsystem="company",
+            name="Validate a business idea before building (CompanyOS)",
+            description=("Score real market demand/competition/monetization/feasibility for a "
+                         "business idea and return a verdict (build/pivot/need_evidence/reject). "
+                         "Validate-before-build: refuses weak ideas instead of wasting time/money."),
+            input_schema={"idea": "str", "answers": "dict?"},
+            output_schema={"verdict": "str", "composite": "float", "recommendation": "str"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["validate the idea: an ai note-taker for lawyers",
+                      "should we build a meal-prep app — validate demand first",
+                      "is this business idea worth building"],
+        ),
     ]
     for c in caps:
         reg.register(c)

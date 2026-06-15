@@ -123,6 +123,7 @@ class ExecutionBroker:
             "skills.run": self._exec_skills_run,
             "content.produce": self._exec_content_produce,
             "finance.draft": self._exec_finance_draft,
+            "company.validate": self._exec_company_validate,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -1005,6 +1006,26 @@ class ExecutionBroker:
                 inputs=ctx.get("inputs") if isinstance(ctx.get("inputs"), dict) else None,
             )
             return {"status": "ok" if out.get("ok") else out.get("status", "error"), **out}
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": str(exc)}
+
+    @staticmethod
+    def _exec_company_validate(cap: Capability, ctx: dict) -> dict:
+        """Validate a business idea before building (CompanyOS validate-before-build)."""
+        idea = str(ctx.get("idea") or ctx.get("goal") or ctx.get("text") or "").strip()
+        if not idea:
+            return {"status": "error", "note": "no idea provided"}
+        try:
+            from companyos.validation_engine import get_validation_engine
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "note": f"companyos not importable: {exc}"}
+        try:
+            brief = {"idea": idea}
+            ans = ctx.get("answers")
+            if isinstance(ans, dict):
+                brief.update(ans)
+            out = get_validation_engine().validate(brief)
+            return {"status": "ok", **out}
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "error": str(exc)}
 
