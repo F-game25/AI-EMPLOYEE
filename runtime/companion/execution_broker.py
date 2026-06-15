@@ -122,6 +122,7 @@ class ExecutionBroker:
             "research.audit_quality": self._exec_research_audit_quality,
             "skills.run": self._exec_skills_run,
             "content.produce": self._exec_content_produce,
+            "finance.draft": self._exec_finance_draft,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -984,6 +985,26 @@ class ExecutionBroker:
                      "variants": ctx.get("variants")}
             out = get_content_factory().produce(brief)
             return {"status": "ok" if out.get("ok") else "error", **out}
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": str(exc)}
+
+    @staticmethod
+    def _exec_finance_draft(cap: Capability, ctx: dict) -> dict:
+        """Advisory finance draft (business model / pricing / forecast / pitch). No execution."""
+        request = str(ctx.get("request") or ctx.get("goal") or ctx.get("text") or "").strip()
+        if not request:
+            return {"status": "error", "note": "no finance request provided"}
+        try:
+            from finance.financeops import get_financeops
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "note": f"financeops not importable: {exc}"}
+        try:
+            out = get_financeops().draft(
+                request,
+                context=str(ctx.get("context") or ""),
+                inputs=ctx.get("inputs") if isinstance(ctx.get("inputs"), dict) else None,
+            )
+            return {"status": "ok" if out.get("ok") else out.get("status", "error"), **out}
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "error": str(exc)}
 

@@ -398,6 +398,22 @@ def _seed(reg: CapabilityRegistry) -> None:
                       "produce 3 blog variants about ai pricing",
                       "create a content calendar piece for instagram"],
         ),
+        Capability(
+            id="finance.draft",
+            subsystem="finance",
+            name="Finance draft (advisory only)",
+            description=("Draft a business model, pricing analysis, revenue forecast, or investor "
+                         "pitch/memo. ADVISORY ONLY — estimates for human review, no transaction, "
+                         "trade, payment, or final tax/legal advice."),
+            input_schema={"request": "str", "context": "str?", "inputs": "dict?"},
+            output_schema={"kind": "str", "draft": "str", "advisory": "bool", "requires_human_signoff": "bool"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=[],
+            examples=["draft a business model for an ai note-taker",
+                      "pricing analysis for our pro tier", "revenue forecast for next year",
+                      "write an investor pitch memo"],
+        ),
     ]
     for c in caps:
         reg.register(c)
