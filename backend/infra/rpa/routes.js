@@ -25,7 +25,7 @@ const router = Router();
 const _proxy = makeProxy('RPA', 60000);
 
 // Require AGENT_RUN permission for all RPA operations
-const rpaGuard = requirePermission(PERMISSIONS.AGENT_RUN);
+const rpaGuard = requirePermission(PERMISSIONS.AGENTS_EXECUTE);
 
 router.post('/sessions',           rpaGuard, (req, res) => _proxy(req, res, '/rpa/sessions', req.body, 'POST'));
 router.get('/sessions',            rpaGuard, (req, res) => _proxy(req, res, '/rpa/sessions'));

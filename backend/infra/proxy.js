@@ -22,6 +22,11 @@ function makeProxy(label, timeout = 30000) {
         headers: {
           'Content-Type': 'application/json',
           'X-Tenant-Id': req.tenantId || req.headers['x-tenant-id'] || 'system',
+          // Forward the caller's already-validated JWT so Python's zero-trust
+          // middleware authorizes the proxied call. Node + Python share
+          // JWT_SECRET_KEY (HS256), so the same token verifies at both layers.
+          // (Without this, /api/rpa/* and other infra proxies 401'd at Python.)
+          ...(req.headers.authorization ? { Authorization: req.headers.authorization } : {}),
         },
       };
       if (body) opts.body = JSON.stringify(body);
