@@ -52,6 +52,7 @@ const AvatarLabPage     = lazy(() => import('./pages/AvatarLabPage'))
 const QuantumBrainPage   = lazy(() => import('./pages/QuantumBrainPage'))
 const DeepResearchPage   = lazy(() => import('./pages/DeepResearchPage'))
 const OrdersPage         = lazy(() => import('./pages/OrdersPage'))
+const CompanyBuilderPage = lazy(() => import('./pages/CompanyBuilderPage'))
 import { API_URL } from '../config/api'
 import { usePerformanceMode } from '../hooks/usePerformanceMode'
 import TopBar from './dashboard/TopBar'
@@ -83,6 +84,8 @@ const PAGES = {
   'economy':        MoneyModePage,
   'sales':          SalesPage,
   'orders':         SalesPage,
+  'company-builder': CompanyBuilderPage,
+  'companyos':      CompanyBuilderPage,
   // OPERATIONS
   'tasks':          OperationsPage,
   'workflows':      WorkflowsPage,

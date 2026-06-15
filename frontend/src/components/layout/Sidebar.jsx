@@ -91,6 +91,11 @@ const NAV_GROUPS = [
         label: 'Orders',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M5 5h6M5 8h6M5 11h3"/><circle cx="12" cy="11" r="2" fill="none"/><path d="M11.3 11l.5.5 1-1"/></svg>,
       },
+      {
+        id: 'company-builder',
+        label: 'Company Builder',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 14h12M3 14V5l4-2.5V14M9 14V6l4 2.5V14"/><path d="M5 6.5h0M5 9h0M5 11.5h0M11 9.5h0M11 11.5h0"/></svg>,
+      },
     ],
   },
   {

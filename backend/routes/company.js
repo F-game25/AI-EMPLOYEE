@@ -81,5 +81,37 @@ module.exports = function createCompanyRouter(requireAuth) {
     }
   });
 
+  // POST /api/company/:id/plan — build roadmap (only after build gate)
+  r.post('/:id/plan', requireAuth, async (req, res) => {
+    try {
+      const result = await w().call('company.plan', { id: req.params.id }, 120_000);
+      if (result && result.blocked) return res.status(409).json(result);
+      res.status(result && result.ok === false ? 502 : 200).json(result);
+    } catch (err) {
+      res.status(503).json({ ..._offline, detail: err.message });
+    }
+  });
+
+  // POST /api/company/:id/cycle — run one orchestrated swarm cycle (approval-gated)
+  r.post('/:id/cycle', requireAuth, async (req, res) => {
+    try {
+      const result = await w().call('company.cycle', { id: req.params.id }, 180_000);
+      if (result && result.blocked) return res.status(409).json(result);
+      res.status(result && result.ok === false ? 502 : 200).json(result);
+    } catch (err) {
+      res.status(503).json({ ..._offline, detail: err.message });
+    }
+  });
+
+  // POST /api/company/:id/export — full local export (no lock-in)
+  r.post('/:id/export', requireAuth, async (req, res) => {
+    try {
+      const result = await w().call('company.export', { id: req.params.id }, 30_000);
+      res.status(result && result.ok === false ? 502 : 200).json(result);
+    } catch (err) {
+      res.status(503).json({ ..._offline, detail: err.message });
+    }
+  });
+
   return r;
 };

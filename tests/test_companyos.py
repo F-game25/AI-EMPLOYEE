@@ -139,6 +139,47 @@ def test_companion_company_refine_capability(monkeypatch):
     assert out["status"] == "ok" and out["suggestions"]
 
 
+def _strong(monkeypatch, co):
+    import companyos.validation_engine as ve
+    monkeypatch.setattr(ve, "_llm_json", lambda *a, **k: {
+        "demand": 9, "competition_gap": 8, "monetization": 8, "feasibility": 8,
+        "confidence": 0.85, "reasons": ["strong"], "strongest_objection": "x"})
+    cos = co.get_companyos()
+    cid = cos.start_company(name="S", idea="ai contract review for SMB law firms",
+                            answers={"target_customer": "SMB law firms", "problem": "slow review",
+                                     "monetization": "per-seat saas"})["company"]["id"]
+    cos.validate_company(cid)
+    cos.begin_build(cid)
+    return cos, cid
+
+
+def test_plan_blocked_until_building(monkeypatch):
+    co = _fresh(monkeypatch)
+    cos = co.get_companyos()
+    cid = cos.start_company(name="P", idea="x", answers={"target_customer": "a", "problem": "b", "monetization": "c"})["company"]["id"]
+    # not built yet → plan refused
+    assert cos.plan_company(cid)["blocked"] is True
+
+
+def test_plan_and_cycle_after_build(monkeypatch):
+    co = _fresh(monkeypatch)
+    cos, cid = _strong(monkeypatch, co)
+    plan = cos.plan_company(cid)
+    assert plan["ok"] is True and "roadmap" in plan
+    # cycle runs via swarm (approval-gated; may produce approvals, never raises)
+    cyc = cos.run_company_cycle(cid)
+    assert cyc["ok"] in (True, False) and "cycle" in cyc
+
+
+def test_export_full_local_ownership(monkeypatch):
+    co = _fresh(monkeypatch)
+    cos, cid = _strong(monkeypatch, co)
+    out = cos.export_company(cid)
+    assert out["ok"] is True
+    from pathlib import Path
+    assert Path(out["export_path"]).exists()
+
+
 def test_companion_company_validate_capability(monkeypatch):
     _fresh(monkeypatch)
     import companyos.validation_engine as ve

@@ -12,6 +12,8 @@ from .company_store import get_company_store
 from .founder_intake import get_founder_intake
 from .validation_engine import get_validation_engine
 from .idea_refiner import get_idea_refiner
+from .company_planner import get_company_planner
+from .export_engine import get_export_engine
 
 
 class CompanyOS:
@@ -20,6 +22,8 @@ class CompanyOS:
         self._intake = get_founder_intake()
         self._validator = get_validation_engine()
         self._refiner = get_idea_refiner()
+        self._planner = get_company_planner()
+        self._exporter = get_export_engine()
 
     # 1) Intake — idea → brief (surfaces gaps; doesn't build).
     def start_company(self, *, name: str, idea: str, answers: dict | None = None) -> dict:
@@ -92,6 +96,42 @@ class CompanyOS:
         return {"ok": True, "company_id": company_id, "status": "building",
                 "validated": validated_ok, "overridden": (not validated_ok and override),
                 "next": "wire roadmap → M7 swarm + Forge build (approval-gated)"}
+
+    # 4) Plan — only after the build gate (company must be 'building').
+    def plan_company(self, company_id: str) -> dict:
+        c = self._store.get(company_id)
+        if c is None:
+            return {"ok": False, "error": "company not found"}
+        if c.get("status") not in ("building", "operating"):
+            return {"ok": False, "blocked": True,
+                    "reason": "Plan only after the build gate clears (validate → build first)."}
+        roadmap = self._planner.build_roadmap(c.get("brief") or {}, c.get("validation"))
+        self._store.update(company_id, {"roadmap": roadmap})
+        self._store.log_decision(company_id, what="roadmap",
+                                 why=f"{len(roadmap.get('milestones', []))} milestones planned")
+        return {"ok": roadmap.get("ok", True), "company_id": company_id, "roadmap": roadmap}
+
+    # 5) Run one orchestrated cycle via the M7 swarm (approval-gated).
+    def run_company_cycle(self, company_id: str) -> dict:
+        c = self._store.get(company_id)
+        if c is None:
+            return {"ok": False, "error": "company not found"}
+        if c.get("status") not in ("building", "operating"):
+            return {"ok": False, "blocked": True,
+                    "reason": "Company must be building/operating to run a cycle."}
+        goal = (c.get("roadmap") or {}).get("goal") or str((c.get("brief") or {}).get("idea") or "")
+        result = self._planner.run_cycle(goal)
+        self._store.update(company_id, {"status": "operating"})
+        self._store.log_decision(company_id, what="cycle",
+                                 why=f"executed={result.get('executed')} approvals={len(result.get('approvals_required') or [])}")
+        return {"ok": result.get("ok", True), "company_id": company_id, "cycle": result}
+
+    # 6) Export — full local ownership (no lock-in).
+    def export_company(self, company_id: str) -> dict:
+        c = self._store.get(company_id)
+        if c is None:
+            return {"ok": False, "error": "company not found"}
+        return self._exporter.export(c)
 
     def get_company(self, company_id: str) -> dict:
         c = self._store.get(company_id)

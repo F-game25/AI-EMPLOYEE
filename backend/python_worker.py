@@ -375,6 +375,18 @@ def _dispatch(op: str, args: dict):
         return cos.begin_build(args['id'], override=bool(args.get('override')),
                                override_reason=str(args.get('override_reason') or ''))
 
+    if op == 'company.plan':
+        cos = _mod('companyos').get_companyos()
+        return cos.plan_company(args['id'])
+
+    if op == 'company.cycle':
+        cos = _mod('companyos').get_companyos()
+        return cos.run_company_cycle(args['id'])
+
+    if op == 'company.export':
+        cos = _mod('companyos').get_companyos()
+        return cos.export_company(args['id'])
+
     if op == 'company.get':
         cos = _mod('companyos').get_companyos()
         return cos.get_company(args['id'])

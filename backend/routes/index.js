@@ -548,6 +548,9 @@ const ROUTE_REGISTRY = [
   { method: 'POST',   path: '/api/company/:id/validate',            auth: true,        file: 'routes/company.js' },
   { method: 'POST',   path: '/api/company/refine',                  auth: true,        file: 'routes/company.js' },
   { method: 'POST',   path: '/api/company/:id/build',               auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/plan',                auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/cycle',               auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/export',              auth: true,        file: 'routes/company.js' },
 
   // ── Service Control & Compute Routing (P9) ───────────────────────────────
   { method: 'GET',    path: '/api/services/status',                 auth: true,        file: 'routes/services.js' },

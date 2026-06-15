@@ -540,6 +540,16 @@ const api = {
   product: {
     dashboard: ()      => api.get('/api/product/dashboard'),
   },
+
+  // ── CompanyOS (P10 AI company-builder) ─────────────────────────────────────
+  company: {
+    list:     ()        => api.get('/api/company'),
+    get:      (id)      => api.get(`/api/company/${id}`),
+    start:    (body)    => api.post('/api/company', body),
+    validate: (id)      => api.post(`/api/company/${id}/validate`, {}),
+    build:    (id, body) => api.post(`/api/company/${id}/build`, body || {}),
+    refine:   (idea)    => api.post('/api/company/refine', { idea }),
+  },
 };
 
 export default api;
