@@ -533,6 +533,14 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/api/companion/capabilities',          auth: true,        file: 'routes/companion.js' },
   { method: 'GET',    path: '/api/companion/state',                 auth: true,        file: 'routes/companion.js' },
 
+  // ── Work Acquisition + Delivery Engine (Module 4) ─────────────────────────
+  { method: 'POST',   path: '/api/work/opportunities',              auth: true,        file: 'routes/work-engine.js' },
+  { method: 'GET',    path: '/api/work/opportunities',              auth: true,        file: 'routes/work-engine.js' },
+  { method: 'GET',    path: '/api/work/opportunities/:id',          auth: true,        file: 'routes/work-engine.js' },
+  { method: 'POST',   path: '/api/work/opportunities/:id/evaluate', auth: true,        file: 'routes/work-engine.js' },
+  { method: 'POST',   path: '/api/work/opportunities/:id/quote',    auth: true,        file: 'routes/work-engine.js' },
+  { method: 'POST',   path: '/api/work/opportunities/:id/deliver',  auth: true,        file: 'routes/work-engine.js' },
+
   // ── Service Control & Compute Routing (P9) ───────────────────────────────
   { method: 'GET',    path: '/api/services/status',                 auth: true,        file: 'routes/services.js' },
   { method: 'GET',    path: '/api/services/routing',                auth: true,        file: 'routes/services.js' },

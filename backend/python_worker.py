@@ -330,6 +330,32 @@ def _dispatch(op: str, args: dict):
     if op == 'evolution.candidate_rollback':
         return _mod('evolution.controller').get_evolution_controller().handle_evolution_op('rollback', args)
 
+    # ── work engine (Module 4 — acquisition + delivery lifecycle) ───────────────
+    # All money figures are labelled estimates; quote + deliver are HITL-gated.
+    if op == 'work.ingest':
+        eng = _mod('money.work_engine').get_work_engine()
+        return eng.ingest_opportunity(args.get('opportunity') or args)
+
+    if op == 'work.list':
+        eng = _mod('money.work_engine').get_work_engine()
+        return eng.list_opportunities(args.get('status') or None)
+
+    if op == 'work.get':
+        eng = _mod('money.work_engine').get_work_engine()
+        return eng.get_opportunity(args['id'])
+
+    if op == 'work.evaluate':
+        eng = _mod('money.work_engine').get_work_engine()
+        return eng.evaluate(args['id'], use_llm=bool(args.get('use_llm', True)))
+
+    if op == 'work.quote':
+        eng = _mod('money.work_engine').get_work_engine()
+        return eng.quote(args['id'], submitted_by=args.get('submitted_by', 'work-engine'))
+
+    if op == 'work.deliver':
+        eng = _mod('money.work_engine').get_work_engine()
+        return eng.deliver(args['id'], submitted_by=args.get('submitted_by', 'work-engine'))
+
     raise ValueError(f'Unknown op: {op}')
 
 
