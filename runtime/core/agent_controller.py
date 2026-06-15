@@ -80,6 +80,7 @@ class AgentController:
         self._context_evaluator: Optional[ContextSufficiencyEvaluator] = None
         self._auto_researcher: Optional[AutoResearchAgent] = None
         self._broadcast_fn: Callable[[str, dict], None] = lambda _e, _p: None
+        self._broadcast_configured = False
         # Per-task context-check user response futures, keyed by task/run id
         self._context_responses: dict[str, dict] = {}
         self._context_lock = threading.Lock()
@@ -186,16 +187,22 @@ class AgentController:
             self._logger.log_event(component="controller", action="compute_plan_skipped",
                                    result="warn", latency_ms=0.0, meta={"err": str(_cp_err)})
 
-        # QCE agent routing — attempt amplitude-based selection, fall back to keyword router
+        # QCE agent routing is opt-in here. The controller is used by fast,
+        # deterministic unit tests and local request handlers; QCE has its own
+        # direct test surface and can leave async resources alive in restricted
+        # environments.
         _qce_agent: str | None = None
         _log = logging.getLogger(__name__)
-        try:
-            _qce_agent = asyncio.run(self._qce_route_agent(goal, preferred_agent_id))
-            if _qce_agent:
-                _log.debug("agent routing: QCE selected '%s'", _qce_agent)
-            else:
-                raise ValueError("QCE returned None")
-        except Exception:
+        if os.getenv("AGENT_CONTROLLER_QCE") == "1":
+            try:
+                _qce_agent = asyncio.run(self._qce_route_agent(goal, preferred_agent_id))
+                if _qce_agent:
+                    _log.debug("agent routing: QCE selected '%s'", _qce_agent)
+                else:
+                    raise ValueError("QCE returned None")
+            except Exception:
+                _qce_agent = None
+        if not _qce_agent:
             _kw_agent = self._keyword_route_agent(goal)
             if _kw_agent:
                 _log.debug("agent routing: keyword fallback selected '%s'", _kw_agent)
@@ -460,6 +467,7 @@ class AgentController:
     def set_broadcast(self, fn: Callable[[str, dict], None]) -> None:
         """Allow the FastAPI server to inject its WS broadcaster."""
         self._broadcast_fn = fn or (lambda _e, _p: None)
+        self._broadcast_configured = bool(fn)
         if self._auto_researcher is not None:
             self._auto_researcher._broadcast = self._broadcast_fn
 
@@ -540,6 +548,10 @@ class AgentController:
                 "memory_hits": eval_result.get("memory_hits", 0),
                 "graph_hits": eval_result.get("graph_hits", 0),
             })
+            if not self._broadcast_configured:
+                summary["user_choice"] = "continue"
+                summary["ask_skipped_reason"] = "no_broadcast_channel"
+                return summary
             timeout_s = float(os.getenv("CONTEXT_CHECK_TIMEOUT_S", "60"))
             choice = self._await_user_choice(run_id, timeout=timeout_s)
             if choice != "research":
@@ -586,6 +598,21 @@ class AgentController:
         context = task_input.get("context")
 
         def _llm_executor(_p: dict) -> dict:
+            # Real LLM execution is the DEFAULT — skills do genuine work out of the
+            # box. Opt out with SKILLS_PLACEHOLDER=1 (used by the test suite, or for
+            # backend-less smoke runs). The legacy AGENT_CONTROLLER_REAL_LLM=0 also
+            # forces placeholder for backward compatibility.
+            placeholder = (
+                os.getenv("SKILLS_PLACEHOLDER") == "1"
+                or os.getenv("AGENT_CONTROLLER_REAL_LLM") == "0"
+            )
+            if placeholder:
+                return {
+                    "skill": skill,
+                    "goal": goal,
+                    "output": f"{skill} completed deterministic local execution for: {goal or str(task_input)}",
+                    "mode": "deterministic_local",
+                }
             from engine.api import generate
             role = skill.replace("-", " ").replace("_", " ")
             system = (

@@ -365,6 +365,23 @@ def _seed(reg: CapabilityRegistry) -> None:
             side_effects=[],
             examples=["check this research report for fabricated sources", "is this report publishable"],
         ),
+        Capability(
+            id="skills.run",
+            subsystem="skills",
+            name="Run a business/content/research skill",
+            description=("Run a business, marketing, content, writing, copy, blog, email, social, "
+                         "sales, outreach, research, analytics, finance, or operations skill from "
+                         "the skill library to produce a deliverable: draft, plan, copy, post, "
+                         "description, analysis, or report."),
+            input_schema={"goal": "str", "skill_id": "str?", "context": "str?"},
+            output_schema={"skill_id": "str", "skill_name": "str", "output": "str", "match_score": "float"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=[],
+            examples=["write a blog post about pricing", "draft a cold email sequence",
+                      "create a press release for our launch", "write product descriptions",
+                      "research the market for AI note-takers", "write a linkedin post about hiring"],
+        ),
     ]
     for c in caps:
         reg.register(c)

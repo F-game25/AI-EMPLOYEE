@@ -17,7 +17,8 @@
         "wallet-vault"
       ],
       "mode": "native_enhancement_layer"
-    }
+    },
+    "system_prompts_backfilled": 134
   },
   "categories": [
     "Content & Writing",
@@ -51,7 +52,7 @@
       "id": "blog_writing",
       "name": "Blog Post Writing",
       "category": "Content & Writing",
-      "description": "Write long-form SEO-optimised blog posts (500\u20133000 words) on any topic with structured headings and meta descriptions.",
+      "description": "Write long-form SEO-optimised blog posts (500–3000 words) on any topic with structured headings and meta descriptions.",
       "prompt_hint": "Write a [word-count]-word blog post about [topic] targeting keyword [keyword]. Include H2/H3 headings, a meta description, and a CTA.",
       "tags": [
         "writing",
@@ -113,10 +114,10 @@
       ],
       "execution_steps": [
         "Extract topic, target keyword, word count, and desired tone from input.",
-        "Research 3\u20135 authoritative angles or statistics to support the post.",
-        "Outline the post: H1 title, 3\u20135 H2 sections with sub-points, conclusion, CTA.",
+        "Research 3–5 authoritative angles or statistics to support the post.",
+        "Outline the post: H1 title, 3–5 H2 sections with sub-points, conclusion, CTA.",
         "Write the full post with meta description (155 chars) and internal link suggestions.",
-        "Review for keyword density (1\u20132%), readability, title tag length (50\u201360 chars)."
+        "Review for keyword density (1–2%), readability, title tag length (50–60 chars)."
       ],
       "system_prompt": "You are an expert SEO content writer. Produce well-structured, keyword-optimized blog posts that rank and convert. Always include H2 headings, meta descriptions, and actionable CTAs."
     },
@@ -187,7 +188,7 @@
         "Identify the email type (cold outreach, nurture, announcement, re-engagement) and audience.",
         "Define the single goal: open, click, reply, or purchase.",
         "Write subject line (40 chars max), preview text (90 chars), and hook first sentence.",
-        "Write the body: hook \u2192 value \u2192 proof \u2192 CTA. One CTA only.",
+        "Write the body: hook → value → proof → CTA. One CTA only.",
         "Review for spam triggers, mobile rendering (under 600px), and unsubscribe compliance."
       ],
       "system_prompt": "You are a direct response email copywriter. Write emails that get opened and clicked. Every word earns its place. Subject lines under 40 chars, one CTA per email, no filler phrases."
@@ -258,7 +259,7 @@
       "execution_steps": [
         "Extract product name, key features, target buyer, and price point.",
         "Identify the top 3 emotional/practical benefits (not just features).",
-        "Write headline (benefit-driven), bullet list (5 bullets, feature \u2192 benefit format), and full description.",
+        "Write headline (benefit-driven), bullet list (5 bullets, feature → benefit format), and full description.",
         "Add sensory language and social proof placeholders (e.g. '4.8/5 stars').",
         "Optimize for target keywords naturally within the first 100 words."
       ],
@@ -330,8 +331,8 @@
       "execution_steps": [
         "Identify platform, content type (post/reel/story/thread), and goal (engagement/traffic/followers).",
         "Write a scroll-stopping first line (hook) that works without seeing the image.",
-        "Draft 2\u20133 body sentences with personality, value, or story.",
-        "Add platform-appropriate hashtags (Instagram: 20\u201330, LinkedIn: 3\u20135, TikTok: 4\u20136).",
+        "Draft 2–3 body sentences with personality, value, or story.",
+        "Add platform-appropriate hashtags (Instagram: 20–30, LinkedIn: 3–5, TikTok: 4–6).",
         "End with a CTA (question, link in bio, or save for later)."
       ],
       "system_prompt": "You are a social media content creator. Write platform-optimized captions with scroll-stopping hooks, personality, and strategic hashtags. Match the platform's unique culture."
@@ -402,7 +403,7 @@
       "execution_steps": [
         "Define video topic, target keyword, and audience level (beginner/intermediate/advanced).",
         "Write a 15-second hook that states the problem and promises the solution.",
-        "Outline the script: Hook \u2192 Problem \u2192 Solution (5\u20137 sections) \u2192 Recap \u2192 CTA.",
+        "Outline the script: Hook → Problem → Solution (5–7 sections) → Recap → CTA.",
         "Write each section with timestamps and b-roll suggestions.",
         "Add SEO-optimized title (60 chars), description (first 150 chars keyword-rich), and tags."
       ],
@@ -476,7 +477,8 @@
         "Write the lede (who, what, when, where, why in first paragraph).",
         "Add supporting paragraphs with quotes, data, and background context.",
         "Close with boilerplate company description and press contact details."
-      ]
+      ],
+      "system_prompt": "You are an expert press release writer. Write professional press releases following AP style for product launches, funding rounds, or company milestones. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "ad_copywriting",
@@ -548,7 +550,8 @@
         "Write 3 headline variants (30 chars for Google, 40 for Meta, 150 for LinkedIn).",
         "Write primary text under 125 chars (before fold) with a clear benefit statement.",
         "Add CTA button text and UTM-tagged destination URL recommendation."
-      ]
+      ],
+      "system_prompt": "You are an expert ad copy writer. Write high-converting ad copy for Google Ads, Meta Ads, and LinkedIn Ads including headlines and descriptions. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "content_calendar",
@@ -619,7 +622,8 @@
         "Generate topic ideas per platform with content type (article/video/carousel/story).",
         "Assign publish dates based on optimal times per platform and content mix.",
         "Output calendar in structured format with status column (draft/review/scheduled/published)."
-      ]
+      ],
+      "system_prompt": "You are an expert content calendar planner. Plan a monthly content calendar across channels with topic ideas, publish dates, and content types. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "newsletter_writing",
@@ -687,16 +691,17 @@
       "execution_steps": [
         "Define newsletter topic, audience segment, and issue number/date.",
         "Write the subject line and preview text (open rate matters most here).",
-        "Structure the issue: opener (1 paragraph), main story (3\u20135 paragraphs), 3 quick tips, CTA.",
-        "Add curated links section with 2\u20133 relevant external resources.",
+        "Structure the issue: opener (1 paragraph), main story (3–5 paragraphs), 3 quick tips, CTA.",
+        "Add curated links section with 2–3 relevant external resources.",
         "Include plain-text fallback version and unsubscribe reminder."
-      ]
+      ],
+      "system_prompt": "You are an expert newsletter writer. Write engaging email newsletters with a consistent structure: opener, main story, tips, and CTA. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "case_study_writing",
       "name": "Case Study Writing",
       "category": "Content & Writing",
-      "description": "Write detailed customer success case studies following the problem\u2013solution\u2013results structure.",
+      "description": "Write detailed customer success case studies following the problem–solution–results structure.",
       "prompt_hint": "Write a case study for [customer]. Challenge: [challenge]. Solution: [solution]. Results: [metrics]. Length: [words].",
       "tags": [
         "b2b",
@@ -757,10 +762,11 @@
       "execution_steps": [
         "Extract: customer name/role, problem before solution, measurable results achieved.",
         "Write the headline: '[Company] achieved [result] with [product]'.",
-        "Structure: Problem \u2192 Solution \u2192 Implementation \u2192 Results \u2192 Quote \u2192 Next steps.",
+        "Structure: Problem → Solution → Implementation → Results → Quote → Next steps.",
         "Include specific metrics (%, $, time saved) in results section.",
         "Add pull quotes from the customer and a CTA to book a demo or request the case study."
-      ]
+      ],
+      "system_prompt": "You are an expert case study writer. Write detailed customer success case studies following the problem–solution–results structure. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "whitepaper_writing",
@@ -827,11 +833,12 @@
       ],
       "execution_steps": [
         "Define thesis, target audience (technical/executive), and key argument to prove.",
-        "Research 5\u201310 supporting data points, studies, or industry reports.",
-        "Structure: Executive summary \u2192 Problem \u2192 Research findings \u2192 Solution framework \u2192 Conclusion.",
+        "Research 5–10 supporting data points, studies, or industry reports.",
+        "Structure: Executive summary → Problem → Research findings → Solution framework → Conclusion.",
         "Write each section with citations and visual data recommendations (charts/tables).",
         "Add executive summary (1-page), table of contents, and download CTA."
-      ]
+      ],
+      "system_prompt": "You are an expert whitepaper writer. Write authoritative whitepapers or thought-leadership reports with executive summaries and data citations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "headline_generation",
@@ -899,10 +906,11 @@
       "execution_steps": [
         "Identify the subject, desired outcome, and target audience for the headline.",
         "Generate variants using 5 proven frameworks: number, how-to, curiosity gap, controversy, benefit.",
-        "Score each headline for clarity (0\u201310), specificity (0\u201310), and hook strength (0\u201310).",
+        "Score each headline for clarity (0–10), specificity (0–10), and hook strength (0–10).",
         "Shortlist top 3 variants and explain the psychological trigger each uses.",
         "Test headline against common alternatives and flag any ambiguity."
-      ]
+      ],
+      "system_prompt": "You are an expert headline specialist. Generate multiple headline options using proven frameworks (numbers, curiosity, how-to, controversy). Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "proofreading",
@@ -972,7 +980,8 @@
         "Check style: active vs passive voice, sentence length variation, redundant phrases.",
         "Check formatting: heading hierarchy, consistent punctuation, proper capitalization.",
         "Final pass: read aloud test for rhythm, then verify brand voice alignment."
-      ]
+      ],
+      "system_prompt": "You are an expert proofreading & editing specialist. Proofread and edit text for grammar, style, clarity, and consistency with brand voice guidelines. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "tone_adaptation",
@@ -1038,11 +1047,12 @@
       ],
       "execution_steps": [
         "Identify the original tone and the target tone (formal/casual/expert/empathetic/urgent).",
-        "List 5 specific vocabulary changes required (formal \u2192 casual: 'utilize' \u2192 'use').",
+        "List 5 specific vocabulary changes required (formal → casual: 'utilize' → 'use').",
         "Rewrite the first paragraph as a tone sample for user approval.",
         "Apply tone changes throughout: vocabulary, sentence length, punctuation style, contractions.",
         "Verify the meaning is preserved and no information was lost in the adaptation."
-      ]
+      ],
+      "system_prompt": "You are an expert tone of voice adaptation specialist. Rewrite existing content in a different tone (formal, casual, expert, friendly) for different audiences or channels. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "translation_assistance",
@@ -1112,7 +1122,8 @@
         "Localize idioms, currency, dates, and cultural references for the target market.",
         "Review technical terms and proper nouns for accuracy in the target language.",
         "Flag any ambiguous phrases where multiple translations are equally valid."
-      ]
+      ],
+      "system_prompt": "You are an expert translation & localisation specialist. Translate content into target languages and localise idioms, currency, dates, and cultural references. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "competitor_analysis",
@@ -1254,8 +1265,9 @@
         "Gather data from: industry reports, analyst estimates, public company filings, and news.",
         "Segment the market by size (TAM/SAM/SOM), geography, and customer type.",
         "Identify key growth drivers, barriers to entry, and macro trends.",
-        "Synthesize findings into an executive summary with 3\u20135 actionable insights."
-      ]
+        "Synthesize findings into an executive summary with 3–5 actionable insights."
+      ],
+      "system_prompt": "You are an expert market researcher. Research market size, growth trends, customer segments, and key drivers for a given industry or niche. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "swot_analysis",
@@ -1322,11 +1334,12 @@
       ],
       "execution_steps": [
         "Define the subject (company, product, strategy, or market entry).",
-        "List 3\u20135 strengths with evidence (competitive advantages, resources, differentiation).",
-        "List 3\u20135 weaknesses with honest assessment (gaps, vulnerabilities, resource constraints).",
-        "List 3\u20135 opportunities from market trends, competitor weaknesses, or unmet needs.",
-        "List 3\u20135 threats with likelihood and impact scores; suggest mitigation per threat."
-      ]
+        "List 3–5 strengths with evidence (competitive advantages, resources, differentiation).",
+        "List 3–5 weaknesses with honest assessment (gaps, vulnerabilities, resource constraints).",
+        "List 3–5 opportunities from market trends, competitor weaknesses, or unmet needs.",
+        "List 3–5 threats with likelihood and impact scores; suggest mitigation per threat."
+      ],
+      "system_prompt": "You are an expert swot analyst. Perform a structured SWOT (Strengths, Weaknesses, Opportunities, Threats) analysis for a company or product. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "industry_report",
@@ -1396,7 +1409,8 @@
         "Identify regulatory environment, technology disruptions, and entry barriers.",
         "Profile top 5 companies with revenue, market share, and strategic positioning.",
         "Synthesize with: key takeaways, future outlook, and investment/opportunity implications."
-      ]
+      ],
+      "system_prompt": "You are an expert industry report specialist. Generate structured industry reports covering market dynamics, regulatory environment, and future outlook. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "trend_identification",
@@ -1463,10 +1477,11 @@
       "execution_steps": [
         "Define the domain (technology, market, consumer behavior, regulation) and time horizon.",
         "Scan sources: news, Google Trends, social media, conference themes, VC funding patterns.",
-        "Classify trends as emerging (0\u201312 months), growing (1\u20132 years), or mainstream (2+ years).",
+        "Classify trends as emerging (0–12 months), growing (1–2 years), or mainstream (2+ years).",
         "Score each trend by impact (high/medium/low) and certainty (confirmed/probable/speculative).",
         "Recommend which trends to act on now vs monitor vs ignore."
-      ]
+      ],
+      "system_prompt": "You are an expert trend identification specialist. Identify emerging trends from news, social media, and search data to inform strategy and content. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "customer_profiling",
@@ -1535,9 +1550,10 @@
         "Define the customer segment or ICP to profile.",
         "Research demographics: age, role, company size, industry, geography.",
         "Map psychographics: goals, challenges, values, information sources, decision triggers.",
-        "Document the buying process: awareness\u2192consideration\u2192decision touchpoints and stakeholders.",
+        "Document the buying process: awareness→consideration→decision touchpoints and stakeholders.",
         "Create a one-page persona card with name, photo suggestion, quote, and key messaging hooks."
-      ]
+      ],
+      "system_prompt": "You are an expert customer persona profiling specialist. Build detailed buyer personas including demographics, goals, pain points, channels, and objections. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "pricing_analysis",
@@ -1608,7 +1624,8 @@
         "Identify pricing model options: cost-plus, value-based, freemium, usage-based, tiered.",
         "Calculate price sensitivity: what's the lowest a buyer expects vs the highest they'd pay.",
         "Recommend pricing strategy with rationale and test variants to A/B validate."
-      ]
+      ],
+      "system_prompt": "You are an expert pricing analyst. Analyse competitive pricing, evaluate pricing models, and recommend optimal pricing strategy. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "sentiment_analysis",
@@ -1679,7 +1696,8 @@
         "Group by theme: what specific topics drive positive vs negative sentiment.",
         "Identify high-severity items (repeated complaints, PR risks, or viral praise).",
         "Summarize: overall sentiment score, top 3 praise themes, top 3 complaint themes, and recommended actions."
-      ]
+      ],
+      "system_prompt": "You are an expert sentiment analyst. Analyse sentiment from customer reviews, social media posts, or news articles for any topic or brand. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "survey_design",
@@ -1745,11 +1763,12 @@
       ],
       "execution_steps": [
         "Define the research goal, target respondent, and what decision the survey will inform.",
-        "Design 8\u201312 questions max: mix question types (likert, multiple choice, open-ended).",
+        "Design 8–12 questions max: mix question types (likert, multiple choice, open-ended).",
         "Write each question to be unambiguous and free of leading language.",
         "Sequence questions: easy/non-threatening first, sensitive/demographics last.",
         "Recommend distribution channel, sample size, and analysis plan."
-      ]
+      ],
+      "system_prompt": "You are an expert survey designer. Design research surveys with well-structured questions to gather actionable customer or market insights. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "literature_review",
@@ -1816,11 +1835,12 @@
       ],
       "execution_steps": [
         "Define the research topic, scope (years, geography, methodology types), and key questions.",
-        "Search for 8\u201312 relevant sources: academic papers, industry reports, and expert blogs.",
+        "Search for 8–12 relevant sources: academic papers, industry reports, and expert blogs.",
         "Summarize each source: methodology, findings, limitations, and relevance.",
         "Synthesize: identify consensus, contradictions, and gaps in existing research.",
         "Conclude with research implications and recommendations for further study."
-      ]
+      ],
+      "system_prompt": "You are an expert literature review & summarisation specialist. Summarise research papers, industry reports, or long documents into concise, actionable briefs. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "data_interpretation",
@@ -1888,16 +1908,17 @@
         "Validate the data: check for completeness, obvious errors, and representativeness.",
         "Identify the primary question the data should answer.",
         "Calculate key statistics: mean, median, range, growth rates, and notable outliers.",
-        "Identify 3\u20135 patterns or trends with supporting data points.",
+        "Identify 3–5 patterns or trends with supporting data points.",
         "Translate numbers into business insights with specific, actionable recommendations."
-      ]
+      ],
+      "system_prompt": "You are an expert data interpretation specialist. Interpret datasets, identify patterns, and translate numbers into clear business insights and recommendations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "risk_assessment",
       "name": "Risk Assessment",
       "category": "Research & Analysis",
       "description": "Identify and score business, market, or operational risks, with mitigation strategies for each.",
-      "prompt_hint": "Perform a risk assessment for [project/business/market]. List risks, rate each (likelihood \u00d7 impact), and provide mitigation plans.",
+      "prompt_hint": "Perform a risk assessment for [project/business/market]. List risks, rate each (likelihood × impact), and provide mitigation plans.",
       "tags": [
         "risk",
         "strategy",
@@ -1958,7 +1979,7 @@
       "execution_steps": [
         "Define the subject, scope, and stakeholders affected by the risk assessment.",
         "Identify risks in 5 categories: financial, operational, strategic, legal, reputational.",
-        "Score each risk: likelihood (1\u20135) \u00d7 impact (1\u20135) = risk score (1\u201325).",
+        "Score each risk: likelihood (1–5) × impact (1–5) = risk score (1–25).",
         "Prioritize top 5 risks; develop specific mitigation strategy for each.",
         "Output risk register with owner, timeline, and residual risk after mitigation."
       ],
@@ -2105,7 +2126,8 @@
         "Assess qualitative factors: moat, management quality, market position, and industry tailwinds.",
         "Calculate valuation: P/E, P/S, EV/EBITDA, and compare to sector peers.",
         "Produce investment thesis: bull case, bear case, fair value estimate, and conviction score."
-      ]
+      ],
+      "system_prompt": "You are an expert fundamental analyst. Evaluate the intrinsic value of assets by analysing financials, moat, management, and macro factors. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "polymarket_research",
@@ -2177,7 +2199,8 @@
         "Analyze current market probability vs base-rate probability for the event.",
         "Identify edge: where market price diverges from your probability estimate.",
         "Score the opportunity: expected value, confidence level, and recommended position size."
-      ]
+      ],
+      "system_prompt": "You are an expert polymarket researcher. Research Polymarket prediction market events, estimate edge, and identify high-probability trading opportunities. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "crypto_signals",
@@ -2247,7 +2270,8 @@
         "Apply technical analysis: trend direction, momentum indicators, and key levels.",
         "Check market context: BTC dominance, fear/greed index, and macro catalysts.",
         "Output signal: direction (long/short/neutral), entry price, stop-loss, target, and confidence %."
-      ]
+      ],
+      "system_prompt": "You are an expert crypto trading signals specialist. Generate crypto trading signals based on technical and on-chain data with entry, stop-loss, and target levels. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "portfolio_optimisation",
@@ -2318,7 +2342,8 @@
         "Calculate correlation matrix between assets to identify concentration risk.",
         "Apply optimization: suggest rebalancing to improve Sharpe ratio while meeting constraints.",
         "Output recommended allocation with rationale, expected impact on risk/return profile."
-      ]
+      ],
+      "system_prompt": "You are an expert portfolio specialist. Optimise portfolio allocation using risk/return analysis, correlation matrices, and position sizing. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "risk_management",
@@ -2388,7 +2413,8 @@
         "Set stop-loss levels based on ATR (Average True Range) or key support levels.",
         "Define maximum open positions, sector concentration limits, and correlation exposure.",
         "Create a risk dashboard: current exposure, max drawdown to date, risk-of-ruin estimate."
-      ]
+      ],
+      "system_prompt": "You are an expert trading risk manager. Calculate position sizes, Kelly criterion, max drawdown limits, and risk-of-ruin for a trading strategy. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "earnings_analysis",
@@ -2459,7 +2485,8 @@
         "Analyze the actual results vs estimates: beat/miss magnitude and quality.",
         "Assess forward guidance changes and management commentary for surprises.",
         "Output price reaction forecast: expected move, key risk factors, and trade strategy."
-      ]
+      ],
+      "system_prompt": "You are an expert earnings report analyst. Analyse quarterly earnings reports, compare to estimates, and assess impact on stock/crypto price. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "mirofish_prediction",
@@ -2531,7 +2558,8 @@
         "Calculate swarm probability: median estimate with confidence interval.",
         "Compare swarm vs market price: identify edge and direction.",
         "Output prediction: probability estimate, confidence band, and recommended position."
-      ]
+      ],
+      "system_prompt": "You are an expert mirofish swarm prediction specialist. Run MiroFish-inspired swarm simulations to predict market outcome probabilities using crowd-intelligence modelling. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "arbitrage_detection",
@@ -2599,15 +2627,16 @@
         "Define the markets or exchanges to compare (crypto, e-commerce, prediction markets).",
         "Identify price discrepancies: calculate spread as % after fees and slippage.",
         "Assess execution risk: liquidity depth, transfer time, and regulatory constraints.",
-        "Calculate expected profit: spread \u00d7 position size \u2212 transaction costs.",
+        "Calculate expected profit: spread × position size − transaction costs.",
         "Rank opportunities by risk-adjusted return; flag any requiring immediate action."
-      ]
+      ],
+      "system_prompt": "You are an expert arbitrage detection specialist. Identify cross-exchange or cross-market arbitrage opportunities with entry size, expected profit, and execution risk. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "market_sentiment_scoring",
       "name": "Market Sentiment Scoring",
       "category": "Trading & Finance",
-      "description": "Score overall market sentiment (0\u2013100) from news, social, and on-chain signals with a directional outlook.",
+      "description": "Score overall market sentiment (0–100) from news, social, and on-chain signals with a directional outlook.",
       "prompt_hint": "Score market sentiment for [asset/market] using: news headlines=[list], social volume=[trend], on-chain=[metric]. Output: score + outlook.",
       "tags": [
         "sentiment",
@@ -2669,10 +2698,11 @@
       "execution_steps": [
         "Define the asset, sector, or market to score.",
         "Aggregate sentiment from: news headlines, social media volume, options flow, and positioning data.",
-        "Score each signal 0\u2013100 (0=extreme fear, 100=extreme greed).",
+        "Score each signal 0–100 (0=extreme fear, 100=extreme greed).",
         "Weight signals by reliability and recency to produce composite sentiment score.",
         "Output score with interpretation, key drivers, and contrarian vs momentum trade implications."
-      ]
+      ],
+      "system_prompt": "You are an expert market sentiment scoring specialist. Score overall market sentiment (0–100) from news, social, and on-chain signals with a directional outlook. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "defi_analysis",
@@ -2743,7 +2773,8 @@
         "Assess smart contract risk: audit status, code age, incident history, and admin keys.",
         "Analyze tokenomics: supply schedule, emission rate, incentive alignment, and sell pressure.",
         "Output investment thesis: yield estimate, risk rating, and recommended position size."
-      ]
+      ],
+      "system_prompt": "You are an expert defi protocol analyst. Analyse DeFi protocols: TVL, yields, smart contract risks, tokenomics, and investment thesis. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "options_strategy",
@@ -2813,7 +2844,8 @@
         "Select strategy based on view: covered call, protective put, spread, straddle, or iron condor.",
         "Calculate: max profit, max loss, breakeven price(s), and probability of profit.",
         "Output trade setup: specific strikes, expiry, premium collected/paid, and Greeks summary."
-      ]
+      ],
+      "system_prompt": "You are an expert options strategy development specialist. Develop options trading strategies (covered calls, spreads, straddles) with breakeven and max profit/loss analysis. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "twitter_thread",
@@ -2882,17 +2914,18 @@
       "execution_steps": [
         "Define the thread topic, core argument, and target audience.",
         "Write a hook tweet that makes readers stop scrolling (stat, question, or bold claim).",
-        "Outline 6\u201312 tweets: each must be a standalone insight while building to a conclusion.",
+        "Outline 6–12 tweets: each must be a standalone insight while building to a conclusion.",
         "Write each tweet under 280 chars with a bridge to the next tweet.",
         "End with a CTA tweet: follow, retweet, or link to deeper content."
-      ]
+      ],
+      "system_prompt": "You are an expert twitter/x thread writer. Write engaging, educational Twitter/X threads with a strong hook, numbered points, and call-to-follow ending. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "linkedin_post",
       "name": "LinkedIn Post Writing",
       "category": "Social Media",
       "description": "Write professional LinkedIn posts that drive engagement, establish thought leadership, and grow connections.",
-      "prompt_hint": "Write a LinkedIn post about [topic/story]. Personal angle: [angle]. Goal: [engagement/leads/awareness]. Include CTA and 3\u20135 hashtags.",
+      "prompt_hint": "Write a LinkedIn post about [topic/story]. Personal angle: [angle]. Goal: [engagement/leads/awareness]. Include CTA and 3–5 hashtags.",
       "tags": [
         "linkedin",
         "b2b",
@@ -2953,17 +2986,18 @@
       ],
       "execution_steps": [
         "Define the post goal (thought leadership, engagement, lead generation, or brand building).",
-        "Write a hook first line that works without the 'see more' \u2014 the first 2 lines must compel a click.",
-        "Write 3\u20135 short paragraphs (2\u20133 sentences max each) with one key insight per paragraph.",
+        "Write a hook first line that works without the 'see more' — the first 2 lines must compel a click.",
+        "Write 3–5 short paragraphs (2–3 sentences max each) with one key insight per paragraph.",
         "Add a question at the end to drive comments (the algorithm rewards them).",
-        "Include 3\u20135 hashtags (1 niche, 1 industry, 1 broad) and tag relevant people/companies."
-      ]
+        "Include 3–5 hashtags (1 niche, 1 industry, 1 broad) and tag relevant people/companies."
+      ],
+      "system_prompt": "You are an expert linkedin post writer. Write professional LinkedIn posts that drive engagement, establish thought leadership, and grow connections. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "instagram_caption",
       "name": "Instagram Caption Writing",
       "category": "Social Media",
-      "description": "Write visually evocative Instagram captions with storytelling, emojis, and 20\u201330 targeted hashtags.",
+      "description": "Write visually evocative Instagram captions with storytelling, emojis, and 20–30 targeted hashtags.",
       "prompt_hint": "Write an Instagram caption for a photo of [subject]. Brand voice: [voice]. Include 20 hashtags split between niche and broad.",
       "tags": [
         "instagram",
@@ -3025,11 +3059,12 @@
       ],
       "execution_steps": [
         "Identify the visual content type (photo, reel, carousel) and the emotional story it tells.",
-        "Write the first 125 characters as the hook \u2014 visible before 'more'.",
-        "Write 3\u20135 sentences of story, value, or personality.",
+        "Write the first 125 characters as the hook — visible before 'more'.",
+        "Write 3–5 sentences of story, value, or personality.",
         "Add a clear CTA: 'save this', 'share with someone who needs this', or 'link in bio'.",
-        "Add 20\u201330 hashtags in the first comment, mixing niche (10K\u2013100K) and popular (100K+) tags."
-      ]
+        "Add 20–30 hashtags in the first comment, mixing niche (10K–100K) and popular (100K+) tags."
+      ],
+      "system_prompt": "You are an expert instagram caption writer. Write visually evocative Instagram captions with storytelling, emojis, and 20–30 targeted hashtags. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "tiktok_hooks",
@@ -3101,14 +3136,15 @@
         "Evaluate each hook on: clarity (will viewers understand instantly), intrigue (do they need to watch), and pattern interrupt (is it unexpected).",
         "Score each hook out of 10 for estimated watch-through rate.",
         "Recommend top 2 hooks with rationale for the specific platform algorithm."
-      ]
+      ],
+      "system_prompt": "You are an expert tiktok hook writer. Write pattern-interrupting TikTok hooks for the first 3 seconds to stop the scroll and maximise watch time. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "hashtag_research",
       "name": "Hashtag Research",
       "category": "Social Media",
       "description": "Research and categorise optimal hashtags by volume and competition for Instagram, TikTok, and LinkedIn.",
-      "prompt_hint": "Research the best hashtags for [niche/topic] on [platform]. Group into: mega (>1M), large (100K\u20131M), niche (<100K). Return [N] per group.",
+      "prompt_hint": "Research the best hashtags for [niche/topic] on [platform]. Group into: mega (>1M), large (100K–1M), niche (<100K). Return [N] per group.",
       "tags": [
         "hashtags",
         "social",
@@ -3168,11 +3204,12 @@
       ],
       "execution_steps": [
         "Define the platform (Instagram/TikTok/LinkedIn/Twitter) and content niche.",
-        "Research hashtag tiers: mega (>10M posts), macro (1M\u201310M), micro (100K\u20131M), niche (<100K).",
+        "Research hashtag tiers: mega (>10M posts), macro (1M–10M), micro (100K–1M), niche (<100K).",
         "Identify 30 relevant hashtags across 3 tiers for maximum organic reach.",
         "Check hashtag health: active community, recent posts, and no shadow bans.",
-        "Output: primary set (8\u201310), secondary set (10\u201315), niche set (5\u20137), with post counts for each."
-      ]
+        "Output: primary set (8–10), secondary set (10–15), niche set (5–7), with post counts for each."
+      ],
+      "system_prompt": "You are an expert hashtag researcher. Research and categorise optimal hashtags by volume and competition for Instagram, TikTok, and LinkedIn. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "engagement_strategy",
@@ -3239,11 +3276,12 @@
       ],
       "execution_steps": [
         "Define the platform, current follower count, and engagement goal (comments/shares/DMs).",
-        "Audit current engagement rate vs platform benchmark (Instagram: 1\u20133%, LinkedIn: 2\u20135%, TikTok: 4\u20138%).",
+        "Audit current engagement rate vs platform benchmark (Instagram: 1–3%, LinkedIn: 2–5%, TikTok: 4–8%).",
         "Design 3 engagement triggers: question prompts, controversy, or community challenges.",
         "Build a response protocol: reply to every comment within 2 hours for first 24 hours.",
-        "Create a DM funnel: viral post \u2192 DM trigger \u2192 conversation \u2192 offer."
-      ]
+        "Create a DM funnel: viral post → DM trigger → conversation → offer."
+      ],
+      "system_prompt": "You are an expert social engagement strategy specialist. Develop a platform-specific engagement strategy: comment approach, DM funnels, community triggers, and growth hacks. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "influencer_outreach",
@@ -3310,11 +3348,12 @@
       ],
       "execution_steps": [
         "Define the campaign goal, budget range, and ideal influencer profile (niche, size, audience).",
-        "Build a prospect list: nano (1K\u201310K), micro (10K\u2013100K), or macro (100K+) influencers.",
+        "Build a prospect list: nano (1K–10K), micro (10K–100K), or macro (100K+) influencers.",
         "Research each prospect: engagement rate, audience demographics, content quality, and past brand deals.",
         "Write a personalized outreach DM/email: specific compliment + collaboration concept + clear ask.",
         "Define deliverables, timeline, and compensation (flat fee, rev share, free product)."
-      ]
+      ],
+      "system_prompt": "You are an expert influencer outreach messaging specialist. Write personalised influencer partnership proposals and outreach DMs that lead to collaboration discussions. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "community_management",
@@ -3381,11 +3420,12 @@
       ],
       "execution_steps": [
         "Define the community platform (Discord/Reddit/Facebook Group/Slack), size, and health goals.",
-        "Establish community rules: 5\u20137 clear guidelines with enforcement protocols.",
+        "Establish community rules: 5–7 clear guidelines with enforcement protocols.",
         "Design weekly engagement calendar: AMAs, challenges, polls, and featured member spotlights.",
-        "Build moderation workflow: flag \u2192 review \u2192 warn \u2192 remove, with escalation criteria.",
+        "Build moderation workflow: flag → review → warn → remove, with escalation criteria.",
         "Create monthly community health report: active members, engagement rate, top contributors."
-      ]
+      ],
+      "system_prompt": "You are an expert community manager. Draft community management responses, moderation guidelines, and pinned posts for Discord, Reddit, and Facebook Groups. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "viral_content_ideas",
@@ -3455,9 +3495,10 @@
         "Identify the brand, niche, and content goal (brand awareness/product/community).",
         "Research currently viral formats: trending sounds (TikTok), viral post structures (LinkedIn), and meme templates.",
         "Generate 10 content ideas across 5 formats: POV story, listicle, behind-the-scenes, hot take, and tutorial.",
-        "Score each idea for: relevance to brand (1\u20135), viral potential (1\u20135), production effort (1\u20135).",
+        "Score each idea for: relevance to brand (1–5), viral potential (1–5), production effort (1–5).",
         "Select top 3 with production brief: concept, format, platform, hook, and expected reach."
-      ]
+      ],
+      "system_prompt": "You are an expert viral content ideation specialist. Generate viral content ideas using trending formats, meme frameworks, and platform algorithm triggers. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "social_analytics",
@@ -3529,13 +3570,14 @@
         "Compare performance vs previous period and platform benchmarks.",
         "Identify the top 3 performing posts and analyze what made them work.",
         "Recommend 3 specific optimizations for the next period based on the data."
-      ]
+      ],
+      "system_prompt": "You are an expert social media analytics interpretation specialist. Interpret social media metrics (reach, engagement rate, saves, shares) and provide optimisation recommendations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "cold_email_outreach",
       "name": "Cold Email Outreach Sequences",
       "category": "Lead Generation & Sales",
-      "description": "Write 3\u20135 touch cold email sequences with subject lines, personalisation hooks, and automated follow-ups.",
+      "description": "Write 3–5 touch cold email sequences with subject lines, personalisation hooks, and automated follow-ups.",
       "prompt_hint": "Write a [N]-email cold outreach sequence for [ICP]. Product: [product]. Pain point: [pain]. Sequence: Day 1, 3, 7, 14. Include subject lines.",
       "tags": [
         "cold email",
@@ -3673,7 +3715,8 @@
         "Write a connection request note (300 chars max) that references something specific.",
         "Write follow-up message sequence: Day 1 (value add), Day 5 (soft ask), Day 10 (direct pitch).",
         "Track metrics: acceptance rate target >30%, reply rate target >15%."
-      ]
+      ],
+      "system_prompt": "You are an expert linkedin prospecting specialist. Write LinkedIn connection requests, InMails, and follow-up messages for targeted B2B prospecting. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "sales_pitch_deck",
@@ -3745,14 +3788,15 @@
         "Write each slide headline as a benefit statement, not a topic label.",
         "Add speaker notes for each slide with key talking points and objection pre-handles.",
         "Close with a single, specific next step (book a call, approve a proposal, start a trial)."
-      ]
+      ],
+      "system_prompt": "You are an expert sales pitch deck outline specialist. Create structured sales pitch deck outlines with slide-by-slide content briefs and key messages. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "objection_handling",
       "name": "Objection Handling Scripts",
       "category": "Lead Generation & Sales",
       "description": "Create objection-handling scripts for top sales objections with empathy statements and counter-questions.",
-      "prompt_hint": "Write handling scripts for these [N] sales objections for [product]: [list of objections]. Use the Feel\u2013Felt\u2013Found framework. Include pivots.",
+      "prompt_hint": "Write handling scripts for these [N] sales objections for [product]: [list of objections]. Use the Feel–Felt–Found framework. Include pivots.",
       "tags": [
         "sales",
         "objections",
@@ -3816,7 +3860,8 @@
         "Ask a clarifying question to understand the real concern beneath the surface objection.",
         "Respond with evidence: data, case study, or analogy that addresses the real concern.",
         "Pivot to the next step: 'Given that, would it make sense to...?'"
-      ]
+      ],
+      "system_prompt": "You are an expert objection handling scripts specialist. Create objection-handling scripts for top sales objections with empathy statements and counter-questions. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "lead_scoring",
@@ -3888,7 +3933,8 @@
         "Set score thresholds: MQL (>40 points), SQL (>70 points), ready to close (>90 points).",
         "Identify negative scoring triggers: competitors, wrong company size, no budget authority.",
         "Output scored lead list with priority ranking and recommended next action per tier."
-      ]
+      ],
+      "system_prompt": "You are an expert lead scoring framework specialist. Build a lead scoring model with demographic and behavioural signals, point weights, and MQL/SQL thresholds. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "crm_notes",
@@ -3958,8 +4004,9 @@
         "Document decisions made and commitments given by each party.",
         "List all action items with owner, deadline, and follow-up method.",
         "Update deal stage and expected close date based on the meeting outcome.",
-        "Write next-step summary to paste into CRM deal record (2\u20133 sentences)."
-      ]
+        "Write next-step summary to paste into CRM deal record (2–3 sentences)."
+      ],
+      "system_prompt": "You are an expert crm update note specialist. Generate structured CRM call/meeting notes from raw bullet points, including next steps and deal stage updates. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "follow_up_sequences",
@@ -4028,10 +4075,11 @@
       "execution_steps": [
         "Define the trigger event (demo attended/content downloaded/free trial started) and buyer stage.",
         "Design 4-touch sequence: Day 1 (thank you + value), Day 3 (case study), Day 7 (objection pre-handle), Day 14 (urgency close).",
-        "Write each message: subject line, 2\u20133 sentence body, specific CTA.",
-        "Set conditional branching: if reply \u2192 move to conversation flow; if no reply \u2192 continue sequence.",
+        "Write each message: subject line, 2–3 sentence body, specific CTA.",
+        "Set conditional branching: if reply → move to conversation flow; if no reply → continue sequence.",
         "Define exit criteria: reply, unsubscribe, or booked meeting."
-      ]
+      ],
+      "system_prompt": "You are an expert sales follow-up sequences specialist. Write multi-touch post-demo or post-meeting follow-up sequences with value-add content and soft nudges. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "proposal_writing",
@@ -4099,11 +4147,12 @@
       ],
       "execution_steps": [
         "Gather requirements: client goals, budget, timeline, success metrics, and stakeholders.",
-        "Write executive summary: problem \u2192 proposed solution \u2192 expected outcome (1 page).",
+        "Write executive summary: problem → proposed solution → expected outcome (1 page).",
         "Detail the scope: deliverables, timeline with milestones, and exclusions/assumptions.",
         "Add pricing: investment breakdown, payment terms, and what's included vs optional.",
         "Close with next steps, signature block, and expiry date to create urgency."
-      ]
+      ],
+      "system_prompt": "You are an expert business proposal writer. Write professional business proposals and statements of work with problem statement, solution, timeline, and pricing. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "discovery_call_prep",
@@ -4171,10 +4220,11 @@
       "execution_steps": [
         "Research the company: recent news, funding, headcount changes, and tech stack.",
         "Research the contact: LinkedIn profile, past roles, shared connections, and recent posts.",
-        "Prepare 5\u20137 SPIN questions: 1 situation, 2 problem, 2 implication, 2 need-payoff.",
+        "Prepare 5–7 SPIN questions: 1 situation, 2 problem, 2 implication, 2 need-payoff.",
         "Anticipate objections based on their industry and prepare 2-sentence responses.",
         "Define success criteria for the call: what outcome qualifies it as a good discovery?"
-      ]
+      ],
+      "system_prompt": "You are an expert discovery call preparation specialist. Prepare discovery call question frameworks, research checklists, and talk tracks for sales reps. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "closing_scripts",
@@ -4245,14 +4295,15 @@
         "Write the opening: acknowledge progress, summarize value delivered, state the ask.",
         "Include objection pre-handle: 'If you had one concern, what would hold you back from moving forward today?'",
         "End with a specific, time-bound next step: 'If we got contracts to you by [day], could you review by [date]?'"
-      ]
+      ],
+      "system_prompt": "You are an expert sales closing scripts specialist. Write assumptive close, trial close, and urgency close scripts tailored to specific deal scenarios. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "ticket_triage",
       "name": "Support Ticket Triage",
       "category": "Customer Support",
       "description": "Categorise, prioritise, and suggest responses for inbound support tickets using a structured triage framework.",
-      "prompt_hint": "Triage the following support tickets: [tickets]. For each: category, severity (P1\u2013P4), suggested team, draft response, and escalation flag.",
+      "prompt_hint": "Triage the following support tickets: [tickets]. For each: category, severity (P1–P4), suggested team, draft response, and escalation flag.",
       "tags": [
         "support",
         "triage",
@@ -4310,12 +4361,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Classify the ticket: category (refund/bug/billing/onboarding/feature/general) and priority (P0\u2013P3).",
+        "Classify the ticket: category (refund/bug/billing/onboarding/feature/general) and priority (P0–P3).",
         "Check for escalation flags: repeated contact, legal threat, media mention, payment dispute.",
-        "Identify the customer's emotional state and adjust tone accordingly (frustrated \u2192 empathetic).",
+        "Identify the customer's emotional state and adjust tone accordingly (frustrated → empathetic).",
         "Draft the initial response: acknowledge, investigate, and set expectations with ETA.",
         "Route to correct team or agent with full context note."
-      ]
+      ],
+      "system_prompt": "You are an expert support ticket triage specialist. Categorise, prioritise, and suggest responses for inbound support tickets using a structured triage framework. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "faq_generation",
@@ -4386,7 +4438,8 @@
         "Write each answer: direct answer first, then explanation, then next step (under 100 words).",
         "Add troubleshooting steps for technical FAQs (numbered, step-by-step).",
         "Structure as searchable knowledge base with category headers and internal linking."
-      ]
+      ],
+      "system_prompt": "You are an expert faq document specialist. Generate comprehensive FAQ documents from product documentation, past tickets, or knowledge base articles. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "response_templates",
@@ -4456,7 +4509,8 @@
         "Include variable placeholders: [CUSTOMER_NAME], [ORDER_NUMBER], [RESOLUTION_DATE].",
         "Add tone guidance per template: neutral for billing, empathetic for complaints, enthusiastic for onboarding.",
         "Test each template for completeness: does it answer the question without requiring follow-up?"
-      ]
+      ],
+      "system_prompt": "You are an expert support response templates specialist. Create a library of polished, empathetic support response templates for common issues, bugs, and billing questions. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "escalation_handling",
@@ -4524,9 +4578,10 @@
         "Define escalation triggers: legal threat, media escalation, billing dispute >$500, data breach, executive request.",
         "Draft the escalation acknowledgment: immediate response within 30 minutes, senior tone.",
         "Prepare the internal briefing: summarize issue, customer history, what was already tried.",
-        "Write de-escalation scripts: acknowledge \u2192 validate \u2192 take ownership \u2192 commit to resolution.",
+        "Write de-escalation scripts: acknowledge → validate → take ownership → commit to resolution.",
         "Define resolution timeline and communication cadence: hourly/daily updates until resolved."
-      ]
+      ],
+      "system_prompt": "You are an expert escalation handling specialist. Write escalation scripts and manager-level response frameworks for angry customers, legal threats, and media escalations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "customer_success_checkin",
@@ -4597,7 +4652,8 @@
         "Prepare QBR agenda: wins since last meeting, metrics review, roadmap preview, and expansion discussion.",
         "Write check-in email: short, specific, and value-focused with a clear ask (15-minute call).",
         "Document outcomes and update the health score in CRM after the meeting."
-      ]
+      ],
+      "system_prompt": "You are an expert customer success check-ins specialist. Write QBR agendas, check-in email templates, and health score messaging for customer success workflows. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "refund_communication",
@@ -4667,7 +4723,8 @@
         "If approving: clear next steps, timeline, and confirmation of amount.",
         "If declining: explain reason clearly, offer alternative (store credit, replacement, extension).",
         "Close with goodwill gesture and invitation to resolve the underlying issue."
-      ]
+      ],
+      "system_prompt": "You are an expert refund & returns communication specialist. Write clear, empathetic refund, cancellation, and returns communication that reduces churn and preserves goodwill. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "feature_request_logging",
@@ -4737,7 +4794,8 @@
         "Score the request: frequency (how many customers asked), impact (business value), and effort (implementation complexity).",
         "Format as a structured feature card: user story, acceptance criteria, and priority score.",
         "Route to product team with a summary of supporting customer quotes."
-      ]
+      ],
+      "system_prompt": "You are an expert feature request logging specialist. Generate structured feature request cards from raw customer feedback for product teams. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "churn_prevention",
@@ -4809,7 +4867,8 @@
         "Design intervention per segment: personal outreach call, discount offer, feature enablement, or success story sharing.",
         "Write the save email/call script: acknowledge they seem less engaged, ask for the real reason, offer a solution.",
         "Define win-back sequence for already-churned customers: 30/60/90-day re-engagement."
-      ]
+      ],
+      "system_prompt": "You are an expert churn prevention outreach specialist. Write at-risk customer outreach messages, win-back emails, and cancellation-flow save scripts. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "code_review",
@@ -4950,7 +5009,7 @@
         "Define the API endpoints, methods, parameters, and authentication method.",
         "Write overview section: purpose, base URL, authentication (API key/OAuth/JWT), and rate limits.",
         "Document each endpoint: method, path, description, request params, request body schema, and response schema.",
-        "Add code examples in 2\u20133 languages (curl, Python, JavaScript) for each endpoint.",
+        "Add code examples in 2–3 languages (curl, Python, JavaScript) for each endpoint.",
         "Include error codes section: list all possible error responses with description and resolution steps."
       ],
       "system_prompt": "You are a technical writer specializing in developer documentation. Write clear, complete API docs with working code examples and comprehensive error references."
@@ -4960,7 +5019,7 @@
       "name": "Bug Report Analysis",
       "category": "Development & Technical",
       "description": "Analyse bug reports, identify root causes, assign severity, and suggest fixes or investigation steps.",
-      "prompt_hint": "Analyse this bug report: [report]. Identify: likely root cause, severity (P1\u2013P4), affected systems, reproduction steps, suggested fix.",
+      "prompt_hint": "Analyse this bug report: [report]. Identify: likely root cause, severity (P1–P4), affected systems, reproduction steps, suggested fix.",
       "tags": [
         "bugs",
         "debugging",
@@ -5024,7 +5083,8 @@
         "Identify the affected component and likely root cause based on the error message and stack trace.",
         "Check for similar historical bugs and existing workarounds.",
         "Draft fix recommendation: specific code change, test to add, and validation step."
-      ]
+      ],
+      "system_prompt": "You are an expert bug report analyst. Analyse bug reports, identify root causes, assign severity, and suggest fixes or investigation steps. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "technical_spec",
@@ -5095,7 +5155,8 @@
         "Design the technical approach: architecture diagram, data model changes, and API contract.",
         "Define acceptance criteria: specific, testable statements that prove the feature is done.",
         "List dependencies, risks, and open questions that need resolution before development starts."
-      ]
+      ],
+      "system_prompt": "You are an expert technical specification writer. Write detailed technical specs, system design documents, and architecture decision records (ADRs). Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "test_case_generation",
@@ -5165,7 +5226,8 @@
         "Write edge case test cases: boundary values, empty inputs, maximum values, and special characters.",
         "Write negative test cases: invalid inputs, unauthorized access, and error states.",
         "Output test cases in structured format: ID, title, preconditions, steps, expected result, and pass/fail column."
-      ]
+      ],
+      "system_prompt": "You are an expert test case specialist. Generate comprehensive test cases (unit, integration, edge cases) from feature descriptions or code. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "devops_automation",
@@ -5236,7 +5298,8 @@
         "Choose the tool stack: GitHub Actions/CircleCI for CI, Docker/Kubernetes for containers, Terraform for IaC.",
         "Write the automation script/config with comments explaining non-obvious decisions.",
         "Define rollback procedure and failure alerts; test in staging before production."
-      ]
+      ],
+      "system_prompt": "You are an expert devops & ci/cd automation specialist. Write CI/CD pipeline configs, Dockerfile, Kubernetes manifests, and deployment scripts. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "db_query_optimisation",
@@ -5308,7 +5371,8 @@
         "Write the optimized query with explanation of each change.",
         "Add or suggest indexes with rationale; calculate expected performance improvement.",
         "Test the optimized query on representative data and measure before/after execution time."
-      ]
+      ],
+      "system_prompt": "You are an expert database query specialist. Analyse and optimise SQL queries for performance, suggest indexes, and rewrite inefficient patterns. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "architecture_review",
@@ -5378,8 +5442,9 @@
         "Review for scalability: will it handle 10x current load? Where are the bottlenecks?",
         "Review for reliability: single points of failure, error handling, graceful degradation, and SLAs.",
         "Review for security: authentication, authorization, data encryption at rest and in transit.",
-        "Produce findings prioritized by risk: critical (fix now) \u2192 high \u2192 medium \u2192 low, with specific recommendations."
-      ]
+        "Produce findings prioritized by risk: critical (fix now) → high → medium → low, with specific recommendations."
+      ],
+      "system_prompt": "You are an expert system architecture review specialist. Review system architecture for scalability, reliability, security, and cost efficiency with improvement recommendations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "security_checklist",
@@ -5450,7 +5515,8 @@
         "Check authentication: strong passwords, MFA, session management, and credential storage.",
         "Check data handling: encryption in transit (TLS 1.3), encryption at rest, PII masking, and GDPR compliance.",
         "Output checklist with pass/fail/manual status for each item and remediation priority."
-      ]
+      ],
+      "system_prompt": "You are an expert security audit checklist specialist. Generate context-specific security audit checklists covering OWASP Top 10, auth, data handling, and infrastructure. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "dependency_analysis",
@@ -5521,7 +5587,8 @@
         "Identify outdated packages: flag any package > 2 major versions behind latest stable.",
         "Check for license conflicts: GPL/LGPL dependencies in commercial projects.",
         "Produce upgrade roadmap: order by severity (security patches first, then major updates)."
-      ]
+      ],
+      "system_prompt": "You are an expert dependency analyst. Analyse project dependencies for outdated packages, known CVEs, licence conflicts, and upgrade paths. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "csv_insights",
@@ -5589,10 +5656,11 @@
       "execution_steps": [
         "Validate the dataset: check row count, column types, missing values, and obvious data errors.",
         "Calculate key statistics per column: mean, median, min, max, and null rate.",
-        "Identify 3\u20135 top patterns or correlations in the data.",
+        "Identify 3–5 top patterns or correlations in the data.",
         "Flag anomalies: outliers >3 standard deviations, unexpected zeros, or impossible values.",
         "Output structured insights: summary, key findings, anomalies, and recommended next analysis steps."
-      ]
+      ],
+      "system_prompt": "You are an expert csv data insights specialist. Extract key insights, trends, and anomalies from CSV or tabular data with actionable recommendations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "kpi_dashboard_design",
@@ -5659,11 +5727,12 @@
       ],
       "execution_steps": [
         "Define the audience (C-suite/team lead/operational) and decision they need to make.",
-        "List 5\u20138 primary KPIs with definition, data source, calculation formula, and target value.",
+        "List 5–8 primary KPIs with definition, data source, calculation formula, and target value.",
         "Define visualization type per KPI: gauge (vs target), line (trend), bar (comparison), or table (detail).",
         "Design the layout: summary row at top, trend charts in middle, detail tables below.",
         "Specify data refresh rate, alerting thresholds, and drill-down capabilities."
-      ]
+      ],
+      "system_prompt": "You are an expert kpi dashboard designer. Design KPI dashboard structures with metric definitions, visualisation types, and data source mappings. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "ab_test_analysis",
@@ -5734,7 +5803,8 @@
         "Check for segment effects: does the winner vary by device, channel, or user type?",
         "Calculate practical significance: is the lift large enough to matter business-wise?",
         "Recommend action: implement winner, iterate, or extend test with larger sample."
-      ]
+      ],
+      "system_prompt": "You are an expert a/b test analyst. Analyse A/B test results for statistical significance, effect size, and practical recommendations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "funnel_analysis",
@@ -5806,7 +5876,8 @@
         "Segment the funnel by traffic source, device, and user cohort to find patterns.",
         "Benchmark against industry averages to contextualize your conversion rates.",
         "Output: funnel visualization data, drop-off analysis, and top 3 improvement hypotheses."
-      ]
+      ],
+      "system_prompt": "You are an expert conversion funnel analyst. Analyse conversion funnels, identify drop-off points, and generate optimisation hypotheses. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "cohort_analysis",
@@ -5877,7 +5948,8 @@
         "Identify the best-performing cohorts: which acquisition source, period, or segment retains best?",
         "Calculate LTV per cohort based on retention curve and average revenue per user.",
         "Recommend acquisition and activation changes based on cohort performance differences."
-      ]
+      ],
+      "system_prompt": "You are an expert cohort analyst. Perform cohort analysis on user/customer data to identify retention curves, LTV trends, and churn patterns. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "anomaly_detection",
@@ -5945,10 +6017,11 @@
       "execution_steps": [
         "Define the metric, expected range, and time series granularity (hourly/daily/weekly).",
         "Calculate baseline: rolling average and standard deviation over a reference period.",
-        "Flag anomalies: values outside \u00b12 or \u00b13 standard deviations from the rolling baseline.",
+        "Flag anomalies: values outside ±2 or ±3 standard deviations from the rolling baseline.",
         "Classify anomaly type: spike, drop, trend change, or seasonality deviation.",
         "Investigate root cause: correlate anomaly timing with events (releases, campaigns, outages)."
-      ]
+      ],
+      "system_prompt": "You are an expert anomaly detection specialist. Detect data anomalies, outliers, and unusual patterns in time-series or cross-sectional datasets. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "forecasting",
@@ -6018,8 +6091,9 @@
         "Identify seasonality, trend direction, and any structural breaks in the historical data.",
         "Select the forecasting model: moving average (stable), exponential smoothing (recent data matters), or linear regression (trend-driven).",
         "Generate forecast with confidence intervals (80% and 95%).",
-        "State assumptions, key risks, and scenarios: base case, optimistic (+20%), and pessimistic (\u221220%)."
-      ]
+        "State assumptions, key risks, and scenarios: base case, optimistic (+20%), and pessimistic (−20%)."
+      ],
+      "system_prompt": "You are an expert data-driven forecasting specialist. Generate statistical forecasts using historical data trends, seasonality, and growth rate analysis. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "data_cleaning_plan",
@@ -6091,7 +6165,8 @@
         "Plan deduplication: define the match key (email, phone, company name) and merge strategy.",
         "Plan normalization: standardize dates, currency symbols, country codes, and categorical values.",
         "Output cleaning script outline with before/after examples for each transformation."
-      ]
+      ],
+      "system_prompt": "You are an expert data cleaning plan specialist. Create a data cleaning and quality assurance plan for raw datasets including deduplication, normalisation, and validation rules. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "product_research",
@@ -6161,9 +6236,10 @@
         "Define research criteria: niche, target margin (>40%), competition level, and demand signal sources.",
         "Research demand: Google Trends, Amazon Best Sellers, TikTok trending products, and Facebook ad library.",
         "Analyze competition: number of sellers, review volume, average BSR, and pricing range.",
-        "Calculate margin: supplier price \u00d7 (1 + markup) = target sell price; verify margin after fees.",
+        "Calculate margin: supplier price × (1 + markup) = target sell price; verify margin after fees.",
         "Output top 5 opportunities with demand score, competition score, margin estimate, and validation recommendation."
-      ]
+      ],
+      "system_prompt": "You are an expert product researcher. Research product opportunities using demand signals, competition analysis, and margin estimates. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "amazon_listing",
@@ -6235,7 +6311,8 @@
         "Write 5 bullet points: each starts with a CAPS benefit, followed by feature detail (under 200 chars each).",
         "Write product description: storytelling paragraph + features breakdown (under 2000 chars).",
         "Research and list 250 backend keywords: no spaces, no repeats, cover synonyms and misspellings."
-      ]
+      ],
+      "system_prompt": "You are an expert amazon listing specialist. Optimise Amazon product titles, bullet points, descriptions, and backend keywords for search rank and conversion. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "pricing_strategy",
@@ -6304,10 +6381,11 @@
       "execution_steps": [
         "Define the product, cost structure (COGS, shipping, platform fees), and target margin.",
         "Research competitor pricing: map the low/mid/high price tiers in the market.",
-        "Choose pricing model: cost-plus (cost \u00d7 markup), value-based (what customer pays to solve the problem), or competitive (match/beat/position vs competitors).",
+        "Choose pricing model: cost-plus (cost × markup), value-based (what customer pays to solve the problem), or competitive (match/beat/position vs competitors).",
         "Set price tiers if applicable: starter, professional, enterprise.",
         "Calculate break-even point and recommend launch pricing vs steady-state pricing."
-      ]
+      ],
+      "system_prompt": "You are an expert pricing strategy development specialist. Develop dynamic pricing strategies including cost-plus, value-based, and competitive pricing frameworks. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "inventory_forecasting",
@@ -6375,11 +6453,12 @@
       ],
       "execution_steps": [
         "Define the SKU, sales velocity (units/day), and lead time (days from order to delivery).",
-        "Calculate reorder point: (average daily sales \u00d7 lead time) + safety stock.",
-        "Calculate safety stock: Z-score \u00d7 standard deviation of daily sales \u00d7 \u221alead time.",
-        "Model 3 scenarios: conservative (\u221220% demand), expected, and aggressive (+20% demand).",
+        "Calculate reorder point: (average daily sales × lead time) + safety stock.",
+        "Calculate safety stock: Z-score × standard deviation of daily sales × √lead time.",
+        "Model 3 scenarios: conservative (−20% demand), expected, and aggressive (+20% demand).",
         "Output: reorder quantity, reorder point, safety stock level, and suggested order calendar."
-      ]
+      ],
+      "system_prompt": "You are an expert inventory forecasting specialist. Forecast inventory requirements using sales velocity, lead times, seasonality, and safety stock formulas. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "dropshipping_research",
@@ -6450,7 +6529,8 @@
         "Evaluate saturation: search Google Shopping and Amazon for how many sellers exist.",
         "Qualify suppliers: response time, product quality, shipping time, and return policy.",
         "Output: top 3 products with profit margin estimate, supplier links, and ad angle recommendation."
-      ]
+      ],
+      "system_prompt": "You are an expert dropshipping researcher. Identify winning dropshipping products using saturation scores, supplier quality, and ad spend signals. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "product_launch_plan",
@@ -6522,7 +6602,8 @@
         "Plan launch day: email blast, social posts, ad campaigns, and live event or webinar.",
         "Plan post-launch (2 weeks): reviews/testimonials, retargeting ads, and referral activation.",
         "Define success metrics: Day 1, Day 7, Day 30 KPIs and course-correct triggers."
-      ]
+      ],
+      "system_prompt": "You are an expert product launch plan specialist. Create a structured product launch plan with pre-launch, launch-day, and post-launch phases and KPIs. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "review_analysis",
@@ -6594,7 +6675,8 @@
         "Extract themes: group mentions by topic (quality, shipping, customer service, value, usability).",
         "Identify the top 3 praise themes and top 3 complaint themes with example quotes.",
         "Output: sentiment score, theme map, product improvement recommendations, and marketing copy from reviews."
-      ]
+      ],
+      "system_prompt": "You are an expert customer review analyst. Analyse product reviews to identify top praise themes, recurring complaints, and product improvement opportunities. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "upsell_strategy",
@@ -6666,7 +6748,8 @@
         "Design upsell sequence: post-purchase pop-up (complementary product), Day 3 email (how-to + upgrade), Day 14 email (bundle offer).",
         "Calculate the upsell economics: average order value increase and impact on LTV.",
         "Write 3 upsell email subjects and body copy for A/B testing."
-      ]
+      ],
+      "system_prompt": "You are an expert upsell & cross-sell strategy specialist. Design upsell and cross-sell sequences for e-commerce checkouts, post-purchase flows, and email triggers. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "returns_reduction",
@@ -6738,7 +6821,8 @@
         "Design listing improvements: better size guides, more product photos (lifestyle + dimensions), honest descriptions.",
         "Design fulfillment improvements: better packaging, quality control checkpoints, and unboxing experience.",
         "Create post-purchase email: Day 1 (usage tips), Day 3 (setup help), Day 7 (satisfaction check)."
-      ]
+      ],
+      "system_prompt": "You are an expert returns rate reduction specialist. Identify root causes of high returns and develop listing, fulfilment, and post-purchase strategies to reduce them. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "supplier_evaluation",
@@ -6805,11 +6889,12 @@
       ],
       "execution_steps": [
         "Define evaluation criteria: quality (30%), lead time (25%), price (20%), MOQ (15%), reliability (10%).",
-        "Score each supplier 1\u20135 on each criterion based on samples, references, and trial orders.",
+        "Score each supplier 1–5 on each criterion based on samples, references, and trial orders.",
         "Calculate weighted score and rank suppliers.",
         "Check due diligence: business registration, payment terms, IP protection policy, and certifications.",
-        "Recommend primary supplier and 1\u20132 backup suppliers to reduce single-source risk."
-      ]
+        "Recommend primary supplier and 1–2 backup suppliers to reduce single-source risk."
+      ],
+      "system_prompt": "You are an expert supplier evaluation specialist. Evaluate and score suppliers across quality, lead time, MOQ, price, and reliability criteria. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "keyword_research",
@@ -6877,10 +6962,10 @@
       ],
       "execution_steps": [
         "Define the topic, target audience intent (informational/commercial/transactional), and domain authority.",
-        "Generate a seed keyword list (20\u201330 terms) using brainstorming and competitor content.",
-        "Expand using tools (Google Suggest, related searches, PAA boxes): target 100\u2013200 keywords.",
+        "Generate a seed keyword list (20–30 terms) using brainstorming and competitor content.",
+        "Expand using tools (Google Suggest, related searches, PAA boxes): target 100–200 keywords.",
         "Group keywords by intent and topic cluster for content planning.",
-        "Prioritize by opportunity score: (search volume \u00d7 click-through potential) / (keyword difficulty + 1)."
+        "Prioritize by opportunity score: (search volume × click-through potential) / (keyword difficulty + 1)."
       ],
       "system_prompt": "You are an SEO strategist. Group keywords by search intent and opportunity score. Focus on keywords the target site can actually rank for given its domain authority."
     },
@@ -6889,7 +6974,7 @@
       "name": "On-Page SEO Optimisation",
       "category": "Marketing & SEO",
       "description": "Audit and optimise on-page SEO: title tags, meta descriptions, headings, internal links, and schema markup.",
-      "prompt_hint": "Optimise this page for SEO: [URL or content]. Target keyword: [keyword]. Review: title tag, meta description, H1\u2013H3, internal links, schema. Return optimised versions.",
+      "prompt_hint": "Optimise this page for SEO: [URL or content]. Target keyword: [keyword]. Review: title tag, meta description, H1–H3, internal links, schema. Return optimised versions.",
       "tags": [
         "seo",
         "on-page",
@@ -6948,12 +7033,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Audit the page: title tag (50\u201360 chars), meta description (155 chars), H1 (includes primary keyword).",
+        "Audit the page: title tag (50–60 chars), meta description (155 chars), H1 (includes primary keyword).",
         "Check content: keyword in first 100 words, H2/H3 structure, LSI keywords, and content length vs top-ranking pages.",
         "Audit images: alt text, file names, and compression (under 100KB).",
-        "Check internal links: link to 2\u20133 relevant pages, use keyword-rich anchor text.",
+        "Check internal links: link to 2–3 relevant pages, use keyword-rich anchor text.",
         "Check technical: URL slug (keyword in URL), canonical tag, page speed, and mobile responsiveness."
-      ]
+      ],
+      "system_prompt": "You are an expert on-page seo specialist. Audit and optimise on-page SEO: title tags, meta descriptions, headings, internal links, and schema markup. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "link_building",
@@ -7025,7 +7111,8 @@
         "Build a prospect list: 50 sites with DA > your domain, relevant topic, and contact info.",
         "Write outreach templates: personalized pitch for each strategy type.",
         "Track outreach: sent, opened, replied, and link acquired. Target 10% conversion on outreach."
-      ]
+      ],
+      "system_prompt": "You are an expert link building strategy specialist. Develop a white-hat link building strategy with prospect lists, outreach templates, and content assets. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "google_ads_copy",
@@ -7097,7 +7184,8 @@
         "Write 4 descriptions (90 chars each): primary benefit, proof point, CTA, and urgency/offer.",
         "Ensure all ad copy passes Google's ad policies (no excessive punctuation, no misleading claims).",
         "Map headline and description combinations to ad groups; recommend pinning strategy."
-      ]
+      ],
+      "system_prompt": "You are an expert google ads copy specialist. Write responsive search ad headlines and descriptions following Google Ads best practices and character limits. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "landing_page_copy",
@@ -7166,10 +7254,11 @@
       "execution_steps": [
         "Define the offer, target audience, traffic source, and conversion goal.",
         "Write the hero: H1 (benefit statement), sub-headline (clarification), CTA (action + benefit).",
-        "Write the body: 3 features \u2192 benefits sections, social proof block, FAQ, and secondary CTA.",
+        "Write the body: 3 features → benefits sections, social proof block, FAQ, and secondary CTA.",
         "Write the meta title and description for organic traffic.",
         "Optimize for conversion: above-the-fold CTA, minimal navigation, trust signals near CTA."
-      ]
+      ],
+      "system_prompt": "You are an expert landing page copy writer. Write conversion-optimised landing page copy with hero, benefits, social proof, and CTA sections. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "email_automation_flow",
@@ -7237,11 +7326,12 @@
       ],
       "execution_steps": [
         "Define the trigger event and the subscriber's journey goal.",
-        "Map the automation flow: trigger \u2192 condition branches \u2192 email sequence \u2192 exit conditions.",
+        "Map the automation flow: trigger → condition branches → email sequence → exit conditions.",
         "Write each email: subject line, preheader, body (under 200 words), and single CTA.",
         "Set timing: Day 0 (trigger), Day 1, Day 3, Day 7, Day 14, Day 30.",
         "Test the flow: verify all branches, test sending across email clients, and check mobile rendering."
-      ]
+      ],
+      "system_prompt": "You are an expert email automation flow designer. Design triggered email automation flows (welcome series, drip campaigns, re-engagement) with branch logic. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "marketing_analytics",
@@ -7313,7 +7403,8 @@
         "Compare performance vs prior period and target benchmarks.",
         "Identify top-performing channel and worst-performing; diagnose root cause for each.",
         "Recommend budget reallocation and 3 specific optimization actions for next period."
-      ]
+      ],
+      "system_prompt": "You are an expert marketing analytics interpretation specialist. Interpret marketing dashboards (GA4, Meta Ads, HubSpot) and translate metrics into strategic recommendations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "brand_voice_guide",
@@ -7379,12 +7470,13 @@
         "Use checklists for self-QA before returning final output."
       ],
       "execution_steps": [
-        "Define the brand: mission, audience, competitive positioning, and personality adjectives (3\u20135).",
+        "Define the brand: mission, audience, competitive positioning, and personality adjectives (3–5).",
         "Document the tone spectrum: formal to casual scale with position marked.",
         "Write do/don't examples for vocabulary, sentence structure, and punctuation (10 examples each).",
         "Create channel-specific tone guides: website (professional), social (conversational), email (warm), support (empathetic).",
         "Add 'brand voice in action' examples: rewrite the same message in old voice vs new voice."
-      ]
+      ],
+      "system_prompt": "You are an expert brand voice guide creation specialist. Create a comprehensive brand voice and tone guide with do/don't examples across channels. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "workflow_automation",
@@ -7454,9 +7546,10 @@
         "Map the current manual process: step-by-step with who does what and how long each step takes.",
         "Identify automation candidates: repetitive tasks, rule-based decisions, and data entry steps.",
         "Choose the tool stack: Zapier, Make, n8n, or custom Python/Node based on complexity.",
-        "Design the workflow: trigger \u2192 condition check \u2192 action \u2192 notification \u2192 error handling.",
+        "Design the workflow: trigger → condition check → action → notification → error handling.",
         "Test with edge cases and define monitoring/alerting for when the automation fails."
-      ]
+      ],
+      "system_prompt": "You are an expert workflow automation designer. Design process automation workflows with triggers, conditions, actions, and tool integration specs. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "meeting_notes",
@@ -7524,11 +7617,12 @@
       ],
       "execution_steps": [
         "Capture attendees, meeting date, objective, and agenda items before writing up.",
-        "Summarize each agenda item: key discussion points in 2\u20133 bullet points (not verbatim transcript).",
+        "Summarize each agenda item: key discussion points in 2–3 bullet points (not verbatim transcript).",
         "Document all decisions made with the rationale and stakeholders involved.",
         "List all action items: owner (first name), due date, and specific deliverable.",
         "Close with next meeting date and open questions requiring follow-up."
-      ]
+      ],
+      "system_prompt": "You are an expert meeting notes & action items specialist. Summarise meeting transcripts or raw notes into structured minutes with decisions and action items. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "project_planning",
@@ -7598,7 +7692,8 @@
         "Estimate effort per task; assign owners and dependencies.",
         "Build timeline: Gantt chart or Kanban board with milestones and critical path.",
         "Define risk register: top 5 risks with likelihood, impact, and mitigation plan."
-      ]
+      ],
+      "system_prompt": "You are an expert project planner. Create project plans with milestones, task breakdowns, resource assignments, and risk mitigation. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "document_templates",
@@ -7670,7 +7765,8 @@
         "Add variable placeholders for all customizable fields: [CLIENT_NAME], [DATE], [AMOUNT].",
         "Write sample content for each section to guide users filling in the template.",
         "Add usage instructions: what to customize, what to keep standard, and legal review note."
-      ]
+      ],
+      "system_prompt": "You are an expert document template creation specialist. Create reusable business document templates (SOW, NDAs, proposals, reports) with variable placeholders. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "task_prioritisation",
@@ -7736,11 +7832,12 @@
       ],
       "execution_steps": [
         "List all tasks with estimated effort (hours) and deadline.",
-        "Apply the Eisenhower Matrix: urgent+important \u2192 do now; important, not urgent \u2192 schedule; urgent, not important \u2192 delegate; neither \u2192 eliminate.",
-        "Score each task with ICE (Impact \u00d7 Confidence \u00d7 Ease, 1\u201310 each).",
+        "Apply the Eisenhower Matrix: urgent+important → do now; important, not urgent → schedule; urgent, not important → delegate; neither → eliminate.",
+        "Score each task with ICE (Impact × Confidence × Ease, 1–10 each).",
         "Sort by ICE score; flag any tasks that are high-ICE but currently not prioritized.",
         "Output a prioritized task list with rationale and recommended time blocks for the week."
-      ]
+      ],
+      "system_prompt": "You are an expert task prioritisation framework specialist. Prioritise a task list using Eisenhower Matrix, ICE scoring, or MoSCoW frameworks with rationale. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "reporting_automation",
@@ -7809,10 +7906,11 @@
       "execution_steps": [
         "Define the report: audience, metrics, data sources, frequency, and delivery method.",
         "Map data source to report fields: identify API, database, or file source for each metric.",
-        "Design the automation: data extraction \u2192 transformation \u2192 formatting \u2192 distribution.",
+        "Design the automation: data extraction → transformation → formatting → distribution.",
         "Write the automation script or Zapier/Make workflow with error handling.",
         "Schedule delivery and set up monitoring: alert if the report fails to send or data looks anomalous."
-      ]
+      ],
+      "system_prompt": "You are an expert reporting automation specialist. Design automated reporting workflows that pull data, format insights, and distribute to stakeholders. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "sop_creation",
@@ -7884,14 +7982,15 @@
         "Write step-by-step instructions: numbered, active voice, specific enough for a new hire to follow.",
         "Add decision points: 'If X, do Y; if not, do Z' branching logic.",
         "Include quality checks per section and a final sign-off step to confirm completion."
-      ]
+      ],
+      "system_prompt": "You are an expert sop (standard operating procedure) creation specialist. Write detailed SOPs with step-by-step instructions, decision trees, checklists, and roles. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "okr_setting",
       "name": "OKR Setting & Tracking",
       "category": "Automation & Productivity",
       "description": "Define quarterly OKRs with measurable key results, confidence scores, and weekly check-in cadences.",
-      "prompt_hint": "Define [N] OKRs for [team/company] for Q[N] [year]. Focus: [strategic focus]. For each O: write 3 KRs with measurable targets, owner, and confidence score (1\u201310).",
+      "prompt_hint": "Define [N] OKRs for [team/company] for Q[N] [year]. Focus: [strategic focus]. For each O: write 3 KRs with measurable targets, owner, and confidence score (1–10).",
       "tags": [
         "okr",
         "goals",
@@ -7952,11 +8051,12 @@
       ],
       "execution_steps": [
         "Define the quarterly objective: ambitious but achievable, qualitative, and motivating.",
-        "Write 3\u20135 Key Results per objective: measurable (number-based), time-bound, and outcome-focused.",
+        "Write 3–5 Key Results per objective: measurable (number-based), time-bound, and outcome-focused.",
         "Set baseline (current state) and target for each Key Result.",
         "Assign a confidence score (%) to each Key Result and identify top risks to achieving each.",
         "Schedule weekly check-ins with 3 questions: progress %, top blocker, and help needed."
-      ]
+      ],
+      "system_prompt": "You are an expert okr setting & tracking specialist. Define quarterly OKRs with measurable key results, confidence scores, and weekly check-in cadences. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "business_plan_generation",
@@ -8100,10 +8200,11 @@
       "execution_steps": [
         "Define the company: stage, industry, current metrics (revenue, costs, team size).",
         "Set the simulation period: 12 months, with key decision points at Month 3, 6, 9, 12.",
-        "Model 3 scenarios: base case (current trajectory), optimistic (+20% key driver), and pessimistic (\u221220%).",
+        "Model 3 scenarios: base case (current trajectory), optimistic (+20% key driver), and pessimistic (−20%).",
         "Simulate month-by-month P&L for each scenario with key driver assumptions.",
         "Output: revenue range, cash runway, and recommended decision at each major decision point."
-      ]
+      ],
+      "system_prompt": "You are an expert company growth simulation specialist. Run detailed business simulations with month-by-month projections, scenario modeling (best/base/worst case), and decision-point analysis. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "org_chart_design",
@@ -8172,11 +8273,12 @@
       ],
       "execution_steps": [
         "Define the organization type, stage (seed/growth/scale), and headcount range.",
-        "Design the reporting structure: departments, management layers, and span of control (5\u20138 direct reports max).",
-        "Define each role: title, responsibilities, level (IC1\u2013IC5 or L1\u2013L6), and compensation band.",
+        "Design the reporting structure: departments, management layers, and span of control (5–8 direct reports max).",
+        "Define each role: title, responsibilities, level (IC1–IC5 or L1–L6), and compensation band.",
         "Map the hiring roadmap: roles to hire in Q1, Q2, Q3, Q4 based on growth priorities.",
         "Identify single points of failure in the org chart and succession planning gaps."
-      ]
+      ],
+      "system_prompt": "You are an expert org chart & team structure designer. Design organizational charts with department structure, reporting lines, role definitions, hiring roadmap, and compensation bands. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "go_to_market",
@@ -8250,7 +8352,8 @@
         "Define the launch sequence: pre-launch (waitlist/beta), launch day (announcement), post-launch (scale).",
         "Identify the first 10 customers: specific companies or people, and how to reach each.",
         "Set 90-day KPIs: MQLs, SQLs, closed deals, CAC, and CAC payback period."
-      ]
+      ],
+      "system_prompt": "You are an expert go-to-market strategy specialist. Develop detailed GTM strategies with ICP definition, channel prioritization, launch sequences, and first customer acquisition tactics. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "tokenomics_design",
@@ -8320,10 +8423,11 @@
       "execution_steps": [
         "Define the token utility: what it does (governance, payment, staking, access) and why it's needed.",
         "Design token supply: total supply, initial circulating supply, and emission schedule.",
-        "Allocate supply: team/advisors (15\u201320% with 1-year cliff, 4-year vest), investors (20\u201325%), community/ecosystem (40\u201350%), treasury (10\u201315%).",
+        "Allocate supply: team/advisors (15–20% with 1-year cliff, 4-year vest), investors (20–25%), community/ecosystem (40–50%), treasury (10–15%).",
         "Design deflationary mechanisms: burn triggers, staking lockups, and buyback conditions.",
         "Model token price scenarios at different market caps and create a launch parameter recommendation."
-      ]
+      ],
+      "system_prompt": "You are an expert tokenomics designer. Design complete tokenomics models including supply, distribution, vesting schedules, deflationary mechanics, and launch parameters. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "token_launch_strategy",
@@ -8398,7 +8502,8 @@
         "Design the launch structure: public sale, private sale, IDO/IEO, or fair launch.",
         "Plan launch day: announcement coordination, CEX/DEX listing, and community activation.",
         "Define post-launch: staking incentives, ecosystem grants, and marketing roadmap to sustain momentum."
-      ]
+      ],
+      "system_prompt": "You are an expert token launch strategy specialist. Create viral token launch campaigns including pre-launch hype building, launch day coordination, influencer activation, and community growth mechanics. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "financial_modeling",
@@ -8467,10 +8572,10 @@
       ],
       "execution_steps": [
         "Define the business model: revenue streams, key drivers, and cost structure.",
-        "Build Month 1\u201312 P&L: revenue (units \u00d7 price), COGS, gross profit, operating expenses, EBITDA.",
-        "Build Year 1\u20133 annual summary with growth rate assumptions.",
+        "Build Month 1–12 P&L: revenue (units × price), COGS, gross profit, operating expenses, EBITDA.",
+        "Build Year 1–3 annual summary with growth rate assumptions.",
         "Add unit economics: CAC, LTV, LTV:CAC ratio, and payback period.",
-        "Build cash flow projection and break-even analysis; scenario test at \u00b120% revenue assumptions."
+        "Build cash flow projection and break-even analysis; scenario test at ±20% revenue assumptions."
       ],
       "system_prompt": "You are a financial analyst. Build clear, assumption-transparent models. Always include sensitivity analysis and state the key risks to your projections."
     },
@@ -8541,11 +8646,12 @@
       ],
       "execution_steps": [
         "Define the raise: stage, amount, use of funds, and target investor type.",
-        "Build the 10-slide structure: Problem \u2192 Solution \u2192 Market \u2192 Product \u2192 Business Model \u2192 Traction \u2192 Team \u2192 Financials \u2192 Competition \u2192 Ask.",
-        "Write each slide with a benefit-driven headline, 3\u20135 supporting points, and 1 visual placeholder.",
+        "Build the 10-slide structure: Problem → Solution → Market → Product → Business Model → Traction → Team → Financials → Competition → Ask.",
+        "Write each slide with a benefit-driven headline, 3–5 supporting points, and 1 visual placeholder.",
         "Add speaker notes with expected investor questions and prepared responses.",
         "Review for narrative: does it flow from pain to opportunity to why now to why us?"
-      ]
+      ],
+      "system_prompt": "You are an expert investor pitch deck specialist. Create investor-grade pitch deck outlines with compelling narratives, financial slides, and market opportunity framing. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "burn_rate_analysis",
@@ -8614,10 +8720,11 @@
       "execution_steps": [
         "Define the monthly expenditures: salary, infrastructure, marketing, legal, and office.",
         "Calculate gross burn (total spend/month) and net burn (spend minus revenue).",
-        "Calculate runway: current cash balance \u00f7 net burn = months of runway.",
-        "Identify the top 3 cost categories and potential reduction levers (10\u201330% savings each).",
-        "Recommend fundraise trigger point: start raising at 9\u201312 months of runway; provide timeline."
-      ]
+        "Calculate runway: current cash balance ÷ net burn = months of runway.",
+        "Identify the top 3 cost categories and potential reduction levers (10–30% savings each).",
+        "Recommend fundraise trigger point: start raising at 9–12 months of runway; provide timeline."
+      ],
+      "system_prompt": "You are an expert burn rate & runway analyst. Calculate and analyze monthly burn rate, cash runway, and provide recommendations for extending runway and fundraising timing. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "brand_naming",
@@ -8690,7 +8797,8 @@
         "Screen each name: Google search (no trademark conflicts), domain availability (.com preferred), and social handle availability.",
         "Score top 5 names on: memorability, pronunciation, meaning alignment, and availability.",
         "Recommend 1 primary name and 2 alternatives with rationale for each."
-      ]
+      ],
+      "system_prompt": "You are an expert brand naming specialist. Generate creative, ownable brand names with etymology, domain availability assessment, trademark risk, and strategic rationale. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "brand_guidelines",
@@ -8760,10 +8868,11 @@
       "execution_steps": [
         "Define the brand foundation: mission, vision, values, and brand personality (5 adjectives).",
         "Document the visual identity: logo usage rules, clear space, minimum sizes, and prohibited uses.",
-        "Define the color palette: primary (1\u20132 colors), secondary (2\u20133), and neutral colors with hex/RGB/CMYK values.",
+        "Define the color palette: primary (1–2 colors), secondary (2–3), and neutral colors with hex/RGB/CMYK values.",
         "Document typography: primary typeface (headings), secondary (body), fallback (web-safe), and hierarchy rules.",
         "Write the voice and tone guide: writing style, vocabulary do/don'ts, and channel-specific tone variations."
-      ]
+      ],
+      "system_prompt": "You are an expert brand guidelines & identity system specialist. Create complete brand identity systems including logo brief, color palette, typography, photography style, and usage guidelines. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "growth_loop_design",
@@ -8832,11 +8941,12 @@
       ],
       "execution_steps": [
         "Define the product, the core value moment, and the user's motivation to share.",
-        "Identify the growth loop type: viral (invite \u2192 use \u2192 invite), content (create \u2192 attract \u2192 create), paid (buy \u2192 convert \u2192 buy more).",
+        "Identify the growth loop type: viral (invite → use → invite), content (create → attract → create), paid (buy → convert → buy more).",
         "Map the loop mechanics: each step in the cycle with conversion rate assumptions.",
-        "Calculate the viral coefficient (K-factor): invites sent \u00d7 conversion rate; K>1 means exponential growth.",
+        "Calculate the viral coefficient (K-factor): invites sent × conversion rate; K>1 means exponential growth.",
         "Design 3 experiment ideas to improve the loop's weakest conversion step."
-      ]
+      ],
+      "system_prompt": "You are an expert growth loop designer. Design viral growth loops and flywheel mechanics that drive exponential, compound user and revenue growth. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "retention_analysis",
@@ -8909,7 +9019,8 @@
         "Calculate retention curves and identify the 'aha moment' (the action that predicts retention).",
         "Compare power users vs churned users: what behaviors differ in first 7 days?",
         "Design 3 activation improvements to increase retention at the biggest drop-off point."
-      ]
+      ],
+      "system_prompt": "You are an expert retention & churn analyst. Develop retention strategies including churn prediction, re-engagement sequences, habit-forming mechanics, and power user programs. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "sprint_planning",
@@ -8981,7 +9092,8 @@
         "Break selected items into tasks with time estimates; flag any item > 8 hours as needing breakdown.",
         "Assign tasks to team members respecting capacity and skill match.",
         "Define Definition of Done for the sprint and schedule daily standup, mid-sprint check, and retrospective."
-      ]
+      ],
+      "system_prompt": "You are an expert sprint planner. Create detailed sprint plans with user stories, acceptance criteria, story point estimation, capacity planning, and definition of done. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "milestone_tracking",
@@ -9054,7 +9166,8 @@
         "Calculate current status: on-track, at-risk, or delayed, with days ahead/behind for each milestone.",
         "Flag risks: missing dependencies, resource conflicts, or scope changes threatening the timeline.",
         "Update stakeholders with status report: green/yellow/red per milestone, blockers, and recovery plan."
-      ]
+      ],
+      "system_prompt": "You are an expert milestone & roadmap planner. Create detailed project roadmaps with milestones, dependencies, critical path analysis, and contingency planning. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "lead_scraping",
@@ -9126,7 +9239,8 @@
         "Extract data fields: name, title, company, email pattern, phone, and LinkedIn URL.",
         "Validate email patterns using domain format verification.",
         "Output structured lead list with enrichment notes and ICP fit score."
-      ]
+      ],
+      "system_prompt": "You are an expert lead scraping specialist. Scrape B2B leads from public directories, LinkedIn-style sources, and business databases. Returns enriched lead lists with company name, size, contact details, and ICP fit indicators. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "qualification_scoring",
@@ -9194,11 +9308,12 @@
       ],
       "execution_steps": [
         "Define qualification criteria using BANT: Budget, Authority, Need, and Timeline.",
-        "Score each dimension 0\u20133 (0=absent, 1=weak, 2=present, 3=strong).",
+        "Score each dimension 0–3 (0=absent, 1=weak, 2=present, 3=strong).",
         "Calculate total BANT score (max 12); set MQL threshold at 6+, SQL at 9+.",
         "Flag disqualifiers: no budget, no authority, no stated need, timeline > 12 months.",
         "Output scored list with recommended action: disqualify, nurture, or advance to sales."
-      ]
+      ],
+      "system_prompt": "You are an expert lead qualification scoring specialist. Score inbound and outbound leads against your Ideal Customer Profile (ICP) using firmographic, technographic, and intent signals. Returns a scored lead list with qualification rationale. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "crm_enrichment",
@@ -9270,7 +9385,8 @@
         "Enrich with intent data: job postings, recent news, web activity signals, and hiring patterns.",
         "Validate and deduplicate: merge duplicate records, fix email bounces, standardize fields.",
         "Output enriched records with confidence score per field and enrichment timestamp."
-      ]
+      ],
+      "system_prompt": "You are an expert crm lead enrichment specialist. Enrich CRM records with additional data points: company funding status, tech stack, recent news, employee growth, job openings, and buying intent signals. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "outreach_script_generator",
@@ -9343,7 +9459,8 @@
         "Write the opener (personalized hook referencing the research) and bridge to the ask.",
         "Write the value proposition in one sentence: '[We help X do Y by Z]'.",
         "Provide 3 variants per channel to test different angles (pain/benefit/social proof)."
-      ]
+      ],
+      "system_prompt": "You are an expert outreach script generator specialist. Generate personalized outreach scripts for cold email, LinkedIn, and WhatsApp tailored to the lead's context, pain points, and ICP fit. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "sequence_builder",
@@ -9411,11 +9528,12 @@
       ],
       "execution_steps": [
         "Define the campaign goal, channel mix (email/LinkedIn/phone), and prospect segment.",
-        "Design multi-touch timeline: define touchpoints across 21\u201330 days.",
-        "Write each touchpoint: channel, timing, subject/opening, body (50\u201375 words max), and CTA.",
-        "Map conditional branches: reply received \u2192 conversation flow; bounce \u2192 remove; unsubscribe \u2192 suppress.",
+        "Design multi-touch timeline: define touchpoints across 21–30 days.",
+        "Write each touchpoint: channel, timing, subject/opening, body (50–75 words max), and CTA.",
+        "Map conditional branches: reply received → conversation flow; bounce → remove; unsubscribe → suppress.",
         "Set success metrics: reply rate >8%, meeting rate >3%, unsubscribe rate <2%."
-      ]
+      ],
+      "system_prompt": "You are an expert cold sequence builder specialist. Build multi-channel cold outreach sequences with day-by-day touchpoints across email, LinkedIn, and WhatsApp. Includes timing, messaging, and channel rationale. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "ab_testing",
@@ -9484,10 +9602,11 @@
       "execution_steps": [
         "Define the test element (subject line, CTA, headline, price, layout) and hypothesis.",
         "Ensure statistical significance: calculate minimum sample size for 95% confidence.",
-        "Create variant A (control) and variant B (single change only \u2014 never test multiple variables).",
+        "Create variant A (control) and variant B (single change only — never test multiple variables).",
         "Define the primary metric (CTR, open rate, conversion) and secondary metrics to monitor.",
         "Set test duration based on traffic/volume and document the winner criteria before testing."
-      ]
+      ],
+      "system_prompt": "You are an expert a/b testing framework specialist. Design and analyze A/B tests for outreach sequences, subject lines, CTAs, and messaging. Returns test variants, success metrics, and statistical significance guidelines. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "reply_tracker",
@@ -9559,7 +9678,8 @@
         "Classify replies: positive (interested), neutral (not now), negative (unsubscribe).",
         "Calculate sequence performance: reply rate, positive reply rate, and meeting booking rate.",
         "Flag hot leads (positive replies) for immediate follow-up and update CRM stage."
-      ]
+      ],
+      "system_prompt": "You are an expert reply & engagement tracker specialist. Track reply rates, engagement signals, and conversation status across outreach sequences. Surfaces hot leads and recommended next actions. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "objection_handler",
@@ -9630,7 +9750,8 @@
         "Ask a clarifying question to find the real objection under the stated one.",
         "Bridge to value: present a specific data point, case study, or guarantee that addresses it.",
         "Move to a micro-commitment: offer a trial, introduce to a decision-maker, or schedule a follow-up."
-      ]
+      ],
+      "system_prompt": "You are an expert sales objection handler specialist. Generate word-for-word responses to common sales objections using empathy-bridge-ask technique and proven frameworks. Covers price, timing, competition, authority, and trust objections. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "negotiation_tactics",
@@ -9701,7 +9822,8 @@
         "Identify concessions to make (low-cost to you, high-value to them) and items to protect.",
         "Use tactical empathy: name their concerns aloud before they do, reduce defensiveness.",
         "Plan the close: define the walk-away point, ideal outcome, and fallback compromise."
-      ]
+      ],
+      "system_prompt": "You are an expert negotiation tactics specialist. Provide negotiation strategies and tactical scripts for B2B deals including anchoring, value stacking, concession planning, and BATNA development. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "close_deal",
@@ -9769,10 +9891,11 @@
       "execution_steps": [
         "Review the full deal history: what value was established, what objections were raised and resolved.",
         "Confirm all stakeholders are aligned: no hidden blockers or undisclosed influencers.",
-        "Present a summary close: 'You need X, we deliver Y, the investment is Z \u2014 shall we move forward?'",
+        "Present a summary close: 'You need X, we deliver Y, the investment is Z — shall we move forward?'",
         "Offer the final nudge: limited-time pricing, implementation timeline, or additional value add.",
         "Draft the next step: contract, purchase order, or onboarding kickoff call invitation."
-      ]
+      ],
+      "system_prompt": "You are an expert deal closing scripts specialist. Generate proven closing scripts and techniques for B2B deals including assumptive close, urgency creation, summary close, and next-step scheduling. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "linkedin_optimizer",
@@ -9841,10 +9964,11 @@
       "execution_steps": [
         "Audit the profile: headline, about section, featured, experience, skills, and endorsements.",
         "Rewrite the headline: current role + value prop + specific outcome (under 220 chars).",
-        "Rewrite the about section: hook (2 sentences), story (3\u20134 paragraphs), and CTA (1 sentence).",
-        "Optimize featured section: add 3 items \u2014 a post, a case study, and contact link.",
+        "Rewrite the about section: hook (2 sentences), story (3–4 paragraphs), and CTA (1 sentence).",
+        "Optimize featured section: add 3 items — a post, a case study, and contact link.",
         "Add 10 skills in demand for the target audience; request endorsements from relevant connections."
-      ]
+      ],
+      "system_prompt": "You are an expert linkedin profile optimizer specialist. Optimize LinkedIn profiles for discoverability, credibility, and lead generation. Covers headline, about section, experience, featured section, and SSI score improvement. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "viral_content_generator",
@@ -9915,9 +10039,10 @@
         "Define the brand, audience, and platform for viral content.",
         "Research current viral trends: TikTok trending audio, LinkedIn top posts this week, and Twitter/X trending topics.",
         "Generate 5 content concepts using proven frameworks: POV, 'hot take', behind-the-scenes, number list, and story-lesson.",
-        "Score each concept: relevance (1\u20135), viral potential (1\u20135), and production effort (1\u20135).",
+        "Score each concept: relevance (1–5), viral potential (1–5), and production effort (1–5).",
         "Select top 2 with production brief: exact hook text, format, platform, and optimal posting time."
-      ]
+      ],
+      "system_prompt": "You are an expert viral content generator specialist. Generate viral LinkedIn posts, carousels, and hook ideas using proven viral formulas (POV, story-lesson, controversial take, numbered list, behind-the-scenes). Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "ad_copy_generator",
@@ -9990,7 +10115,8 @@
         "Write full ad copy per angle: headline, primary text, description, and CTA.",
         "Score each variant for estimated CTR based on hook strength, clarity, and specificity.",
         "Output A/B test plan: which two variants to test first and primary metric to measure."
-      ]
+      ],
+      "system_prompt": "You are an expert ad copy generator specialist. Generate high-converting ad copy for Meta, Google, and LinkedIn ads including headlines, primary text, descriptions, and CTAs optimized for each platform. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "budget_allocator",
@@ -10062,7 +10188,8 @@
         "Calculate expected reach, clicks, and conversions per channel at proposed budget allocation.",
         "Recommend allocation based on: historical performance, audience size, and funnel stage fit.",
         "Output allocation table with projected metrics and monthly pacing recommendations."
-      ]
+      ],
+      "system_prompt": "You are an expert ad budget allocator specialist. Calculate optimal budget allocation across ad channels, campaigns, and audience segments based on CPM benchmarks, conversion rates, and ROAS targets. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "performance_analyzer",
@@ -10134,7 +10261,8 @@
         "Identify underperformers: campaigns with CPA >20% above target or ROAS <target.",
         "Diagnose root cause: creative fatigue, audience saturation, bidding issue, or landing page problem.",
         "Recommend bid/budget/creative adjustments with estimated performance impact."
-      ]
+      ],
+      "system_prompt": "You are an expert ad performance analyzer specialist. Analyze ad campaign performance data, identify underperformers, surface optimization opportunities, and recommend bid/budget/creative adjustments. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "referral_program_design",
@@ -10206,7 +10334,8 @@
         "Calculate incentive economics: LTV of a referred customer vs cost of reward.",
         "Design sharing flows: in-app share button, unique referral link, and email template.",
         "Build fraud prevention: limits per account, IP deduplication, and cooling-off period."
-      ]
+      ],
+      "system_prompt": "You are an expert referral program designer. Design end-to-end referral programs including structure (one-sided/two-sided/tiered), reward mechanics, sharing flows, tracking infrastructure, and fraud prevention. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "incentive_calculator",
@@ -10274,11 +10403,12 @@
       ],
       "execution_steps": [
         "Define the product, average LTV, and target viral coefficient.",
-        "Model incentive options: cash ($5\u2013$50), credit (10\u201320% of first purchase), or feature unlock.",
-        "Calculate ROI for each incentive: referred LTV \u2212 incentive cost = net value per referral.",
+        "Model incentive options: cash ($5–$50), credit (10–20% of first purchase), or feature unlock.",
+        "Calculate ROI for each incentive: referred LTV − incentive cost = net value per referral.",
         "Model at different K-factors (0.5, 0.8, 1.2) to show growth scenarios.",
         "Recommend incentive type and amount that maximizes ROI while meeting the viral coefficient target."
-      ]
+      ],
+      "system_prompt": "You are an expert referral incentive calculator specialist. Calculate economically optimal referral incentives based on LTV, CAC, and desired viral coefficient. Models cash vs credit vs feature rewards and their impact on program ROI. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "partner_scoring",
@@ -10346,11 +10476,12 @@
       ],
       "execution_steps": [
         "Define partner evaluation criteria: audience overlap, complementary offering, reach, and brand alignment.",
-        "Score each potential partner 1\u20135 on each dimension.",
+        "Score each potential partner 1–5 on each dimension.",
         "Calculate weighted score (total/max possible) and rank the shortlist.",
         "Research the partner's deal history, current partnerships, and decision-making structure.",
         "Output scored shortlist with recommended approach, deal structure, and opening pitch angle."
-      ]
+      ],
+      "system_prompt": "You are an expert partnership fit scoring specialist. Score potential partners on audience overlap, complementary offerings, reach, brand alignment, and deal feasibility. Returns a scored partner shortlist with deal rationale. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "pitch_deck_generator",
@@ -10418,18 +10549,19 @@
       ],
       "execution_steps": [
         "Gather company inputs: product, market, traction, team, and funding ask.",
-        "Structure deck: Cover \u2192 Problem \u2192 Solution \u2192 Market \u2192 Business Model \u2192 Traction \u2192 Team \u2192 Financials \u2192 Ask.",
-        "Write each slide: headline (benefit-led), 3\u20135 bullet points, and data/visual placeholders.",
+        "Structure deck: Cover → Problem → Solution → Market → Business Model → Traction → Team → Financials → Ask.",
+        "Write each slide: headline (benefit-led), 3–5 bullet points, and data/visual placeholders.",
         "Add speaker notes with key talking points and expected investor questions per slide.",
         "Review for narrative arc: does the deck tell a compelling story from problem to opportunity?"
-      ]
+      ],
+      "system_prompt": "You are an expert partnership pitch deck generator specialist. Generate partnership pitch deck outlines and slide content for JV proposals, affiliate arrangements, and co-marketing campaigns. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "funnel_analyzer",
       "name": "Conversion Funnel Analyzer",
       "category": "Growth & Marketing",
       "description": "Analyze conversion funnels stage by stage, identify drop-off points, benchmark against industry rates, and prioritize fixes by revenue impact.",
-      "prompt_hint": "Analyze this funnel for [product/page]: [funnel_stages_with_rates]. Identify: biggest drop-off, benchmark vs industry, root causes, and top 5 fixes ranked by revenue impact \u00d7 effort.",
+      "prompt_hint": "Analyze this funnel for [product/page]: [funnel_stages_with_rates]. Identify: biggest drop-off, benchmark vs industry, root causes, and top 5 fixes ranked by revenue impact × effort.",
       "tags": [
         "funnel",
         "conversion",
@@ -10494,8 +10626,9 @@
         "Calculate conversion rate at each step and identify the biggest absolute drop-off.",
         "Benchmark against industry averages: flag stages that are >20% below benchmark.",
         "Segment the funnel: is the drop-off consistent across channels/devices/cohorts?",
-        "Prioritize fixes by revenue impact: improvement \u00d7 traffic \u00d7 conversion value."
-      ]
+        "Prioritize fixes by revenue impact: improvement × traffic × conversion value."
+      ],
+      "system_prompt": "You are an expert conversion funnel analyzer specialist. Analyze conversion funnels stage by stage, identify drop-off points, benchmark against industry rates, and prioritize fixes by revenue impact. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "ab_test_design",
@@ -10567,13 +10700,14 @@
         "Create variant A (control) and variant B (one change only).",
         "Define test duration based on traffic volume and statistical requirements.",
         "Document pre-test baseline metrics and commit to the analysis plan before launch."
-      ]
+      ],
+      "system_prompt": "You are an expert a/b test designer. Design statistically rigorous A/B tests for landing pages, checkout flows, CTAs, and pricing pages. Includes hypothesis, variants, success metrics, and sample size calculations. Work through the skill's execution steps precisely and meet its quality standards. Always return complete, unambiguous, decision-ready output."
     },
     {
       "id": "context-research",
       "name": "Context Research",
       "category": "Research & Analysis",
-      "description": "Evaluate context sufficiency for a goal and auto-research knowledge gaps online (web search \u2192 CloakBrowser stealth fetch \u2192 LLM summarize \u2192 3-layer memory persistence).",
+      "description": "Evaluate context sufficiency for a goal and auto-research knowledge gaps online (web search → CloakBrowser stealth fetch → LLM summarize → 3-layer memory persistence).",
       "prompt_hint": "Use when you need to verify the system has enough background before answering, or when you want to deliberately learn about a topic.",
       "tags": [
         "research",
@@ -10588,10 +10722,11 @@
       ],
       "input_format": "{ goal: string, max_hops?: int (0-5), force_research?: bool }",
       "output_format": "{ status, score (0-1), sufficient (bool), gaps[], hops[], findings_count, memory_hits, graph_hits }",
-      "quality_standards": "Adaptive depth (3\u21926\u219210 sources per hop), per-source trust weighting, idempotent vector writes, durable knowledge_store.json backup, optional screenshot persistence.",
+      "quality_standards": "Adaptive depth (3→6→10 sources per hop), per-source trust weighting, idempotent vector writes, durable knowledge_store.json backup, optional screenshot persistence.",
       "error_handling": "Falls back to plain HTTP when Playwright/CloakBrowser unavailable; respects RESEARCH_MAX_PAGES_PER_DAY budget; honors STRICT_PIPELINE for hard failures.",
       "best_practices": "Run before any task whose context score < 0.6. Use force_research=true to refresh stale memory on a known topic.",
-      "execution_steps": "1) ContextSufficiencyEvaluator scores the goal vs vector/graph memory. 2) If insufficient, AutoResearchAgent fans out web searches across gaps. 3) Top results fetched in parallel via CloakBrowser. 4) LLM extracts 3-5 facts per page. 5) Findings written to vector store + Neo4j brain graph + knowledge_store.json. 6) Re-evaluate; repeat up to max_hops."
+      "execution_steps": "1) ContextSufficiencyEvaluator scores the goal vs vector/graph memory. 2) If insufficient, AutoResearchAgent fans out web searches across gaps. 3) Top results fetched in parallel via CloakBrowser. 4) LLM extracts 3-5 facts per page. 5) Findings written to vector store + Neo4j brain graph + knowledge_store.json. 6) Re-evaluate; repeat up to max_hops.",
+      "system_prompt": "You are an expert context researcher. Evaluate context sufficiency for a goal and auto-research knowledge gaps online (web search → CloakBrowser stealth fetch → LLM summarize → 3-layer memory persistence). Work through the skill's execution steps precisely and meet its quality standards. Return structured, decision-ready output and follow the defined execution steps."
     },
     {
       "id": "agent_skill_api_and_interface_design",

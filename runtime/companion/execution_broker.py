@@ -120,6 +120,7 @@ class ExecutionBroker:
             "context.compress_session": self._exec_context_compress_session,
             "forge.lifecycle_plan": self._exec_forge_lifecycle_plan,
             "research.audit_quality": self._exec_research_audit_quality,
+            "skills.run": self._exec_skills_run,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -914,6 +915,56 @@ class ExecutionBroker:
                     "publishable": bool(quality.get("publishable", quality.get("gate", {}).get("passed", False)))}
         except Exception as exc:
             return {"status": "error", "error": str(exc)}
+
+    @staticmethod
+    def _exec_skills_run(cap: Capability, ctx: dict) -> dict:
+        """Select the best-matching library skill for the goal and run it via the LLM.
+
+        This bridges the 200-skill library into the companion: the teammate can
+        produce a real deliverable (copy/plan/analysis) guided by the skill's
+        own system_prompt. Honest — no skill match or no LLM → structured note.
+        """
+        goal = str(ctx.get("goal") or ctx.get("text") or "").strip()
+        if not goal:
+            return {"status": "error", "note": "no goal provided"}
+        # 1) Resolve a skill — explicit id wins, else best match from the library.
+        try:
+            from forge.lifecycle.skill_selector import select_skills, _load_skills
+        except Exception as exc:
+            return {"status": "unavailable", "note": f"skill selector not importable: {exc}"}
+        skill = None
+        wanted = str(ctx.get("skill_id") or "").strip()
+        if wanted:
+            skill = next((s for s in _load_skills() if s.get("id") == wanted), None)
+        if skill is None:
+            picks = select_skills(goal, str(ctx.get("task_type") or "chat"), max_skills=1)
+            skill = picks[0] if picks else None
+        if skill is None:
+            return {"status": "no_skill", "note": "no matching skill in the library for this goal"}
+        # 2) Execute it via the LLM, guided by the skill's own system_prompt.
+        system = str(skill.get("system_prompt") or
+                     f"You are the '{skill.get('name','specialist')}' capability. "
+                     "Complete the user's goal concretely and concisely.")
+        steps = skill.get("execution_steps")
+        if isinstance(steps, list) and steps:
+            system += "\n\nFollow these steps:\n" + "\n".join(f"- {s}" for s in steps[:8])
+        try:
+            from engine.api import generate
+        except Exception as exc:
+            return {"status": "unavailable", "note": f"LLM engine not importable: {exc}"}
+        try:
+            context = ctx.get("context")
+            text = generate(prompt=goal, system=system,
+                            context=context if isinstance(context, str) else None)
+            text = (text or "").strip()
+            if not text:
+                return {"status": "error", "skill_id": skill.get("id"),
+                        "error": "skill produced no output"}
+            return {"status": "ok", "skill_id": skill.get("id"),
+                    "skill_name": skill.get("name"), "output": text,
+                    "match_score": skill.get("match_score")}
+        except Exception as exc:
+            return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
 
     # ── Approval request shaping ─────────────────────────────────────────────────
 
