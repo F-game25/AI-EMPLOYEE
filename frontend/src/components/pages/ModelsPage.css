@@ -1048,3 +1048,47 @@ select.mp-model-select option { background: #111120; }
 .mp-ghost-btn--green:hover { border-color: #22c55e; background: rgba(34,197,94,0.08); }
 .mp-ghost-btn--warn { color: #f59e0b; border-color: rgba(245,158,11,0.3); }
 .mp-ghost-btn--warn:hover { border-color: #f59e0b; background: rgba(245,158,11,0.08); }
+.mp-badge--warn   { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+.mp-badge--danger { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+.mp-ghost-btn--danger { color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.mp-ghost-btn--danger:hover { border-color: #ef4444; background: rgba(239,68,68,0.08); }
+
+/* ── Orchestration tab (Phase A7) ────────────────────────────────────────── */
+.mp-orch { display: flex; flex-direction: column; }
+.mp-muted { color: rgba(255,255,255,0.4); font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+.mp-gauge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.mp-gauge {
+  padding: 10px 14px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+}
+.mp-gauge__label {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.mp-gauge__bar {
+  position: relative;
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mp-gauge__fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+.mp-role-table th { white-space: nowrap; }
+.mp-role-name { font-family: 'JetBrains Mono', monospace; color: var(--nx-gold, #e5c76b); font-size: 11px; }
+.mp-role-min { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: rgba(255,255,255,0.4); }
+.mp-role-reason { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.mp-role-row--missing { background: rgba(239,68,68,0.04); }
+.mp-role-row--offload { background: rgba(245,158,11,0.04); }

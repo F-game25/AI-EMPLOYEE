@@ -324,6 +324,36 @@ def model_and_quant_for_role(role: str) -> dict:
                       f"(free={free}MB); honour on_unavailable"}
 
 
+def best_quant_for_model(model: str, *, min_quant: str | None = None) -> dict:
+    """Pick the best quant of a SPECIFIC ``model`` that fits live free VRAM.
+
+    Used by the inference path (A4) to add quant-awareness to a model the router
+    already chose — it does NOT re-select the model. Walks the model's quant ladder
+    highest→lowest and returns the highest quant >= ``min_quant`` that fits free VRAM;
+    else the smallest acceptable quant with ``fits=False`` + ``offload_layers`` (never
+    OOM). If the model has no quant profile, returns ``quant=None`` so the caller keeps
+    its current behaviour (Ollama decides placement).
+
+    Returns {model, quant, vram_needed, fits, offload_layers}.
+    """
+    free = _live_free_vram_mb()
+    fallback: dict | None = None
+    for quant, vram in _quant_ladder(model):  # highest → lowest quant
+        if not _quant_at_least(quant, min_quant):
+            continue
+        fits = (free is None) or (vram + _KV_SELECT_HEADROOM_MB <= free)
+        if fits:
+            return {"model": model, "quant": quant, "vram_needed": vram,
+                    "fits": True, "offload_layers": 0}
+        if fallback is None:
+            fallback = {"model": model, "quant": quant, "vram_needed": vram,
+                        "fits": False, "offload_layers": _offload_layers(model, quant, vram, free)}
+    if fallback is not None:
+        return fallback
+    return {"model": model, "quant": None, "vram_needed": None,
+            "fits": None, "offload_layers": 0}
+
+
 # ── Execution targets (local / external API / rented remote) ──────────────────
 # Per requirement: CODE and heavy/deep work may also run on an EXTERNAL API
 # (Claude/GPT) or on RENTED remote compute (a much bigger local model on a rented

@@ -230,6 +230,8 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/api/models/routing',                  auth: true,        file: 'server.js' },
   { method: 'POST',   path: '/api/models/routing',                  auth: true,        file: 'server.js' },
   { method: 'GET',    path: '/api/models/providers',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/models/roles',                    auth: true,        file: 'routes/forge-ops.js' },
+  { method: 'GET',    path: '/api/models/benchmarks',               auth: true,        file: 'routes/forge-ops.js' },
   { method: 'POST',   path: '/api/model/route-plan',                auth: true,        file: 'server.js' },
 
   // Model Fabric (proxy → Python, loop-generated)
