@@ -5,7 +5,7 @@ Enterprise-grade AI operations platform for founders, agencies, and lean teams t
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Specialist Agents](https://img.shields.io/badge/Specialist%20Agents-113-blueviolet.svg)](runtime/config/agent_capabilities.json)
-[![Skills](https://img.shields.io/badge/Skills-200-orange.svg)](runtime/config/skills_library.json)
+[![Skills](https://img.shields.io/badge/Skills-570-orange.svg)](runtime/config/skills_library.json)
 [![Multi-tenant](https://img.shields.io/badge/Multi--tenant-yes-success.svg)](#platform-subsystems)
 
 ---
@@ -64,8 +64,9 @@ Key system endpoints include:
 Each run is logged to pipeline telemetry and returned with estimated ROI metrics.
 
 ### 4) Skills system
-- `runtime/config/skills_library.json` ships **200 reusable skills** (library v3.1), including a native fork-enrichment layer (engineering, finance, money, autonomy, wallet, and channel skills).
-- Every skill carries structured quality metadata (`input_format`, `output_format`, `quality_standards`, `error_handling`, `best_practices`, `execution_steps`) to standardize outputs.
+- `runtime/config/skills_library.json` ships **570 skills**: 200 hand-curated (including a native fork-enrichment layer for engineering, finance, money, autonomy, wallet, and channel work) plus 370 generated to back **every** capability the agent catalog advertises — so no agent references a skill that doesn't exist.
+- Every skill carries structured quality metadata (`input_format`, `output_format`, `quality_standards`, `error_handling`, `best_practices`, `execution_steps`) and a `system_prompt`, so it is dispatchable and runs the real LLM via the agent controller / companion `skills.run` path.
+- The library is regenerated from the agent catalog by `scripts/backfill_agent_skills.py` (idempotent), keeping skills and agent capabilities in sync.
 
 ### 5) Dashboard feature modules
 The dashboard is served by **30+ backend route modules** (`backend/routes/`) spanning CRM and business ops, ecommerce ops, AscendForge controlled code execution, the companion/voice teammate, compute fabric, research, intelligence and learning, media, security ops, secret vault, workflow automation, self-evolution, sessions, settings, and system controls.
