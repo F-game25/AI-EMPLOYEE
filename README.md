@@ -4,8 +4,9 @@ Enterprise-grade AI operations platform for founders, agencies, and lean teams t
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Skills](https://img.shields.io/badge/Skills-147-orange.svg)](runtime/config/skills_library.json)
-[![Modes](https://img.shields.io/badge/Modes-Starter%20%7C%20Business%20%7C%20Power-success.svg)](#operating-modes)
+[![Specialist Agents](https://img.shields.io/badge/Specialist%20Agents-113-blueviolet.svg)](runtime/config/agent_capabilities.json)
+[![Skills](https://img.shields.io/badge/Skills-200-orange.svg)](runtime/config/skills_library.json)
+[![Multi-tenant](https://img.shields.io/badge/Multi--tenant-yes-success.svg)](#platform-subsystems)
 
 ---
 
@@ -63,21 +64,56 @@ Key system endpoints include:
 Each run is logged to pipeline telemetry and returned with estimated ROI metrics.
 
 ### 4) Skills system
-- `runtime/config/skills_library.json` includes **147 skills**.
-- Skills include structured quality metadata (`input_format`, `output_format`, `quality_standards`, `error_handling`, `best_practices`, `execution_steps`) to standardize outputs.
+- `runtime/config/skills_library.json` ships **200 reusable skills** (library v3.1), including a native fork-enrichment layer (engineering, finance, money, autonomy, wallet, and channel skills).
+- Every skill carries structured quality metadata (`input_format`, `output_format`, `quality_standards`, `error_handling`, `best_practices`, `execution_steps`) to standardize outputs.
 
 ### 5) Dashboard feature modules
-The dashboard loads 16 feature routers including CRM, email marketing, meeting intelligence, social media, analytics, invoicing, workflow builder, team management, customer support, website builder, competitor watch, personal brand, health check, export/backup, and system controls.
+The dashboard is served by **30+ backend route modules** (`backend/routes/`) spanning CRM and business ops, ecommerce ops, AscendForge controlled code execution, the companion/voice teammate, compute fabric, research, intelligence and learning, media, security ops, secret vault, workflow automation, self-evolution, sessions, settings, and system controls.
 
 ---
 
-## Operating modes
+## Capacity and operating modes
 
-| Mode | Active specialist agents | Best for |
-|---|---:|---|
-| Starter | 3 | Fast onboarding and focused execution |
-| Business | 15 | Small teams running multi-function workflows |
-| Power | 56 | Full automation stack and advanced specialization |
+All specialist agents run at **full capacity** — there are no tiers, paywalled agents, or "ghost" entries. The catalog registers **113 specialist agents** (across 124 agent directories) in `runtime/config/agent_capabilities.json`, organized into 28 categories (sales, marketing, content, research, analytics, operations, ecommerce, social, coordination, and more), each discovered from a `runtime/agents/<name>/` directory.
+
+Runtime behavior is governed by orthogonal modes rather than agent tiers:
+
+| Control | Values | Effect |
+|---|---|---|
+| Automation (`/api/mode`) | `AUTO` · `MANUAL` · `BLACKLIGHT` | Whether safe tasks execute autonomously or wait for operator approval |
+| Evolution (`EVOLUTION_MODE`) | `AUTO` · `SAFE` · `OFF` | Whether the system self-patches, proposes only, or stays static |
+| Research (`AUTO_RESEARCH_MODE`) | `ask` · `auto` · `off` | Whether missing context triggers autonomous web research |
+| LLM backend (`LLM_BACKEND`) | `anthropic` · `ollama` | Cloud or local-first inference |
+
+---
+
+## Platform subsystems
+
+Beyond the agent catalog, the platform ships several production subsystems:
+
+- **Multi-tenancy** — full tenant isolation with per-tenant state and config directories; JWT carries a `tenant_id` claim enforced by both Node and FastAPI middleware (`runtime/core/tenancy.py`).
+- **Unified pipeline** — all input flows through an enforced 10-phase pipeline (retrieve → context → classify → LLM → validate → execute → format → update graph → monitor → integrity check) in `runtime/core/unified_pipeline.py`.
+- **Autonomous research loop** — when a goal lacks context, a sufficiency score triggers `AutoResearchAgent` to run adaptive-depth web research and persist findings to the vector store, brain graph, and knowledge base (`runtime/core/auto_research_agent.py`).
+- **Companion / voice teammate** — one unified conversational runtime (`runtime/companion/`) with an intent classifier, capability registry, execution broker, and safety gate behind it.
+- **Self-evolution** — controlled patch generation, validation, and safe deployment gated by `EVOLUTION_MODE` (`runtime/core/self_evolution/`).
+- **Observability** — Prometheus-style `/metrics` endpoint, a 1-second metrics collector, a JSONL event stream, and an immutable audit log in `state/audit.db`.
+- **Local-first access** — on `localhost` the dashboard authenticates automatically via `/api/auth/auto-token` (no operator secret required); a secret is only requested for remote access.
+
+---
+
+## Autonomous business operations
+
+The platform runs operations end-to-end, with consequential steps gated behind approval:
+
+- **CompanyOS** — a validate-before-build company builder: refine a raw idea (`runtime/companyos/idea_refiner.py`), validate it, then orchestrate the build (`runtime/companyos/`, `/api/company/*`).
+- **Work acquisition → delivery** — an opportunity → quote → deliver pipeline (`runtime/money/work_engine/`), HITL-gated before anything leaves the system.
+- **Content Factory** — multi-platform content generation with an approval-gated publish queue (`runtime/content/content_factory.py`).
+- **FinanceOps** — advisory-only finance drafts that require sign-off; it never moves money on its own (`runtime/finance/financeops.py`).
+- **Business Swarm** — decompose → assign → execute → aggregate across real agent contracts (`runtime/core/swarm/`, `runtime/agents/business_swarm/`).
+- **AscendForge** — a controlled code-execution engine with sandboxing and UI-quality auditing (`runtime/forge/`), surfaced via `/api/forge/*`.
+- **Computer-Use mode** — an explicit master switch (`/api/computer-use/mode`) that lets the teammate drive a real browser only when toggled ON.
+
+Honest execution is enforced system-wide: pipelines do real work or report real failures — there is no fabricated "success."
 
 ---
 
@@ -89,7 +125,7 @@ curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-ins
 ```
 
 ### Other install options
-- Linux & macOS (advanced): `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash` — detecteert automatisch je OS
+- Linux & macOS (advanced): `curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-install.sh | bash` — auto-detects your OS
 - Windows: use `quick-install-windows.bat` or `install-windows.ps1`
 
 Full guide: [INSTALL.md](INSTALL.md)
@@ -140,10 +176,11 @@ Use `/api/product/dashboard` to monitor:
 
 ## Governance and safety
 
-- Approval queue for sensitive actions via ActionBus endpoints.
-- Action metrics exposed for operational monitoring.
+- Human-in-the-loop (HITL) approval gate blocks consequential actions by high-risk agents until an operator approves from the dashboard.
+- Approval queue for sensitive actions via ActionBus endpoints, with action metrics exposed for operational monitoring.
+- Tenant isolation: state and config are segregated per tenant, and JWT `tenant_id` claims are enforced at every route.
 - Mode controls support `AUTO`, `MANUAL`, and `BLACKLIGHT` operating contexts.
-- Built-in validation and feedback loop architecture for deterministic orchestration.
+- Built-in validation and feedback loop architecture for deterministic orchestration, plus an immutable audit log (`state/audit.db`) for compliance.
 
 See also: [SECURITY.md](SECURITY.md), [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
 
