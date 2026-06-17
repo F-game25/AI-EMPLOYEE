@@ -1,0 +1,102 @@
+{
+  "_meta": {
+    "purpose": "Per-model quant ladder (VRAM for the weights) + architecture (for KV-cache math). Single source of truth — selection logic reads this, never hardcodes model names. VRAM seeded from the plan (docs/LOCAL_QUANTIZATION_AND_MODEL_ORCHESTRATION_PLAN.md §2.6/§3.2); 'measured' entries are overwritten by scripts/benchmark_models.py from real /api/ps numbers and tagged with measured_from.",
+    "fields": {
+      "quants": "ordered map {quant: weights_vram_mb}; benchmarker overwrites with measured values",
+      "arch": "{n_layers, n_kv_heads, head_dim} for the KV-cache formula (vram_budget.plan). Defaults applied when omitted.",
+      "default_ctx": "typical context window the model is run at",
+      "measured": "true once a benchmark replaced the seed numbers",
+      "measured_from": "source of the VRAM number for the recorded quant(s)"
+    },
+    "kv_arch_defaults": { "n_layers": 32, "n_kv_heads": 8, "head_dim": 128 },
+    "updated": "2026-06-17"
+  },
+
+  "llama3.2:latest": {
+    "quants": { "q4_K_M": 1300, "q8_0": 2500 },
+    "arch": { "n_layers": 28, "n_kv_heads": 8, "head_dim": 128 },
+    "default_ctx": 4096,
+    "measured": false,
+    "measured_from": "plan seed (§3.2); benchmark_models.py overwrites measured quant in state/model_benchmarks.json"
+  },
+
+  "gemma3:latest": {
+    "quants": { "q4_K_M": 3300 },
+    "arch": { "n_layers": 34, "n_kv_heads": 4, "head_dim": 256 },
+    "default_ctx": 4096,
+    "measured": false,
+    "measured_from": "plan seed (§1 installed-models size)"
+  },
+
+  "gemma3:4b-it-qat": {
+    "quants": { "q4_0": 3600 },
+    "arch": { "n_layers": 34, "n_kv_heads": 4, "head_dim": 256 },
+    "default_ctx": 4096,
+    "measured": false,
+    "measured_from": "plan seed (§3.2 QAT int4); not yet pulled on this box"
+  },
+
+  "gemma3:12b-it-qat": {
+    "quants": { "q4_0": 8200 },
+    "arch": { "n_layers": 48, "n_kv_heads": 8, "head_dim": 256 },
+    "default_ctx": 4096,
+    "measured": false,
+    "measured_from": "plan seed (§3.2 QAT int4 — offload + low ctx on 8GB)"
+  },
+
+  "qwen2.5-coder:14b": {
+    "quants": { "q4_K_M": 7500, "q5_K_M": 10600 },
+    "arch": { "n_layers": 48, "n_kv_heads": 8, "head_dim": 128 },
+    "default_ctx": 8192,
+    "measured": false,
+    "measured_from": "plan seed (§3.2)"
+  },
+
+  "qwen2.5-coder:7b": {
+    "quants": { "q4_K_M": 3800, "q5_K_M": 5300 },
+    "arch": { "n_layers": 28, "n_kv_heads": 4, "head_dim": 128 },
+    "default_ctx": 8192,
+    "measured": false,
+    "measured_from": "plan seed (§3.2); not pulled on this box"
+  },
+
+  "qwen3.5": {
+    "quants": { "q4_K_M": 4600, "q5_K_M": 6600 },
+    "arch": { "n_layers": 36, "n_kv_heads": 8, "head_dim": 128 },
+    "default_ctx": 8192,
+    "measured": false,
+    "measured_from": "plan seed (§3.2)"
+  },
+
+  "qwen2.5:7b-instruct": {
+    "quants": { "q4_K_M": 4700, "q5_K_M": 5800 },
+    "arch": { "n_layers": 28, "n_kv_heads": 4, "head_dim": 128 },
+    "default_ctx": 8192,
+    "measured": false,
+    "measured_from": "plan seed (§1 installed-models size)"
+  },
+
+  "qwen2.5:14b-instruct": {
+    "quants": { "q4_K_M": 9000, "q5_K_M": 10600 },
+    "arch": { "n_layers": 48, "n_kv_heads": 8, "head_dim": 128 },
+    "default_ctx": 8192,
+    "measured": false,
+    "measured_from": "plan seed"
+  },
+
+  "llava": {
+    "quants": { "q4_K_M": 4700 },
+    "arch": { "n_layers": 32, "n_kv_heads": 32, "head_dim": 128 },
+    "default_ctx": 4096,
+    "measured": false,
+    "measured_from": "plan seed (§1 installed-models size)"
+  },
+
+  "moondream": {
+    "quants": { "q4_K_M": 1700 },
+    "arch": { "n_layers": 24, "n_kv_heads": 16, "head_dim": 64 },
+    "default_ctx": 2048,
+    "measured": false,
+    "measured_from": "plan seed (§1 installed-models size)"
+  }
+}

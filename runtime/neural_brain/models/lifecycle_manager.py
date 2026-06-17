@@ -69,31 +69,23 @@ class ModelEntry:
     unloader: object = field(default=None, repr=False)  # callable | None
 
 
+# VRAM probes are centralized in engine.compute.hardware_profiler — these thin
+# wrappers keep existing call-sites stable while removing the duplicated nvidia-smi
+# parsing. They degrade to None on a CPU-only host, exactly as before.
 def _free_vram_mb() -> int | None:
-    """Free GPU VRAM in MB via nvidia-smi, or None if no GPU."""
-    import shutil
-    import subprocess
-    if not shutil.which("nvidia-smi"):
-        return None
+    """Free GPU VRAM in MB, or None if no GPU. Delegates to hardware_profiler."""
     try:
-        out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            text=True, timeout=4)
-        return int(out.strip().splitlines()[0])
-    except Exception:  # noqa: BLE001
+        from engine.compute.hardware_profiler import live_vram_mb
+        return live_vram_mb()
+    except Exception:  # noqa: BLE001 — never break admission control
         return None
 
 
 def _total_vram_mb() -> int | None:
-    import shutil
-    import subprocess
-    if not shutil.which("nvidia-smi"):
-        return None
+    """Total GPU VRAM in MB, or None if no GPU. Delegates to hardware_profiler."""
     try:
-        out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            text=True, timeout=4)
-        return int(out.strip().splitlines()[0])
+        from engine.compute.hardware_profiler import total_vram_mb
+        return total_vram_mb()
     except Exception:  # noqa: BLE001
         return None
 

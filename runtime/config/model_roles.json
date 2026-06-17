@@ -1,0 +1,53 @@
+{
+  "_meta": {
+    "purpose": "Role → tier + quant floor + preferred local models. Single source of truth for role-based model selection (model_lanes.model_and_quant_for_role / A5 role resolver). No model name is hardcoded in logic — it all comes from here. Every model named below MUST exist in model_quant_profiles.json.",
+    "fields": {
+      "tier": "size tier the role maps onto (FAST/NORMAL/HEAVY/DEEP_THINKING/CODE)",
+      "min_quant": "lowest acceptable quant; selection never drops below this floor",
+      "preferred_models": "ordered preference, best→fallback; first installed model that fits wins",
+      "required_for": "capabilities that HARD-REQUIRE this role's model",
+      "on_unavailable": "what to do when no preferred model at >= min_quant fits — NEVER silently downgrade",
+      "never_degrade_to_general": "coding must never resolve to a non-coder model",
+      "text_only_fallback": "vision role may fall back to text-only when no multimodal model fits"
+    },
+    "updated": "2026-06-17"
+  },
+
+  "execution_reasoning": {
+    "tier": "HEAVY",
+    "min_quant": "q4_0",
+    "preferred_models": ["gemma4:e4b-it-qat", "gemma3:4b-it-qat", "gemma3:12b-it-qat", "qwen3.5"],
+    "required_for": ["pc_control", "browser_action", "forge_action"],
+    "on_unavailable": "block_or_manual_or_remote"
+  },
+
+  "coding": {
+    "tier": "CODE",
+    "min_quant": "q4_K_M",
+    "preferred_models": ["qwen2.5-coder:14b", "qwen2.5-coder:7b"],
+    "never_degrade_to_general": true,
+    "on_unavailable": "block_or_remote"
+  },
+
+  "cheap_summary": {
+    "tier": "FAST",
+    "min_quant": "q4_K_M",
+    "preferred_models": ["llama3.2:latest"],
+    "on_unavailable": "best_available"
+  },
+
+  "vision": {
+    "tier": "NORMAL",
+    "min_quant": "q4_K_M",
+    "preferred_models": ["llava", "moondream"],
+    "text_only_fallback": true,
+    "on_unavailable": "text_only_fallback"
+  },
+
+  "review_safety": {
+    "tier": "HEAVY",
+    "min_quant": "q5_K_M",
+    "preferred_models": ["qwen3.5", "qwen2.5:14b-instruct", "gemma3:12b-it-qat"],
+    "on_unavailable": "block_or_remote"
+  }
+}
