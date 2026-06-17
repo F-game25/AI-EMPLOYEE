@@ -57,6 +57,121 @@ _FAIL_STATUSES = {"failed", "failing", "error", "errored", "crashed",
 
 _WS = re.compile(r"\s+")
 
+# ── Option / selection reference resolution ──────────────────────────────────
+# When the assistant just offered enumerated options, a follow-up like "option
+# 2 / doe 2 / de tweede / pak optie twee / ja die / doe dat" must bind to that
+# option — never trigger a "what do you mean?" clarification. Matching is
+# language-light (EN + NL, the two languages this product ships in) and keyed
+# off the live ``last_options_given`` list, so it works for any option set.
+
+# Word-number → ordinal (1-based). EN + NL up to twelve covers any realistic
+# enumerated menu.
+_ORDINAL_WORDS: dict = {
+    # English cardinals
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    # English ordinals
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+    # Dutch cardinals
+    "een": 1, "één": 1, "twee": 2, "drie": 3, "vier": 4, "vijf": 5, "zes": 6,
+    "zeven": 7, "acht": 8, "negen": 9, "tien": 10, "elf": 11, "twaalf": 12,
+    # Dutch ordinals
+    "eerste": 1, "tweede": 2, "derde": 3, "vierde": 4, "vijfde": 5,
+    "zesde": 6, "zevende": 7, "achtste": 8, "negende": 9, "tiende": 10,
+}
+_ORDINAL_WORDS_RE = "|".join(sorted(_ORDINAL_WORDS, key=len, reverse=True))
+
+# "option 2", "optie 2", "choice 2", "number 2", "nummer 2", "#2", "do 2",
+# "doe 2", "pak 2", "kies 2".
+_NUM_SELECT = re.compile(
+    r"\b(?:option|optie|choice|keuze|number|nummer|nr|do|doe|run|kies|pak|"
+    r"neem|take|pick|select)\s*#?\s*(\d{1,2})\b",
+    re.IGNORECASE)
+_BARE_NUM = re.compile(r"^\s*#?\s*(\d{1,2})\s*[.)]?\s*$")
+# "the second one", "de tweede", "optie twee", "pak optie twee", "do the third".
+_WORD_SELECT = re.compile(
+    rf"\b(?:option|optie|choice|keuze|the|de|het|pak|kies|neem|take|pick)\s+"
+    rf"(?:optie\s+|option\s+)?({_ORDINAL_WORDS_RE})\b",
+    re.IGNORECASE)
+# Bare ordinal word as (almost) the whole message: "second", "de tweede", "twee".
+_BARE_WORD = re.compile(
+    rf"^\s*(?:the |de |het )?(?:optie |option )?({_ORDINAL_WORDS_RE})"
+    rf"(?:\s+(?:one|er|tje))?\s*$",
+    re.IGNORECASE)
+# Affirmative deixis that selects the single pending/last proposed thing:
+# "yes do it", "ja die", "doe dat", "that one", "go ahead", "yep".
+_AFFIRM_SELECT = re.compile(
+    r"\b(ja die|ja doe dat|doe dat|doe maar|that one|yes do it|yes please|"
+    r"go ahead|do that|ga je gang|sounds good do it)\b",
+    re.IGNORECASE)
+
+
+def _select_ordinal(low: str) -> Optional[int]:
+    """Extract a 1-based option ordinal from a selection message, else None."""
+    if (m := _NUM_SELECT.search(low)) or (m := _BARE_NUM.match(low)):
+        return int(m.group(1))
+    if (m := _WORD_SELECT.search(low)) or (m := _BARE_WORD.match(low)):
+        return _ORDINAL_WORDS.get(m.group(1).lower())
+    return None
+
+
+def _is_affirm_select(low: str) -> bool:
+    return bool(_AFFIRM_SELECT.search(low))
+
+
+def resolve_option_selection(text: str,
+                             last_options_given: Optional[list]) -> Optional[dict]:
+    """Bind a selection message to one of the previously offered options.
+
+    Returns ``{ordinal, option, resolved_text, kind}`` when the message is a
+    selection AND ``last_options_given`` is non-empty; otherwise ``None`` (the
+    caller falls through to normal resolution). Never asks a clarifying
+    question — that's the whole point.
+
+    ``last_options_given`` items are ``{id, summary}`` (see
+    ``companion.session_state.extract_options``). An affirmative ("ja die",
+    "do that") resolves to the *only* option when exactly one was offered,
+    otherwise it leaves disambiguation to the caller (returns None) so we don't
+    guess between several.
+    """
+    opts = [o for o in (last_options_given or []) if isinstance(o, dict)]
+    if not opts:
+        return None
+    low = (text or "").strip().lower()
+    if not low:
+        return None
+
+    ordinal = _select_ordinal(low)
+    if ordinal is None and _is_affirm_select(low) and len(opts) == 1:
+        ordinal = 1  # "do that" with a single offered option → that one
+    if ordinal is None:
+        return None
+
+    chosen = _option_by_ordinal(opts, ordinal)
+    if chosen is None:
+        return None  # out-of-range selection — let the caller clarify the range
+
+    summary = str(chosen.get("summary") or "").strip()
+    resolved = summary or f"option {ordinal}"
+    return {
+        "ordinal": ordinal,
+        "option": chosen,
+        "resolved_text": resolved,
+        "kind": "option_selection",
+    }
+
+
+def _option_by_ordinal(opts: list, ordinal: int) -> Optional[dict]:
+    """Find an option by its declared ``id`` ordinal, else by list position."""
+    target = str(ordinal)
+    for o in opts:
+        if str(o.get("id", "")).strip() == target:
+            return o
+    if 1 <= ordinal <= len(opts):
+        return opts[ordinal - 1]
+    return None
+
 
 def _norm(text: str) -> str:
     return _WS.sub(" ", (text or "").strip())
