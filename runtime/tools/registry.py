@@ -119,6 +119,12 @@ class ToolRegistry:
         self.register("llm_infer", self._llm_infer, 0, "Run LLM inference")
         self.register("embed_text", self._embed_text, 0, "Embed text to vector")
         self.register("get_memory", self._get_memory, 0, "Retrieve from memory")
+        # Risk 0 — system-info probes (real OS values, never fabricated)
+        try:
+            from .system_info import register_system_tools
+            register_system_tools(self)
+        except Exception as e:  # noqa: BLE001 — defaults must never fail to load
+            logger.debug("system-info tools unavailable: %s", e)
         # Risk 1 — local write
         self.register("write_file", self._write_file, 1, "Write a file")
         self.register("create_file", self._create_file, 1, "Create a new file")
@@ -215,6 +221,7 @@ def _autoregister() -> None:
         from . import react_tools  # noqa: F401
         from . import write_file_tool     # noqa: F401
         from . import http_request_tool   # noqa: F401
+        from . import system_info         # noqa: F401
     except Exception as e:
         logger.debug("tool autoregister partial failure: %s", e)
 

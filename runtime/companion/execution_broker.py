@@ -40,6 +40,17 @@ logger = logging.getLogger("companion.execution_broker")
 # registry). Keeps a single turn bounded and cheap.
 _MAX_CANDIDATES = 4
 
+# Fine-grained system-info intents → the read-only tool that answers them.
+# Routed deterministically (no token-overlap matching) so a "what time is it on
+# my PC?" request always reaches the real local-time tool (Phase 7.1.4). These
+# are L0 OS probes (real measured values, never fabricated) — no safety gate
+# needed: the teammate ANSWERS instead of explaining how to check manually.
+_SYSTEM_INFO_TOOLS: dict[str, str] = {
+    "system_info.local_time": "system_local_time",
+    "system_info.hardware": "system_hardware",
+    "system_info.cwd": "system_cwd",
+}
+
 # ── Adapter bounds (keep every executor cheap, read-only, non-destructive) ────
 _LOG_SEARCH_MAX_LINES = 50      # max matching log lines returned
 _LOG_SCAN_MAX_BYTES = 2_000_000  # tail at most ~2MB of a log file

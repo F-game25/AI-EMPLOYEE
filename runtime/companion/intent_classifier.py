@@ -43,6 +43,45 @@ ALL_MODES = (
 # task_type is a free-form downstream hint for model-tier selection.
 _TASK_TYPE_DEFAULT = "chat"
 
+# ── Fine-grained intent names (dotted) ─────────────────────────────────────────
+# These ride alongside the coarse ``mode`` so the execution broker can route a
+# system-info request straight to the matching system tool (Phase 7.1.3/7.1.4).
+INTENT_SYSTEM_LOCAL_TIME = "system_info.local_time"
+INTENT_SYSTEM_HARDWARE = "system_info.hardware"
+INTENT_SYSTEM_CWD = "system_info.cwd"
+INTENT_QUESTION_SIMPLE = "question.simple"
+
+# ── System-info cues (conservative — only clear phrasings) ─────────────────────
+# Map a fine intent name to the phrases that trigger it. Kept tight on purpose:
+# the teammate must ACT on a real system question, never on a vague one.
+_SYS_LOCAL_TIME = (
+    "what time is it", "what's the time", "whats the time", "current time",
+    "local time", "the time right now", "time right now", "what is the time",
+    "time on my pc", "time on my computer", "time on this machine",
+    # Dutch
+    "hoe laat is het", "hoe laat is t", "hoe laat hebben we het",
+    "wat is de tijd", "huidige tijd",
+)
+_SYS_HARDWARE = (
+    "my cpu", "what cpu", "which cpu", "what gpu", "which gpu", "my gpu",
+    "how much ram", "how much memory", "my ram", "what hardware",
+    "which hardware", "system specs", "my specs", "hardware specs",
+    "what are my specs", "cpu cores", "how many cores", "vram",
+    "graphics card", "my hardware",
+    # Dutch
+    "mijn cpu", "welke cpu", "mijn gpu", "welke gpu", "hoeveel ram",
+    "hoeveel geheugen", "mijn hardware", "wat voor hardware", "mijn specs",
+)
+_SYS_CWD = (
+    "which folder", "what folder", "current directory", "working directory",
+    "which directory", "what directory", "where am i", "current folder",
+    "which dir", "present working directory", "what's my cwd", "whats my cwd",
+    "what path are we in", "which path are we in",
+    # Dutch
+    "welke map", "welke folder", "huidige map", "huidige directory",
+    "in welke map", "waar zijn we",
+)
+
 # ── Approval / rejection (highest priority — short, unambiguous) ───────────────
 _APPROVE = (
     "approve", "approved", "go ahead", "do it", "yes do it", "yes please",
@@ -181,6 +220,21 @@ class IntentClassifier:
             return self._result(MODE_APPROVAL, "chat", 0.9, False,
                                  "rejection phrase")
 
+        # 1.5) System-info — "what time is it on my pc", "my cpu", "which folder".
+        #      mode=EXECUTION so the runtime routes through the broker, which
+        #      keys on the fine ``intent`` name to call the real system tool.
+        #      Checked before monitoring/analysis so "what is the time" doesn't
+        #      get swallowed by the generic "what is" analysis cue.
+        for patterns, intent_name in (
+            (_SYS_LOCAL_TIME, INTENT_SYSTEM_LOCAL_TIME),
+            (_SYS_HARDWARE, INTENT_SYSTEM_HARDWARE),
+            (_SYS_CWD, INTENT_SYSTEM_CWD),
+        ):
+            if (s := _hit(t, patterns)):
+                return self._result(MODE_EXECUTION, "system", 0.95, True,
+                                    f"system-info cue: '{s}'",
+                                    intent=intent_name)
+
         # 2) Monitoring — status questions.
         if (m := _hit(t, _MONITOR)):
             return self._result(MODE_MONITORING, "monitoring", 0.9, False,
@@ -283,14 +337,20 @@ class IntentClassifier:
 
     @staticmethod
     def _result(mode: str, task_type: str, confidence: float,
-                is_command: bool, reason: str) -> dict:
-        return {
+                is_command: bool, reason: str,
+                intent: Optional[str] = None) -> dict:
+        out = {
             "mode": mode,
             "task_type": task_type,
             "confidence": round(float(confidence), 3),
             "is_command": bool(is_command),
             "reason": reason,
         }
+        # Fine-grained dotted intent (e.g. system_info.local_time). Present only
+        # when the classifier resolved one — the broker routes on it directly.
+        if intent:
+            out["intent"] = intent
+        return out
 
 
 _SINGLETON: Optional[IntentClassifier] = None
