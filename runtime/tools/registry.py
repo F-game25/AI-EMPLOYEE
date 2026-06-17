@@ -129,19 +129,19 @@ class ToolRegistry:
         self.register("write_file", self._write_file, 1, "Write a file")
         self.register("create_file", self._create_file, 1, "Create a new file")
         self.register("update_db", self._update_db, 1, "Update database")
-        # Risk 2 — external paid media generation (Open-Generative-AI / MuAPI base)
-        self.register("media_generate", self._media_generate, 2,
-                      "Generate an image/video via MuAPI (Open-Generative-AI base)")
+        # Risk 1 — local offline media generation (sd-cli); cloud (MuAPI) is opt-in
+        self.register("media_generate", self._media_generate, 1,
+                      "Generate an image locally/offline (stable-diffusion.cpp); cloud opt-in")
         # Risk 3 — external
         self.register("send_email", self._send_email, 3, "Send an email")
         self.register("call_api", self._call_api, 3, "Call an external API")
         self.register("browser_fetch", self._browser_fetch, 3, "Fetch a URL")
 
-    def _media_generate(self, prompt: str, model: str = "flux-dev",
-                        media_type: str = "image", inputs: dict | None = None, **_):
+    def _media_generate(self, prompt: str, model: str | None = None,
+                        media_type: str = "image", provider: str = "local", **opts):
         from content.content_factory import get_content_factory
         return get_content_factory().generate_media(
-            prompt, model=model, media_type=media_type, inputs=inputs)
+            prompt, model=model, media_type=media_type, provider=provider, **opts)
 
     def _web_search(self, query: str, limit: int = 5, **_):
         try:

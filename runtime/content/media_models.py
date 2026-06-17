@@ -11,6 +11,7 @@ so refreshing the base (re-copying those two files) updates the system.
 from __future__ import annotations
 
 import json
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -79,3 +80,37 @@ def endpoint_for(model_id: str) -> str:
 
 def count() -> int:
     return len(_catalog())
+
+
+# ── Local / offline catalog (stable-diffusion.cpp via sd-cli) ─────────────────
+# The DEFAULT content-creation path is local + offline. The cloud catalog above
+# (MuAPI) is opt-in. Local models run fully on-device on an 8GB GPU.
+
+@lru_cache(maxsize=1)
+def _local() -> dict[str, Any]:
+    try:
+        return json.loads((_VENDOR / "local_models.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {"models": [], "auxiliary": {}, "_meta": {}}
+
+
+def local_models() -> list[dict[str, Any]]:
+    """Installed-or-installable local image models (sd-cli). provider='sdcpp'."""
+    return [{**m, "provider": "sdcpp"} for m in (_local().get("models") or [])]
+
+
+def get_local_model(model_id: str) -> dict[str, Any] | None:
+    for m in local_models():
+        if m["id"] == model_id:
+            return m
+    return None
+
+
+def default_local_model_id() -> str:
+    return os.getenv("SD_DEFAULT_MODEL") or _local().get("_meta", {}).get(
+        "default_model") or "dreamshaper-8"
+
+
+def zimage_aux() -> dict[str, Any]:
+    """Shared llm + vae files required by z-image models."""
+    return _local().get("auxiliary") or {}

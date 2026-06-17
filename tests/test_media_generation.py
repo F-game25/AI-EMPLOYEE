@@ -40,12 +40,13 @@ def test_generate_requires_api_key(monkeypatch):
         mc.generate("flux-dev", "a red fox")
 
 
-def test_content_factory_media_honest_without_key(monkeypatch):
+def test_content_factory_cloud_media_honest_without_key(monkeypatch):
+    # Cloud (MuAPI) is opt-in via provider="cloud"; the default is local/offline.
     monkeypatch.delenv("MUAPI_API_KEY", raising=False)
     monkeypatch.delenv("MUAPI_KEY", raising=False)
     from content.content_factory import get_content_factory
-    out = get_content_factory().generate_media("a red fox", model="flux-dev")
-    assert out["ok"] is False and "MUAPI_API_KEY" in out["error"]
+    out = get_content_factory().generate_media("a red fox", model="flux-dev", provider="cloud")
+    assert out["ok"] is False and out["provider"] == "cloud" and "MUAPI_API_KEY" in out["error"]
 
 
 # ── Submit → poll → url (mocked HTTP) ─────────────────────────────────────────

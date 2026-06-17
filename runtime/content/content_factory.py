@@ -81,37 +81,61 @@ class ContentFactory:
         """Convenience: N variants of one topic for a single platform."""
         return self.produce({"topic": topic, "platforms": [platform], "variants": variants})
 
-    def generate_media(self, prompt: str, *, model: str = "flux-dev",
-                       media_type: str = "image", inputs: dict | None = None,
-                       api_key: str | None = None) -> dict:
-        """Generate an image/video via the Open-Generative-AI MuAPI engine and stage
-        it in the approval-gated queue (never auto-published).
+    def generate_media(self, prompt: str, *, model: str | None = None,
+                       media_type: str = "image", provider: str = "local",
+                       inputs: dict | None = None, api_key: str | None = None,
+                       **gen_opts) -> dict:
+        """Generate an image and stage it in the approval-gated queue (never posted).
 
-        Honest: returns a real media URL on success, or a real error (e.g. missing
-        MUAPI_API_KEY, generation failure) — never a fabricated link.
+        provider="local" (default) → fully OFFLINE generation via stable-diffusion.cpp
+        (sd-cli) on this machine — no network. provider="cloud" → opt-in MuAPI.
+        Honest: a real local artifact path / cloud URL on success, or a real error
+        (engine not installed, model file missing, generation failure) — never a
+        fabricated result and never a silent cloud call.
         """
         prompt = str(prompt or "").strip()
         if not prompt:
             return {"ok": False, "error": "prompt required"}
+
+        if provider == "local":
+            try:
+                from .local_image_gen import generate as _local_gen, LocalGenError
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": f"local media engine unavailable: {exc}"}
+            try:
+                out = _local_gen(prompt, model_id=model, **{
+                    k: v for k, v in gen_opts.items()
+                    if k in ("width", "height", "negative", "seed", "steps", "cfg", "timeout")})
+            except LocalGenError as exc:
+                return {"ok": False, "error": str(exc), "provider": "local", "model": model}
+            entry = get_publish_queue().enqueue(
+                topic=prompt[:120], platform=f"media:{media_type}:local:{out['model']}",
+                artifact_path=out["path"], word_count=0, content_status="generated")
+            return {"ok": True, "provider": "local", "model": out["model"],
+                    "media_type": media_type, "path": out["path"],
+                    "latency_s": out.get("latency_s"), "queued": entry,
+                    "note": "Generated offline on this machine (stable-diffusion.cpp) and "
+                            "staged in the publish queue pending approval — nothing posted."}
+
+        # provider == "cloud" — opt-in MuAPI (online; requires MUAPI_API_KEY).
         try:
             from .muapi_client import generate as _gen, MuapiError
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": f"media engine unavailable: {exc}"}
+            return {"ok": False, "error": f"cloud media engine unavailable: {exc}"}
         try:
-            out = _gen(model, prompt, inputs=inputs, api_key=api_key)
+            out = _gen(model or "flux-dev", prompt, inputs=inputs, api_key=api_key)
         except MuapiError as exc:
-            return {"ok": False, "error": str(exc), "model": model}
+            return {"ok": False, "error": str(exc), "provider": "cloud", "model": model}
         url = out.get("url")
         if not url:
             return {"ok": False, "error": "MuAPI returned no media url",
-                    "model": model, "raw": out.get("raw")}
+                    "provider": "cloud", "model": model, "raw": out.get("raw")}
         entry = get_publish_queue().enqueue(
-            topic=prompt[:120], platform=f"media:{media_type}:{model}",
+            topic=prompt[:120], platform=f"media:{media_type}:cloud:{model}",
             artifact_path=url, word_count=0, content_status="generated")
-        return {"ok": True, "model": model, "media_type": media_type, "url": url,
-                "request_id": out.get("request_id"), "queued": entry,
-                "note": "Media generated via MuAPI and staged in the publish queue "
-                        "pending your approval — nothing posted."}
+        return {"ok": True, "provider": "cloud", "model": model, "media_type": media_type,
+                "url": url, "request_id": out.get("request_id"), "queued": entry,
+                "note": "Generated via MuAPI (cloud) and staged pending approval."}
 
 
 _instance: ContentFactory | None = None
