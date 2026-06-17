@@ -213,6 +213,17 @@ class ExecutionBroker:
             candidates = [c for c in candidates if c.subsystem in only_subsystems]
         candidates = candidates[:_MAX_CANDIDATES]
 
+        # Hard rule (plan §A5): PC-control/browser actions require an execution-grade
+        # local reasoner (Gemma Q4/QAT or stronger) to be INSTALLED. Resolve once.
+        _exec_status: dict = {"available": True}
+        if any(c.subsystem in _COMPUTER_USE_SUBSYSTEMS for c in candidates):
+            try:
+                from core.model_role_resolver import execution_reasoning_ready
+                _exec_status = execution_reasoning_ready()
+            except Exception as exc:  # noqa: BLE001 — resolver failure → fail safe (block)
+                _exec_status = {"available": False, "reason": f"resolver error: {exc}",
+                                "install_suggestion": "gemma3:4b-it-qat"}
+
         for cap in candidates:
             # Master Computer-Use switch: browser/desktop capabilities are refused
             # entirely until the user enables Computer-Use mode from the UI. This is
@@ -224,6 +235,19 @@ class ExecutionBroker:
                     "status": "disabled", "cap": cap.id, "subsystem": cap.subsystem,
                     "reason": "Computer Use mode is off — enable it from the UI to let "
                               "the teammate use a browser/computer.",
+                })
+                continue
+            # Even with Computer-Use ON, never drive the PC/browser with a weak model.
+            if cap.subsystem in _COMPUTER_USE_SUBSYSTEMS and not _exec_status.get("available"):
+                blocked.append(cap.id)
+                sugg = _exec_status.get("install_suggestion") or "gemma3:4b-it-qat"
+                results.append({
+                    "status": "blocked_no_model", "cap": cap.id, "subsystem": cap.subsystem,
+                    "reason": ("No execution-grade local model is installed for PC/browser "
+                               f"control ({_exec_status.get('reason', '')}). Pull one first, "
+                               f"e.g. `ollama pull {sugg}` — refusing to drive the computer "
+                               "with a weak model."),
+                    "install_suggestion": sugg,
                 })
                 continue
             try:
