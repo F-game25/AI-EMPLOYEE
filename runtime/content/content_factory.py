@@ -81,6 +81,38 @@ class ContentFactory:
         """Convenience: N variants of one topic for a single platform."""
         return self.produce({"topic": topic, "platforms": [platform], "variants": variants})
 
+    def generate_media(self, prompt: str, *, model: str = "flux-dev",
+                       media_type: str = "image", inputs: dict | None = None,
+                       api_key: str | None = None) -> dict:
+        """Generate an image/video via the Open-Generative-AI MuAPI engine and stage
+        it in the approval-gated queue (never auto-published).
+
+        Honest: returns a real media URL on success, or a real error (e.g. missing
+        MUAPI_API_KEY, generation failure) — never a fabricated link.
+        """
+        prompt = str(prompt or "").strip()
+        if not prompt:
+            return {"ok": False, "error": "prompt required"}
+        try:
+            from .muapi_client import generate as _gen, MuapiError
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"media engine unavailable: {exc}"}
+        try:
+            out = _gen(model, prompt, inputs=inputs, api_key=api_key)
+        except MuapiError as exc:
+            return {"ok": False, "error": str(exc), "model": model}
+        url = out.get("url")
+        if not url:
+            return {"ok": False, "error": "MuAPI returned no media url",
+                    "model": model, "raw": out.get("raw")}
+        entry = get_publish_queue().enqueue(
+            topic=prompt[:120], platform=f"media:{media_type}:{model}",
+            artifact_path=url, word_count=0, content_status="generated")
+        return {"ok": True, "model": model, "media_type": media_type, "url": url,
+                "request_id": out.get("request_id"), "queued": entry,
+                "note": "Media generated via MuAPI and staged in the publish queue "
+                        "pending your approval — nothing posted."}
+
 
 _instance: ContentFactory | None = None
 _instance_lock = threading.Lock()
