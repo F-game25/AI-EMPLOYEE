@@ -1,37 +1,12 @@
 // Centralized API client — all fetch calls go through here.
 // Base URL is inferred from window.location so it works with both Vite dev proxy and production.
 
+import { getStoredToken as getToken, clearToken, ensureOperatorToken } from './auth'
+
 const BASE = import.meta.env.VITE_API_BASE ?? '';
 
-function getToken() {
-  return localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || null
-}
-
-function storeToken(token) {
-  if (!token) return
-  localStorage.setItem('ai_jwt', token)
-  sessionStorage.setItem('ai_jwt', token)
-}
-
-let _refreshing = false
-let _refreshPromise = null
-
-async function refreshToken() {
-  if (_refreshing) return _refreshPromise
-  _refreshing = true
-  _refreshPromise = (async () => {
-    try {
-      const res = await fetch(`${BASE}/api/auth/auto-token`, { method: 'GET' })
-      if (res.ok) {
-        const data = await res.json()
-        const token = data.token || data.access_token
-        if (token) { storeToken(token); return token }
-      }
-    } catch { /* network error — fall through */ }
-    return null
-  })().finally(() => { _refreshing = false; _refreshPromise = null })
-  return _refreshPromise
-}
+// Force a fresh localhost token after a 401 (the current one expired/was rejected).
+const refreshToken = () => ensureOperatorToken({ force: true })
 
 async function _fetch(method, path, body, opts = {}) {
   const doRequest = (token) => {
@@ -53,8 +28,7 @@ async function _fetch(method, path, body, opts = {}) {
       res = await doRequest(newToken)
     }
     if (res.status === 401) {
-      localStorage.removeItem('ai_jwt')
-      sessionStorage.removeItem('ai_jwt')
+      clearToken()
       window.dispatchEvent(new CustomEvent('nx:auth-expired'))
       const err = new Error('Session expired — please log in again')
       err.status = 401

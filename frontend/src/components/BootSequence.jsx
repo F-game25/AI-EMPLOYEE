@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { API_URL } from '../config/api'
+import { ensureOperatorToken } from '../api/auth'
 import './BootSequence.css'
 
 const BOOT_STEPS = [
@@ -219,17 +220,11 @@ export default function BootSequence({ onComplete, subState }) {
         setProgress(p => Math.max(p, 54))
       })
 
-    fetch('/api/auth/auto-token', { signal: AbortSignal.timeout(4500) })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`auth ${r.status}`)))
-      .then(data => {
+    ensureOperatorToken({ timeoutMs: 4500 })
+      .then(token => {
         if (cancelled) return
-        setStep('auth', data?.token ? 'ok' : 'fail', data?.token ? '> Secure operator token acquired' : '> Secure token unavailable')
-        setProgress(p => Math.max(p, data?.token ? 78 : 68))
-      })
-      .catch(err => {
-        if (cancelled) return
-        setStep('auth', 'fail', `> Auth bootstrap delayed: ${err.message || 'timeout'}`)
-        setProgress(p => Math.max(p, 68))
+        setStep('auth', token ? 'ok' : 'fail', token ? '> Secure operator token acquired' : '> Secure token unavailable')
+        setProgress(p => Math.max(p, token ? 78 : 68))
       })
 
     timers.push(setTimeout(() => {
