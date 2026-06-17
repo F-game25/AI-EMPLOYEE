@@ -135,7 +135,13 @@ def main() -> int:
         },
         "results": results,
     }
-    out_path = ROOT / "state" / "model_benchmarks.json"
+    # Write to the canonical state dir ($STATE_DIR → ~/.ai-employee/state) so the
+    # Models page / /api/models/benchmarks reads the same file the stack runs against.
+    try:
+        from core.state_paths import canonical_state_dir
+        out_path = canonical_state_dir() / "model_benchmarks.json"
+    except Exception:  # noqa: BLE001 — fall back to repo-local state if helper unavailable
+        out_path = ROOT / "state" / "model_benchmarks.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
     print(f"\nwrote {out_path} ({len([r for r in results if r.get('status') == 'ok'])} measured)")

@@ -4000,6 +4000,77 @@ def post_models_reload(_auth: None = Depends(require_auth), _rbac=Depends(requir
         return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
 
 
+@app.get("/api/models/roles")
+def get_models_roles():
+    """Live role → installed model@quant resolution for every configured role (Phase A7).
+
+    Source of truth: core.model_role_resolver.resolve_role (installed + quant-floor +
+    VRAM fit) plus model_lanes.tier_models() and a live hardware snapshot. No model
+    name, role list, or VRAM number is hardcoded — roles come from model_roles.json,
+    numbers from live probes. Honest failure: if the resolver layer is unavailable the
+    endpoint says so instead of fabricating a resolution.
+    """
+    try:
+        from core import model_lanes as ml
+        from core import model_role_resolver as rr
+        from engine.compute.hardware_profiler import snapshot as hw_snapshot
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("models/roles import failed: %s", exc)
+        return JSONResponse(
+            {"ok": False, "error": "model_orchestration_unavailable", "detail": str(exc)},
+            status_code=503,
+        )
+    try:
+        roles = {role: rr.resolve_role(role) for role in ml._model_roles().keys()}
+        return JSONResponse({
+            "ok": True,
+            "roles": roles,
+            "tiers": ml.tier_models(),
+            "hardware": hw_snapshot(),
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("models/roles resolution failed: %s", exc)
+        return JSONResponse(
+            {"ok": False, "error": "role_resolution_failed", "detail": str(exc)},
+            status_code=500,
+        )
+
+
+@app.get("/api/models/benchmarks")
+def get_models_benchmarks():
+    """Measured tok/s + VRAM per model from state/model_benchmarks.json (Phase A7).
+
+    State dir resolved via the canonical helper (no hardcoded path). Honest failure:
+    a missing/unparseable benchmark file returns a clear structured error so the UI
+    shows an empty state instead of fabricated numbers.
+    """
+    try:
+        from core.state_paths import canonical_state_dir
+        path = canonical_state_dir() / "model_benchmarks.json"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("models/benchmarks state path failed: %s", exc)
+        return JSONResponse(
+            {"ok": False, "error": "state_dir_unavailable", "detail": str(exc)},
+            status_code=500,
+        )
+    if not path.exists():
+        return JSONResponse(
+            {"ok": False, "error": "benchmarks_not_found", "path": str(path),
+             "detail": "Run scripts/benchmark_models.py to generate measured tok/s."},
+            status_code=404,
+        )
+    try:
+        with open(path, "r") as fh:
+            data = json.load(fh)
+        return JSONResponse({"ok": True, **data})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("models/benchmarks read failed: %s", exc)
+        return JSONResponse(
+            {"ok": False, "error": "benchmarks_unreadable", "path": str(path), "detail": str(exc)},
+            status_code=500,
+        )
+
+
 @app.get("/api/evolution/status")
 def get_evolution_status():
     try:

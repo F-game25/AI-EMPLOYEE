@@ -174,6 +174,37 @@ module.exports = function createForgeOpsRouter(deps) {
     }).catch(() => res.json({ providers: { anthropic: { configured: anthropicOk }, openai: { configured: openaiOk }, ollama: { configured: false } } }));
   });
 
+  // ── GET /api/models/roles — live role → model@quant resolution ───────────────
+  // Bridges to the Python source of truth (model_role_resolver + model_lanes).
+  // Honest failure: surfaces Python's structured error / unreachable status.
+
+  router.get('/models/roles', requireAuth, async (req, res) => {
+    try {
+      const py = await requestPythonJSON('/api/models/roles', 'GET', null, { timeoutMs: 8000 });
+      const status = py && py._http_status ? py._http_status : 200;
+      const { _http_status, ...payload } = py || {};
+      return res.status(status).json(payload && Object.keys(payload).length ? payload
+        : { ok: false, error: 'python_backend_empty' });
+    } catch (e) {
+      return res.status(503).json({ ok: false, error: 'python_backend_unreachable', detail: e.message });
+    }
+  });
+
+  // ── GET /api/models/benchmarks — measured tok/s per model ────────────────────
+  // Bridges to Python which reads state/model_benchmarks.json via canonical_state_dir().
+
+  router.get('/models/benchmarks', requireAuth, async (req, res) => {
+    try {
+      const py = await requestPythonJSON('/api/models/benchmarks', 'GET', null, { timeoutMs: 5000 });
+      const status = py && py._http_status ? py._http_status : 200;
+      const { _http_status, ...payload } = py || {};
+      return res.status(status).json(payload && Object.keys(payload).length ? payload
+        : { ok: false, error: 'python_backend_empty' });
+    } catch (e) {
+      return res.status(503).json({ ok: false, error: 'python_backend_unreachable', detail: e.message });
+    }
+  });
+
   // ── GET /api/ollama/status ───────────────────────────────────────────────────
 
   router.get('/ollama/status', requireAuth, async (req, res) => {

@@ -11,7 +11,7 @@ import PromptsTab from './models/PromptsTab'
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
 
-const TABS = ['PROVIDERS', 'PERFORMANCE', 'ROUTING RULES', 'PROMPTS']
+const TABS = ['PROVIDERS', 'PERFORMANCE', 'ROUTING RULES', 'PROMPTS', 'ORCHESTRATION']
 
 // Fallback model list used until registry loads
 
@@ -228,31 +228,38 @@ function MainBrainPicker({ registryData }) {
 
 /* ── VRAM Gauge ─────────────────────────────────────────────────────────── */
 
-const VRAM_TOTAL_MB = 8192  // RTX 2070 Super 8 GB
-
-function VramGauge({ runningModels }) {
+// totalMb comes from the live hardware snapshot (nvidia-smi memory.total). No
+// hardcoded card size — when it's unknown we honestly show used-only, no %.
+function VramGauge({ runningModels, totalMb }) {
   const usedMb = runningModels.reduce((s, m) => s + (m.size_vram || 0) / 1e6, 0)
-  const pct = Math.min(100, (usedMb / VRAM_TOTAL_MB) * 100)
+  const total = totalMb && totalMb > 0 ? totalMb : null
+  const pct = total ? Math.min(100, (usedMb / total) * 100) : 0
   const color = pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#22c55e'
   return (
     <div className="mp-vram-gauge">
       <div className="mp-vram-gauge__label">
         <span>VRAM</span>
-        <span style={{ color }}>{usedMb.toFixed(0)} / {VRAM_TOTAL_MB} MB ({pct.toFixed(0)}%)</span>
+        <span style={{ color }}>
+          {total
+            ? `${usedMb.toFixed(0)} / ${total.toFixed(0)} MB (${pct.toFixed(0)}%)`
+            : `${usedMb.toFixed(0)} MB used · total unknown`}
+        </span>
       </div>
-      <div className="mp-vram-gauge__bar">
-        <div className="mp-vram-gauge__fill" style={{ width: `${pct}%`, background: color }} />
-        {runningModels.map((m, i) => {
-          const mbThis = (m.size_vram || 0) / 1e6
-          const pctThis = (mbThis / VRAM_TOTAL_MB) * 100
-          const pctStart = runningModels.slice(0, i).reduce((s, r) => s + (r.size_vram || 0) / 1e6, 0) / VRAM_TOTAL_MB * 100
-          return (
-            <div key={m.name} className="mp-vram-gauge__segment-label" style={{ left: `${pctStart + pctThis / 2}%` }}>
-              {m.name?.split(':')[0]}
-            </div>
-          )
-        })}
-      </div>
+      {total && (
+        <div className="mp-vram-gauge__bar">
+          <div className="mp-vram-gauge__fill" style={{ width: `${pct}%`, background: color }} />
+          {runningModels.map((m, i) => {
+            const mbThis = (m.size_vram || 0) / 1e6
+            const pctThis = (mbThis / total) * 100
+            const pctStart = runningModels.slice(0, i).reduce((s, r) => s + (r.size_vram || 0) / 1e6, 0) / total * 100
+            return (
+              <div key={m.name} className="mp-vram-gauge__segment-label" style={{ left: `${pctStart + pctThis / 2}%` }}>
+                {m.name?.split(':')[0]}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -267,11 +274,18 @@ function OllamaManager() {
   const [pulling, setPulling]     = useState(false)
   const [pullStatus, setPullStatus] = useState(null)
   const [loadingModel, setLoadingModel] = useState(null)
+  const [vramTotalMb, setVramTotalMb] = useState(null)  // live, from nvidia-smi via backend
 
   const refresh = useCallback(() => {
     api.get('/api/ollama/models')
       .then(d => { setModels(d.models || []); setError(null) })
       .catch(e => { setError(e.message || 'ollama unavailable'); setModels([]) })
+  }, [])
+
+  useEffect(() => {
+    api.get('/api/system/resources')
+      .then(d => { if (d?.vram_total_mb) setVramTotalMb(d.vram_total_mb) })
+      .catch(() => {})
   }, [])
 
   const refreshRunning = useCallback(() => {
@@ -345,7 +359,7 @@ function OllamaManager() {
   return (
     <div className="mp-ollama">
       {/* VRAM gauge — always show when Ollama is reachable */}
-      {!error && <VramGauge runningModels={running} />}
+      {!error && <VramGauge runningModels={running} totalMb={vramTotalMb} />}
 
       {/* Currently loaded in VRAM */}
       {running.length > 0 && (
@@ -650,9 +664,222 @@ function PerformanceTab() {
 /* ── Tab 4: PROMPTS ────────────────────────────────────────────────────── */
 
 
+/* ── Tab 5: ORCHESTRATION (live role→model@quant, gauges, benchmarks) ───── */
+
+// Stream an `ollama pull` over SSE (reuses POST /api/ollama/pull). onStatus gets
+// each parsed event; resolves when the stream ends.
+async function streamPull(name, onStatus) {
+  const jwt = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || ''
+  const res = await fetch('/api/ollama/pull', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'authorization': `Bearer ${jwt}` },
+    body: JSON.stringify({ name }),
+  })
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const events = buf.split('\n\n'); buf = events.pop()
+    for (const e of events) {
+      const line = e.trim()
+      if (line.startsWith('data: ')) { try { onStatus(JSON.parse(line.slice(6))) } catch {} }
+    }
+  }
+}
+
+function Gauge({ label, usedMb, totalMb, unit = 'MB' }) {
+  const total = totalMb && totalMb > 0 ? totalMb : null
+  const pct = total ? Math.min(100, (usedMb / total) * 100) : 0
+  const color = pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#22c55e'
+  return (
+    <div className="mp-gauge">
+      <div className="mp-gauge__label">
+        <span>{label}</span>
+        <span style={{ color }}>
+          {total ? `${usedMb.toFixed(0)} / ${total.toFixed(0)} ${unit} (${pct.toFixed(0)}%)` : 'unavailable'}
+        </span>
+      </div>
+      <div className="mp-gauge__bar">
+        {total && <div className="mp-gauge__fill" style={{ width: `${pct}%`, background: color }} />}
+      </div>
+    </div>
+  )
+}
+
+function RoleRow({ role, r, benchByModel, onPull, pullState }) {
+  const avail = r?.available
+  const fits = r?.fits
+  const model = r?.model
+  const quant = r?.quant
+  const bench = model ? benchByModel[model] : null
+  const ps = model ? pullState[model] : null
+  const installState = avail ? (fits ? 'fits' : 'offload') : 'missing'
+  const stateLabel = { fits: 'FITS', offload: 'OFFLOAD', missing: 'NOT INSTALLED' }[installState]
+  const suggestion = r?.install_suggestion || (r?.preferred_models && r.preferred_models[0])
+  const pullTarget = model || suggestion
+  return (
+    <tr className={`mp-role-row mp-role-row--${installState}`}>
+      <td className="mp-role-name">{role}</td>
+      <td>{model ? <ModelBadge model={model} /> : <span className="mp-muted">—</span>}</td>
+      <td className="mp-num">{quant || '—'}</td>
+      <td><span className={`mp-badge mp-badge--${avail ? (fits ? 'green' : 'warn') : 'danger'}`}>{stateLabel}</span></td>
+      <td className="mp-num">{r?.vram_needed != null ? `${r.vram_needed} MB` : '—'}</td>
+      <td className="mp-num">{r?.offload_layers ? `${r.offload_layers} layers` : (fits ? 'all GPU' : '—')}</td>
+      <td className="mp-num">{bench?.tokens_per_s != null ? `${bench.tokens_per_s.toFixed(1)} tok/s` : '—'}</td>
+      <td className="mp-role-min">{r?.min_quant || '—'}</td>
+      <td>
+        {avail ? (
+          <span className="mp-muted mp-role-reason" title={r?.reason}>{r?.reason}</span>
+        ) : pullTarget ? (
+          <button className="mp-ghost-btn mp-ghost-btn--green" onClick={() => onPull(pullTarget)} disabled={ps?.pulling}>
+            {ps?.pulling
+              ? (ps.status?.completed && ps.status?.total
+                  ? `${((ps.status.completed / ps.status.total) * 100).toFixed(0)}%`
+                  : (ps.status?.status || 'PULLING…'))
+              : `PULL ${pullTarget.split(':')[0]}`}
+          </button>
+        ) : <span className="mp-muted">no candidate</span>}
+      </td>
+    </tr>
+  )
+}
+
+function OrchestrationTab() {
+  const [roles, setRoles] = useState(null)       // null=loading, {}=error
+  const [rolesErr, setRolesErr] = useState(null)
+  const [bench, setBench] = useState(null)
+  const [benchErr, setBenchErr] = useState(null)
+  const [pullState, setPullState] = useState({})  // model → { pulling, status }
+
+  const loadRoles = useCallback(() => {
+    api.get('/api/models/roles')
+      .then(d => {
+        if (d?.ok && d.roles) { setRoles(d); setRolesErr(null) }
+        else { setRoles({}); setRolesErr(d?.error || 'role resolution unavailable') }
+      })
+      .catch(e => { setRoles({}); setRolesErr(e.body?.error || e.message || 'backend unreachable') })
+  }, [])
+
+  const loadBench = useCallback(() => {
+    api.get('/api/models/benchmarks')
+      .then(d => { if (d?.ok) { setBench(d); setBenchErr(null) } else { setBench({}); setBenchErr(d?.error || 'no benchmarks') } })
+      .catch(e => { setBench({}); setBenchErr(e.body?.error || e.message || 'no benchmarks') })
+  }, [])
+
+  useEffect(() => { loadRoles(); loadBench() }, [loadRoles, loadBench])
+  // Poll live resolution (VRAM fit changes as models load/evict).
+  useEffect(() => { const id = setInterval(loadRoles, 8000); return () => clearInterval(id) }, [loadRoles])
+
+  const onPull = useCallback(async (model) => {
+    setPullState(s => ({ ...s, [model]: { pulling: true, status: { status: 'starting' } } }))
+    try {
+      await streamPull(model, st => setPullState(s => ({ ...s, [model]: { pulling: true, status: st } })))
+      setPullState(s => ({ ...s, [model]: { pulling: false, status: { status: 'complete' } } }))
+      loadRoles()
+    } catch (e) {
+      setPullState(s => ({ ...s, [model]: { pulling: false, status: { status: 'error', error: e.message } } }))
+    }
+  }, [loadRoles])
+
+  const hw = roles?.hardware || {}
+  const loaded = Array.isArray(hw.ollama_loaded) ? hw.ollama_loaded : []
+  const usedVram = loaded.reduce((s, m) => s + (m.vram_mb || 0), 0)
+  const benchByModel = Object.fromEntries((bench?.results || []).map(r => [r.model, r]))
+
+  if (roles === null) return <LoadingSkeleton variant="list" rows={5} />
+
+  return (
+    <div className="mp-orch">
+      {/* Live hardware gauges */}
+      <div className="mp-section-label">LIVE HARDWARE</div>
+      {hw.vram_total_mb || hw.ram_available_mb ? (
+        <div className="mp-gauge-grid">
+          <Gauge label="VRAM IN USE" usedMb={usedVram} totalMb={hw.vram_total_mb} />
+          <div className="mp-gauge">
+            <div className="mp-gauge__label">
+              <span>VRAM FREE</span>
+              <span>{hw.vram_free_mb != null ? `${hw.vram_free_mb} MB` : 'unavailable'}</span>
+            </div>
+          </div>
+          <div className="mp-gauge">
+            <div className="mp-gauge__label">
+              <span>RAM AVAILABLE</span>
+              <span>{hw.ram_available_mb != null ? `${(hw.ram_available_mb / 1024).toFixed(1)} GB` : 'unavailable'}</span>
+            </div>
+          </div>
+          <div className="mp-gauge">
+            <div className="mp-gauge__label">
+              <span>CPU THREADS</span>
+              <span>{hw.cpu_threads ?? '—'}</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="mp-ops-banner mp-ops-banner--unavailable">
+          No GPU/RAM probe returned (nvidia-smi / psutil unavailable). Gauges stay empty rather than show fabricated values.
+        </div>
+      )}
+
+      {/* Loaded-now with CPU/GPU split */}
+      <div className="mp-section-label mp-section-label--sub">LOADED NOW (CPU / GPU SPLIT)</div>
+      {loaded.length > 0 ? (
+        <div className="mp-ollama__list mp-ollama__list--running">
+          {loaded.map(m => (
+            <div key={m.name} className="mp-ollama__row mp-ollama__row--running">
+              <span className="mp-vram-dot" />
+              <span className="mp-ollama__name">{m.name}</span>
+              <span className="mp-ollama__size">{m.gpu_fraction != null ? `${(m.gpu_fraction * 100).toFixed(0)}% GPU` : '—'}</span>
+              <span className="mp-ollama__size">{m.vram_mb} MB VRAM</span>
+              <span className="mp-ollama__size">{m.cpu_mb} MB CPU</span>
+              {benchByModel[m.name]?.tokens_per_s != null && (
+                <span className="mp-ollama__size">{benchByModel[m.name].tokens_per_s.toFixed(1)} tok/s</span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mp-muted" style={{ padding: '4px 0' }}>
+          {hw.ollama_loaded == null ? 'Ollama unreachable — no live load data.' : 'No models currently resident in VRAM.'}
+        </div>
+      )}
+
+      {/* Role → model@quant resolution */}
+      <div className="mp-section-label mp-section-label--sub">
+        ROLE → MODEL@QUANT {rolesErr && <span className="mp-ollama__err">· {rolesErr}</span>}
+        {benchErr && <span className="mp-ollama__err">· benchmarks: {benchErr}</span>}
+      </div>
+      {roles?.roles && Object.keys(roles.roles).length > 0 ? (
+        <div className="mp-perf-table-wrap">
+          <table className="mp-perf-table mp-role-table">
+            <thead>
+              <tr>
+                <th>ROLE</th><th>MODEL</th><th>QUANT</th><th>STATE</th>
+                <th>VRAM NEED</th><th>OFFLOAD</th><th>TOK/S</th><th>MIN QUANT</th><th>ACTION / REASON</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(roles.roles).map(([role, r]) => (
+                <RoleRow key={role} role={role} r={r} benchByModel={benchByModel}
+                  onPull={onPull} pullState={pullState} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState title="No role resolution"
+          sub={rolesErr ? `Backend: ${rolesErr}` : 'No roles configured in model_roles.json'} />
+      )}
+    </div>
+  )
+}
+
+
 /* ── Root ──────────────────────────────────────────────────────────────── */
 
-const TAB_COMPONENTS = [ProvidersTab, PerformanceTab, RoutingTab, PromptsTab]
+const TAB_COMPONENTS = [ProvidersTab, PerformanceTab, RoutingTab, PromptsTab, OrchestrationTab]
 
 export default function ModelsPage() {
   const [activeTab, setActiveTab] = useState(0)
