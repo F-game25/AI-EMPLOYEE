@@ -78,16 +78,16 @@ def system_hardware(**_: Any) -> dict:
 
 def _cpu_info() -> dict:
     cores_logical = os.cpu_count()
-    model = platform.processor() or ""
+    model = ""
     cores_physical = None
     # /proc/cpuinfo gives a precise model name + physical-core count on Linux.
+    # Prefer it over platform.processor() (which often returns just "x86_64").
     try:
         with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
-        if not model:
-            m = re.search(r"^model name\s*:\s*(.+)$", text, re.MULTILINE)
-            if m:
-                model = m.group(1).strip()
+        m = re.search(r"^model name\s*:\s*(.+)$", text, re.MULTILINE)
+        if m:
+            model = m.group(1).strip()
         core_ids = set(re.findall(r"^core id\s*:\s*(\d+)$", text, re.MULTILINE))
         phys_ids = set(re.findall(r"^physical id\s*:\s*(\d+)$", text, re.MULTILINE))
         if core_ids and phys_ids:
@@ -97,7 +97,7 @@ def _cpu_info() -> dict:
     except Exception:  # noqa: BLE001 — best-effort; logical count still returned
         pass
     if not model:
-        model = platform.machine() or "unknown"
+        model = platform.processor() or platform.machine() or "unknown"
     return {
         "available": True,
         "model": model,

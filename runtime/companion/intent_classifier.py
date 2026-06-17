@@ -43,45 +43,6 @@ ALL_MODES = (
 # task_type is a free-form downstream hint for model-tier selection.
 _TASK_TYPE_DEFAULT = "chat"
 
-# ── Fine-grained intent names (dotted) ─────────────────────────────────────────
-# These ride alongside the coarse ``mode`` so the execution broker can route a
-# system-info request straight to the matching system tool (Phase 7.1.3/7.1.4).
-INTENT_SYSTEM_LOCAL_TIME = "system_info.local_time"
-INTENT_SYSTEM_HARDWARE = "system_info.hardware"
-INTENT_SYSTEM_CWD = "system_info.cwd"
-INTENT_QUESTION_SIMPLE = "question.simple"
-
-# ── System-info cues (conservative — only clear phrasings) ─────────────────────
-# Map a fine intent name to the phrases that trigger it. Kept tight on purpose:
-# the teammate must ACT on a real system question, never on a vague one.
-_SYS_LOCAL_TIME = (
-    "what time is it", "what's the time", "whats the time", "current time",
-    "local time", "the time right now", "time right now", "what is the time",
-    "time on my pc", "time on my computer", "time on this machine",
-    # Dutch
-    "hoe laat is het", "hoe laat is t", "hoe laat hebben we het",
-    "wat is de tijd", "huidige tijd",
-)
-_SYS_HARDWARE = (
-    "my cpu", "what cpu", "which cpu", "what gpu", "which gpu", "my gpu",
-    "how much ram", "how much memory", "my ram", "what hardware",
-    "which hardware", "system specs", "my specs", "hardware specs",
-    "what are my specs", "cpu cores", "how many cores", "vram",
-    "graphics card", "my hardware",
-    # Dutch
-    "mijn cpu", "welke cpu", "mijn gpu", "welke gpu", "hoeveel ram",
-    "hoeveel geheugen", "mijn hardware", "wat voor hardware", "mijn specs",
-)
-_SYS_CWD = (
-    "which folder", "what folder", "current directory", "working directory",
-    "which directory", "what directory", "where am i", "current folder",
-    "which dir", "present working directory", "what's my cwd", "whats my cwd",
-    "what path are we in", "which path are we in",
-    # Dutch
-    "welke map", "welke folder", "huidige map", "huidige directory",
-    "in welke map", "waar zijn we",
-)
-
 # ── Approval / rejection (highest priority — short, unambiguous) ───────────────
 _APPROVE = (
     "approve", "approved", "go ahead", "do it", "yes do it", "yes please",
@@ -104,6 +65,24 @@ _MONITOR = (
     "is it done", "are we done", "current state", "show me the dashboard",
     "system status", "any errors", "what's happening", "whats happening",
     "live metrics", "active tasks", "running tasks", "what is active",
+)
+
+# ── System-info probes (answer with a real OS value, never a tutorial) ─────────
+_SYS_LOCAL_TIME = (
+    "what time is it", "what's the time", "whats the time", "what is the time",
+    "current time", "local time", "time on my pc", "time on this pc",
+    "time on this computer", "tell me the time", "hoe laat is het", "wat is de tijd",
+)
+_SYS_HARDWARE = (
+    "my cpu", "what cpu", "which cpu", "what's my cpu", "whats my cpu", "my gpu",
+    "what gpu", "which gpu", "how much ram", "my ram", "what hardware",
+    "what's my hardware", "system specs", "hardware specs", "my specs",
+    "what are my specs", "wat is mijn cpu", "welke gpu", "mijn hardware",
+)
+_SYS_CWD = (
+    "current directory", "current folder", "which directory", "which folder",
+    "what directory", "what folder", "where am i", "working directory",
+    "print working directory", "welke map", "huidige map", "in welke map",
 )
 
 # ── Debugging (root-cause / why-failed) ────────────────────────────────────────
@@ -133,6 +112,23 @@ _EXEC_GENERIC = (
     "schedule", "install", "uninstall", "clean up", "cleanup", "optimize",
     "optimise", "apply",
 )
+
+# ── Browser / computer-use (drive a web page like a human) ─────────────────────
+# Phrases that mean "use the browser" → execution, task_type='browser', so the
+# runtime routes to the browser.* capabilities (gated by Computer-Use mode).
+_BROWSER_VERBS = (
+    "browse to", "navigate to", "go to the website", "go to the site", "go to ",
+    "visit ", "open the browser", "open a browser", "open the website",
+    "open the page", "open the url", "open the site", "on the page",
+    "fill in the", "fill out the", "click the", "click on", "scroll the page",
+    "screenshot the page", "take a screenshot of the page", "type into the",
+    "search the web and open", "log in to", "sign in to",
+)
+# A URL or bare domain (example.com, https://…, www.…) strongly implies browser use.
+_URL_RE = re.compile(r"(https?://|www\.|\b[a-z0-9-]+\.(com|org|net|io|ai|co|dev|app|gov|edu)\b)", re.I)
+# Generic verbs that only mean "browser" when paired with a URL/web cue.
+# (bare tokens — _starts_with_verb compares the first word)
+_BROWSER_OPEN_VERBS = ("open", "load", "read", "check", "visit", "fetch")
 
 # ── Planning ───────────────────────────────────────────────────────────────────
 _PLAN = (
@@ -220,20 +216,17 @@ class IntentClassifier:
             return self._result(MODE_APPROVAL, "chat", 0.9, False,
                                  "rejection phrase")
 
-        # 1.5) System-info — "what time is it on my pc", "my cpu", "which folder".
-        #      mode=EXECUTION so the runtime routes through the broker, which
-        #      keys on the fine ``intent`` name to call the real system tool.
-        #      Checked before monitoring/analysis so "what is the time" doesn't
-        #      get swallowed by the generic "what is" analysis cue.
-        for patterns, intent_name in (
-            (_SYS_LOCAL_TIME, INTENT_SYSTEM_LOCAL_TIME),
-            (_SYS_HARDWARE, INTENT_SYSTEM_HARDWARE),
-            (_SYS_CWD, INTENT_SYSTEM_CWD),
-        ):
-            if (s := _hit(t, patterns)):
-                return self._result(MODE_EXECUTION, "system", 0.95, True,
-                                    f"system-info cue: '{s}'",
-                                    intent=intent_name)
+        # 1.5) System-info probes — answer with a real OS value (checked before
+        #      monitoring/analysis so "what is the time" isn't caught as analysis).
+        if _hit(t, _SYS_LOCAL_TIME):
+            return self._result(MODE_MONITORING, "system_info.local_time", 0.95,
+                                 False, "system-info: local time")
+        if _hit(t, _SYS_HARDWARE):
+            return self._result(MODE_MONITORING, "system_info.hardware", 0.92,
+                                 False, "system-info: hardware")
+        if _hit(t, _SYS_CWD):
+            return self._result(MODE_MONITORING, "system_info.cwd", 0.9,
+                                 False, "system-info: cwd")
 
         # 2) Monitoring — status questions.
         if (m := _hit(t, _MONITOR)):
@@ -245,6 +238,14 @@ class IntentClassifier:
         if (d := _hit(t, _DEBUG)):
             return self._result(MODE_DEBUGGING, "analysis", 0.9, False,
                                  f"debugging cue: '{d}'")
+
+        # 3.5) Browser / computer-use — "browse to X", "open <url>", "click the…".
+        #      Routes to browser.* (themselves gated by Computer-Use mode).
+        has_url = bool(_URL_RE.search(t))
+        browser_cue = _hit(t, _BROWSER_VERBS)
+        if browser_cue or (has_url and _starts_with_verb(t, _BROWSER_OPEN_VERBS)):
+            return self._result(MODE_EXECUTION, "browser", 0.85, True,
+                                 f"browser cue: '{browser_cue or 'url'}'")
 
         # 4) Execution — imperative leading verb ⇒ is_command.
         for verbs, ttype in ((_EXEC_CODE, "code"),
@@ -337,20 +338,14 @@ class IntentClassifier:
 
     @staticmethod
     def _result(mode: str, task_type: str, confidence: float,
-                is_command: bool, reason: str,
-                intent: Optional[str] = None) -> dict:
-        out = {
+                is_command: bool, reason: str) -> dict:
+        return {
             "mode": mode,
             "task_type": task_type,
             "confidence": round(float(confidence), 3),
             "is_command": bool(is_command),
             "reason": reason,
         }
-        # Fine-grained dotted intent (e.g. system_info.local_time). Present only
-        # when the classifier resolved one — the broker routes on it directly.
-        if intent:
-            out["intent"] = intent
-        return out
 
 
 _SINGLETON: Optional[IntentClassifier] = None

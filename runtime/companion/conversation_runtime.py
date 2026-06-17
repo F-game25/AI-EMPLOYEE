@@ -415,6 +415,28 @@ class ConversationRuntime:
     @staticmethod
     def _summarize_monitoring(out: dict) -> str:
         results = out.get("results", [])
+        # Direct system-info answers (local time / cwd / hardware): one real line,
+        # not a tutorial — the teammate answered with the measured value.
+        for r in results:
+            cap, res = r.get("cap"), (r.get("result") or {})
+            if cap == "system_local_time" and res.get("hhmm"):
+                tz = res.get("timezone")
+                return f"It's {res['hhmm']} local time on this PC{f' ({tz})' if tz else ''}."
+            if cap == "system_cwd" and res.get("cwd"):
+                return f"You're in {res['cwd']}."
+            if cap == "system_hardware":
+                cpu, ram, gpu = (res.get("cpu") or {}), (res.get("ram") or {}), (res.get("gpu") or {})
+                parts: list[str] = []
+                if cpu.get("model"):
+                    cores = cpu.get("cores_physical") or cpu.get("cores_logical")
+                    parts.append(f"CPU {cpu['model']}" + (f" ({cores} cores)" if cores else ""))
+                if ram.get("total_gb"):
+                    parts.append(f"{ram['total_gb']} GB RAM")
+                names = [str(g.get("name")) for g in (gpu.get("gpus") or []) if g.get("name")]
+                if names:
+                    parts.append("GPU " + ", ".join(names))
+                if parts:
+                    return "This PC — " + "; ".join(parts) + "."
         ok = [r for r in results if r.get("status") == "ok"]
         if ok:
             ids = ", ".join(r["cap"] for r in ok)

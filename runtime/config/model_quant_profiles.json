@@ -44,6 +44,14 @@
     "measured_from": "plan seed (§3.2 QAT int4 — offload + low ctx on 8GB)"
   },
 
+  "gemma4:e4b-it-qat": {
+    "quants": { "q4_0": 4500 },
+    "arch": { "n_layers": 34, "n_kv_heads": 4, "head_dim": 256 },
+    "default_ctx": 4096,
+    "measured": false,
+    "measured_from": "plan seed (§2.6 research: Gemma 4 E4B Q4_0 ~4.5GB); NOT yet pulled — preferred execution model once installed"
+  },
+
   "qwen2.5-coder:14b": {
     "quants": { "q4_K_M": 7500, "q5_K_M": 10600 },
     "arch": { "n_layers": 48, "n_kv_heads": 8, "head_dim": 128 },
