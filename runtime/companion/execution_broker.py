@@ -40,17 +40,16 @@ logger = logging.getLogger("companion.execution_broker")
 # registry). Keeps a single turn bounded and cheap.
 _MAX_CANDIDATES = 4
 
-# Subsystems gated behind the master Computer-Use mode toggle.
-_COMPUTER_USE_SUBSYSTEMS = frozenset({"browser", "desktop"})
-
-
-def _computer_use_on() -> bool:
-    """Master Computer-Use switch (fails safe → OFF if unreadable)."""
-    try:
-        from companion.computer_use_mode import computer_use_enabled
-        return computer_use_enabled()
-    except Exception:  # noqa: BLE001
-        return False
+# Fine-grained system-info intents → the read-only tool that answers them.
+# Routed deterministically (no token-overlap matching) so a "what time is it on
+# my PC?" request always reaches the real local-time tool (Phase 7.1.4). These
+# are L0 OS probes (real measured values, never fabricated) — no safety gate
+# needed: the teammate ANSWERS instead of explaining how to check manually.
+_SYSTEM_INFO_TOOLS: dict[str, str] = {
+    "system_info.local_time": "system_local_time",
+    "system_info.hardware": "system_hardware",
+    "system_info.cwd": "system_cwd",
+}
 
 # ── Adapter bounds (keep every executor cheap, read-only, non-destructive) ────
 _LOG_SEARCH_MAX_LINES = 50      # max matching log lines returned
@@ -120,11 +119,6 @@ class ExecutionBroker:
             "context.compress_session": self._exec_context_compress_session,
             "forge.lifecycle_plan": self._exec_forge_lifecycle_plan,
             "research.audit_quality": self._exec_research_audit_quality,
-            "skills.run": self._exec_skills_run,
-            "content.produce": self._exec_content_produce,
-            "finance.draft": self._exec_finance_draft,
-            "company.validate": self._exec_company_validate,
-            "company.refine": self._exec_company_refine,
             # NOTE: forge.apply_patch is deliberately absent — it is L3 and stays
             # approval-gated. It must never auto-run from the broker.
             # NOTE: browser.act is deliberately absent — it is L3 and stays
@@ -180,18 +174,6 @@ class ExecutionBroker:
         candidates = candidates[:_MAX_CANDIDATES]
 
         for cap in candidates:
-            # Master Computer-Use switch: browser/desktop capabilities are refused
-            # entirely until the user enables Computer-Use mode from the UI. This is
-            # a hard gate (not an approval) — both voice and chat inherit it because
-            # both flow through this broker.
-            if cap.subsystem in _COMPUTER_USE_SUBSYSTEMS and not _computer_use_on():
-                blocked.append(cap.id)
-                results.append({
-                    "status": "disabled", "cap": cap.id, "subsystem": cap.subsystem,
-                    "reason": "Computer Use mode is off — enable it from the UI to let "
-                              "the teammate use a browser/computer.",
-                })
-                continue
             try:
                 decision = self._gate.evaluate(cap, ctx)
             except Exception as exc:  # gate itself failing → block, never run
@@ -918,132 +900,6 @@ class ExecutionBroker:
                     "quality": quality,
                     "publishable": bool(quality.get("publishable", quality.get("gate", {}).get("passed", False)))}
         except Exception as exc:
-            return {"status": "error", "error": str(exc)}
-
-    @staticmethod
-    def _exec_skills_run(cap: Capability, ctx: dict) -> dict:
-        """Select the best-matching library skill for the goal and run it via the LLM.
-
-        This bridges the 200-skill library into the companion: the teammate can
-        produce a real deliverable (copy/plan/analysis) guided by the skill's
-        own system_prompt. Honest — no skill match or no LLM → structured note.
-        """
-        goal = str(ctx.get("goal") or ctx.get("text") or "").strip()
-        if not goal:
-            return {"status": "error", "note": "no goal provided"}
-        # 1) Resolve a skill — explicit id wins, else best match from the library.
-        try:
-            from forge.lifecycle.skill_selector import select_skills, _load_skills
-        except Exception as exc:
-            return {"status": "unavailable", "note": f"skill selector not importable: {exc}"}
-        skill = None
-        wanted = str(ctx.get("skill_id") or "").strip()
-        if wanted:
-            skill = next((s for s in _load_skills() if s.get("id") == wanted), None)
-        if skill is None:
-            picks = select_skills(goal, str(ctx.get("task_type") or "chat"), max_skills=1)
-            skill = picks[0] if picks else None
-        if skill is None:
-            return {"status": "no_skill", "note": "no matching skill in the library for this goal"}
-        # 2) Execute it via the LLM, guided by the skill's own system_prompt.
-        system = str(skill.get("system_prompt") or
-                     f"You are the '{skill.get('name','specialist')}' capability. "
-                     "Complete the user's goal concretely and concisely.")
-        steps = skill.get("execution_steps")
-        if isinstance(steps, list) and steps:
-            system += "\n\nFollow these steps:\n" + "\n".join(f"- {s}" for s in steps[:8])
-        try:
-            from engine.api import generate
-        except Exception as exc:
-            return {"status": "unavailable", "note": f"LLM engine not importable: {exc}"}
-        try:
-            context = ctx.get("context")
-            text = generate(prompt=goal, system=system,
-                            context=context if isinstance(context, str) else None)
-            text = (text or "").strip()
-            if not text:
-                return {"status": "error", "skill_id": skill.get("id"),
-                        "error": "skill produced no output"}
-            return {"status": "ok", "skill_id": skill.get("id"),
-                    "skill_name": skill.get("name"), "output": text,
-                    "match_score": skill.get("match_score")}
-        except Exception as exc:
-            return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
-
-    @staticmethod
-    def _exec_content_produce(cap: Capability, ctx: dict) -> dict:
-        """Produce multi-platform content via the Content Factory (staged for approval)."""
-        topic = str(ctx.get("topic") or ctx.get("goal") or ctx.get("text") or "").strip()
-        if not topic:
-            return {"status": "error", "note": "no topic provided"}
-        try:
-            from content.content_factory import get_content_factory
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "unavailable", "note": f"content factory not importable: {exc}"}
-        try:
-            brief = {"topic": topic,
-                     "platforms": ctx.get("platforms"),
-                     "content_type": ctx.get("content_type"),
-                     "variants": ctx.get("variants")}
-            out = get_content_factory().produce(brief)
-            return {"status": "ok" if out.get("ok") else "error", **out}
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "error": str(exc)}
-
-    @staticmethod
-    def _exec_finance_draft(cap: Capability, ctx: dict) -> dict:
-        """Advisory finance draft (business model / pricing / forecast / pitch). No execution."""
-        request = str(ctx.get("request") or ctx.get("goal") or ctx.get("text") or "").strip()
-        if not request:
-            return {"status": "error", "note": "no finance request provided"}
-        try:
-            from finance.financeops import get_financeops
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "unavailable", "note": f"financeops not importable: {exc}"}
-        try:
-            out = get_financeops().draft(
-                request,
-                context=str(ctx.get("context") or ""),
-                inputs=ctx.get("inputs") if isinstance(ctx.get("inputs"), dict) else None,
-            )
-            return {"status": "ok" if out.get("ok") else out.get("status", "error"), **out}
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "error": str(exc)}
-
-    @staticmethod
-    def _exec_company_validate(cap: Capability, ctx: dict) -> dict:
-        """Validate a business idea before building (CompanyOS validate-before-build)."""
-        idea = str(ctx.get("idea") or ctx.get("goal") or ctx.get("text") or "").strip()
-        if not idea:
-            return {"status": "error", "note": "no idea provided"}
-        try:
-            from companyos.validation_engine import get_validation_engine
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "unavailable", "note": f"companyos not importable: {exc}"}
-        try:
-            brief = {"idea": idea}
-            ans = ctx.get("answers")
-            if isinstance(ans, dict):
-                brief.update(ans)
-            out = get_validation_engine().validate(brief)
-            return {"status": "ok", **out}
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "error": str(exc)}
-
-    @staticmethod
-    def _exec_company_refine(cap: Capability, ctx: dict) -> dict:
-        """Turn a weak idea into a buildable one (validate + pivot suggestions)."""
-        idea = str(ctx.get("idea") or ctx.get("goal") or ctx.get("text") or "").strip()
-        if not idea:
-            return {"status": "error", "note": "no idea provided"}
-        try:
-            from companyos import get_companyos
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "unavailable", "note": f"companyos not importable: {exc}"}
-        try:
-            out = get_companyos().refine_idea(idea)
-            return {"status": "ok" if out.get("ok") else "error", **out}
-        except Exception as exc:  # noqa: BLE001
             return {"status": "error", "error": str(exc)}
 
     # ── Approval request shaping ─────────────────────────────────────────────────
