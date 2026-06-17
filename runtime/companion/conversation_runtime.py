@@ -34,10 +34,12 @@ import time
 from typing import Any, Optional
 
 from companion.schemas import CompanionRequest, CompanionResponse
-from companion.context_resolver import get_context_resolver
+from companion.context_resolver import get_context_resolver, resolve_option_selection
 from companion.intent_classifier import get_intent_classifier
 from companion.execution_broker import get_execution_broker
 from companion.avatar_state_engine import get_avatar_state_engine
+from companion.session_state import get_session_store
+from companion.response_policy import policy_for
 from companion.critique_engine import (
     get_critique_engine,
     STANCE_PROCEED,
@@ -76,6 +78,7 @@ class ConversationRuntime:
         self._broker = get_execution_broker()
         self._avatar = get_avatar_state_engine()
         self._critic = get_critique_engine()
+        self._sessions = get_session_store()
 
     def handle(self, request: CompanionRequest) -> CompanionResponse:
         """Run a turn. Never raises — failures become ok=False responses."""
@@ -99,13 +102,36 @@ class ConversationRuntime:
         ctx = dict(request.context or {})
         ctx.setdefault("text", request.text)
 
-        # 1) Resolve vague references against live UI context.
-        resolved = self._resolver.resolve(request.text, ctx)
-        resolved_text = resolved.get("resolved_text") or request.text
+        # 0) Load short-term session memory and fold it into the context so a
+        #    follow-up like "option 2" / "do that" has a referent.
+        session = self._sessions.load(request.session_id or "anonymous",
+                                      request.tenant_id or "default")
+        for k, v in session.as_context().items():
+            ctx.setdefault(k, v)
+        session.note_user(request.text)
+
+        # 1) Resolve the message. An explicit option selection ("option 2",
+        #    "de tweede", "do that") binds to what the assistant just offered —
+        #    never a "what do you mean?" round-trip. Otherwise fall back to the
+        #    vague-reference resolver against live UI context.
+        opt = resolve_option_selection(request.text, session.last_options_given)
+        if opt is not None:
+            resolved = {"resolved_text": opt["resolved_text"], "referents": [],
+                        "focus": None, "confidence": 0.95,
+                        "kind": "option_selection", "selected_option": opt["option"]}
+            resolved_text = opt["resolved_text"]
+        else:
+            resolved = self._resolver.resolve(request.text, ctx)
+            resolved_text = resolved.get("resolved_text") or request.text
 
         # 2) Classify into a conversation mode.
         intent = self._classifier.classify(resolved_text, ctx)
         mode = intent.get("mode", "conversation")
+
+        # 2.5) Response policy — match answer length/shape to the intent
+        #      (short value answers, no unsolicited tutorials/options).
+        policy = policy_for(intent, user_text=request.text)
+        ctx["response_policy_hint"] = policy.system_prompt_hint()
 
         # 3) Pick a model target. Default = free local. Paid only on explicit
         #    opt-in, and even then it comes back requiring approval.
@@ -113,11 +139,16 @@ class ConversationRuntime:
 
         # 3.5) Teammate critique — CHALLENGE consequential requests before acting.
         #      Advisory only (separate from the safety/approval gate). On a
-        #      'need_info' stance we ask instead of executing.
-        critique = self._maybe_critique(resolved_text, intent, ctx)
+        #      'need_info' stance we ask instead of executing. Skipped when the
+        #      user has explicitly selected an offered option (already decided).
+        critique = None if opt is not None else self._maybe_critique(
+            resolved_text, intent, ctx)
         if critique is not None and critique.get("stance") == STANCE_NEED_INFO:
-            return self._clarification_response(
+            resp = self._clarification_response(
                 mode, critique, model_info, intent, resolved, request, t0)
+            session.note_assistant(resp.reply, intent=intent)
+            self._sessions.save(session)
+            return resp
 
         # 4) Act by mode.
         reply = ""
@@ -152,6 +183,10 @@ class ConversationRuntime:
         else:  # learning + any unmapped mode → conversational reply
             reply = self._generate_reply(resolved_text, ctx, model_info, mode)
             phase = "learning" if mode == "learning" else "generating"
+
+        # Enforce the response policy's length budget (only trims genuinely
+        # over-long value/error replies; structured/code answers are left intact).
+        reply = policy.shape(reply)
 
         # A pending paid upgrade always surfaces as an approval too.
         if model_info.get("requires_approval"):
@@ -189,6 +224,14 @@ class ConversationRuntime:
         }
         if critique is not None:
             meta["critique"] = critique
+        if resolved.get("kind") == "option_selection":
+            meta["selected_option"] = resolved.get("selected_option")
+        meta["response_policy"] = policy.to_dict()
+
+        # Persist short-term session memory (captures any options this reply
+        # offered, so the next "option N" resolves).
+        session.note_assistant(reply, intent=intent, actions=actions)
+        self._sessions.save(session)
 
         # Voice channel: also carry a short, spoken-friendly summary. The full
         # `reply` still goes to chat/action panel; TTS speaks `voice_summary`.
@@ -306,6 +349,9 @@ class ConversationRuntime:
         system = ("You are the companion assistant for an AI operating system. "
                   "Be concise, factual, and never claim to have taken actions you "
                   "did not take.")
+        hint = ctx.get("response_policy_hint")
+        if hint:
+            system = f"{system} {hint}"
         prompt = text
         page = ctx.get("current_page")
         if page:

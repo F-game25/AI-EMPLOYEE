@@ -245,6 +245,7 @@ class SessionStore:
 
     def _path(self, session_id: str) -> Path:
         sessions_dir = canonical_state_dir() / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)  # lock needs the dir to exist
         return sessions_dir / f"{_safe_session_id(session_id)}.json"
 
     def load(self, session_id: str, tenant_id: str = "default") -> SessionState:
