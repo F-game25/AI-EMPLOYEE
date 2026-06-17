@@ -67,7 +67,7 @@ GGUF compresses FP16 weights to 8/6/5/4/3/2-bit. Practical mapping (per Hardware
 ### 2.3 KV-cache quantization (free VRAM, ~zero quality cost)
 - `OLLAMA_KV_CACHE_TYPE=q8_0` → **~½ KV-cache memory**, "very small" precision loss (perplexity +0.002–0.05, undetectable). `q4_0` → ~¼ memory but more loss at long context.
 - **Requires `OLLAMA_FLASH_ATTENTION=1`** to take effect.
-- ➡ Set **`OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` globally** — near-free headroom on an 8 GB card.
+- ➡ Set **`OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` globally** — near-free headroom on an 8 GB card. (Google **TurboQuant** pushes this much further — ~3-bit KV; see §2.7.)
 
 ### 2.4 KV-cache VRAM formula (for the budgeter)
 `KV_bytes ≈ 2 × n_layers × n_kv_heads × head_dim × bytes_per_elem × context_len × num_parallel`
@@ -81,6 +81,26 @@ GGUF compresses FP16 weights to 8/6/5/4/3/2-bit. Practical mapping (per Hardware
 
 ### 2.6 Gemma 4 footprints (secondary sources — verify by measuring, do not hardcode)
 E4B ≈ 4.5 GB (Q4_0) / 8.9 GB (8-bit); 12B ≈ 6.7 GB (Q4_0) / 13.4 GB (8-bit) — **base weights only; KV-cache/context add on top.** ➡ On 8 GB: **E4B Q4/QAT is realistic; 12B Q4 only with offload + low ctx; any 8-bit is not realistic.** The profiler/benchmark harness (§5 Phase A0) must replace these estimates with **measured** numbers.
+
+### 2.7 Google TurboQuant — next-gen KV-cache compression ★ the lever for heavier models
+
+> **Naming:** Google **TurboQuant** is NOT the repo's existing `runtime/agents/turbo-quant/turbo_quant.py` (that's our own quant *selector*). TurboQuant is a Google DeepMind algorithm (ICLR 2026, paper Mar 25 2026) for compressing the **KV cache**.
+
+- **What:** a training-free, data-oblivious KV-cache quantizer (Walsh-Hadamard transform → polar/Lloyd-Max quantization → QJL correction) that takes the KV cache down to **~3 bits/value** (2-bit demonstrated) with **no measurable accuracy loss**, ~**5–6× KV-cache memory reduction** and faster attention.
+- **Why it matters here:** after model weights, the **KV cache is the #2 VRAM cost** on 8 GB (it grows linearly with context — §2.4). Ollama's built-in `q8_0` KV is only ½; TurboQuant is ~⅙. **Stacking matters:** QAT int4 **weights** (~4× smaller) **+ TurboQuant 3-bit KV** (~5–6× smaller) is what lets a **12B-class model with real context fit in 8 GB**, instead of OOM or tiny-context.
+- **Availability (measured June 2026 — verify before relying):**
+  - **vLLM:** upstream — `--kv-cache-dtype turboquant_3bit_nc` on stock vLLM for GQA/MHA models (no plugin). Heaviest runtime; best for serving, not ideal as the only local engine on 8 GB.
+  - **llama.cpp:** community implementations (e.g. AmesianX/TurboQuant "~5.2× KV reduction", and the **QuantumLeap** fork which exposes an **Ollama-compatible API** and *coexists* with Ollama). Mainline llama.cpp discussion open → likely to land as a standard `--cache-type` and reach Ollama users automatically.
+  - **Ollama (stable):** not native yet. Today's native lever stays §2.3 (`q8_0` KV + flash-attn).
+- **Recommendation for THIS box (cost/risk ordered):**
+  1. **Now:** Ollama `OLLAMA_KV_CACHE_TYPE=q8_0` + `OLLAMA_FLASH_ATTENTION=1` (§2.3) — zero new infra.
+  2. **Pilot (heavy models):** install the **QuantumLeap llama.cpp+TurboQuant** fork as a *second, opt-in backend* (Ollama-compatible API, runs alongside Ollama). Route only `execution_reasoning`/heavy tiers to it when present; everything else stays on Ollama. Benchmark real tok/s + VRAM before trusting it.
+  3. **Watch:** when mainline llama.cpp/Ollama merge TurboQuant, drop the fork and use the native `--cache-type`.
+- **Wire-in (no hardcoding, backend-detected):**
+  - `model_quant_profiles.json` / `vram_budget.plan`: add a `turboquant_3bit` KV option (`bytes_per_elem ≈ 0.375` in the §2.4 formula) so the budgeter can show how much more context/model fits with it on.
+  - `hardware_profiler`: detect the active inference backend + whether TurboQuant KV is available (vLLM flag present, or QuantumLeap endpoint reachable). Selection uses TurboQuant KV **only when detected**, else falls back to `q8_0` — never assume it's there.
+  - `model_roles` gains an optional `kv_cache` preference per role (heavy/long-context roles prefer `turboquant_3bit` when available).
+- **Honest status:** this is a real capability with real implementations, but it requires a **backend change** (a llama.cpp fork or vLLM) — not a flag flip on stock Ollama. Treat it as an opt-in pilot with measured benchmarks and graceful fallback, consistent with the anti-fantasy rule (§0): don't claim TurboQuant is active unless the backend actually reports it.
 
 ---
 
@@ -219,3 +239,5 @@ Global Ollama env: `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, `OLL
 - Ollama KV-cache quant + flash attention: docs.ollama.com/faq, modelpiper.com/blog/ollama-kv-cache-quantization, smcleod.net/2024/12/bringing-k/v-context-quantisation-to-ollama
 - Ollama offload / num_gpu / num_parallel: ollama.readthedocs.io/en/faq, localllm.in/blog/ollama-vram-requirements-for-local-llms, eastondev.com/blog/en/posts/ai/ollama-gpu-scheduling
 - KV-cache VRAM formula: spheron.network/blog/kv-cache-optimization-guide, pcpartguide.com/blog/kv-cache-explained
+- Google TurboQuant (KV-cache 3-bit, ICLR 2026): research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression, en.wikipedia.org/wiki/TurboQuant
+- TurboQuant implementations: github.com/ggml-org/llama.cpp/discussions/20969, github.com/AmesianX/TurboQuant, github.com/MartinCrespoC/QuantumLeap---Llama.cpp-TurboQuant (Ollama-compatible), github.com/varjoranta/turboquant-vllm (vLLM `--kv-cache-dtype turboquant_3bit_nc`)
