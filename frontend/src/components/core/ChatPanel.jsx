@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import { useCompanionStore } from '../../store/companionStore'
-import { sendChatMessage } from '../../hooks/useWebSocket'
 import { enableDevMode, disableDevMode, isDevModeActive } from '../../hooks/useDevMode'
 import './ChatPanel.css'
 
@@ -17,7 +16,6 @@ export default function ChatPanel({ isOpen, onClose }) {
   const companionThinking = useCompanionStore(s => s.thinking)
   const companionMessages = useCompanionStore(s => s.messages)
   const sendCompanionMessage = useCompanionStore(s => s.sendMessage)
-  const [companionMode, setCompanionMode] = useState(false)
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -53,20 +51,17 @@ export default function ChatPanel({ isOpen, onClose }) {
       setInput('')
       return
     }
-    if (companionMode) {
-      // Route through the Companion Gateway with live page context.
-      addChatMessage?.({ role: 'user', content: text, ts: Date.now() })
-      sendCompanionMessage(text, {
-        current_page: activeSection || null,
-        selected_item: null,
-        recent_events: [],
-        active_task: null,
-      })
-      setInput('')
-      return
-    }
+    // Single path: always route through the Companion Gateway (the teammate
+    // runtime — intent → session/context → tools → response policy). No bare-LLM
+    // fallback, so the chat always gets context retention, option resolution,
+    // and answer discipline.
     addChatMessage?.({ role: 'user', content: text, ts: Date.now() })
-    sendChatMessage(text)
+    sendCompanionMessage(text, {
+      current_page: activeSection || null,
+      selected_item: null,
+      recent_events: [],
+      active_task: null,
+    })
     setInput('')
   }
 
@@ -250,22 +245,13 @@ export default function ChatPanel({ isOpen, onClose }) {
       </div>
 
       <div className="chat-panel__input-wrap">
-        <button
-          type="button"
-          className={`chat-panel__companion-toggle${companionMode ? ' chat-panel__companion-toggle--on' : ''}`}
-          onClick={() => setCompanionMode(v => !v)}
-          aria-pressed={companionMode}
-          title={companionMode ? 'Companion mode on — Enter routes to Companion Gateway' : 'Ask the Companion'}
-        >
-          ◉
-        </button>
-        <label htmlFor={inputId} className="sr-only">Message your AI assistant</label>
+        <label htmlFor={inputId} className="sr-only">Message your AI teammate</label>
         <input
           id={inputId}
           ref={inputRef}
           type="text"
           className="chat-panel__input"
-          placeholder={companionMode ? 'Ask the companion...' : 'Enter command...'}
+          placeholder="Ask your teammate..."
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}
