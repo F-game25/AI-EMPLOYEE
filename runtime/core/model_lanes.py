@@ -28,10 +28,22 @@ Usage
 """
 from __future__ import annotations
 
-import os
+import functools
+import json
 import logging
+import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Config files (single source of truth — no model names hardcoded in logic).
+_CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+_QUANT_PROFILES_PATH = _CONFIG_DIR / "model_quant_profiles.json"
+_MODEL_ROLES_PATH = _CONFIG_DIR / "model_roles.json"
+
+# KV-cache headroom (MB) to reserve when ranking quant fit. The full per-request
+# KV math lives in engine.compute.vram_budget; this is a cheap floor for selection.
+_KV_SELECT_HEADROOM_MB = 600
 
 TIER_FAST = "FAST"
 TIER_NORMAL = "NORMAL"
@@ -139,6 +151,177 @@ def resolve_tier(tier: str) -> str:
         if need <= vram or need <= vram * 2:
             return model
     return ladder[-1][0]
+
+
+# ── Quant-aware resolution (config-driven, measured-VRAM) ─────────────────────
+# These extend resolve_tier() with quant selection driven by model_quant_profiles
+# + live free VRAM. resolve_tier() stays backward-compatible (returns .model).
+
+@functools.lru_cache(maxsize=1)
+def _quant_profiles() -> dict:
+    """{model: {quants: {quant: vram_mb}, arch, ...}} from model_quant_profiles.json."""
+    try:
+        with open(_QUANT_PROFILES_PATH, "r") as fh:
+            data = json.load(fh)
+        return {k: v for k, v in data.items() if not k.startswith("_")}
+    except Exception as exc:  # noqa: BLE001 — never break resolution
+        logger.warning("model_lanes: quant profiles load failed: %s", exc)
+        return {}
+
+
+@functools.lru_cache(maxsize=1)
+def _model_roles() -> dict:
+    """{role: {...}} from model_roles.json."""
+    try:
+        with open(_MODEL_ROLES_PATH, "r") as fh:
+            data = json.load(fh)
+        return {k: v for k, v in data.items() if not k.startswith("_")}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("model_lanes: model roles load failed: %s", exc)
+        return {}
+
+
+def _live_free_vram_mb() -> int | None:
+    """Live MEASURED free VRAM (hardware_profiler), falling back to the RM budget."""
+    try:
+        from engine.compute.hardware_profiler import live_vram_mb
+        v = live_vram_mb()
+        if v is not None:
+            return v
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("model_lanes: hardware_profiler unavailable: %s", exc)
+    return _usable_vram_mb()
+
+
+def _quant_ladder(model: str) -> list[tuple[str, int]]:
+    """Model's quant ladder as (quant, vram_mb) ordered LARGEST→SMALLEST VRAM."""
+    quants = (_quant_profiles().get(model) or {}).get("quants") or {}
+    return sorted(quants.items(), key=lambda kv: kv[1], reverse=True)
+
+
+_QUANT_RANK = ["q2_K", "q3_K_M", "q4_0", "q4_K_M", "q5_K_M", "q6_K", "q8_0", "f16", "fp16"]
+
+
+def _quant_at_least(quant: str, floor: str | None) -> bool:
+    """True if ``quant`` meets/exceeds ``floor`` on the quality ladder."""
+    if not floor:
+        return True
+    q, f = quant.lower(), floor.lower()
+    rl = [r.lower() for r in _QUANT_RANK]
+    if q not in rl or f not in rl:
+        return True  # unknown quant — don't block, let VRAM decide
+    return rl.index(q) >= rl.index(f)
+
+
+def _offload_layers(model: str, quant: str, vram_needed: int, free: int | None) -> int:
+    """How many layers spill to CPU if this quant doesn't fully fit (0 = fully fits)."""
+    if free is None or vram_needed + _KV_SELECT_HEADROOM_MB <= free:
+        return 0
+    n_layers = int(((_quant_profiles().get(model) or {}).get("arch") or {}).get("n_layers", 0) or 0)
+    if not n_layers:
+        return 0
+    per_layer = max(vram_needed / n_layers, 1.0)
+    deficit = (vram_needed + _KV_SELECT_HEADROOM_MB) - free
+    return min(n_layers, max(0, int((deficit + per_layer - 1) // per_layer)))
+
+
+def resolve_tier_with_quant(tier: str, *, min_quant: str | None = None) -> dict:
+    """Resolve a tier to a concrete ``model@quant`` that fits live free VRAM.
+
+    Walks the tier's model ladder (largest→smallest), and for each model walks its
+    quant ladder (highest→lowest quant), picking the FIRST quant whose
+    ``vram + KV headroom`` fits live free VRAM and meets ``min_quant``. If nothing
+    fully fits, returns the largest model's smallest acceptable quant with
+    ``fits=False`` + ``offload_layers`` so the caller can offload (never OOM).
+
+    Returns {model, quant, vram_needed, fits, offload_layers}.
+    """
+    tier = (tier or TIER_NORMAL).strip().upper()
+    if tier not in _LADDERS:
+        tier = TIER_NORMAL
+
+    free = _live_free_vram_mb()
+    profiles = _quant_profiles()
+    fallback: dict | None = None  # best "doesn't fully fit" candidate (largest model)
+
+    for model, _legacy_need in _LADDERS[tier]:  # largest → smallest model
+        ladder = _quant_ladder(model)
+        if not ladder:
+            continue  # no profile for this model — skip in quant-aware path
+        for quant, vram in ladder:  # highest → lowest quant
+            if not _quant_at_least(quant, min_quant):
+                continue
+            offload = _offload_layers(model, quant, vram, free)
+            fits = (free is None) or (vram + _KV_SELECT_HEADROOM_MB <= free)
+            if fits:
+                return {"model": model, "quant": quant, "vram_needed": vram,
+                        "fits": True, "offload_layers": 0}
+            if fallback is None:
+                fallback = {"model": model, "quant": quant, "vram_needed": vram,
+                            "fits": False, "offload_layers": offload}
+
+    if fallback is not None:
+        return fallback
+    # No profiled model in this tier — degrade to the legacy resolver's choice.
+    legacy = resolve_tier(tier)
+    return {"model": legacy, "quant": None, "vram_needed": None,
+            "fits": None, "offload_layers": 0}
+
+
+def model_and_quant_for_role(role: str) -> dict:
+    """Resolve a ROLE (model_roles.json) to a concrete model@quant.
+
+    Walks the role's ``preferred_models`` best→fallback; for each, picks the highest
+    quant >= the role's ``min_quant`` that fits live free VRAM. Honours
+    ``never_degrade_to_general`` only implicitly (preferred_models for coding lists
+    coder models exclusively). Returns:
+        {role, model, quant, vram_needed, fits, offload_layers, min_quant,
+         available, reason, on_unavailable}
+    ``available=False`` means no preferred model meets the quant floor AND fits —
+    the caller must honour ``on_unavailable`` (never silently downgrade).
+    """
+    spec = _model_roles().get(role)
+    if not spec:
+        return {"role": role, "model": None, "quant": None, "available": False,
+                "reason": f"unknown role '{role}'", "on_unavailable": "block_or_remote"}
+
+    min_quant = spec.get("min_quant")
+    free = _live_free_vram_mb()
+    preferred = spec.get("preferred_models") or []
+    profiles = _quant_profiles()
+
+    fits_best: dict | None = None
+    offload_best: dict | None = None  # meets quant floor but needs offload
+
+    for model in preferred:
+        for quant, vram in _quant_ladder(model):  # highest → lowest quant
+            if not _quant_at_least(quant, min_quant):
+                continue
+            fits = (free is None) or (vram + _KV_SELECT_HEADROOM_MB <= free)
+            cand = {"model": model, "quant": quant, "vram_needed": vram,
+                    "fits": fits,
+                    "offload_layers": 0 if fits else _offload_layers(model, quant, vram, free)}
+            if fits:
+                fits_best = cand
+                break
+            if offload_best is None:
+                offload_best = cand
+        if fits_best is not None:
+            break
+
+    base = {"role": role, "min_quant": min_quant,
+            "on_unavailable": spec.get("on_unavailable", "block_or_remote")}
+    if fits_best is not None:
+        return {**base, **fits_best, "available": True,
+                "reason": f"{fits_best['model']}@{fits_best['quant']} fits free VRAM"}
+    if offload_best is not None:
+        return {**base, **offload_best, "available": True,
+                "reason": f"{offload_best['model']}@{offload_best['quant']} via "
+                          f"{offload_best['offload_layers']}-layer CPU offload (no full GPU fit)"}
+    return {**base, "model": None, "quant": None, "vram_needed": None,
+            "fits": False, "offload_layers": 0, "available": False,
+            "reason": f"no preferred model for '{role}' meets {min_quant} and fits "
+                      f"(free={free}MB); honour on_unavailable"}
 
 
 # ── Execution targets (local / external API / rented remote) ──────────────────
