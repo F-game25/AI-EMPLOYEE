@@ -3750,7 +3750,12 @@ def _v5_state_path(subdir: str, item_id: str) -> Path:
         raise HTTPException(400, "invalid_v5_state_subdir")
     d = (STATE_DIR / "forge" / subdir).resolve()
     d.mkdir(parents=True, exist_ok=True)
-    return d / f"{_v5_safe_id(item_id)}.json"
+    # _v5_safe_id already whitelist-validates the id; this resolved-path
+    # containment is defence-in-depth (and a sanitiser CodeQL recognises).
+    p = (d / f"{_v5_safe_id(item_id)}.json").resolve()
+    if os.path.commonpath([str(d), str(p)]) != str(d):
+        raise HTTPException(400, "invalid_v5_state_path")
+    return p
 
 def _v5_read_json(path: str):
     try:
