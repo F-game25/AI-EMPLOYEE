@@ -135,6 +135,44 @@ def genereer_pitch(order_id: str, *, demo_url: str = "") -> dict[str, Any]:
     }
 
 
+def _demo_link(demo_pad: str, base_url: str = "") -> str:
+    """Public demo URL from a stored demo_pad. ``base_url`` (or BASE_URL env) lets the
+    link point at a real public origin once hosting is configured (Netlify/tunnel)."""
+    base = (base_url or _BASE_URL).rstrip("/")
+    if not demo_pad:
+        return ""
+    if demo_pad.startswith("http"):
+        return demo_pad
+    p = Path(demo_pad)
+    if p.name == "index.html":               # multi-page folder demo
+        return f"{base}/api/demos/{p.parent.name}/"
+    if p.suffix == ".html":                   # legacy single-file demo
+        return f"{base}/api/demos/{p.name}"
+    return f"{base}/api/demos/{p.name}/"       # folder path
+
+
+def genereer_deel_links(order_id: str, base_url: str = "") -> dict[str, Any]:
+    """Build the customer-facing demo URL + WhatsApp/e-mail share deep-links from the
+    order's saved pitch. HITL: returns links only — nothing is sent. Backs
+    GET /api/orders/:id/stuur-link (SalesPage 'Deel-links genereren')."""
+    from urllib.parse import quote
+    from core.orders_store import order_ophalen
+    order = order_ophalen(order_id)
+    if not order:
+        return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+    pitch_tekst = order.get("pitch_tekst") or ""
+    if not pitch_tekst:
+        return {"ok": False, "error": "Genereer eerst een pitch voordat je deel-links maakt"}
+    body = quote(pitch_tekst)
+    subject = quote(f"Een website voor {order.get('bedrijfsnaam', '')}")
+    return {
+        "ok": True,
+        "demo_url": _demo_link(order.get("demo_pad", ""), base_url),
+        "whatsapp_url": f"https://wa.me/?text={body}",
+        "email_url": f"mailto:?subject={subject}&body={body}",
+    }
+
+
 def markeer_gepitcht(order_id: str) -> dict[str, Any]:
     """Zet status → gepitcht."""
     from core.orders_store import order_ophalen, status_bijwerken

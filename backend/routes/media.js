@@ -155,6 +155,17 @@ module.exports = function createMediaRouter(deps) {
     res.send(html);
   }
 
+  // Publicly serve uploaded order photos used in demos: /api/demos/_assets/<id>/<file>
+  // (3 path segments — never matches the 1-/2-segment demo routes below.)
+  router.get('/api/demos/_assets/:id/:file', (req, res) => {
+    const id = path.basename(req.params.id);
+    const file = path.basename(req.params.file);
+    const fpath = path.resolve(path.join(DEMOS_DIR, '_assets', id, file));
+    if (!fpath.startsWith(DEMOS_ROOT)) return res.status(400).send('Ongeldig pad');
+    if (!fs.existsSync(fpath) || !fs.statSync(fpath).isFile()) return res.status(404).send('Niet gevonden');
+    res.sendFile(fpath);
+  });
+
   // Sub-page within a site folder: /api/demos/<slug>/<page>.html
   router.get('/api/demos/:slug/:page', (req, res) => {
     const slug = path.basename(req.params.slug);

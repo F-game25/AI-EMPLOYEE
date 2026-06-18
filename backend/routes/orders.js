@@ -7,10 +7,31 @@
 
 const express = require('express');
 const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const multer = require('multer');
 const { getWorker } = require('../py_worker_client');
 
 // Public base URL for demo links sent to customers.
 const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
+
+// Uploaded order photos live under the (public) demos dir so the demo can show them
+// and customers can load them. Mirrors media.js DEMOS_DIR/_assets resolution.
+const AI_HOME = path.resolve(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee'));
+const ASSETS_DIR = path.join(AI_HOME, 'state', 'artifacts', 'demos', '_assets');
+
+const photoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const dir = path.join(ASSETS_DIR, path.basename(String(req.params.id)));
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => cb(null, `${Date.now()}_${path.basename(file.originalname).replace(/[^\w.\-]/g, '_')}`),
+  }),
+  limits: { files: 12, fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, /^image\//.test(file.mimetype)),
+});
 
 const w = () => getWorker(); // resolved lazily so the module loads before the worker is ready
 
@@ -87,6 +108,36 @@ module.exports = function createOrdersRouter(requireAuth) {
         research_data: req.body?.research_data || {},
       }, 10_000);
       res.json(result);
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // POST /api/orders/:id/update — persist edited core fields (Leads step)
+  r.post('/:id/update', requireAuth, async (req, res) => {
+    try {
+      const { bedrijfsnaam, plaats, branche, contact, prijs } = req.body || {};
+      const result = await w().call('orders.update', {
+        id: req.params.id, bedrijfsnaam, plaats, branche, contact, prijs,
+      }, 10_000);
+      res.status(result?.ok ? 200 : 404).json(result);
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // POST /api/orders/:id/photo — upload demo photos (multipart) → public asset URLs
+  r.post('/:id/photo', requireAuth, photoUpload.array('photos', 12), (req, res) => {
+    try {
+      const id = path.basename(String(req.params.id));
+      const urls = (req.files || []).map(
+        (f) => `/api/demos/_assets/${encodeURIComponent(id)}/${encodeURIComponent(f.filename)}`,
+      );
+      res.json({ ok: true, urls });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // GET /api/orders/:id/stuur-link — demo URL + WhatsApp/e-mail share links (HITL, nothing sent)
+  r.get('/:id/stuur-link', requireAuth, async (req, res) => {
+    try {
+      const result = await w().call('orders.stuur_link', { id: req.params.id, base_url: BASE_URL }, 10_000);
+      res.status(result?.ok ? 200 : 400).json(result);
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
