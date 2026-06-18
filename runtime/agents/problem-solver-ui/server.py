@@ -1022,28 +1022,6 @@ def _load_chat_history(n_exchanges: int = 8) -> list:
     return history
 
 
-def _direct_conversation_reply(goal_plan: dict, message: str) -> str | None:
-    """Handle utility/chat turns that must never enter the task executor."""
-    response_type = str(goal_plan.get("response_type") or "").lower()
-    if response_type == "time":
-        from datetime import datetime
-
-        now = datetime.now().astimezone()
-        return f"It is {now.strftime('%H:%M:%S')} ({now.tzname() or 'local time'})."
-    if response_type == "date":
-        from datetime import datetime
-
-        now = datetime.now().astimezone()
-        day = str(now.day)
-        return f"Today is {now.strftime('%A, %B')} {day}, {now.year}."
-    if response_type == "greeting":
-        return "I’m here. Tell me what you want to build, fix, research, or run."
-    if response_type == "empty":
-        return "Send me a question or a task and I’ll route it properly."
-    # Let normal questions use the conversational LLM path.
-    return None
-
-
 def _generate_llm_response(
     message: str,
     routed_agent: str,
@@ -5890,34 +5868,12 @@ def handle_command(
         except Exception as _bias_exc:
             logger.debug("bias check error (non-fatal): %s", _bias_exc)
 
-    # ── Real execution engine — structured goal → real tool calls ────────────
-    # If the message is a goal (not a question), parse it into a structured plan
-    # and execute it step-by-step with real tools. Rules: no fake results, every
-    # step maps to a real tool, errors are explicit.
-    try:
-        from core.goal_parser import parse_goal as _parse_goal  # noqa: PLC0415
-        from core.real_execution_engine import RealExecutionEngine as _RealExecEngine  # noqa: PLC0415
-        _goal_plan = _parse_goal(message)
-        if not _goal_plan.get("is_goal"):
-            _direct_reply = _direct_conversation_reply(_goal_plan, message)
-            if _direct_reply:
-                return _direct_reply
-        if _goal_plan.get("is_goal") and _goal_plan.get("task_plan"):
-            logger.info("[REAL_ENGINE] Goal detected — %d steps planned", len(_goal_plan["task_plan"]))
-            _engine = _RealExecEngine()
-            _exec_result = _engine.run(_goal_plan["task_plan"], goal=message)
-            _chat_reply = _engine.format_for_chat(_exec_result)
-            # Prepend brief goal summary
-            _structured = _goal_plan.get("structured_goal", {})
-            if _structured.get("action"):
-                _chat_reply = f"Executing: **{_structured['action']}**\n\n" + _chat_reply
-            return _chat_reply
-    except Exception as _real_exc:
-        logger.warning("real_execution_engine failed (non-fatal): %s", _real_exc)
-
-    # ── Unified pipeline — single controlled execution path ───────────────────
-    # All remaining user inputs are routed through process_user_input() which
-    # enforces the full pipeline: graph → LLM → agents → result → forge.
+    # ── Unified pipeline — THE single controlled execution path (C1) ──────────
+    # The former pre-pipeline bypass (goal-parse → direct utility reply / real
+    # execution engine) now lives INSIDE process_user_input as Phase 0, so every
+    # chat input flows through one entry with full telemetry + STRICT_PIPELINE.
+    # All user inputs are routed through process_user_input() which enforces the
+    # full pipeline: graph → LLM → agents → result → forge.
     # The already-resolved routed_agent and mode are forwarded via a closure
     # so server-side keyword routing is preserved while the pipeline adds
     # graph context, task decomposition, and telemetry around every LLM call.
