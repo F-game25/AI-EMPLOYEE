@@ -49,6 +49,16 @@ from core.unified_pipeline import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_intent_fast_path():
+    """These tests target the downstream pipeline phases. The Phase 0 fast-path
+    (added in Coherence C1 — utility direct-reply / structured-goal short-circuit)
+    is covered separately in test_pipeline_single_entry_c1.py; disable it here so
+    placeholder inputs like 'test'/'hello' exercise the full pipeline as intended."""
+    with patch("core.unified_pipeline._intent_fast_path", return_value=None):
+        yield
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
