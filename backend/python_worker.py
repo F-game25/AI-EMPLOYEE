@@ -160,6 +160,21 @@ def _dispatch(op: str, args: dict):
         m = _mod('core.pitch')
         return m.markeer_betaald(args['id'], args.get('referentie', ''))
 
+    if op == 'orders.update':
+        m = _mod('core.orders_store')
+        return m.order_bijwerken(
+            args['id'],
+            bedrijfsnaam=args.get('bedrijfsnaam'),
+            plaats=args.get('plaats'),
+            branche=args.get('branche'),
+            contact=args.get('contact'),
+            prijs=(float(args['prijs']) if args.get('prijs') is not None else None),
+        )
+
+    if op == 'orders.stuur_link':
+        m = _mod('core.pitch')
+        return m.genereer_deel_links(args['id'], base_url=args.get('base_url', ''))
+
     if op == 'orders.demo_quality':
         m = _mod('core.demo_quality_gate')
         return m.evaluate_order_demo(args['id'])
