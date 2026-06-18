@@ -22,11 +22,13 @@ def _now() -> str:
 
 
 def _sentences(text: str) -> list[str]:
-    return [part.strip(" .\n\t") for part in re.split(r"[.;\n]+", text or "") if part.strip()]
+    normalized = (text or "")[:8000].replace("\n", ".").replace(";", ".")
+    return [part.strip(" .\t") for part in normalized.split(".") if part.strip()]
 
 
 # repo root = .../AI-EMPLOYEE (this file lives at runtime/core/forge_v5_runtime.py)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_AI_HOME_ROOT = Path(os.environ.get("AI_HOME") or Path.home() / ".ai-employee").resolve()
 _SKIP_DIRS = {".git", "node_modules", "dist", "build", "__pycache__", ".venv", "venv", "state", ".cache", "coverage"}
 _CODE_EXT = {".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".md", ".sh", ".css"}
 _STOPWORDS = {
@@ -87,6 +89,24 @@ def _scan_codebase(keywords: list[str], root: Path | None = None, max_hits: int 
     return sorted(hits, key=lambda h: h["confidence"], reverse=True)
 
 
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_scan_root(project: dict[str, Any]) -> Path:
+    target = str(project.get("root_path") or project.get("path") or "").strip()
+    if not target:
+        return _REPO_ROOT
+    candidate = Path(target).expanduser().resolve()
+    if candidate.exists() and (_is_under(candidate, _REPO_ROOT) or _is_under(candidate, _AI_HOME_ROOT)):
+        return candidate
+    return _REPO_ROOT
+
+
 class ForgeV5Runtime:
     def __init__(self) -> None:
         self.reasoning = get_forge_reasoning_orchestrator()
@@ -136,8 +156,7 @@ class ForgeV5Runtime:
 
         # ── Real codebase inspection ─────────────────────────────────────────
         project = brief.get("project") or {}
-        target = project.get("root_path") or project.get("path")
-        root = Path(target) if target and Path(target).exists() else _REPO_ROOT
+        root = _safe_scan_root(project)
         # Derive keywords from the whole brief, not just raw input.
         kw_source = " ".join(str(x) for x in [
             brief.get("title"), brief.get("summary"), brief.get("desired_outcome"),

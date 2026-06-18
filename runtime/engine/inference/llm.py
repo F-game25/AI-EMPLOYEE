@@ -218,25 +218,49 @@ def _ollama_get(endpoint: str, timeout: int) -> dict:
         raise RuntimeError(f"Ollama not reachable at {OLLAMA_HOST}: {exc}") from exc
 
 
+def _lifecycle_manager():
+    try:
+        from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+        return get_lifecycle_manager()
+    except Exception:
+        return None
+
+
+def _lifecycle_loaded_models(mgr=None) -> set[str]:
+    mgr = mgr or _lifecycle_manager()
+    try:
+        return {e.model_id for e in getattr(mgr, "_reg", {}).values() if getattr(e, "loaded", False)}
+    except Exception:
+        return set()
+
+
 def _evict_idle_models(keep: frozenset[str] | None = None) -> None:
     """Unload non-permanent models from Ollama VRAM (keep_alive=0).
 
     Called before loading a heavy model when VRAM headroom is tight.
     Permanent models (llama3.2, nomic-embed-text) are never evicted.
     """
-    keep_set = keep if keep is not None else _PERMANENT_MODELS
+    mgr = _lifecycle_manager()
+    keep_set = set(keep if keep is not None else _PERMANENT_MODELS) | _lifecycle_loaded_models(mgr)
+    lock = getattr(mgr, "_lock", None)
     try:
-        resp = _ollama_get("/api/ps", timeout=8)
-        for m in resp.get("models", []):
-            name = m.get("name", "")
-            if name and name not in keep_set:
-                logger.info("evict_idle model=%s", name)
-                _ollama_unloader(name)()
+        if lock:
+            lock.acquire()
+        try:
+            resp = _ollama_get("/api/ps", timeout=8)
+            for m in resp.get("models", []):
+                name = m.get("name", "")
+                if name and name not in keep_set:
+                    logger.info("evict_idle model=%s", name)
+                    _ollama_unloader(name)()
+        finally:
+            if lock:
+                lock.release()
     except Exception as exc:
         logger.debug("evict_idle_models skipped: %s", exc)
 
 
-def ensure_model_ready(model: str) -> bool:
+def ensure_model_ready(model: str, options: dict[str, Any] | None = None) -> bool:
     """Warm *model* into VRAM, evicting idle models first if headroom is tight.
 
     Permanent models (llama3.2, nomic-embed-text) get keep_alive=-1 so Ollama
@@ -257,7 +281,10 @@ def ensure_model_ready(model: str) -> bool:
 
     keep_alive: int = -1 if model in _PERMANENT_MODELS else 300
     try:
-        _ollama_post("/api/generate", {"model": model, "prompt": " ", "keep_alive": keep_alive, "stream": False}, 30)
+        payload = {"model": model, "prompt": " ", "keep_alive": keep_alive, "stream": False}
+        if options:
+            payload["options"] = options
+        _ollama_post("/api/generate", payload, 30)
         logger.info("model_ready model=%s keep_alive=%s", model, keep_alive)
         return True
     except Exception as exc:
@@ -377,9 +404,9 @@ def generate(
         except Exception as exc:  # noqa: BLE001
             logger.warning("ai_router failed (%s) — falling back to direct Ollama", exc)
 
-    mgr, _ = _enforce_lifecycle(chosen_model)
-    ensure_model_ready(chosen_model)
     offload_opts = _build_ollama_options(chosen_model)
+    mgr, _ = _enforce_lifecycle(chosen_model)
+    ensure_model_ready(chosen_model, offload_opts)
     payload = {
         "model": chosen_model,
         "prompt": full_prompt,

@@ -123,7 +123,7 @@ class BaseAgent:
     @classmethod
     def wrap(cls, legacy, agent_id: str = 'unknown') -> '_LegacyAgentWrapper':
         """Wrap a non-conforming object as a BaseAgent."""
-        entry = next((m for m in ('run', 'execute', 'process', 'handle') if hasattr(legacy, m)), None)
+        entry = next((m for m in ('run', 'execute', 'process', 'handle', 'main') if hasattr(legacy, m)), None)
         if entry is None and callable(legacy):
             entry = '__call__'
         return _LegacyAgentWrapper(legacy, agent_id, entry or 'run')
@@ -131,6 +131,7 @@ class BaseAgent:
 
 class _LegacyAgentWrapper(BaseAgent):
     def __init__(self, legacy, agent_id: str, entry_point: str):
+        super().__init__()
         self.agent_id = agent_id
         self._legacy = legacy
         self._entry = entry_point
