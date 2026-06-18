@@ -41,6 +41,34 @@ function proxy(path, req, res, fallback) {
   proxyReq.write(body); proxyReq.end()
 }
 
+// ── Method/auth-preserving proxy (for the Deep Research sub-API) ──────────────
+// The POST-only proxy() above can't carry the deep endpoints, which use GET (list/
+// poll), POST (start/commit) and DELETE, and require auth on the Python side. This
+// forwards method + full path + body + the caller's Authorization header verbatim.
+function proxyDeep(req, res) {
+  const isWrite = !['GET', 'HEAD', 'DELETE'].includes(req.method)
+  const body = isWrite ? JSON.stringify(req.body || {}) : null
+  const headers = { 'Content-Type': 'application/json' }
+  if (body) headers['Content-Length'] = Buffer.byteLength(body)
+  if (req.headers.authorization) headers['Authorization'] = req.headers.authorization
+  const proxyReq = http.request(
+    `http://${PYTHON_HOST}:${PYTHON_PORT}${req.originalUrl}`,
+    { method: req.method, headers, timeout: TIMEOUT_MS },
+    (pr) => {
+      let data = ''
+      pr.on('data', c => { data += c })
+      pr.on('end', () => {
+        try { res.status(pr.statusCode || 200).json(JSON.parse(data || '{}')) }
+        catch { res.status(502).json({ ok: false, error: 'invalid response from research backend', raw: data.slice(0, 200) }) }
+      })
+    }
+  )
+  proxyReq.on('error',   () => res.status(503).json({ ok: false, error: 'Deep research backend offline' }))
+  proxyReq.on('timeout', () => { proxyReq.destroy(); res.status(504).json({ ok: false, error: 'Deep research backend timeout' }) })
+  if (body) proxyReq.write(body)
+  proxyReq.end()
+}
+
 // ── Mock fallbacks (clearly labelled, no real data) ───────────────────────────
 function mockDiscover(query, limit) {
   const domains = ['example.com', 'docs.example.org', 'news.example.net', 'forum.example.io', 'scholar.example.edu']
@@ -119,6 +147,11 @@ module.exports = function createResearchRouter(requireAuth) {
       () => res.json(mockExecute(query, selected_urls, session_id))
     )
   })
+
+  // Deep Research sub-API — was unreachable (no proxy) so DeepResearchPage 404'd.
+  // GET /deep (list) · POST /deep/start · GET|DELETE /deep/:id · POST /deep/:id/commit
+  router.all('/deep', requireAuth, proxyDeep)
+  router.all('/deep/*', requireAuth, proxyDeep)
 
   return router
 }
