@@ -298,12 +298,16 @@ export OLLAMA_HOST="$_OLLAMA_HOST"
 export OLLAMA_MODELS="$_OLLAMA_MODELS"
 export OLLAMA_NO_CLOUD="${OLLAMA_NO_CLOUD:-1}"
 # Local-VRAM tuning (plan §2.3): q8_0 KV-cache ≈ half the KV memory at ~zero
-# quality loss (needs flash-attn); one heavy model at a time and serialized
-# requests so an 8GB GPU isn't over-committed. All overridable via env.
+# quality loss (needs flash-attn); serialized requests so an 8GB GPU isn't
+# over-committed. All overridable via env.
 export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
 export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
 export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
-export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
+# 2, not 1: the tiny embed model (nomic, ~0.3GB) must stay resident ALONGSIDE the
+# chat model — MAX=1 evicted one to load the other on every memory/chat call,
+# causing constant reload thrash. The app-layer lifecycle still evicts heavy
+# models one-at-a-time, so two won't over-commit the 8GB card.
+export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-2}"
 mkdir -p "$_OLLAMA_MODELS"
 
 _OLLAMA_BIN="${OLLAMA_BIN:-}"
@@ -400,7 +404,7 @@ if [[ -n "${PYTHON_BIN:-}" && -f "$_PYTHON_SERVER" ]]; then
         PYTHONPATH="$REPO_ROOT/runtime" "$PYTHON_BIN" -m neural_brain.graph.sync_native_to_neo4j \
           >> "$APP_LOG_DIR/python-backend.log" 2>&1 || true
         # Pre-warm Ollama model so first chat message is instant
-        _WARM_MODEL="${OLLAMA_MODEL:-qwen2.5:7b-instruct}"
+        _WARM_MODEL="${OLLAMA_MODEL:-gemma3:4b-it-qat}"
         _OLLAMA_WARM_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
         curl -s --max-time 60 -X POST "${_OLLAMA_WARM_HOST}/api/generate" \
           -H "Content-Type: application/json" \
