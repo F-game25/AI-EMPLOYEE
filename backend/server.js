@@ -495,7 +495,7 @@ const WORKSPACE_DIR = path.join(os.homedir(), '.ai-employee', 'workspace');
 app.use('/workspace', express.static(WORKSPACE_DIR, { index: false }));
 
 // Serve AI-generated artifacts (summaries, code files) at /api/artifacts/:filename
-const ARTIFACTS_DIR = path.join(__dirname, '..', 'state', 'artifacts');
+const ARTIFACTS_DIR = path.join(STATE_DIR, 'artifacts');  // canonical, not repo-local (C0)
 // Preview HTML artifacts inline (no auth cookie needed — token in query param for iframe src)
 
 function readJsonLinesRecent(filePath, limit = 100) {

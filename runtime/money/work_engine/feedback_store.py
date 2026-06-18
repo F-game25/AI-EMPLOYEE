@@ -23,7 +23,7 @@ def _state_dir() -> Path:
         from core.state_paths import canonical_state_dir
         base = canonical_state_dir()
     except Exception:
-        base = Path(__file__).resolve().parents[3] / "state"
+        base = Path.home() / ".ai-employee" / "state"  # canonical default, never repo-local (C0)
     try:
         base.mkdir(parents=True, exist_ok=True)
     except Exception:

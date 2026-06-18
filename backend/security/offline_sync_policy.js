@@ -9,8 +9,9 @@ function nowIso() {
 }
 
 function createOfflineSecuritySyncPolicy(options = {}) {
-  const queueFile = options.queueFile || path.resolve(__dirname, '../../state/security_sync_queue.json');
-  const historyFile = options.historyFile || path.resolve(__dirname, '../../state/security_sync_history.log');
+  const _stateDir = require('../state-paths').STATE_DIR;  // canonical, not repo-local (C0)
+  const queueFile = options.queueFile || path.join(_stateDir, 'security_sync_queue.json');
+  const historyFile = options.historyFile || path.join(_stateDir, 'security_sync_history.log');
   const deliver = typeof options.deliver === 'function' ? options.deliver : null;
 
   let online = true;

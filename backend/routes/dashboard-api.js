@@ -285,12 +285,8 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
 
   // ── KNOWLEDGE ─────────────────────────────────────────────────────────────
 
-  // Resolve store path — tries repo-local state/ first, then ~/.ai-employee/state/
-  const KNOWLEDGE_STORE = (() => {
-    const repoLocal = path.resolve(__dirname, '..', '..', 'state', 'knowledge_store.json')
-    const homeLocal = path.join(STATE_DIR, 'state', 'knowledge_store.json')
-    return fs.existsSync(repoLocal) ? repoLocal : homeLocal
-  })()
+  // Canonical store path only — no repo-local fallback (C0, one state tree)
+  const KNOWLEDGE_STORE = path.join(STATE_DIR, 'state', 'knowledge_store.json')
 
   const PYTHON_BACKEND = process.env.PYTHON_BACKEND_URL ||
     `http://${process.env.PYTHON_BACKEND_HOST || '127.0.0.1'}:${process.env.PYTHON_BACKEND_PORT || 18790}`
@@ -1815,7 +1811,7 @@ module.exports = function createDashboardAPIRouter(requireAuth) {
 
   r.get('/models/registry', requireAuth, (req, res) => {
     try {
-      const registryPath = path.join(process.cwd(), 'state', 'model-registry.json')
+      const registryPath = path.join(STATE_DIR, 'state', 'model-registry.json')  // canonical, not cwd (C0)
       if (!fs.existsSync(registryPath)) return res.status(404).json({ error: 'registry not found' })
       res.json(readJSON(registryPath, {}))
     } catch (e) {

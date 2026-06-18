@@ -26,33 +26,33 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Absolute path to state/ directory (repo-root / state)
-_STATE_DIR = Path(__file__).parent.parent.parent / "state"
+from core.state_paths import canonical_state_dir
+from core.file_lock import read_json_safe, write_json_safe
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _state_path(name: str) -> Path:
+    # Canonical state dir (honours STATE_DIR / AI_HOME), resolved per-call so an
+    # env override set after import is respected. Was repo-local parents[3]/state
+    # which split state across two trees — see docs/SYSTEM_COHERENCE_PLAN.md C0.
+    return canonical_state_dir() / f"{name}.json"
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _load_json(name: str) -> dict:
-    path = _STATE_DIR / f"{name}.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text())
-    except Exception as e:
-        logger.warning("state_store: could not read %s: %s", path, e)
-        return {}
+    # Lock-protected read (blocking-with-timeout) — no more raw read races.
+    return read_json_safe(_state_path(name), default={})
 
 
 def _save_json(name: str, data: dict) -> None:
-    path = _STATE_DIR / f"{name}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, default=str))
+    # Lock-protected write — stops silent last-writer-wins on concurrent agents.
+    write_json_safe(_state_path(name), data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
