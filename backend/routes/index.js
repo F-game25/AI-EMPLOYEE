@@ -491,6 +491,11 @@ const ROUTE_REGISTRY = [
   { method: 'POST',   path: '/api/search',                          auth: 'optional',  file: 'routes/search.js' },
   { method: 'POST',   path: '/api/research/discover',               auth: true,        file: 'routes/research.js' },
   { method: 'POST',   path: '/api/research/execute',                auth: true,        file: 'routes/research.js' },
+  { method: 'GET',    path: '/api/research/deep',                   auth: true,        file: 'routes/research.js' },
+  { method: 'POST',   path: '/api/research/deep/start',             auth: true,        file: 'routes/research.js' },
+  { method: 'GET',    path: '/api/research/deep/:id',               auth: true,        file: 'routes/research.js' },
+  { method: 'DELETE', path: '/api/research/deep/:id',               auth: true,        file: 'routes/research.js' },
+  { method: 'POST',   path: '/api/research/deep/:id/commit',        auth: true,        file: 'routes/research.js' },
 
   // ── Vault (Obsidian knowledge store) ─────────────────────────────────────
   { method: 'GET',    path: '/api/vault/notes',                     auth: true,        file: 'routes/vault.js' },
