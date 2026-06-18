@@ -69,8 +69,9 @@ def _broadcast_ws(event: str, data: dict) -> None:
     except Exception:
         pass  # import failure or any other error — never propagate
 _DEPTH_PLAN = {0: 3, 1: 6, 2: 10}
-_SCREENSHOT_DIR = Path(__file__).resolve().parents[2] / "state" / "research_screenshots"
-_BUDGET_FILE = Path(__file__).resolve().parents[2] / "state" / "research_budget.json"
+from core.state_paths import canonical_state_dir  # canonical state tree (C0)
+_SCREENSHOT_DIR = canonical_state_dir() / "research_screenshots"
+_BUDGET_FILE = canonical_state_dir() / "research_budget.json"
 
 # Ensure runtime/ on sys.path for sibling imports (search_web, cloak fetcher)
 _RUNTIME_ROOT = str(Path(__file__).resolve().parents[1])

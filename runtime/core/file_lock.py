@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -45,16 +46,26 @@ class FileLock:
         self._lock_file: Any = None
 
     def __enter__(self):
+        # BLOCKING with timeout: retry the non-blocking lock with backoff until
+        # `timeout` elapses, instead of failing instantly under contention (which
+        # caused silent last-writer-wins). Honours the previously-unused timeout.
         lock_path = self.file_path.with_suffix(self.file_path.suffix + '.lock')
-        try:
-            self._lock_file = open(lock_path, 'w')
-            _lock(self._lock_file)
-            return self
-        except (IOError, OSError) as e:
-            if self._lock_file:
-                self._lock_file.close()
-            logger.warning("Could not acquire lock for %s: %s", self.file_path, e)
-            raise
+        self._lock_file = open(lock_path, 'w')
+        deadline = time.monotonic() + max(self.timeout, 0.0)
+        delay = 0.01
+        while True:
+            try:
+                _lock(self._lock_file)  # non-blocking primitive — raises if held
+                return self
+            except (IOError, OSError) as e:
+                if time.monotonic() >= deadline:
+                    self._lock_file.close()
+                    self._lock_file = None
+                    logger.warning("Could not acquire lock for %s within %ss: %s",
+                                   self.file_path, self.timeout, e)
+                    raise TimeoutError(f"lock timeout for {self.file_path}") from e
+                time.sleep(delay)
+                delay = min(delay * 2, 0.2)
 
     def __exit__(self, *args):
         if self._lock_file:
@@ -94,9 +105,9 @@ def write_json_safe(file_path: Path, data: Any, tenant_id: str = None) -> bool:
                 if "_tenant_data" not in existing:
                     existing["_tenant_data"] = {}
                 existing["_tenant_data"][tenant_id] = data
-                file_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding='utf-8')
+                file_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False, default=str), encoding='utf-8')
             else:
-                file_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+                file_path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding='utf-8')
             # chmod is a no-op on Windows — skip it
             if sys.platform != 'win32':
                 try:

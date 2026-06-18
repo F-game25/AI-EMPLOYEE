@@ -23,7 +23,7 @@ function _broadcastQCE(type, data) {
 const PYTHON_HOST = '127.0.0.1';
 const PYTHON_PORT = process.env.PYTHON_BACKEND_PORT || 18790;
 const TIMEOUT_MS  = 5000;
-const STATE_DIR   = process.env.STATE_DIR || path.join(__dirname, '../../state');
+const STATE_DIR   = require('../state-paths').STATE_DIR;  // canonical, not repo-local (C0)
 const FEEDBACK_FILE = path.join(STATE_DIR, 'quantum_feedback.jsonl');
 
 // Ensure state dir exists at module load time.

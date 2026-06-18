@@ -8,7 +8,7 @@ const https = require('https');
 const { spawn } = require('child_process');
 
 const DEFAULT_BASE_URL = process.env.FISH_SPEECH_URL || process.env.FISH_AUDIO_S2_URL || 'http://127.0.0.1:8080';
-const DEFAULT_ARTIFACT_DIR = path.resolve(__dirname, '../../../state/artifacts');
+const DEFAULT_ARTIFACT_DIR = require('../../state-paths').ARTIFACTS_DIR;  // canonical (C0)
 const RECHECK_MS = 30_000;
 
 const DEFAULT_OPTIONS = {
