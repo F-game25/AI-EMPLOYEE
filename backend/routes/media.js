@@ -185,7 +185,7 @@ module.exports = function createMediaRouter(deps) {
   });
 
   // Sub-page within a site folder: /api/demos/<slug>/<page>.html
-  router.get('/api/demos/:slug/:page', (req, res) => {
+  router.get('/api/demos/:slug/:page', rateLimit, (req, res) => {
     const slug = path.basename(req.params.slug);
     const page = path.basename(req.params.page);
     if (!page.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
@@ -193,7 +193,7 @@ module.exports = function createMediaRouter(deps) {
   });
 
   // Folder root or legacy single file: /api/demos/<slug>(/)  |  /api/demos/<file>.html
-  router.get('/api/demos/:slug', (req, res) => {
+  router.get('/api/demos/:slug', rateLimit, (req, res) => {
     const slug = path.basename(req.params.slug);
     if (slug.endsWith('.html')) return _sendDemo(res, path.join(DEMOS_DIR, slug)); // legacy
     const dir = path.join(DEMOS_DIR, slug);
