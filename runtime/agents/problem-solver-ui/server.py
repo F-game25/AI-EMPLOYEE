@@ -1022,28 +1022,6 @@ def _load_chat_history(n_exchanges: int = 8) -> list:
     return history
 
 
-def _direct_conversation_reply(goal_plan: dict, message: str) -> str | None:
-    """Handle utility/chat turns that must never enter the task executor."""
-    response_type = str(goal_plan.get("response_type") or "").lower()
-    if response_type == "time":
-        from datetime import datetime
-
-        now = datetime.now().astimezone()
-        return f"It is {now.strftime('%H:%M:%S')} ({now.tzname() or 'local time'})."
-    if response_type == "date":
-        from datetime import datetime
-
-        now = datetime.now().astimezone()
-        day = str(now.day)
-        return f"Today is {now.strftime('%A, %B')} {day}, {now.year}."
-    if response_type == "greeting":
-        return "I’m here. Tell me what you want to build, fix, research, or run."
-    if response_type == "empty":
-        return "Send me a question or a task and I’ll route it properly."
-    # Let normal questions use the conversational LLM path.
-    return None
-
-
 def _generate_llm_response(
     message: str,
     routed_agent: str,
@@ -3601,7 +3579,7 @@ def get_status():
 
 
 @app.post("/api/v5/brief")
-async def forge_v5_brief(payload: dict):
+async def forge_v5_brief(payload: dict, _auth: None = Depends(require_auth)):
   """Compute a Forge V5 project brief. Persistence stays in Node Forge."""
   try:
     from core.forge_v5_runtime import get_forge_v5_runtime
@@ -3626,7 +3604,7 @@ async def forge_v5_brief(payload: dict):
 
 
 @app.post("/api/v5/research")
-async def forge_v5_research(payload: dict):
+async def forge_v5_research(payload: dict, _auth: None = Depends(require_auth)):
   """Compute a Forge V5 research pack. No external action is executed here."""
   try:
     from core.forge_v5_runtime import get_forge_v5_runtime
@@ -3644,7 +3622,7 @@ async def forge_v5_research(payload: dict):
 
 
 @app.post("/api/v5/goals")
-async def forge_v5_goals(payload: dict):
+async def forge_v5_goals(payload: dict, _auth: None = Depends(require_auth)):
   """Compute Forge V5 proposed goals from a brief and research pack."""
   try:
     from core.forge_v5_runtime import get_forge_v5_runtime
@@ -3665,7 +3643,7 @@ async def forge_v5_goals(payload: dict):
 
 
 @app.post("/api/v5/reason")
-async def forge_v5_reason(payload: dict):
+async def forge_v5_reason(payload: dict, _auth: None = Depends(require_auth)):
   """Compute QCE-backed reasoning metadata for Forge V5."""
   try:
     from core.forge_reasoning_orchestrator import get_forge_reasoning_orchestrator
@@ -3688,7 +3666,7 @@ async def forge_v5_reason(payload: dict):
 
 
 @app.post("/api/v5/quality")
-async def forge_v5_quality(payload: dict):
+async def forge_v5_quality(payload: dict, _auth: None = Depends(require_auth)):
   """Map existing Forge run/verification output into V5 quality dimensions."""
   try:
     from core.forge_sandbox_manager import get_forge_sandbox_manager
@@ -3712,7 +3690,7 @@ async def forge_v5_quality(payload: dict):
 
 
 @app.get("/api/v5/compute/backends")
-async def forge_v5_compute_backends():
+async def forge_v5_compute_backends(_auth: None = Depends(require_auth)):
   """Return honest compute backend availability for Forge V5."""
   try:
     from core.compute_router import get_compute_router
@@ -3724,7 +3702,7 @@ async def forge_v5_compute_backends():
 
 
 @app.get("/api/v5/models/health")
-async def forge_v5_models_health():
+async def forge_v5_models_health(_auth: None = Depends(require_auth)):
   """Return local/provider model health without claiming unavailable models."""
   models: dict[str, Any] = {
     "ollama": {"available": False, "models": [], "reason": "ollama unavailable"},
@@ -3765,15 +3743,37 @@ def _v5_direct_projects_disabled() -> None:
     )
 
 
-def _v5_state_path(subdir: str, filename: str) -> str:
-    import os as _os
-    d = _os.path.join(_os.path.expanduser("~"), ".ai-employee", "state", "forge", subdir)
-    _os.makedirs(d, exist_ok=True)
-    return _os.path.join(d, filename)
+_V5_STATE_SUBDIRS = {"briefs", "research_packs", "goals", "reports", "quality_gates"}
 
-def _v5_read_json(path: str):
+
+def _v5_safe_id(value: str, field: str = "id") -> str:
+    safe = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", safe) or ".." in safe:
+        raise HTTPException(400, f"invalid_{field}")
+    return safe
+
+
+def _v5_state_path(subdir: str, item_id: str) -> Path:
+    if subdir not in _V5_STATE_SUBDIRS:
+        raise HTTPException(400, "invalid_v5_state_subdir")
+    d = (STATE_DIR / "forge" / subdir).resolve()
+    d.mkdir(parents=True, exist_ok=True)
+    # _v5_safe_id already whitelist-validates the id; this resolved-path
+    # containment is defence-in-depth (and a sanitiser CodeQL recognises).
+    p = (d / f"{_v5_safe_id(item_id)}.json").resolve()
+    if os.path.commonpath([str(d), str(p)]) != str(d):
+        raise HTTPException(400, "invalid_v5_state_path")
+    return p
+
+def _v5_read_json(path: str | Path):
     try:
-        with open(path) as _f:
+        # Defence-in-depth: only read inside the V5 state tree (paths already come
+        # from _v5_state_path, which validates the id; this is the sanitiser CodeQL recognises).
+        root = (STATE_DIR / "forge").resolve()
+        p = Path(path).resolve()
+        if os.path.commonpath([str(root), str(p)]) != str(root):
+            return None
+        with open(p) as _f:
             import json as _json
             return _json.load(_f)
     except Exception:
@@ -3781,7 +3781,7 @@ def _v5_read_json(path: str):
 
 
 @app.post("/api/v5/projects/start")
-async def forge_v5_projects_start(payload: dict):
+async def forge_v5_projects_start(payload: dict, _auth: None = Depends(require_auth)):
     """Convenience: brief + research + goals in one call, returns project_id."""
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
@@ -3791,11 +3791,11 @@ async def forge_v5_projects_start(payload: dict):
         raw_input = str((payload or {}).get("raw_input") or "").strip()
         if not raw_input:
             raise HTTPException(400, "raw_input required")
-        project_id = str((payload or {}).get("project_id") or f"p-{_uuid.uuid4().hex[:8]}")
+        project_id = _v5_safe_id((payload or {}).get("project_id") or f"p-{_uuid.uuid4().hex[:8]}", "project_id")
         rt = get_forge_v5_runtime()
         brief = await rt.start_project_brief(raw_input, project_id, (payload or {}).get("project") or {})
         import json as _json
-        brief_path = _v5_state_path("briefs", f"{project_id}.json")
+        brief_path = _v5_state_path("briefs", project_id)
         with open(brief_path, "w") as _bf:
             _json.dump(brief, _bf, indent=2)
         return {"ok": True, "project_id": project_id, "brief": brief, "status": "briefed"}
@@ -3807,28 +3807,30 @@ async def forge_v5_projects_start(payload: dict):
 
 
 @app.get("/api/v5/projects/{project_id}/brief")
-async def forge_v5_get_brief(project_id: str):
+async def forge_v5_get_brief(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    data = _v5_read_json(_v5_state_path("briefs", f"{project_id}.json"))
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("briefs", project_id))
     if not data:
         raise HTTPException(404, "brief not found")
     return {"ok": True, "brief": data}
 
 
 @app.post("/api/v5/projects/{project_id}/research")
-async def forge_v5_project_research(project_id: str, payload: dict = None):
+async def forge_v5_project_research(project_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
     """Run research for a project; reads brief from state if not provided."""
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
     try:
         from core.forge_v5_runtime import get_forge_v5_runtime
-        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", f"{project_id}.json"))
+        project_id = _v5_safe_id(project_id, "project_id")
+        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", project_id))
         if not brief:
             raise HTTPException(404, "brief not found — call /api/v5/brief first")
         pack = await get_forge_v5_runtime().run_research(brief)
         import json as _json
-        with open(_v5_state_path("research_packs", f"{project_id}.json"), "w") as _rf:
+        with open(_v5_state_path("research_packs", project_id), "w") as _rf:
             _json.dump(pack, _rf, indent=2)
         return {"ok": True, "research_pack": pack}
     except HTTPException:
@@ -3839,30 +3841,32 @@ async def forge_v5_project_research(project_id: str, payload: dict = None):
 
 
 @app.get("/api/v5/projects/{project_id}/research")
-async def forge_v5_get_research(project_id: str):
+async def forge_v5_get_research(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    data = _v5_read_json(_v5_state_path("research_packs", f"{project_id}.json"))
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("research_packs", project_id))
     if not data:
         raise HTTPException(404, "research pack not found")
     return {"ok": True, "research_pack": data}
 
 
 @app.post("/api/v5/projects/{project_id}/goals/plan")
-async def forge_v5_project_goals_plan(project_id: str, payload: dict = None):
+async def forge_v5_project_goals_plan(project_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
     """Plan goals for a project; reads brief/research from state if not provided."""
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
     try:
         from core.forge_v5_runtime import get_forge_v5_runtime
-        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", f"{project_id}.json"))
+        project_id = _v5_safe_id(project_id, "project_id")
+        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", project_id))
         if not brief:
             raise HTTPException(404, "brief not found — call /api/v5/brief first")
-        research_pack = (payload or {}).get("research_pack") or _v5_read_json(_v5_state_path("research_packs", f"{project_id}.json")) or {}
+        research_pack = (payload or {}).get("research_pack") or _v5_read_json(_v5_state_path("research_packs", project_id)) or {}
         result = await get_forge_v5_runtime().plan_goals(brief, research_pack)
         import json as _json
         goals_data = result.get("goals", result)
-        with open(_v5_state_path("goals", f"{project_id}.json"), "w") as _gf:
+        with open(_v5_state_path("goals", project_id), "w") as _gf:
             _json.dump(goals_data, _gf, indent=2)
         return {"ok": True, **result}
     except HTTPException:
@@ -3873,17 +3877,18 @@ async def forge_v5_project_goals_plan(project_id: str, payload: dict = None):
 
 
 @app.get("/api/v5/projects/{project_id}/goals")
-async def forge_v5_get_goals(project_id: str):
+async def forge_v5_get_goals(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    data = _v5_read_json(_v5_state_path("goals", f"{project_id}.json"))
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("goals", project_id))
     if data is None:
         raise HTTPException(404, "goals not found")
     return {"ok": True, "goals": data if isinstance(data, list) else data.get("goals", [])}
 
 
 @app.post("/api/v5/goals/{goal_id}/execute")
-async def forge_v5_execute_goal(goal_id: str, payload: dict = None):
+async def forge_v5_execute_goal(goal_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
     """Prepare a goal for execution via the V5 runtime."""
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
@@ -3904,27 +3909,29 @@ async def forge_v5_execute_goal(goal_id: str, payload: dict = None):
 
 
 @app.get("/api/v5/projects/{project_id}/report")
-async def forge_v5_get_report(project_id: str):
+async def forge_v5_get_report(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    data = _v5_read_json(_v5_state_path("reports", f"{project_id}.json"))
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("reports", project_id))
     if not data:
         raise HTTPException(404, "report not found")
     return {"ok": True, "report": data}
 
 
 @app.get("/api/v5/goals/{goal_id}/quality-gate")
-async def forge_v5_get_quality_gate(goal_id: str):
+async def forge_v5_get_quality_gate(goal_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    data = _v5_read_json(_v5_state_path("quality_gates", f"{goal_id}.json"))
+    goal_id = _v5_safe_id(goal_id, "goal_id")
+    data = _v5_read_json(_v5_state_path("quality_gates", goal_id))
     if not data:
         raise HTTPException(404, "quality gate not found")
     return {"ok": True, "quality_gate": data}
 
 
 @app.post("/api/v5/goals/{goal_id}/memory")
-async def forge_v5_write_memory(goal_id: str, payload: dict = None):
+async def forge_v5_write_memory(goal_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
     """Write a structured memory lesson for a completed/failed goal.
 
     Honest writeback: returns the real store() result (or the failure) so the
@@ -3943,7 +3950,8 @@ async def forge_v5_write_memory(goal_id: str, payload: dict = None):
         # Persist the quality gate alongside the lesson so the report can read it.
         if quality_gate:
             import json as _json
-            with open(_v5_state_path("quality_gates", f"{goal_id}.json"), "w") as _f:
+            goal_id = _v5_safe_id(goal_id, "goal_id")
+            with open(_v5_state_path("quality_gates", goal_id), "w") as _f:
                 _json.dump(quality_gate, _f)
         return {"ok": bool(result.get("ok", True)), "memory": result}
     except HTTPException:
@@ -4014,10 +4022,10 @@ def get_models_roles():
         from core import model_lanes as ml
         from core import model_role_resolver as rr
         from engine.compute.hardware_profiler import snapshot as hw_snapshot
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/roles import failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/roles import failed")
         return JSONResponse(
-            {"ok": False, "error": "model_orchestration_unavailable", "detail": str(exc)},
+            {"ok": False, "error": "model_orchestration_unavailable", "detail": "internal_error"},
             status_code=503,
         )
     try:
@@ -4028,10 +4036,10 @@ def get_models_roles():
             "tiers": ml.tier_models(),
             "hardware": hw_snapshot(),
         })
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/roles resolution failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/roles resolution failed")
         return JSONResponse(
-            {"ok": False, "error": "role_resolution_failed", "detail": str(exc)},
+            {"ok": False, "error": "role_resolution_failed", "detail": "internal_error"},
             status_code=500,
         )
 
@@ -4047,10 +4055,10 @@ def get_models_benchmarks():
     try:
         from core.state_paths import canonical_state_dir
         path = canonical_state_dir() / "model_benchmarks.json"
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/benchmarks state path failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/benchmarks state path failed")
         return JSONResponse(
-            {"ok": False, "error": "state_dir_unavailable", "detail": str(exc)},
+            {"ok": False, "error": "state_dir_unavailable", "detail": "internal_error"},
             status_code=500,
         )
     if not path.exists():
@@ -4063,10 +4071,10 @@ def get_models_benchmarks():
         with open(path, "r") as fh:
             data = json.load(fh)
         return JSONResponse({"ok": True, **data})
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/benchmarks read failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/benchmarks read failed")
         return JSONResponse(
-            {"ok": False, "error": "benchmarks_unreadable", "path": str(path), "detail": str(exc)},
+            {"ok": False, "error": "benchmarks_unreadable", "path": str(path), "detail": "internal_error"},
             status_code=500,
         )
 
@@ -5890,34 +5898,12 @@ def handle_command(
         except Exception as _bias_exc:
             logger.debug("bias check error (non-fatal): %s", _bias_exc)
 
-    # ── Real execution engine — structured goal → real tool calls ────────────
-    # If the message is a goal (not a question), parse it into a structured plan
-    # and execute it step-by-step with real tools. Rules: no fake results, every
-    # step maps to a real tool, errors are explicit.
-    try:
-        from core.goal_parser import parse_goal as _parse_goal  # noqa: PLC0415
-        from core.real_execution_engine import RealExecutionEngine as _RealExecEngine  # noqa: PLC0415
-        _goal_plan = _parse_goal(message)
-        if not _goal_plan.get("is_goal"):
-            _direct_reply = _direct_conversation_reply(_goal_plan, message)
-            if _direct_reply:
-                return _direct_reply
-        if _goal_plan.get("is_goal") and _goal_plan.get("task_plan"):
-            logger.info("[REAL_ENGINE] Goal detected — %d steps planned", len(_goal_plan["task_plan"]))
-            _engine = _RealExecEngine()
-            _exec_result = _engine.run(_goal_plan["task_plan"], goal=message)
-            _chat_reply = _engine.format_for_chat(_exec_result)
-            # Prepend brief goal summary
-            _structured = _goal_plan.get("structured_goal", {})
-            if _structured.get("action"):
-                _chat_reply = f"Executing: **{_structured['action']}**\n\n" + _chat_reply
-            return _chat_reply
-    except Exception as _real_exc:
-        logger.warning("real_execution_engine failed (non-fatal): %s", _real_exc)
-
-    # ── Unified pipeline — single controlled execution path ───────────────────
-    # All remaining user inputs are routed through process_user_input() which
-    # enforces the full pipeline: graph → LLM → agents → result → forge.
+    # ── Unified pipeline — THE single controlled execution path (C1) ──────────
+    # The former pre-pipeline bypass (goal-parse → direct utility reply / real
+    # execution engine) now lives INSIDE process_user_input as Phase 0, so every
+    # chat input flows through one entry with full telemetry + STRICT_PIPELINE.
+    # All user inputs are routed through process_user_input() which enforces the
+    # full pipeline: graph → LLM → agents → result → forge.
     # The already-resolved routed_agent and mode are forwarded via a closure
     # so server-side keyword routing is preserved while the pipeline adds
     # graph context, task decomposition, and telemetry around every LLM call.

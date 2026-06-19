@@ -8,6 +8,11 @@ from unittest.mock import MagicMock, patch
 # Add runtime to path FIRST so 'core' resolves to the real package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "runtime"))
 
+# Stub modules this test newly injects into sys.modules. Tracked so tearDownModule
+# can remove them — otherwise an empty stub (e.g. core.execution_engine) leaks and
+# breaks later tests that import the real module ("cannot import name ... unknown location").
+_INJECTED_MODULES: list[str] = []
+
 
 def _inject_stubs():
     """Inject minimal stubs so OrchestratorV2 can be imported without the full runtime."""
@@ -17,6 +22,7 @@ def _inject_stubs():
     if orch_mod is None:
         orch_mod = types.ModuleType("core.orchestrator")
         sys.modules["core.orchestrator"] = orch_mod
+        _INJECTED_MODULES.append("core.orchestrator")
     llm_stub = MagicMock()
     llm_stub.complete.return_value = {"output": '{"category": "ops", "urgency": 3}'}
     orch_mod.get_llm_client = MagicMock(return_value=llm_stub)
@@ -25,10 +31,16 @@ def _inject_stubs():
     if not hasattr(orch_mod, "LLMClient"):
         orch_mod.LLMClient = MagicMock
 
+    # NOTE: core.execution_engine is intentionally NOT stubbed. OrchestratorV2
+    # imports it inside a try/except (see _execute_steps), so it never needs a stub,
+    # and an empty stub here leaks into sys.modules and breaks test_execution_engine_qce
+    # ("cannot import name 'ExecutionEngine' ... unknown location").
     for name in ["core.knowledge_store", "core.memory_index", "core.model_routing",
-                 "core.hitl_gate", "core.execution_engine", "core.bus",
+                 "core.hitl_gate", "core.bus",
                  "core.observability.metrics_collector", "core.observability"]:
-        sys.modules.setdefault(name, types.ModuleType(name))
+        if name not in sys.modules:
+            sys.modules[name] = types.ModuleType(name)
+            _INJECTED_MODULES.append(name)
 
     # core.bus — get_message_bus
     bus_mod = sys.modules["core.bus"]
@@ -46,6 +58,13 @@ def _inject_stubs():
 _inject_stubs()
 
 from core.orchestrator_v2 import OrchestratorV2, _PipelineAbort  # noqa: E402
+
+
+def tearDownModule():
+    """Remove stub modules this test injected so later tests import the real ones."""
+    for name in _INJECTED_MODULES:
+        sys.modules.pop(name, None)
+    _INJECTED_MODULES.clear()
 
 
 class TestOrchestratorV2Init(unittest.TestCase):

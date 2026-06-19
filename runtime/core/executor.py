@@ -97,9 +97,26 @@ class Executor:
             except Exception as exc:
                 task.status = "failed"
                 task.error = str(exc)
+                if self._is_non_retryable_error(task.error):
+                    break
                 if attempt < retries:
                     time.sleep(min(2 ** (attempt - 1), 4))
         return task
+
+    @staticmethod
+    def _is_non_retryable_error(message: str) -> bool:
+        text = (message or "").lower()
+        return any(
+            marker in text
+            for marker in (
+                "operation not permitted",
+                "no ai provider available",
+                "llm_provider_unavailable",
+                "ollama not reachable",
+                "permission denied",
+                "pending_approval",
+            )
+        )
 
     def _execute_once(self, task: TaskNode) -> None:
         skill = self._skills.get(task.skill)

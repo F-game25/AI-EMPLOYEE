@@ -8,18 +8,78 @@ Requires order status: betaald (or akkoord with override_payment=True).
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
+import sqlite3
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
+from core.file_lock import FileLock
+
 _AI_HOME = os.environ.get("AI_HOME") or str(Path.home() / ".ai-employee")
 _FORGE_STATE = Path(_AI_HOME) / "state" / "forge"
+logger = logging.getLogger(__name__)
 
 
 def _ts() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _safe_token(value: str, label: str) -> str:
+    token = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", token) or ".." in token:
+        raise ValueError(f"invalid_{label}")
+    return token
+
+
+def _tenant_id() -> str:
+    try:
+        from core.tenancy import get_current_tenant
+        return _safe_token(get_current_tenant().tenant_id, "tenant_id")
+    except Exception:
+        return "default"
+
+
+def _handoff_lock(order_id: str) -> FileLock:
+    lock_dir = _FORGE_STATE / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    return FileLock(lock_dir / f"handoff-{_tenant_id()}-{_safe_token(order_id, 'order_id')}.json", timeout=10)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _audit_handoff(handoff: dict[str, Any]) -> None:
+    try:
+        _FORGE_STATE.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(_FORGE_STATE / "audit.db")) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS audit (id TEXT PRIMARY KEY, event_type TEXT, source TEXT, entity_id TEXT, details TEXT, created_at TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO audit (id, event_type, source, entity_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    f"audit-{uuid.uuid4().hex[:12]}",
+                    "forge_project_created",
+                    "orders",
+                    str(handoff.get("order_id") or ""),
+                    json.dumps(handoff, ensure_ascii=False),
+                    _ts(),
+                ),
+            )
+    except Exception as exc:
+        logger.warning("orders_forge_handoff audit failed: %s", type(exc).__name__)
+    logger.info(
+        "orders_forge_handoff created order_id=%s project_id=%s override_payment=%s",
+        handoff.get("order_id"),
+        handoff.get("forge_project_id"),
+        handoff.get("override_payment_used"),
+    )
 
 
 def build_resource_plan(order_id: str) -> dict[str, Any]:
@@ -95,6 +155,15 @@ def create_forge_project_from_order(
     base_url: str = "",
     override_payment: bool = False,
 ) -> dict[str, Any]:
+    with _handoff_lock(order_id):
+        return _create_forge_project_from_order_locked(order_id, base_url, override_payment)
+
+
+def _create_forge_project_from_order_locked(
+    order_id: str,
+    base_url: str = "",
+    override_payment: bool = False,
+) -> dict[str, Any]:
     """Create a Forge V5 project from an approved/paid order.
 
     Args:
@@ -104,6 +173,7 @@ def create_forge_project_from_order(
     """
     from core.orders_store import order_ophalen, forge_project_opslaan
 
+    order_id = _safe_token(order_id, "order_id")
     order = order_ophalen(order_id)
     if not order:
         return {"ok": False, "error": f"Order {order_id} niet gevonden"}
@@ -180,9 +250,7 @@ def create_forge_project_from_order(
     }
 
     # Persist brief to Forge state
-    briefs_dir = _FORGE_STATE / "briefs"
-    briefs_dir.mkdir(parents=True, exist_ok=True)
-    (briefs_dir / f"{project_id}.json").write_text(json.dumps(brief, indent=2, ensure_ascii=False))
+    _write_json(_FORGE_STATE / "briefs" / f"{_safe_token(project_id, 'project_id')}.json", brief)
 
     # Build handoff package
     handoff = {
@@ -206,9 +274,8 @@ def create_forge_project_from_order(
     }
 
     # Persist handoff
-    handoffs_dir = _FORGE_STATE / "handoffs"
-    handoffs_dir.mkdir(parents=True, exist_ok=True)
-    (handoffs_dir / f"{project_id}.json").write_text(json.dumps(handoff, indent=2, ensure_ascii=False))
+    _write_json(_FORGE_STATE / "handoffs" / f"{_safe_token(project_id, 'project_id')}.json", handoff)
+    _audit_handoff(handoff)
 
     # Store forge_project_id on the order
     forge_project_opslaan(order_id, project_id)

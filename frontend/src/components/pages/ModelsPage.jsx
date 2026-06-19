@@ -310,14 +310,28 @@ function OllamaManager() {
 
   const load = async (name) => {
     setLoadingModel(name)
-    try { await api.post('/api/ollama/load', { name, keep_alive: -1 }) } catch {}
-    setLoadingModel(null); refreshRunning()
+    try {
+      await api.post('/api/ollama/load', { name, keep_alive: -1 })
+    } catch (err) {
+      console.error('Failed to load Ollama model:', err)
+      alert(`Model load failed: ${err?.message || err}`)
+    } finally {
+      setLoadingModel(null)
+      refreshRunning()
+    }
   }
 
   const evict = async (name) => {
     setLoadingModel(name)
-    try { await api.post('/api/ollama/evict', { name }) } catch {}
-    setLoadingModel(null); refreshRunning()
+    try {
+      await api.post('/api/ollama/evict', { name })
+    } catch (err) {
+      console.error('Failed to evict Ollama model:', err)
+      alert(`Model evict failed: ${err?.message || err}`)
+    } finally {
+      setLoadingModel(null)
+      refreshRunning()
+    }
   }
 
   const pull = async () => {

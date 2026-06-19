@@ -1156,7 +1156,10 @@ class TestMoneyMode:
             dry_run=True,
         )
         drafts = [s for s in result["steps"] if s.get("step") == "draft_content"]
-        assert any("Notion" in s["content"] for s in drafts)
+        assert drafts, "expected a draft_content step per platform"
+        # R1: drafted content is saved as a real artifact (output.file_path), not inline text.
+        assert all(s.get("output", {}).get("file_path") for s in drafts)
+        assert result["affiliate_product"] == "Notion"
 
     def test_lead_pipeline_dry_run(self):
         from core.money_mode import MoneyMode

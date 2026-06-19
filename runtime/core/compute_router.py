@@ -93,7 +93,7 @@ class ComputeRouter:
     def select(self, workload: ComputeWorkload) -> ComputeDecision:
         health = self.health()
         level = workload.privacy_level
-        remote_permitted = workload.remote_allowed or level in ("remote_allowed", "external_api_allowed")
+        remote_permitted = workload.remote_allowed or level == "remote_allowed"
         external_permitted = workload.external_allowed or level == "external_api_allowed"
 
         # Local first — always honest, never leaves the box.

@@ -136,6 +136,7 @@ class ForgeV7ExecutionStore {
       summary: String(body.summary || goal.description || goal.title || 'Patch proposal').slice(0, 2000),
       files_intended: filesIntended,
       diff: redact(diff),
+      diff_exec: diff,
       file_patches: files,
       risk_level: ['SAFE', 'CAUTION', 'DANGEROUS', 'BLOCKED'].includes(risk) ? risk : 'CAUTION',
       requires_approval: true,
@@ -216,9 +217,12 @@ class ForgeV7ExecutionStore {
 
     const touched = new Set()
     let applyOutput = ''
-    if (proposal.diff) {
+    // Apply the ORIGINAL diff, not proposal.diff — that copy is redacted + capped at
+    // 12KB for display/audit and would corrupt the patch (replaced secrets, truncation).
+    const execDiff = proposal.diff_exec || proposal.diff
+    if (execDiff) {
       const patchFile = path.join(workspace.path, '.forge_v7_patch.diff')
-      fs.writeFileSync(patchFile, proposal.diff, 'utf8')
+      fs.writeFileSync(patchFile, execDiff, 'utf8')
       const applied = forgeWorkspace.runGit(workspace.path, ['apply', '--whitespace=nowarn', patchFile], 30000)
       applyOutput = applied.stdout || applied.stderr
       try { fs.unlinkSync(patchFile) } catch { /* ignore */ }
@@ -419,17 +423,22 @@ class ForgeV7ExecutionStore {
     const projectRoot = forgeWorkspace.safeProjectRoot(project)
     const files = asArray(workspace.files_touched?.length ? workspace.files_touched : proposal.files_intended).map(safeRel).filter(Boolean)
     const rollbackPatches = []
+    const createdFiles = []
     const applied = []
     for (const rel of files) {
       const src = path.join(workspace.path, rel)
       const dst = path.join(projectRoot, rel)
-      const before = fs.existsSync(dst) ? fs.readFileSync(dst, 'utf8') : ''
+      const existedBefore = fs.existsSync(dst)
+      const before = existedBefore ? fs.readFileSync(dst, 'utf8') : ''
       if (!fs.existsSync(src)) continue
       const after = fs.readFileSync(src, 'utf8')
       ensureDir(path.dirname(dst))
       fs.writeFileSync(dst, after, 'utf8')
       applied.push({ path: rel, bytes: Buffer.byteLength(after, 'utf8') })
-      rollbackPatches.push(forgeDiff.generateUnifiedDiff(after, before, rel))
+      // Files that did not exist before must be DELETED on rollback — an
+      // after->"" diff would leave a zero-byte file. Record them separately.
+      if (existedBefore) rollbackPatches.push(forgeDiff.generateUnifiedDiff(after, before, rel))
+      else createdFiles.push(rel)
     }
     if (body.stage_only && applied.length) {
       forgeWorkspace.runGit(projectRoot, ['add', '--', ...applied.map(item => item.path)], 30000)
@@ -441,6 +450,7 @@ class ForgeV7ExecutionStore {
       patch_artifact_id: proposal.artifact_id,
       approval_id: approval.approval_id,
       files_changed: applied.map(item => item.path),
+      files_created: createdFiles,
       reverse_patch: redact(rollbackPatches.join('\n')),
       status: applied.length ? 'available' : 'unavailable',
       created_at: nowIso(),
