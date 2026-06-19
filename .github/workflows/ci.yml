@@ -68,6 +68,19 @@ jobs:
           pip install -r runtime/requirements-core.txt \
                       -r requirements-test.txt -q
 
+      # Some Python tests shell out to Node (forge memory-graph persists via
+      # better-sqlite3). Without it ForgeStore's graph methods no-op and the
+      # roundtrip tests fail — so provide the same Node backend the node job uses.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install Node deps for subprocess-backed tests
+        run: |
+          npm ci
+          npm install --no-save better-sqlite3@12.9.0
+
       - name: Run pytest
         run: |
           python3 -m pytest tests/ \
