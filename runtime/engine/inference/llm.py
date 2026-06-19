@@ -120,10 +120,13 @@ def _ollama_quant(model: str) -> str | None:
     return quant
 
 
-def _legacy_offload_options(model: str) -> dict:
-    """Fallback offload options via turbo_quant (used when a model has no vram_budget
-    quant profile). Computes num_gpu/low_vram from disk_offload_config() + free VRAM —
-    stops OOM on models exceeding VRAM (e.g. 14B on 8 GB)."""
+def _build_ollama_options(model: str) -> dict:
+    """Compute Ollama inference options: num_gpu (layers on GPU), num_thread, low_vram.
+
+    Uses the existing disk_offload_config() from turbo_quant and _free_vram_mb()
+    from lifecycle_manager to compute how many layers to keep on GPU vs offload
+    to CPU/RAM. This stops OOM crashes on models that exceed VRAM (e.g. 14B on 8 GB).
+    """
     try:
         from neural_brain.models.lifecycle_manager import _free_vram_mb
         import importlib, pathlib as _pl, sys as _sys
@@ -182,125 +185,8 @@ def _legacy_offload_options(model: str) -> dict:
         return opts
 
     except Exception as exc:  # noqa: BLE001
-        logger.debug("_legacy_offload_options skipped: %s", exc)
+        logger.debug("_build_ollama_options skipped: %s", exc)
         return {}
-
-
-def _build_ollama_options(model: str, quant: str | None = None) -> tuple[dict, dict]:
-    """Ollama inference options + budget meta for ``model@quant`` (A4).
-
-    Primary path: ``vram_budget.plan()`` — KV-cache-aware, measured free VRAM →
-    num_gpu / num_ctx / low_vram. Fallback: legacy turbo_quant offload (unprofiled
-    model). Returns ``(ollama_options, meta)``; meta carries est_vram_mb / free_vram_mb
-    / num_gpu / num_ctx / fits / source for inference logging + lifecycle eviction (A6).
-    """
-    ctx = int(os.environ.get("OLLAMA_NUM_CTX", "4096"))
-    n_thread = min(8, os.cpu_count() or 4)
-    meta: dict = {"source": None, "num_ctx": ctx}
-    try:
-        from engine.compute.vram_budget import plan as _plan
-        p = _plan(model, quant, ctx)
-        if p.get("weights_mb") is not None:  # model has a quant profile → budget it
-            free = p.get("free_vram_mb")
-            opts: dict = {
-                "num_thread": n_thread,
-                "num_batch": 256 if (free is not None and free < 4000) else 512,
-                "num_ctx": int(p.get("num_ctx", ctx)),
-            }
-            ng = p.get("num_gpu")
-            if isinstance(ng, int) and ng >= 0:   # -1 == all layers → let Ollama default
-                opts["num_gpu"] = ng
-            if p.get("low_vram"):
-                opts["low_vram"] = True
-            meta.update(source="vram_budget", est_vram_mb=p.get("est_vram_mb"),
-                        free_vram_mb=free, num_gpu=ng, num_ctx=opts["num_ctx"],
-                        fits=p.get("fits"), recommend_remote=p.get("recommend_remote"))
-            logger.debug("ollama_options[budget] model=%s quant=%s %s", model, quant, p.get("reason"))
-            return opts, meta
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("_build_ollama_options budget path skipped: %s", exc)
-    meta.update(source="legacy")
-    return _legacy_offload_options(model), meta
-
-
-# ── Quant resolution + honest availability (A4) ───────────────────────────────
-def _resolve_quant_model(base_model: str) -> tuple[str, str | None]:
-    """Resolve the router's chosen model to (model, quant) via its quant ladder +
-    live free VRAM (A2). Never changes model identity — only adds the best-fitting
-    quant. Falls back to (base_model, None) if model_lanes/profile is unavailable."""
-    try:
-        from core.model_lanes import best_quant_for_model
-        res = best_quant_for_model(base_model)
-        return res.get("model", base_model), res.get("quant")
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("_resolve_quant_model fallback model=%s: %s", base_model, exc)
-        return base_model, None
-
-
-_tags_cache: dict[str, Any] = {"ts": 0.0, "tags": None}
-
-
-def _installed_tags(ttl: float = 30.0) -> set[str] | None:
-    """Installed Ollama tags (cached ``ttl`` s). None = list unavailable (don't block)."""
-    import time as _t
-    now = _t.time()
-    if _tags_cache["tags"] is not None and (now - _tags_cache["ts"]) < ttl:
-        return _tags_cache["tags"]
-    try:
-        resp = _ollama_get("/api/tags", timeout=8)
-        tags = {m.get("name", "") for m in resp.get("models", []) if m.get("name")}
-        tags |= {n.split(":")[0] for n in list(tags) if ":" in n}  # also bare names
-        _tags_cache.update(ts=now, tags=tags)
-        return tags
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("installed_tags unavailable: %s", exc)
-        return None
-
-
-def ensure_model_available(model: str, quant: str | None = None) -> dict:
-    """Honest availability check for an Ollama model tag — never a silent OOM/downgrade.
-
-    Installed → available. Not installed → ``ollama pull`` only when OLLAMA_AUTO_PULL=1
-    (a multi-GB pull must never block the hot path silently); else return
-    ``available=False`` + ``install_suggestion`` so the caller blocks/escalates.
-    """
-    tags = _installed_tags()
-    if tags is None:
-        return {"available": True, "model": model, "quant": quant,
-                "reason": "tag list unavailable; proceeding (Ollama errors if missing)"}
-    if model in tags or model.split(":")[0] in tags:
-        return {"available": True, "model": model, "quant": quant, "reason": "installed"}
-    if os.environ.get("OLLAMA_AUTO_PULL") == "1":
-        try:
-            logger.info("auto-pull model=%s (OLLAMA_AUTO_PULL=1)", model)
-            _ollama_post("/api/pull", {"name": model, "stream": False}, 1800)
-            _tags_cache["tags"] = None  # invalidate cache
-            return {"available": True, "model": model, "quant": quant, "reason": "pulled"}
-        except Exception as exc:  # noqa: BLE001
-            return {"available": False, "model": model, "quant": quant,
-                    "reason": f"auto-pull failed: {exc}", "install_suggestion": model}
-    return {"available": False, "model": model, "quant": quant,
-            "reason": f"model '{model}' not installed", "install_suggestion": model}
-
-
-def _log_inference(model: str, quant: str | None, meta: dict, latency_ms: float, tier: str) -> None:
-    """Append one inference record to ``state/turbo_quant.log.jsonl`` (A4 observability)."""
-    try:
-        import time as _t
-        from core.state_paths import canonical_state_dir
-        rec = {
-            "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
-            "model": model, "quant": quant, "tier": tier,
-            "est_vram_mb": meta.get("est_vram_mb"), "free_vram_mb": meta.get("free_vram_mb"),
-            "num_gpu": meta.get("num_gpu"), "num_ctx": meta.get("num_ctx"),
-            "fits": meta.get("fits"), "source": meta.get("source"),
-            "latency_ms": round(latency_ms, 1),
-        }
-        path = canonical_state_dir() / "turbo_quant.log.jsonl"
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec) + "\n")
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("_log_inference skipped: %s", exc)
 
 
 _CORE_MODELS = [DEFAULT_MODEL, DEFAULT_EMBED_MODEL]
@@ -332,36 +218,58 @@ def _ollama_get(endpoint: str, timeout: int) -> dict:
         raise RuntimeError(f"Ollama not reachable at {OLLAMA_HOST}: {exc}") from exc
 
 
+def _lifecycle_manager():
+    try:
+        from neural_brain.models.lifecycle_manager import get_lifecycle_manager
+        return get_lifecycle_manager()
+    except Exception:
+        return None
+
+
+def _lifecycle_loaded_models(mgr=None) -> set[str]:
+    mgr = mgr or _lifecycle_manager()
+    try:
+        return {e.model_id for e in getattr(mgr, "_reg", {}).values() if getattr(e, "loaded", False)}
+    except Exception:
+        return set()
+
+
 def _evict_idle_models(keep: frozenset[str] | None = None) -> None:
     """Unload non-permanent models from Ollama VRAM (keep_alive=0).
 
     Called before loading a heavy model when VRAM headroom is tight.
     Permanent models (llama3.2, nomic-embed-text) are never evicted.
     """
-    keep_set = keep if keep is not None else _PERMANENT_MODELS
+    mgr = _lifecycle_manager()
+    keep_set = set(keep if keep is not None else _PERMANENT_MODELS) | _lifecycle_loaded_models(mgr)
+    lock = getattr(mgr, "_lock", None)
     try:
-        resp = _ollama_get("/api/ps", timeout=8)
-        for m in resp.get("models", []):
-            name = m.get("name", "")
-            if name and name not in keep_set:
-                logger.info("evict_idle model=%s", name)
-                _ollama_unloader(name)()
+        if lock:
+            lock.acquire()
+        try:
+            resp = _ollama_get("/api/ps", timeout=8)
+            for m in resp.get("models", []):
+                name = m.get("name", "")
+                if name and name not in keep_set:
+                    logger.info("evict_idle model=%s", name)
+                    _ollama_unloader(name)()
+        finally:
+            if lock:
+                lock.release()
     except Exception as exc:
         logger.debug("evict_idle_models skipped: %s", exc)
 
 
-def ensure_model_ready(model: str, needed_mb: float | None = None) -> bool:
-    """Warm *model* into VRAM, evicting idle models first if headroom is tight (A6).
+def ensure_model_ready(model: str, options: dict[str, Any] | None = None) -> bool:
+    """Warm *model* into VRAM, evicting idle models first if headroom is tight.
 
-    ``needed_mb`` is the live KV-aware VRAM estimate from ``vram_budget.plan`` (passed
-    by generate()); when absent we fall back to the static ``_MODEL_VRAM_MB`` table.
-    Permanent models (llama3.2, nomic-embed-text) get keep_alive=-1 so Ollama never
-    evicts them between calls — one heavy model at a time, core models stay hot.
-    On-demand heavy models get keep_alive=300s. Returns True on success.
+    Permanent models (llama3.2, nomic-embed-text) get keep_alive=-1 so Ollama
+    never evicts them between calls.  On-demand heavy models get keep_alive=300s.
+    Returns True on success, False if Ollama is unreachable.
     """
     if not model:
         return False
-    needed_mb = needed_mb if needed_mb is not None else _MODEL_VRAM_MB.get(model, 5000)
+    needed_mb = _MODEL_VRAM_MB.get(model, 5000)
     try:
         from neural_brain.models.lifecycle_manager import _free_vram_mb
         free_mb = _free_vram_mb() or 0
@@ -373,7 +281,10 @@ def ensure_model_ready(model: str, needed_mb: float | None = None) -> bool:
 
     keep_alive: int = -1 if model in _PERMANENT_MODELS else 300
     try:
-        _ollama_post("/api/generate", {"model": model, "prompt": " ", "keep_alive": keep_alive, "stream": False}, 30)
+        payload = {"model": model, "prompt": " ", "keep_alive": keep_alive, "stream": False}
+        if options:
+            payload["options"] = options
+        _ollama_post("/api/generate", payload, 30)
         logger.info("model_ready model=%s keep_alive=%s", model, keep_alive)
         return True
     except Exception as exc:
@@ -493,21 +404,11 @@ def generate(
         except Exception as exc:  # noqa: BLE001
             logger.warning("ai_router failed (%s) — falling back to direct Ollama", exc)
 
-    # A4: resolve a concrete quant for the routed model + budget VRAM (KV-aware), and
-    # fail honestly if the model isn't installed — never silently OOM or swap to a
-    # weaker model. Model identity is unchanged; only the quant/offload plan is added.
-    resolved_model, quant = _resolve_quant_model(chosen_model)
-    avail = ensure_model_available(resolved_model, quant)
-    if not avail.get("available", True):
-        suggest = (f" — install: ollama pull {avail['install_suggestion']}"
-                   if avail.get("install_suggestion") else "")
-        raise RuntimeError(f"model '{resolved_model}' unavailable: {avail.get('reason')}{suggest}")
-
-    offload_opts, budget = _build_ollama_options(resolved_model, quant)
-    mgr, _ = _enforce_lifecycle(resolved_model)
-    ensure_model_ready(resolved_model, needed_mb=budget.get("est_vram_mb"))
+    offload_opts = _build_ollama_options(chosen_model)
+    mgr, _ = _enforce_lifecycle(chosen_model)
+    ensure_model_ready(chosen_model, offload_opts)
     payload = {
-        "model": resolved_model,
+        "model": chosen_model,
         "prompt": full_prompt,
         "system": system,
         "stream": False,
@@ -516,13 +417,12 @@ def generate(
     import time as _t
     t0 = _t.time()
     response = _ollama_post("/api/generate", payload, timeout)
-    latency_ms = (_t.time() - t0) * 1000
     if mgr is not None:
         try:
-            mgr.mark_loaded(resolved_model, load_ms=latency_ms, quant=_ollama_quant(resolved_model))
+            mgr.mark_loaded(chosen_model, load_ms=(_t.time() - t0) * 1000,
+                            quant=_ollama_quant(chosen_model))
         except Exception:  # noqa: BLE001
             pass
-    _log_inference(resolved_model, quant, budget, latency_ms, decision.tier)
     return response.get("response", "")
 
 
