@@ -1,4 +1,8 @@
 'use strict';
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
+
+const rateLimit = createRouteRateLimit({ keyPrefix: 'media-demo-assets', max: 60, windowMs: 60_000 });
+
 module.exports = function createMediaRouter(deps) {
   const router = require('express').Router();
   const { requireAuth, path, fs, AI_HOME, ARTIFACTS_DIR, readJsonLinesRecent, statePath } = deps;
@@ -157,7 +161,7 @@ module.exports = function createMediaRouter(deps) {
 
   // Publicly serve uploaded order photos used in demos: /api/demos/_assets/<id>/<file>
   // (3 path segments — never matches the 1-/2-segment demo routes below.)
-  router.get('/api/demos/_assets/:id/:file', (req, res) => {
+  router.get('/api/demos/_assets/:id/:file', rateLimit, (req, res) => {
     const id = path.basename(req.params.id);
     const file = path.basename(req.params.file);
     const fpath = path.resolve(path.join(DEMOS_DIR, '_assets', id, file));

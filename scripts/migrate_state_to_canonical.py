@@ -49,8 +49,8 @@ def main() -> int:
 
     src = Path(args.repo_state).resolve()
     dst = canonical_state_dir().resolve()
-    print(f"repo-local : {src}")
-    print(f"canonical  : {dst}")
+    print("repo-local : configured")
+    print("canonical  : configured")
     if src == dst:
         print("✓ already one tree (src == canonical) — nothing to do.")
         return 0
@@ -91,9 +91,10 @@ def main() -> int:
 
     print(f"\n{'APPLIED' if args.apply else 'DRY-RUN'} summary:")
     print(f"  copied (repo-only)      : {len(copied)}")
-    print(f"  promoted (repo newer)   : {len(promoted)}  (backed up to {backup if args.apply else '<backup>'})")
+    backup_status = "created" if args.apply and backed_up else "not created"
+    print(f"  promoted (repo newer)   : {len(promoted)}  (backup: {backup_status})")
     print(f"  skipped (canonical wins): {len(skipped_older)}")
-    print(f"  skipped DBs (manual)    : {len(skipped_db)}  {skipped_db if skipped_db else ''}")
+    print(f"  skipped DBs (manual)    : {len(skipped_db)}")
     if not args.apply:
         print("\nRe-run with --apply to perform the migration.")
     if skipped_db:
