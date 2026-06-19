@@ -642,6 +642,49 @@ class ForgeStore {
         );
         CREATE INDEX IF NOT EXISTS idx_forge_stage_usage_project
           ON forge_stage_context_usage(project_id, run_id);
+
+        CREATE TABLE IF NOT EXISTS forge_v5_artifacts (
+          artifact_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          artifact_type TEXT NOT NULL,
+          status TEXT DEFAULT 'available',
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_v5_artifacts_project
+          ON forge_v5_artifacts(project_id, artifact_type, updated_at);
+
+        CREATE TABLE IF NOT EXISTS forge_v5_goals (
+          goal_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          status TEXT DEFAULT 'proposed',
+          priority INTEGER DEFAULT 50,
+          risk_level TEXT DEFAULT 'low',
+          approval_required INTEGER DEFAULT 1,
+          backlog_id TEXT,
+          run_id TEXT,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_v5_goals_project
+          ON forge_v5_goals(project_id, status, priority);
+
+        CREATE TABLE IF NOT EXISTS forge_v5_quality_gates (
+          quality_gate_id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL,
+          project_id TEXT,
+          run_id TEXT,
+          status TEXT DEFAULT 'partial',
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_v5_quality_goal
+          ON forge_v5_quality_gates(goal_id, updated_at);
       `)
       this.backend = 'sqlite'
       this.lastError = null
@@ -2291,6 +2334,230 @@ class ForgeStore {
     data.model_versions = versions
     this._saveTrainingData(projectId, data)
     return versions.find(v => v.model_version_id === mv.model_version_id)
+  }
+
+  // ── Forge V5 project runtime ─────────────────────────────────────────────
+
+  _v5File(projectId) {
+    return path.join(this.forgeHome, 'v5', `${projectId}.json`)
+  }
+
+  _loadV5Data(projectId) {
+    return readJson(this._v5File(projectId), { artifacts: [], goals: [], quality_gates: [] })
+  }
+
+  _saveV5Data(projectId, data) {
+    writeJson(this._v5File(projectId), {
+      artifacts: asList(data.artifacts),
+      goals: asList(data.goals),
+      quality_gates: asList(data.quality_gates),
+    })
+  }
+
+  upsertV5Artifact(artifact) {
+    const now = nowIso()
+    const rec = {
+      artifact_id: artifact.artifact_id || `v5-artifact-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      project_id: artifact.project_id,
+      artifact_type: artifact.artifact_type || artifact.type || 'artifact',
+      status: artifact.status || 'available',
+      payload: artifact.payload || artifact.data || {},
+      created_at: artifact.created_at || now,
+      updated_at: now,
+    }
+    this._ensureDb()
+    if (this._db) {
+      try {
+        this._db.prepare(`
+          INSERT OR REPLACE INTO forge_v5_artifacts
+            (artifact_id, project_id, artifact_type, status, payload_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(rec.artifact_id, rec.project_id, rec.artifact_type, rec.status, JSON.stringify(rec.payload), rec.created_at, rec.updated_at)
+        return rec
+      } catch (err) { this._degrade(err) }
+    }
+    const data = this._loadV5Data(rec.project_id)
+    data.artifacts = [rec, ...asList(data.artifacts).filter(item => item.artifact_id !== rec.artifact_id)]
+    this._saveV5Data(rec.project_id, data)
+    return rec
+  }
+
+  getV5Artifacts(projectId, artifactType = null) {
+    this._ensureDb()
+    if (this._db) {
+      try {
+        const sql = artifactType
+          ? 'SELECT * FROM forge_v5_artifacts WHERE project_id = ? AND artifact_type = ? ORDER BY datetime(updated_at) DESC'
+          : 'SELECT * FROM forge_v5_artifacts WHERE project_id = ? ORDER BY datetime(updated_at) DESC'
+        const rows = artifactType
+          ? this._db.prepare(sql).all(projectId, artifactType)
+          : this._db.prepare(sql).all(projectId)
+        return rows.map(row => ({
+          artifact_id: row.artifact_id,
+          project_id: row.project_id,
+          artifact_type: row.artifact_type,
+          status: row.status,
+          payload: (() => { try { return JSON.parse(row.payload_json) } catch { return {} } })(),
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+        }))
+      } catch (err) { this._degrade(err) }
+    }
+    const data = this._loadV5Data(projectId)
+    return asList(data.artifacts)
+      .filter(item => !artifactType || item.artifact_type === artifactType)
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+  }
+
+  getV5Artifact(projectId, artifactType) {
+    return this.getV5Artifacts(projectId, artifactType)[0] || null
+  }
+
+  upsertV5Goal(goal) {
+    const now = nowIso()
+    const rec = {
+      ...goal,
+      goal_id: goal.goal_id || goal.id || `v5g-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      project_id: goal.project_id,
+      title: goal.title || 'Untitled V5 goal',
+      description: goal.description || '',
+      status: goal.status || 'proposed',
+      priority: typeof goal.priority === 'number' ? goal.priority : 50,
+      risk_level: goal.risk_level || 'low',
+      approval_required: goal.approval_required !== false,
+      backlog_id: goal.backlog_id || null,
+      run_id: goal.run_id || null,
+      created_at: goal.created_at || now,
+      updated_at: now,
+    }
+    this._ensureDb()
+    if (this._db) {
+      try {
+        this._db.prepare(`
+          INSERT OR REPLACE INTO forge_v5_goals
+            (goal_id, project_id, title, description, status, priority, risk_level,
+             approval_required, backlog_id, run_id, payload_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          rec.goal_id, rec.project_id, rec.title, rec.description, rec.status,
+          rec.priority, rec.risk_level, rec.approval_required ? 1 : 0,
+          rec.backlog_id, rec.run_id, JSON.stringify(rec), rec.created_at, rec.updated_at,
+        )
+        return rec
+      } catch (err) { this._degrade(err) }
+    }
+    const data = this._loadV5Data(rec.project_id)
+    data.goals = [rec, ...asList(data.goals).filter(item => item.goal_id !== rec.goal_id)]
+    this._saveV5Data(rec.project_id, data)
+    return rec
+  }
+
+  getV5Goals(projectId) {
+    this._ensureDb()
+    if (this._db) {
+      try {
+        return this._db.prepare(
+          'SELECT payload_json FROM forge_v5_goals WHERE project_id = ? ORDER BY priority DESC, datetime(created_at) ASC'
+        ).all(projectId).map(row => {
+          try { return JSON.parse(row.payload_json) } catch { return null }
+        }).filter(Boolean)
+      } catch (err) { this._degrade(err) }
+    }
+    return asList(this._loadV5Data(projectId).goals)
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  }
+
+  findV5Goal(goalId) {
+    if (!goalId) return null
+    this._ensureDb()
+    if (this._db) {
+      try {
+        const row = this._db.prepare('SELECT payload_json FROM forge_v5_goals WHERE goal_id = ?').get(goalId)
+        return row ? JSON.parse(row.payload_json) : null
+      } catch (err) { this._degrade(err) }
+    }
+    const dir = path.join(this.forgeHome, 'v5')
+    try {
+      for (const file of fs.readdirSync(dir)) {
+        if (!file.endsWith('.json')) continue
+        const data = readJson(path.join(dir, file), { goals: [] })
+        const found = asList(data.goals).find(item => item.goal_id === goalId)
+        if (found) return found
+      }
+    } catch {}
+    return null
+  }
+
+  updateV5Goal(goalId, patch) {
+    const goal = this.findV5Goal(goalId)
+    if (!goal) return null
+    return this.upsertV5Goal({ ...goal, ...patch, goal_id: goalId, updated_at: nowIso() })
+  }
+
+  // Remove all V5 goals for a project so re-planning replaces rather than
+  // accumulates duplicates. Returns the number of goals removed.
+  clearV5Goals(projectId) {
+    if (!projectId) return 0
+    this._ensureDb()
+    if (this._db) {
+      try {
+        const info = this._db.prepare('DELETE FROM forge_v5_goals WHERE project_id = ?').run(projectId)
+        return info.changes || 0
+      } catch (err) { this._degrade(err) }
+    }
+    const data = this._loadV5Data(projectId)
+    const removed = asList(data.goals).length
+    data.goals = []
+    this._saveV5Data(projectId, data)
+    return removed
+  }
+
+  upsertV5QualityGate(gate) {
+    const now = nowIso()
+    const rec = {
+      ...gate,
+      quality_gate_id: gate.quality_gate_id || `qg-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      goal_id: gate.goal_id,
+      project_id: gate.project_id || null,
+      run_id: gate.run_id || null,
+      status: gate.status || 'partial',
+      created_at: gate.created_at || now,
+      updated_at: now,
+    }
+    this._ensureDb()
+    if (this._db) {
+      try {
+        this._db.prepare(`
+          INSERT OR REPLACE INTO forge_v5_quality_gates
+            (quality_gate_id, goal_id, project_id, run_id, status, payload_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(rec.quality_gate_id, rec.goal_id, rec.project_id, rec.run_id, rec.status, JSON.stringify(rec), rec.created_at, rec.updated_at)
+        return rec
+      } catch (err) { this._degrade(err) }
+    }
+    const projectId = rec.project_id || this.findV5Goal(rec.goal_id)?.project_id
+    if (!projectId) return rec
+    const data = this._loadV5Data(projectId)
+    data.quality_gates = [rec, ...asList(data.quality_gates).filter(item => item.quality_gate_id !== rec.quality_gate_id && item.goal_id !== rec.goal_id)]
+    this._saveV5Data(projectId, data)
+    return rec
+  }
+
+  getV5QualityGate(goalId) {
+    this._ensureDb()
+    if (this._db) {
+      try {
+        const row = this._db.prepare(
+          'SELECT payload_json FROM forge_v5_quality_gates WHERE goal_id = ? ORDER BY datetime(updated_at) DESC LIMIT 1'
+        ).get(goalId)
+        return row ? JSON.parse(row.payload_json) : null
+      } catch (err) { this._degrade(err) }
+    }
+    const goal = this.findV5Goal(goalId)
+    if (!goal?.project_id) return null
+    return asList(this._loadV5Data(goal.project_id).quality_gates)
+      .filter(item => item.goal_id === goalId)
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))[0] || null
   }
 
   // ── Cognitive events ──────────────────────────────────────────────────────

@@ -21,6 +21,7 @@ const { getAscendForgeEngine, DEFAULT_APPROVAL_POLICY } = require('../ascendforg
 const { getSandboxExecutor } = require('../infra/sandbox/executor')
 const { ForgeStore } = require('../services/forge_store')
 const { ForgeLearningStore } = require('../services/forge_learning_store')
+const { ForgeV7ExecutionStore } = require('../services/forge_v7_execution')
 const forgeWorkspace = require('../services/forge_workspace')
 const forgePath = require('../services/forge_path')
 const forgeDiff = require('../services/forge_diff')
@@ -28,6 +29,15 @@ const forgeLearning = require('../services/forge_learning')
 const forgeTraining = require('../services/forge_training')
 const forgeMemoryGraph = require('../services/forge_memory_graph')
 const forgeContextEngine = require('../services/forge_context_engine')
+const broadcaster = require('../events/broadcaster')
+
+// Lightweight logger shim — several swarm/execute paths reference `logger.*`.
+// Maps to console so those paths log instead of throwing "logger is not defined".
+const logger = {
+  info: (...a) => console.log('[forge]', ...a),
+  warn: (...a) => console.warn('[forge]', ...a),
+  error: (...a) => console.error('[forge]', ...a),
+}
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const STATE_DIR = path.resolve(process.env.STATE_DIR || process.env.AI_EMPLOYEE_STATE_DIR || path.join(os.homedir(), '.ai-employee', 'state'))
@@ -91,6 +101,7 @@ const MAX_STAGED_COPY_FILES = 2500
 const MAX_STAGED_COPY_BYTES = 50 * 1024 * 1024
 const _forgeStore       = new ForgeStore({ forgeHome: FORGE_HOME, runsFile: RUNS_FILE, maxRuns: MAX_RUNS })
 const _forgeLearning    = new ForgeLearningStore(FORGE_HOME)
+const _forgeV7          = new ForgeV7ExecutionStore({ forgeHome: FORGE_HOME })
 // Unified proxy so all forgeRunStore.X calls resolve to the right store
 const forgeRunStore = new Proxy(_forgeStore, {
   get(target, prop) {
@@ -121,6 +132,9 @@ function appendAudit(event, details = {}) {
   ensureDir(path.dirname(AUDIT_FILE))
   fs.appendFileSync(AUDIT_FILE, JSON.stringify({ ts: new Date().toISOString(), event, details }) + '\n', { mode: 0o600 })
   forgeRunStore.recordAudit(event, details)
+  if (String(event || '').startsWith('forge_')) {
+    broadcastForge('forge:diagnostic', { event, details, level: 'info' })
+  }
 }
 
 function nowIso() {
@@ -187,6 +201,382 @@ function updateAction(id, patch) {
   const updated = actions.map(action => action.id === id ? { ...action, ...patch, updated_at: nowIso() } : action)
   saveActions(updated)
   return updated.find(action => action.id === id) || null
+}
+
+const RUN_ACTIVE_STATUSES = new Set(['running', 'planning', 'testing', 'executing', 'in_progress', 'agentic'])
+const RUN_WAITING_STATUSES = new Set(['awaiting_approval', 'waiting_approval', 'staged', 'verify_failed', 'blocked'])
+const RUN_TERMINAL_STATUSES = new Set(['applied', 'complete', 'completed', 'cancelled', 'canceled', 'failed'])
+const APPROVAL_STATUSES = new Set(['pending_approval', 'requires_approval', 'awaiting_approval', 'waiting_approval', 'staged'])
+let _agentEngineCapabilityCache = null
+let _forgeRuntimeSwarmConfig = null
+
+function broadcastForge(event, data = {}) {
+  try {
+    broadcaster.broadcast(event, { ...data, emitted_at: nowIso() })
+  } catch {
+    // Best-effort only. Forge API responses remain authoritative.
+  }
+}
+
+function emitForgeRuntimeSnapshot(reason, query = {}) {
+  try {
+    broadcastForge('forge:runtime_snapshot', { reason, snapshot: buildForgeRuntimeSnapshot(query) })
+  } catch (err) {
+    broadcastForge('forge:diagnostic', { level: 'warning', event: 'runtime_snapshot_failed', message: err.message })
+  }
+}
+
+function statusOf(value) {
+  return String(value || '').toLowerCase()
+}
+
+function runIdOf(run) {
+  return run?.run_id || run?.id || null
+}
+
+function projectIdOf(value) {
+  return value?.project_id || value?.projectId || null
+}
+
+function uniqueBy(items, keyFn) {
+  const out = []
+  const seen = new Set()
+  for (const item of items || []) {
+    const key = keyFn(item)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
+function summarizeRun(run) {
+  if (!run) return null
+  const latestTest = Array.isArray(run.test_results) ? run.test_results.slice(-1)[0] : null
+  return {
+    id: runIdOf(run),
+    run_id: runIdOf(run),
+    type: 'run',
+    project_id: run.project_id,
+    task_id: run.linked_backlog_id || run.task_id || run.context_pack?.task_id || null,
+    goal: run.goal,
+    status: run.status || 'unknown',
+    mode: run.mode || null,
+    provider: run.provider || null,
+    phase: run.review?.status || run.status || null,
+    action_count: Array.isArray(run.actions) ? run.actions.length : 0,
+    patch_count: Array.isArray(run.patches) ? run.patches.length : 0,
+    approval_count: Array.isArray(run.approvals) ? run.approvals.length : 0,
+    verification_count: Array.isArray(run.test_results) ? run.test_results.length : 0,
+    latest_verification_passed: latestTest ? latestTest.all_passed === true : null,
+    has_report: !!run.final_report,
+    created_at: run.created_at || null,
+    updated_at: run.updated_at || null,
+    source_endpoint: `/api/forge/runs/${runIdOf(run)}`,
+  }
+}
+
+function actionBelongsToRun(action, run) {
+  const rid = runIdOf(run)
+  if (!action || !rid) return false
+  if (action.run_id === rid || action.runId === rid) return true
+  const ids = new Set((run.actions || []).map(a => a.id || a.action_id).filter(Boolean))
+  return ids.has(action.id || action.action_id)
+}
+
+function collectRunActions(run) {
+  if (!run) return []
+  const persisted = loadActions().filter(action => actionBelongsToRun(action, run))
+  return uniqueBy([...(run.actions || []), ...persisted], action => action.id || action.action_id)
+}
+
+function collectPendingApprovals(runs, actions) {
+  const runMap = new Map((runs || []).map(run => [runIdOf(run), run]))
+  return (actions || [])
+    .filter(action => APPROVAL_STATUSES.has(statusOf(action.status)) || action.approval_required === true)
+    .map(action => {
+      const run = runMap.get(action.run_id || action.runId)
+      return {
+        id: action.id || action.action_id,
+        type: 'approval',
+        status: action.status || 'pending_approval',
+        project_id: action.project_id || run?.project_id || null,
+        run_id: action.run_id || action.runId || runIdOf(run),
+        action_id: action.id || action.action_id,
+        file_path: action.file_path || action.path || null,
+        risk: action.risk || action.risk_level || null,
+        summary: action.description || action.summary || action.type || action.action_type || 'Forge action requires approval',
+        created_at: action.created_at || null,
+        updated_at: action.updated_at || null,
+        source_endpoint: run ? `/api/forge/runs/${runIdOf(run)}/pending-approvals` : '/api/forge/actions',
+      }
+    })
+}
+
+function pendingApprovalsForRun(run) {
+  return run ? collectPendingApprovals([run], collectRunActions(run)) : []
+}
+
+function collectValidation(run) {
+  const results = Array.isArray(run?.test_results) ? run.test_results : []
+  const latest = results.slice(-1)[0] || null
+  return {
+    id: latest?.id || (run ? `validation-${runIdOf(run)}` : null),
+    type: 'validation',
+    run_id: runIdOf(run),
+    status: !run ? 'unavailable' : latest ? (latest.all_passed ? 'passed' : 'failed') : 'not_run',
+    latest,
+    results,
+    failures: latest?.results?.filter?.(item => item.ok === false || item.passed === false) || [],
+    source_endpoint: run ? `/api/forge/runs/${runIdOf(run)}/verify` : null,
+  }
+}
+
+function collectArtifacts(run) {
+  if (!run) return []
+  const patchArtifacts = (run.patches || []).map((patch, idx) => ({
+    id: patch.patch_id || patch.action_id || `patch-${idx}`,
+    type: 'artifact',
+    artifact_type: 'patch',
+    run_id: runIdOf(run),
+    project_id: run.project_id,
+    status: patch.status || 'unknown',
+    file_path: patch.file_path || patch.files?.[0] || null,
+    summary: patch.diff ? 'Patch diff available' : 'Patch metadata available',
+    source_endpoint: `/api/forge/runs/${runIdOf(run)}/patches`,
+  }))
+  const reportFiles = (run.final_report?.applied_files || run.final_report?.applied || []).map((file, idx) => ({
+    id: `applied-${runIdOf(run)}-${idx}`,
+    type: 'artifact',
+    artifact_type: 'applied_file',
+    run_id: runIdOf(run),
+    project_id: run.project_id,
+    status: 'applied',
+    file_path: typeof file === 'string' ? file : file.path || file.file_path || null,
+    summary: 'Applied file from final report',
+    source_endpoint: `/api/forge/runs/${runIdOf(run)}/report`,
+  }))
+  return [...patchArtifacts, ...reportFiles]
+}
+
+function collectReports(runs) {
+  return (runs || [])
+    .filter(run => run.final_report)
+    .map(run => ({
+      id: `report-${runIdOf(run)}`,
+      type: 'report',
+      run_id: runIdOf(run),
+      project_id: run.project_id,
+      status: run.final_report?.status || run.status || 'available',
+      summary: run.final_report?.summary || run.review?.summary || run.goal || 'Forge final report',
+      created_at: run.final_report?.applied_at || run.updated_at || run.created_at || null,
+      source_endpoint: `/api/forge/runs/${runIdOf(run)}/report`,
+      report: run.final_report,
+    }))
+}
+
+function collectMemoryLessons(projectId) {
+  if (!projectId || typeof forgeRunStore.getLessons !== 'function') return []
+  try {
+    return forgeRunStore.getLessons(projectId, { limit: 50 })
+  } catch {
+    return []
+  }
+}
+
+function collectCycles(projectId) {
+  if (!projectId || typeof forgeRunStore.getCycles !== 'function') return []
+  try {
+    return forgeRunStore.getCycles(projectId) || []
+  } catch {
+    return []
+  }
+}
+
+function buildUnsupportedActions(run) {
+  const status = statusOf(run?.status)
+  const hasRun = !!run
+  const pauseSupported = hasRun && RUN_ACTIVE_STATUSES.has(status)
+  const resumeSupported = hasRun && status === 'paused'
+  const cancelSupported = hasRun && !RUN_TERMINAL_STATUSES.has(status)
+  return {
+    pause: pauseSupported ? null : {
+      unsupported: true,
+      reason: hasRun ? `run is not actively pauseable in status ${run.status || 'unknown'}` : 'no active run selected',
+    },
+    resume: resumeSupported ? null : {
+      unsupported: true,
+      reason: hasRun ? `run is not resumable in status ${run.status || 'unknown'}` : 'no active run selected',
+    },
+    cancel: cancelSupported ? null : {
+      unsupported: true,
+      reason: hasRun ? `run is already terminal in status ${run.status || 'unknown'}` : 'no active run selected',
+    },
+  }
+}
+
+function inspectAgentEngineCapabilities() {
+  const now = Date.now()
+  if (_agentEngineCapabilityCache && now - _agentEngineCapabilityCache.checked_ms < 30000) {
+    return _agentEngineCapabilityCache.value
+  }
+  const runtimeDir = path.join(REPO_ROOT, 'runtime')
+  const requiredFiles = {
+    react_agent_loop: path.join(runtimeDir, 'engine', 'agent', 'agent_loop.py'),
+    tool_registry: path.join(runtimeDir, 'tools', 'registry.py'),
+    swarm_controller: path.join(runtimeDir, 'core', 'swarm', 'swarm_controller.py'),
+    llm_inference: path.join(runtimeDir, 'engine', 'inference', 'llm.py'),
+  }
+  const files = Object.fromEntries(Object.entries(requiredFiles).map(([key, file]) => [key, fs.existsSync(file)]))
+  let importCheck = { state: 'not_checked', modules: {}, error: null }
+  try {
+    const script = [
+      'import importlib, json',
+      "mods=['engine.agent.agent_loop','tools.registry','core.swarm.swarm_controller','engine.inference.llm']",
+      'result={}',
+      'for m in mods:',
+      '  try:',
+      '    importlib.import_module(m)',
+      "    result[m]='ready'",
+      '  except Exception as e:',
+      "    result[m]='error: '+str(e)[:180]",
+      "print(json.dumps(result))",
+    ].join('\n')
+    const child = spawnSync(process.env.PYTHON_BIN || 'python3', ['-c', script], {
+      env: { ...process.env, PYTHONPATH: runtimeDir },
+      encoding: 'utf8',
+      timeout: 5000,
+    })
+    const modules = child.stdout ? JSON.parse(child.stdout.trim().split('\n').pop() || '{}') : {}
+    const failed = Object.values(modules).filter(value => String(value).startsWith('error:'))
+    importCheck = {
+      state: child.status === 0 && failed.length === 0 ? 'ready' : 'error',
+      modules,
+      error: child.status === 0 ? null : (child.stderr || child.error?.message || `python exited ${child.status}`).slice(0, 500),
+    }
+  } catch (err) {
+    importCheck = { state: 'error', modules: {}, error: err.message }
+  }
+  const value = {
+    state: Object.values(files).every(Boolean) && importCheck.state === 'ready' ? 'ready' : 'degraded',
+    files,
+    imports: importCheck,
+    swarm_config: _forgeRuntimeSwarmConfig ? { ..._forgeRuntimeSwarmConfig } : { state: 'router_not_initialized' },
+    source: 'runtime/engine + runtime/core/swarm',
+  }
+  _agentEngineCapabilityCache = { checked_ms: now, value }
+  return value
+}
+
+function buildRelationships({ activeRun, actions, reports, memoryLessons }) {
+  const runId = runIdOf(activeRun)
+  const taskId = activeRun?.linked_backlog_id || activeRun?.task_id || null
+  const relationships = []
+  if (taskId && runId) relationships.push({ from_type: 'task', from_id: taskId, to_type: 'run', to_id: runId, relation: 'started_run' })
+  for (const action of actions || []) {
+    const actionId = action.id || action.action_id
+    if (runId && actionId) relationships.push({ from_type: 'run', from_id: runId, to_type: 'approval', to_id: actionId, relation: 'requires_or_tracks_action' })
+  }
+  if (runId) relationships.push({ from_type: 'run', from_id: runId, to_type: 'validation', to_id: `validation-${runId}`, relation: 'validated_by' })
+  for (const report of reports || []) {
+    if (report.run_id) relationships.push({ from_type: 'run', from_id: report.run_id, to_type: 'report', to_id: report.id, relation: 'generated_report' })
+  }
+  for (const lesson of memoryLessons || []) {
+    const sourceRun = lesson.source_run_id || lesson.run_id || lesson.source?.run_id
+    if (sourceRun) relationships.push({ from_type: 'run', from_id: sourceRun, to_type: 'memory_lesson', to_id: lesson.lesson_id || lesson.id, relation: 'distilled_into' })
+  }
+  return relationships
+}
+
+function getRunAuditEvents(runId) {
+  if (!runId) return []
+  if (typeof forgeRunStore.getAuditEventsForRun === 'function') {
+    const rows = forgeRunStore.getAuditEventsForRun(runId)
+    if (rows.length) return rows
+  }
+  try {
+    const lines = fs.readFileSync(AUDIT_FILE, 'utf8').split('\n').filter(Boolean)
+    return lines
+      .map(line => { try { return JSON.parse(line) } catch { return null } })
+      .filter(Boolean)
+      .filter(row => row.details?.run_id === runId || row.run_id === runId)
+  } catch {
+    return []
+  }
+}
+
+function buildForgeRuntimeSnapshot(query = {}) {
+  const selectedProjectId = String(query.project_id || '').trim()
+  const selectedRunId = String(query.run_id || '').trim()
+  const projects = loadProjects()
+  const allRuns = loadRuns()
+  const scopedRuns = allRuns.filter(run => !selectedProjectId || run.project_id === selectedProjectId)
+  const activeRun = selectedRunId
+    ? (allRuns.find(run => runIdOf(run) === selectedRunId) || null)
+    : (scopedRuns.find(run => RUN_ACTIVE_STATUSES.has(statusOf(run.status)) || RUN_WAITING_STATUSES.has(statusOf(run.status))) || scopedRuns[0] || allRuns[0] || null)
+  const activeProject = activeRun
+    ? (projects.find(project => project.id === activeRun.project_id) || null)
+    : (selectedProjectId ? projects.find(project => project.id === selectedProjectId) || null : projects[0] || null)
+  const projectRuns = allRuns.filter(run => !activeProject?.id || run.project_id === activeProject.id)
+  const activeActions = collectRunActions(activeRun)
+  const pendingApprovals = collectPendingApprovals(activeRun ? [activeRun] : projectRuns, activeActions.length ? activeActions : loadActions().filter(a => !activeProject?.id || a.project_id === activeProject.id))
+  const validation = collectValidation(activeRun)
+  const artifacts = collectArtifacts(activeRun)
+  const reports = collectReports(projectRuns)
+  const memoryLessons = collectMemoryLessons(activeProject?.id)
+  const cycles = collectCycles(activeProject?.id)
+  const activeCycle = cycles.find(cycle => ['RUNNING', 'PAUSED'].includes(String(cycle.status || '').toUpperCase())) || cycles[0] || null
+  const unsupportedActions = buildUnsupportedActions(activeRun)
+  const diagnostics = {
+    generated_at: nowIso(),
+    persistence: forgeRunStore.status(),
+    python_forge: fs.existsSync(PYTHON_FORGE_SCRIPT) ? 'available' : 'missing',
+    agent_engine: inspectAgentEngineCapabilities(),
+    websocket_events: 'best_effort',
+    active_stream_abort_supported: false,
+    notes: ['Run controls are persisted honestly; active stream abort is unsupported unless a tracked controller exists.'],
+    unsupported_actions: unsupportedActions,
+  }
+  const health = {
+    state: diagnostics.persistence?.degraded ? 'degraded' : 'live',
+    projects_total: projects.length,
+    runs_total: allRuns.length,
+    pending_approvals: pendingApprovals.length,
+    validation_status: validation.status,
+    reports_total: reports.length,
+  }
+  const metrics = {
+    project_count: projects.length,
+    run_count: projectRuns.length,
+    action_count: activeActions.length,
+    pending_approval_count: pendingApprovals.length,
+    report_count: reports.length,
+    memory_lesson_count: memoryLessons.length,
+    validation_status: validation.status,
+  }
+  return {
+    generated_at: nowIso(),
+    selected_project_id: selectedProjectId || activeProject?.id || null,
+    selected_run_id: selectedRunId || runIdOf(activeRun),
+    projects,
+    active_project: activeProject,
+    active_task: activeRun?.linked_backlog_id ? { id: activeRun.linked_backlog_id, type: 'task', source: 'forge_backlog' } : null,
+    active_run: activeRun,
+    active_cycle: activeCycle,
+    runs: projectRuns.map(summarizeRun),
+    actions: activeActions,
+    pending_approvals: pendingApprovals,
+    validation,
+    artifacts,
+    reports,
+    memory_lessons: memoryLessons,
+    diagnostics,
+    agent_engine: diagnostics.agent_engine,
+    metrics,
+    relationships: buildRelationships({ activeRun, actions: activeActions, reports, memoryLessons }),
+    health,
+    unsupported_actions: unsupportedActions,
+  }
 }
 
 function safeProjectRoot(project) { return forgePath.safeProjectRoot(project) }
@@ -308,6 +698,113 @@ function ensureRunWorkspace(run, project) { return forgeWorkspace.ensureRunWorks
 function resolveInsideWorkspace(workspaceRoot, rel) { return forgeWorkspace.resolveInsideWorkspace(workspaceRoot, rel) }
 function readWorkspaceMetadata(workspaceRoot) { return forgeWorkspace.readWorkspaceMetadata(workspaceRoot) }
 function removeRunWorkspace(runId) { return forgeWorkspace.removeRunWorkspace(runId) }
+
+function parseGitHubRemote(url) {
+  const value = String(url || '').trim()
+  if (!value) return null
+  let match = value.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i)
+  if (match) return _normalizeGitHubRepo(match[1], match[2])
+  match = value.match(/^https:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?$/i)
+  if (match) return _normalizeGitHubRepo(match[1], match[2])
+  return null
+}
+
+function _normalizeGitHubRepo(owner, repo) {
+  const cleanOwner = String(owner || '').trim()
+  const cleanRepo = String(repo || '').replace(/\.git$/i, '').trim()
+  const re = /^[A-Za-z0-9_.-]{1,100}$/
+  return re.test(cleanOwner) && re.test(cleanRepo) ? { owner: cleanOwner, repo: cleanRepo } : null
+}
+
+function parseGitStatus(stdout) {
+  return String(stdout || '').split(/\r?\n/).map(line => {
+    const raw = String(line || '')
+    if (!raw.trim()) return null
+    const status = raw.slice(0, 2).trim() || '??'
+    const file = raw.slice(3).trim()
+    return { status, path: file.includes(' -> ') ? file.split(' -> ').pop() : file, raw }
+  }).filter(Boolean)
+}
+
+function tokenAvailable() {
+  return Boolean(process.env.GITHUB_TOKEN || process.env.GH_TOKEN)
+}
+
+function buildGitHubStatus(project) {
+  const root = safeProjectRoot(project)
+  const inside = runGit(root, ['rev-parse', '--is-inside-work-tree'], 8000)
+  if (!inside.ok || inside.stdout !== 'true') {
+    return {
+      ok: true,
+      available: false,
+      project_id: project.id,
+      git: { inside: false, root, current_branch: null, head: null, dirty_files: [] },
+      remote: { name: 'origin', url: null, is_github: false, owner: null, repo: null },
+      auth: { git_remote_configured: false, token_available: tokenAvailable() },
+      blockers: ['project root is not a git repository'],
+    }
+  }
+  const top = runGit(root, ['rev-parse', '--show-toplevel'], 8000)
+  const gitRoot = top.ok && top.stdout ? top.stdout : root
+  const branch = runGit(gitRoot, ['branch', '--show-current'], 8000)
+  const head = runGit(gitRoot, ['rev-parse', '--short', 'HEAD'], 8000)
+  const status = runGit(gitRoot, ['status', '--porcelain'], 8000)
+  const remote = runGit(gitRoot, ['remote', 'get-url', 'origin'], 8000)
+  const remoteInfo = parseGitHubRemote(remote.stdout)
+  const dirtyFiles = status.ok ? parseGitStatus(status.stdout) : []
+  const blockers = []
+  if (!remote.ok || !remote.stdout) blockers.push('origin remote is not configured')
+  if (!remoteInfo) blockers.push('origin remote is not a GitHub repository')
+  return {
+    ok: true,
+    available: blockers.length === 0,
+    project_id: project.id,
+    git: {
+      inside: true,
+      root: gitRoot,
+      current_branch: branch.ok ? branch.stdout || null : null,
+      head: head.ok ? head.stdout || null : null,
+      dirty_files: dirtyFiles,
+      status_error: status.ok ? null : status.stderr || 'git status failed',
+    },
+    remote: {
+      name: 'origin',
+      url: remote.ok ? remote.stdout || null : null,
+      is_github: Boolean(remoteInfo),
+      owner: remoteInfo?.owner || null,
+      repo: remoteInfo?.repo || null,
+    },
+    auth: {
+      git_remote_configured: Boolean(remote.ok && remote.stdout),
+      token_available: tokenAvailable(),
+    },
+    blockers,
+  }
+}
+
+function latestV5ArtifactPayload(projectId, type) {
+  return forgeRunStore.getV5Artifact(projectId, type)?.payload || null
+}
+
+function buildGitHubPublishDraft(project, status, body = {}) {
+  const ts = Date.now().toString(36)
+  const branch = slugify(body.branch_name || `forge/${project.name || project.id}-${ts}`).replace(/^forge-/, 'forge/')
+  const base = String(body.base_branch || status.git.current_branch || 'main').trim() || 'main'
+  const files = status.git.dirty_files.map(item => item.path).filter(Boolean)
+  return {
+    publish_id: `ghpub-${project.id}-${ts}`,
+    project_id: project.id,
+    branch_name: branch,
+    base_branch: base,
+    title: String(body.title || `AscendForge: ${project.name || project.id}`).trim(),
+    body: String(body.body || 'Prepared by AscendForge local build workspace.').trim(),
+    commit_message: String(body.commit_message || `Forge publish: ${project.name || project.id}`).trim(),
+    files,
+    remote: status.remote,
+    created_at: nowIso(),
+    status: 'prepared',
+  }
+}
 
 function stageRunAction(run, project, action) {
   const policy = validateRunActionPolicy(action, project)
@@ -770,6 +1267,40 @@ function _httpJson(url, payload, timeoutMs, extraHeaders = {}) {
   })
 }
 
+function _httpGetJson(url, timeoutMs = 10000, extraHeaders = {}) {
+  return new Promise(resolve => {
+    const http = require('http')
+    const req = http.get(url, { timeout: timeoutMs, headers: extraHeaders }, response => {
+      let text = ''
+      response.on('data', chunk => { text += chunk })
+      response.on('end', () => {
+        try { resolve({ ok: response.statusCode < 400, status: response.statusCode, ...JSON.parse(text || '{}') }) }
+        catch { resolve({ ok: false, error: 'parse_error', raw: text.slice(0, 200) }) }
+      })
+    })
+    req.on('error', err => resolve({ ok: false, error: err.message }))
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }) })
+  })
+}
+
+function callPythonV5(pathname, payload = {}, timeoutMs = 120000) {
+  if (!/^\/api\/v5\/[A-Za-z0-9_./-]+$/.test(pathname) || pathname.includes('..')) {
+    return Promise.resolve({ ok: false, error: 'invalid_v5_path' })
+  }
+  const token = _codeIndexToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  return _httpJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}${pathname}`, payload, timeoutMs, headers)
+}
+
+function getPythonV5(pathname, timeoutMs = 10000) {
+  if (!/^\/api\/v5\/[A-Za-z0-9_./-]+$/.test(pathname) || pathname.includes('..')) {
+    return Promise.resolve({ ok: false, error: 'invalid_v5_path' })
+  }
+  const token = _codeIndexToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  return _httpGetJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}${pathname}`, timeoutMs, headers)
+}
+
 // Short-lived service token so Node→Python code-index calls pass the zero-trust
 // RequestGuard. Signed with the shared JWT secret; cached ~5 min.
 let _ciToken = null
@@ -902,6 +1433,7 @@ const _swarmConfig = {
   n_agents_code: parseInt(process.env.SWARM_AGENTS_CODE) || 5,
   n_agents_analysis: parseInt(process.env.SWARM_AGENTS_ANALYSIS) || 3,
 }
+_forgeRuntimeSwarmConfig = _swarmConfig
 function isSwarmEnabled() { return _swarmConfig.enabled }
 function swarmAgents(type) {
   return type === 'code' ? _swarmConfig.n_agents_code : _swarmConfig.n_agents_analysis
@@ -1042,6 +1574,31 @@ function _makeForgeRateLimit(max, windowMs = 60000) {
   }
 }
 const _rl_forge_fs = _makeForgeRateLimit(30)  // 30/min per IP for filesystem routes
+const _SAFE_ID_RE = /^[A-Za-z0-9._-]{1,120}$/
+const _V5_JSON_SUBDIRS = new Set(['briefs', 'research_packs', 'goals', 'reports', 'quality_gates'])
+
+function _safeId(value, label = 'id') {
+  const id = String(value || '').trim()
+  if (!_SAFE_ID_RE.test(id) || id.includes('..')) {
+    const err = new Error(`${label} contains unsupported characters`)
+    err.status = 400
+    throw err
+  }
+  return id
+}
+
+function _normalizeVerifyCommands(commands, fallback, isAllowed) {
+  const source = Array.isArray(commands) && commands.length ? commands : fallback
+  return (Array.isArray(source) ? source : [])
+    .map(c => String(c || '').trim())
+    .filter(c => c && isAllowed(c))
+    .slice(0, 5)
+}
+
+function _safeV5Path(subdir, id) {
+  if (!_V5_JSON_SUBDIRS.has(subdir)) throw new Error('unsupported_v5_subdir')
+  return path.join(FORGE_HOME, subdir, `${_safeId(id, 'v5 id')}.json`)
+}
 
 module.exports = function createForgeRouter(requireAuth, opts = {}) {
   const rlRuns = opts.rlRuns || ((_req, _res, next) => next())
@@ -1076,7 +1633,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     return false
   }
 
-  router.get('/engine/status', requireAuth, async (_req, res) => {
+  router.get('/engine/status', requireAuth, _rl_forge_fs, async (_req, res) => {
     const status = engine.getStatus()
     res.json({
       ...status,
@@ -1143,6 +1700,33 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       res.json(engine.execute(req.body || {}))
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  router.get('/runtime', requireAuth, (req, res) => {
+    try {
+      res.json({ ok: true, state: 'live', snapshot: buildForgeRuntimeSnapshot(req.query || {}) })
+    } catch (err) {
+      res.status(500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  router.get('/diagnostics', requireAuth, (req, res) => {
+    try {
+      const snapshot = buildForgeRuntimeSnapshot(req.query || {})
+      res.json({ ok: true, state: snapshot.health?.state || 'live', diagnostics: snapshot.diagnostics, health: snapshot.health, unsupported_actions: snapshot.unsupported_actions })
+    } catch (err) {
+      res.status(500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  router.get('/reports', requireAuth, (req, res) => {
+    try {
+      const projectId = String(req.query.project_id || '').trim()
+      const runs = loadRuns().filter(run => !projectId || run.project_id === projectId)
+      res.json({ ok: true, state: 'live', reports: collectReports(runs) })
+    } catch (err) {
+      res.status(500).json({ ok: false, state: 'degraded', error: err.message })
     }
   })
 
@@ -1238,6 +1822,10 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       }
       upsertRun(run)
       appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      broadcastForge('forge:run_created', { run })
+      broadcastForge('forge:run_updated', { run })
+      if (pendingApprovalsForRun(run).length) broadcastForge('forge:approval_required', { run_id: runId, pending_approvals: pendingApprovalsForRun(run) })
+      emitForgeRuntimeSnapshot('run_created', { project_id: project.id, run_id: runId })
       res.json({ ok: true, state: 'live', run_id: runId, status: run.status, context_pack: contextPack, plan, actions, patches, run })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
@@ -1309,6 +1897,11 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       }
       upsertRun(run)
       appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      broadcastForge('forge:run_created', { run })
+      broadcastForge('forge:run_updated', { run })
+      const pending = pendingApprovalsForRun(run)
+      if (pending.length) broadcastForge('forge:approval_required', { run_id: runId, pending_approvals: pending })
+      emitForgeRuntimeSnapshot('run_created', { project_id: project.id, run_id: runId })
       send('run', { ok: true, state: 'live', run_id: runId, status: run.status, context_pack: contextPack, plan, actions, patches, run })
       send('done', { run_id: runId })
     } catch (err) {
@@ -1346,6 +1939,73 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         updated_at: run.updated_at,
       }))
     res.json({ ok: true, state: 'live', runs, total: runs.length, persistence: forgeRunStore.status() })
+  })
+
+  router.get('/runs/:id/audit', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    res.json({ ok: true, state: 'live', run_id: runIdOf(run), audit: getRunAuditEvents(runIdOf(run)) })
+  })
+
+  router.get('/runs/:id/report', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    if (!run.final_report) return res.status(404).json({ ok: false, state: 'unavailable', error: 'run report not generated' })
+    res.json({ ok: true, state: 'live', run_id: runIdOf(run), report: run.final_report })
+  })
+
+  router.post('/runs/:id/pause', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    if (!RUN_ACTIVE_STATUSES.has(statusOf(run.status))) {
+      const reason = `run is not actively pauseable in status ${run.status || 'unknown'}`
+      broadcastForge('forge:diagnostic', { level: 'warning', run_id: runIdOf(run), action: 'pause', unsupported: true, reason })
+      return res.status(409).json({ ok: false, state: 'unsupported', unsupported: true, reason, run_status: run.status })
+    }
+    const updated = updateRun(run.id || run.run_id, { status: 'paused', previous_status: run.status, paused_at: nowIso() })
+    appendAudit('forge_run_paused', { run_id: runIdOf(run), previous_status: run.status, by: req.user?.email || 'operator' })
+    broadcastForge('forge:run_updated', { run: updated, action: 'pause' })
+    emitForgeRuntimeSnapshot('run_paused', { project_id: run.project_id, run_id: runIdOf(run) })
+    res.json({ ok: true, state: 'live', run: updated })
+  })
+
+  router.post('/runs/:id/resume', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    if (statusOf(run.status) !== 'paused') {
+      const reason = `run is not resumable in status ${run.status || 'unknown'}`
+      broadcastForge('forge:diagnostic', { level: 'warning', run_id: runIdOf(run), action: 'resume', unsupported: true, reason })
+      return res.status(409).json({ ok: false, state: 'unsupported', unsupported: true, reason, run_status: run.status })
+    }
+    const nextStatus = RUN_TERMINAL_STATUSES.has(statusOf(run.previous_status)) ? 'awaiting_approval' : (run.previous_status || 'awaiting_approval')
+    const updated = updateRun(run.id || run.run_id, { status: nextStatus, resumed_at: nowIso() })
+    appendAudit('forge_run_resumed', { run_id: runIdOf(run), status: nextStatus, by: req.user?.email || 'operator' })
+    broadcastForge('forge:run_updated', { run: updated, action: 'resume' })
+    emitForgeRuntimeSnapshot('run_resumed', { project_id: run.project_id, run_id: runIdOf(run) })
+    res.json({ ok: true, state: 'live', run: updated })
+  })
+
+  router.post('/runs/:id/cancel', requireAuth, (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    if (RUN_TERMINAL_STATUSES.has(statusOf(run.status))) {
+      const reason = `run is already terminal in status ${run.status || 'unknown'}`
+      broadcastForge('forge:diagnostic', { level: 'warning', run_id: runIdOf(run), action: 'cancel', unsupported: true, reason })
+      return res.status(409).json({ ok: false, state: 'unsupported', unsupported: true, reason, run_status: run.status })
+    }
+    const updated = updateRun(run.id || run.run_id, {
+      status: 'cancelled',
+      cancelled_at: nowIso(),
+      review: {
+        ...(run.review || {}),
+        status: 'cancelled',
+        summary: 'Run cancelled by operator. Persisted run state was stopped; active stream abort is not available for this run.',
+      },
+    })
+    appendAudit('forge_run_cancelled', { run_id: runIdOf(run), previous_status: run.status, by: req.user?.email || 'operator' })
+    broadcastForge('forge:run_updated', { run: updated, action: 'cancel' })
+    emitForgeRuntimeSnapshot('run_cancelled', { project_id: run.project_id, run_id: runIdOf(run) })
+    res.json({ ok: true, state: 'live', run: updated, active_stream_abort_supported: false })
   })
 
   router.get('/runs/:id', requireAuth, (req, res) => {
@@ -1418,6 +2078,10 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         },
       })
       appendAudit('forge_run_approved', { run_id: run.id, staged: staged.length, failures: failures.length })
+      broadcastForge('forge:approval_decided', { run_id: runIdOf(run), status: failures.length ? 'blocked' : 'approved', staged, failures })
+      for (const action of nextActions) broadcastForge('forge:action_updated', { run_id: runIdOf(run), action })
+      broadcastForge('forge:run_updated', { run: updated, action: 'approve' })
+      emitForgeRuntimeSnapshot('run_approved', { project_id: project.id, run_id: runIdOf(run) })
       res.status(failures.length ? 409 : 200).json({ ok: failures.length === 0, state: failures.length ? 'degraded' : 'live', run: updated, staged, failures })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
@@ -1433,9 +2097,13 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
       const workspace = runWorkspaceRoot(run.id)
       if (!fs.existsSync(workspace)) return res.status(409).json({ ok: false, error: 'run workspace missing; approve/stage a patch first' })
-      const cmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
-        ? req.body.commands
-        : (run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project))
+      const cmds = _normalizeVerifyCommands(
+        req.body?.commands,
+        run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project),
+        isVerifyAllowed,
+      )
+      if (!cmds.length) return res.status(400).json({ ok: false, error: 'no allowed verification commands' })
+      broadcastForge('forge:validation_started', { run_id: runIdOf(run), project_id: project.id, commands: cmds })
       const verify = await runVerifyCommands(project, cmds, workspace)
       const workspaceMeta = readWorkspaceMetadata(workspace)
       const testResult = {
@@ -1470,6 +2138,9 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         },
       })
       appendAudit('forge_run_verified', { run_id: run.id, all_passed: verify.all_passed, commands: cmds.length })
+      broadcastForge('forge:validation_completed', { run_id: runIdOf(run), project_id: project.id, test_result: testResult, all_passed: verify.all_passed })
+      broadcastForge('forge:run_updated', { run: updated, action: 'verify' })
+      emitForgeRuntimeSnapshot('run_verified', { project_id: project.id, run_id: runIdOf(run) })
       res.status(verify.all_passed ? 200 : 409).json({ ok: verify.all_passed, state: verify.all_passed ? 'live' : 'degraded', run: updated, test_result: testResult })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
@@ -1528,6 +2199,9 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         },
       })
       appendAudit('forge_run_applied', { run_id: run.id, project_id: project.id, files: result.applied.length, snapshots: result.snapshots.length })
+      broadcastForge('forge:report_generated', { run_id: runIdOf(run), project_id: project.id, report: finalReport })
+      broadcastForge('forge:run_updated', { run: updated, action: 'apply' })
+      emitForgeRuntimeSnapshot('run_applied', { project_id: project.id, run_id: runIdOf(run) })
       res.json({ ok: true, state: 'live', run: updated, final_report: finalReport })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
@@ -1562,6 +2236,11 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     const updated = updateRun(run.id, { actions: updatedActions })
     appendAudit('forge_action_approved', { run_id: run.id, action_id: actionId, approved_by: req.user?.email || 'operator' })
     const stillPending = updatedActions.filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', run.autonomy_level ?? 2))
+    const action = updatedActions.find(a => a.id === actionId)
+    broadcastForge('forge:approval_decided', { run_id: runIdOf(run), action_id: actionId, status: 'approved' })
+    broadcastForge('forge:action_updated', { run_id: runIdOf(run), action })
+    broadcastForge('forge:run_updated', { run: updated, action: 'approve_action' })
+    emitForgeRuntimeSnapshot('action_approved', { project_id: run.project_id, run_id: runIdOf(run) })
     res.json({ ok: true, run: updated, still_pending: stillPending.length, can_continue: stillPending.length === 0 })
   })
 
@@ -1581,6 +2260,11 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     }
     const updated = updateRun(run.id, { actions: updatedActions })
     appendAudit('forge_action_rejected', { run_id: run.id, action_id: actionId, rejected_by: req.user?.email || 'operator' })
+    const updatedAction = updatedActions.find(a => a.id === actionId)
+    broadcastForge('forge:approval_decided', { run_id: runIdOf(run), action_id: actionId, status: 'rejected' })
+    broadcastForge('forge:action_updated', { run_id: runIdOf(run), action: updatedAction })
+    broadcastForge('forge:run_updated', { run: updated, action: 'reject_action' })
+    emitForgeRuntimeSnapshot('action_rejected', { project_id: run.project_id, run_id: runIdOf(run) })
     res.json({ ok: true, run: updated })
   })
 
@@ -1594,21 +2278,26 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     const stillPending = (run.actions || []).filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', run.autonomy_level ?? 2))
     if (stillPending.length) return res.status(400).json({ ok: false, error: `${stillPending.length} action(s) still pending approval`, pending: stillPending.map(a => a.id) })
     // Resume at tester stage — run the approved workspace through verification
-    updateRun(run.id, { status: 'testing' })
     const project = findProject(run.project_id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    const root = runWorkspaceRoot(run.id)
     const verifyCmds = project.verification_commands || defaultVerificationCommands(project)
+    const testingRun = updateRun(run.id, { status: 'testing' })
+    broadcastForge('forge:run_updated', { run: testingRun, action: 'continue' })
+    broadcastForge('forge:validation_started', { run_id: runIdOf(run), project_id: run.project_id, commands: verifyCmds })
+    const root = runWorkspaceRoot(run.id)
     try {
       const testerStage = await runTesterAgent(project, verifyCmds, root, run.id)
       const passed = testerStage.output.all_passed
-      updateRun(run.id, {
+      const finalRun = updateRun(run.id, {
         status: passed ? 'verified' : 'verify_failed',
         test_results: [...(run.test_results || []), { id: `verify-continue-${Date.now()}`, all_passed: passed, results: testerStage.output.results, verified_at: nowIso() }],
         review: { status: passed ? 'verification_passed' : 'iteration_failed', summary: passed ? 'Verification passed after approval. Apply to proceed.' : 'Verification failed after approval.' },
       })
       appendAudit('forge_agentic_continue', { run_id: run.id, project_id: project.id, passed })
-      res.json({ ok: true, run: findRun(run.id), tester: testerStage, passed, summary: passed ? 'Verification passed. You may now apply the run.' : 'Verification failed — review errors and try again.' })
+      broadcastForge('forge:validation_completed', { run_id: runIdOf(run), project_id: project.id, all_passed: passed, tester: testerStage })
+      broadcastForge('forge:run_updated', { run: finalRun, action: 'continue_verify' })
+      emitForgeRuntimeSnapshot('run_continued', { project_id: project.id, run_id: runIdOf(run) })
+      res.json({ ok: true, run: finalRun, tester: testerStage, passed, summary: passed ? 'Verification passed. You may now apply the run.' : 'Verification failed - review errors and try again.' })
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message })
     }
@@ -1713,6 +2402,8 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     const plan = createPlan(engine, project, { goal: `Create ${template} scaffold for ${name}`, provider: req.body?.provider, scaffold_files: files })
     const actions = actionsForPlan(plan, project, { scaffold_files: files })
     appendAudit('forge_project_created', { id, name, template, root_path: rootPath })
+    broadcastForge('forge:project_updated', { project, action: 'created' })
+    emitForgeRuntimeSnapshot('project_created', { project_id: project.id })
     res.json({ ok: true, state: 'live', project, plan, actions, message: 'Project registered. Scaffold files are staged for owner approval.' })
   })
 
@@ -1738,6 +2429,8 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     }
     updateProject(project)
     appendAudit('forge_project_imported_read_only', { id: project.id, root_path: root, target_type: project.target_type })
+    broadcastForge('forge:project_updated', { project, action: 'imported' })
+    emitForgeRuntimeSnapshot('project_imported', { project_id: project.id })
     res.json({ ok: true, state: 'live', project, tree: buildTree(root) })
   })
 
@@ -1754,12 +2447,16 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     }
     const updated = { ...project, ...updates, updated_at: nowIso() }
     updateProject(updated)
+    broadcastForge('forge:project_updated', { project: updated, action: 'updated' })
+    emitForgeRuntimeSnapshot('project_updated', { project_id: updated.id })
     res.json({ ok: true, state: 'live', project: updated })
   })
 
   router.delete('/projects/:id', requireAuth, (req, res) => {
     saveProjects(loadProjects().filter(project => project.id !== req.params.id))
     appendAudit('forge_project_removed', { id: req.params.id })
+    broadcastForge('forge:project_updated', { project_id: req.params.id, action: 'removed' })
+    emitForgeRuntimeSnapshot('project_removed', {})
     res.json({ ok: true })
   })
 
@@ -2028,10 +2725,15 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         result,
       })
       appendAudit(ok ? 'forge_action_completed' : 'forge_action_failed', { id: action.id, type: action.type, result: { ok, error: result.error } })
+      broadcastForge('forge:action_updated', { action: updated, project_id: action.project_id })
+      broadcastForge('forge:approval_decided', { action_id: action.id, status: ok ? 'completed' : 'failed', project_id: action.project_id })
+      emitForgeRuntimeSnapshot('action_approved', { project_id: action.project_id })
       res.status(ok ? 200 : 409).json({ ok, state: ok ? 'live' : 'degraded', action: updated, output: result.output || result.error || 'action processed', diff: result.diff || action.diff || null, result })
     } catch (err) {
       const updated = updateAction(action.id, { status: 'failed', error: err.message, result: { ok: false, error: err.message } })
       appendAudit('forge_action_failed', { id: action.id, type: action.type, error: err.message })
+      broadcastForge('forge:action_updated', { action: updated, project_id: action.project_id })
+      emitForgeRuntimeSnapshot('action_failed', { project_id: action.project_id })
       res.status(err.status || 500).json({ ok: false, state: 'degraded', action: updated, error: err.message })
     }
   })
@@ -2041,6 +2743,9 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     if (!action) return res.status(404).json({ ok: false, error: 'action not found' })
     const updated = updateAction(action.id, { status: 'rejected', rejected_at: nowIso(), rejected_by: req.user?.email || 'operator', reject_reason: req.body?.reason || '' })
     appendAudit('forge_action_rejected', { id: action.id, type: action.type, reason: req.body?.reason || '' })
+    broadcastForge('forge:action_updated', { action: updated, project_id: action.project_id })
+    broadcastForge('forge:approval_decided', { action_id: action.id, status: 'rejected', project_id: action.project_id })
+    emitForgeRuntimeSnapshot('action_rejected', { project_id: action.project_id })
     res.json({ ok: true, state: 'live', action: updated })
   })
 
@@ -2182,6 +2887,9 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     }
     if (Number.isInteger(n_agents_code)) _swarmConfig.n_agents_code = Math.min(20, Math.max(2, n_agents_code))
     if (Number.isInteger(n_agents_analysis)) _swarmConfig.n_agents_analysis = Math.min(20, Math.max(2, n_agents_analysis))
+    _forgeRuntimeSwarmConfig = _swarmConfig
+    broadcastForge('forge:diagnostic', { event: 'swarm_config_updated', level: 'info', swarm_config: { ..._swarmConfig } })
+    emitForgeRuntimeSnapshot('swarm_config_updated', {})
     res.json({ ok: true, ..._swarmConfig })
   })
 
@@ -2303,9 +3011,12 @@ print(json.dumps({'winner': winner, 'confidence': round(conf, 3), 'distribution'
     if (!requireOwnerApproval(req, res, 'forge_verify')) return
     const project = findProject(req.body?.project_id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    const cmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
-      ? req.body.commands
-      : (project.verification_commands || defaultVerificationCommands(project))
+    const cmds = _normalizeVerifyCommands(
+      req.body?.commands,
+      project.verification_commands || defaultVerificationCommands(project),
+      isVerifyAllowed,
+    )
+    if (!cmds.length) return res.status(400).json({ ok: false, error: 'no allowed verification commands' })
     const root = safeProjectRoot(project)
     const verify = await runVerifyCommands(project, cmds, root)
     const results = verify.results
@@ -3162,7 +3873,50 @@ Respond with ONLY valid JSON (no markdown fences):
     // Delegate to Python SwarmController when use_swarm flag is set
     if (opts.use_swarm) {
       try {
-        return await _executeSwarmRun(project, goal, opts)
+        const swarmResult = await _executeSwarmRun(project, goal, opts)
+        const runId = swarmResult.run_id || `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+        const success = ['done', 'complete', 'completed', 'success'].includes(statusOf(swarmResult.status)) || swarmResult.ok === true
+        const finalReport = {
+          status: success ? 'verified' : 'partial',
+          summary: swarmResult.output || swarmResult.answer || swarmResult.summary || 'External swarm run finished.',
+          swarm_result: swarmResult,
+          applied_files: [],
+          snapshots: [],
+          test_result: null,
+          generated_at: nowIso(),
+          provider: 'python_swarm_controller',
+          next_steps: success ? ['Review the swarm output and decide whether to create implementation tasks.'] : ['Inspect the swarm result and rerun with narrower scope.'],
+        }
+        const run = upsertRun({
+          id: runId,
+          run_id: runId,
+          project_id: project.id,
+          goal,
+          status: success ? 'verified' : 'verify_failed',
+          mode: 'external_swarm',
+          provider: 'python_swarm_controller',
+          autonomy_level: Math.min(3, Math.max(0, Number(opts.autonomy_level ?? 2))),
+          max_iterations: 1,
+          context_pack: null,
+          plan: null,
+          actions: [],
+          patches: [],
+          approvals: [],
+          test_results: [],
+          review: { status: success ? 'swarm_completed' : 'swarm_partial', summary: finalReport.summary },
+          final_report: finalReport,
+          audit_ids: [],
+          linked_backlog_id: opts.linked_backlog_id || null,
+          workspace_path: null,
+          created_at: nowIso(),
+          updated_at: nowIso(),
+        })
+        appendAudit('forge_swarm_run_completed', { run_id: runId, project_id: project.id, success, provider: 'python_swarm_controller' })
+        broadcastForge('forge:run_created', { run })
+        broadcastForge('forge:report_generated', { run_id: runId, project_id: project.id, report: finalReport })
+        broadcastForge('forge:run_updated', { run, action: 'external_swarm_done' })
+        emitForgeRuntimeSnapshot('external_swarm_done', { project_id: project.id, run_id: runId })
+        return { ok: true, success, run_id: runId, run, summary: finalReport.summary, swarm_result: swarmResult }
       } catch (err) {
         // Log and fall through to the local pipeline
         console.error('[forge] swarm delegation failed, using local pipeline:', err.message)
@@ -3218,6 +3972,9 @@ Respond with ONLY valid JSON (no markdown fences):
     const allActions = []
     const allPatches = []
     appendAudit('forge_agentic_start', { run_id: runId, project_id: project.id, goal: goal.slice(0, 120), max_iters: maxIters })
+    broadcastForge('forge:run_created', { run })
+    broadcastForge('forge:run_updated', { run, action: 'agentic_start' })
+    emitForgeRuntimeSnapshot('agentic_start', { project_id: project.id, run_id: runId })
     ;['planner','coder','tester','security','reviewer'].forEach(a => setForgeAgentStatus(a, 'idle', ''))
 
     // Phase 9: build a context packet for the planner stage (graceful — never blocks)
@@ -3271,14 +4028,18 @@ Respond with ONLY valid JSON (no markdown fences):
       // High-risk gate: pause for human approval before testing
       const riskyActions = allActions.filter(a => a.status === 'staged' && requiresApproval(a.file_path || '', autonomyLevelNum))
       if (riskyActions.length) {
-        updateRun(runId, {
+        const waitingRun = updateRun(runId, {
           status: 'waiting_approval',
           actions: allActions,
           patches: allPatches,
           review: { status: 'waiting_approval', summary: `${riskyActions.length} high-risk file(s) require human approval` },
         })
         appendAudit('forge_agentic_waiting_approval', { run_id: runId, project_id: project.id, iter, risky_files: riskyActions.map(a => a.file_path) })
-        return { ok: true, success: false, waiting_approval: true, run_id: runId, run: findRun(runId), pending_approvals: riskyActions.map(a => ({ action_id: a.id, file_path: a.file_path, risk_level: a.risk_level, unified_diff: a.unified_diff })) }
+        const pending_approvals = riskyActions.map(a => ({ action_id: a.id, file_path: a.file_path, risk_level: a.risk_level, unified_diff: a.unified_diff }))
+        broadcastForge('forge:approval_required', { run_id: runId, project_id: project.id, pending_approvals })
+        broadcastForge('forge:run_updated', { run: waitingRun, action: 'waiting_approval' })
+        emitForgeRuntimeSnapshot('agentic_waiting_approval', { project_id: project.id, run_id: runId })
+        return { ok: true, success: false, waiting_approval: true, run_id: runId, run: waitingRun, pending_approvals }
       }
 
       updateRun(runId, { status: 'testing' })
@@ -3343,6 +4104,10 @@ Respond with ONLY valid JSON (no markdown fences):
     const finalReport = buildFinalReport({ success, transcript, goal, workspaceCleaned, baseline })
     const finalRun = updateRun(runId, { status: success ? 'verified' : 'verify_failed', final_report: finalReport })
     appendAudit('forge_agentic_done', { run_id: runId, project_id: project.id, success, iterations: transcript.length, workspace_removed: workspaceCleaned })
+    broadcastForge('forge:validation_completed', { run_id: runId, project_id: project.id, all_passed: success, results: finalRun?.test_results || [] })
+    broadcastForge('forge:report_generated', { run_id: runId, project_id: project.id, report: finalReport })
+    broadcastForge('forge:run_updated', { run: finalRun, action: 'agentic_done' })
+    emitForgeRuntimeSnapshot('agentic_done', { project_id: project.id, run_id: runId })
     try { recordTaskMemory(runId, goal, transcript, success, repoIdx?.stack) } catch { /* best-effort */ }
 
     // Phase 9: link the completed run into the Memory Graph + consolidate (best-effort)
@@ -3364,6 +4129,8 @@ Respond with ONLY valid JSON (no markdown fences):
           forgeRunStore.upsertDistillationRecord(distRec)
           _persistDistillationArtifacts(distRec, project)
           appendAudit('forge_distillation_created', { run_id: runId, confidence: distRec.confidence, lessons: distRec.lessons?.length || 0, is_positive: distRec.scores?.is_positive })
+          broadcastForge('forge:memory_candidate_created', { run_id: runId, project_id: project.id, distillation: distRec })
+          emitForgeRuntimeSnapshot('distillation_created', { project_id: project.id, run_id: runId })
         }
       } catch { /* learning failures must never affect run result */ }
     })
@@ -3405,8 +4172,65 @@ Respond with ONLY valid JSON (no markdown fences):
   })
 
   router.get('/queue', requireAuth, (_req, res) => {
-    const pending = loadActions().filter(action => ['proposed', 'approved'].includes(action.status))
+    const pending = loadActions().filter(action => ['proposed', 'pending', 'approved'].includes(action.status))
     res.json({ ok: true, state: 'live', items: pending, total: pending.length })
+  })
+
+  router.post('/submit', requireAuth, (req, res) => {
+    const goal = String(req.body?.goal || req.body?.description || req.body?.title || '').trim()
+    if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
+    const projectId = req.body?.project_id || null
+    const project = projectId ? findProject(projectId) : null
+    if (projectId && !project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const action = makeAction('forge_queue_item', {
+      project_id: project?.id || null,
+      label: String(req.body?.title || goal).slice(0, 140),
+      description: goal,
+      risk: req.body?.risk || 'review',
+      expected_result: 'Queue item reviewed before conversion into a Forge run or approved work item.',
+      approval_reason: 'Queued Forge work requires owner review before execution.',
+      rollback_plan: 'No code changes are made by queue submission.',
+    })
+    action.priority = String(req.body?.priority || 'normal')
+    action.mode = req.body?.mode || 'builder'
+    action.queue_kind = 'forge_queue'
+    action.submitted_by = req.user?.email || 'operator'
+    persistActions([action])
+    broadcastForge('forge:queue_update', { item: action, items: loadActions().filter(a => ['proposed', 'pending', 'approved'].includes(a.status)) })
+    emitForgeRuntimeSnapshot('queue_item_submitted', { project_id: project?.id || null })
+    res.json({ ok: true, state: 'queued', item: action })
+  })
+
+  router.post('/approve/:id', requireAuth, (req, res) => {
+    const action = findAction(req.params.id)
+    if (!action) return res.status(404).json({ ok: false, error: 'queue item not found' })
+    const updated = updateAction(action.id, {
+      status: 'approved',
+      approved_at: nowIso(),
+      approved_by: req.user?.email || 'operator',
+      approval_note: req.body?.note || '',
+    })
+    appendAudit('forge_queue_item_approved', { id: action.id, project_id: action.project_id })
+    broadcastForge('forge:queue_update', { item: updated, items: loadActions().filter(a => ['proposed', 'pending', 'approved'].includes(a.status)) })
+    broadcastForge('forge:action_updated', { action: updated, project_id: action.project_id })
+    emitForgeRuntimeSnapshot('queue_item_approved', { project_id: action.project_id })
+    res.json({ ok: true, state: 'approved', item: updated, action: updated })
+  })
+
+  router.post('/reject/:id', requireAuth, (req, res) => {
+    const action = findAction(req.params.id)
+    if (!action) return res.status(404).json({ ok: false, error: 'queue item not found' })
+    const updated = updateAction(action.id, {
+      status: 'rejected',
+      rejected_at: nowIso(),
+      rejected_by: req.user?.email || 'operator',
+      reject_reason: req.body?.reason || '',
+    })
+    appendAudit('forge_queue_item_rejected', { id: action.id, project_id: action.project_id, reason: req.body?.reason || '' })
+    broadcastForge('forge:queue_update', { item: updated, items: loadActions().filter(a => ['proposed', 'pending', 'approved'].includes(a.status)) })
+    broadcastForge('forge:action_updated', { action: updated, project_id: action.project_id })
+    emitForgeRuntimeSnapshot('queue_item_rejected', { project_id: action.project_id })
+    res.json({ ok: true, state: 'rejected', item: updated, action: updated })
   })
 
   // ── Code understanding (WS4): index a project + retrieve architecture/context ──
@@ -3704,7 +4528,7 @@ Output a JSON array:
     } catch { return [] }
   }
 
-  router.post('/projects/:id/decompose', requireAuth, async (req, res) => {
+  router.post('/projects/:id/decompose', requireAuth, _rl_forge_fs, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const { goal, add_to_backlog } = req.body || {}
@@ -3755,23 +4579,23 @@ Output a JSON array:
     return _loadForgeSkills().filter(s => (Array.isArray(s.triggers) ? s.triggers : []).some(t => goalLower.includes(t.toLowerCase())))
   }
 
-  router.get('/skills', requireAuth, (_req, res) => {
+  router.get('/skills', requireAuth, _rl_forge_fs, (_req, res) => {
     res.json({ ok: true, skills: _loadForgeSkills() })
   })
 
-  router.get('/skills/:skillId', requireAuth, (req, res) => {
+  router.get('/skills/:skillId', requireAuth, _rl_forge_fs, (req, res) => {
     const skill = _loadForgeSkills().find(s => s.skill_id === req.params.skillId)
     if (!skill) return res.status(404).json({ ok: false, error: 'skill not found' })
     res.json({ ok: true, skill })
   })
 
-  router.post('/skills/reload', requireAuth, (_req, res) => {
+  router.post('/skills/reload', requireAuth, _rl_forge_fs, (_req, res) => {
     _forgeSkillsCache = null
     const skills = _loadForgeSkills()
     res.json({ ok: true, count: skills.length, skills: skills.map(s => s.skill_id) })
   })
 
-  router.post('/runs/:id/apply-skill', requireAuth, (req, res) => {
+  router.post('/runs/:id/apply-skill', requireAuth, _rl_forge_fs, (req, res) => {
     const run = findRun(req.params.id)
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
     const { skill_id } = req.body || {}
@@ -4839,6 +5663,815 @@ Return JSON:
       details: safeDetails, created_at: nowIso(),
     })
     res.json({ ok: true, event: ev })
+  })
+
+  // ── Forge V5 project runtime ───────────────────────────────────────────────
+
+  function _publicProject(project) {
+    if (!project) return null
+    return {
+      id: project.id,
+      name: project.name,
+      target_type: project.target_type,
+      root_path: project.root_path,
+      path: project.path,
+      write_access: !!project.write_access,
+      allowed_write_paths: project.allowed_write_paths || [],
+      package_type: project.package_type,
+      verification_commands: project.verification_commands || [],
+      policy_profile: project.policy_profile,
+    }
+  }
+
+  function _ensureV5Project(body = {}) {
+    if (body.project_id) {
+      const existing = findProject(String(body.project_id))
+      if (!existing) {
+        const err = new Error('project not found')
+        err.status = 404
+        throw err
+      }
+      return existing
+    }
+
+    const root = path.resolve(String(body.target_path || REPO_ROOT))
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+      const err = new Error('valid target_path directory required')
+      err.status = 400
+      throw err
+    }
+    const existingByPath = loadProjects().find(item => path.resolve(item.root_path || item.path || '') === root)
+    if (existingByPath) return existingByPath
+
+    const project = {
+      id: crypto.randomUUID(),
+      name: String(body.name || (root === REPO_ROOT ? 'AI-EMPLOYEE' : path.basename(root))).trim(),
+      target_type: root === REPO_ROOT ? 'internal_repo' : 'external_local_repo',
+      root_path: root,
+      path: root,
+      allowed_write_paths: [],
+      write_access: false,
+      package_type: inferPackageType({ root_path: root }),
+      verification_commands: defaultVerificationCommands({ target_type: root === REPO_ROOT ? 'internal_repo' : 'external_local_repo', root_path: root }),
+      policy_profile: 'read_only_until_owner_approval',
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    }
+    updateProject(project)
+    appendAudit('forge_v5_project_imported_read_only', { id: project.id, root_path: root, target_type: project.target_type })
+    broadcastForge('forge:project_updated', { project, action: 'v5_imported' })
+    return project
+  }
+
+  function _upsertV5Artifact(projectId, type, payload, status = 'available') {
+    return forgeRunStore.upsertV5Artifact({
+      artifact_id: `v5-${projectId}-${type}`,
+      project_id: projectId,
+      artifact_type: type,
+      status,
+      payload,
+      updated_at: nowIso(),
+    })
+  }
+
+  function _buildV5Report(projectId) {
+    const brief = forgeRunStore.getV5Artifact(projectId, 'brief')?.payload || null
+    const research = forgeRunStore.getV5Artifact(projectId, 'research')?.payload || null
+    const reasoning = forgeRunStore.getV5Artifact(projectId, 'reasoning')?.payload || null
+    const goals = forgeRunStore.getV5Goals(projectId)
+    const completed = goals.filter(goal => goal.status === 'completed')
+    const failed = goals.filter(goal => goal.status === 'failed')
+    const blocked = goals.filter(goal => goal.status === 'blocked' || goal.status === 'waiting_approval')
+
+    // Aggregate real execution metadata from goals + their quality gates.
+    const modes = new Set(reasoning?.selected_mode ? [reasoning.selected_mode] : [])
+    const models = new Set(reasoning?.model_used ? [reasoning.model_used] : [])
+    const backends = new Set()
+    const memoryLessons = []
+    const qualityGateSummary = []
+    let externalApiUsed = false
+    let remoteComputeUsed = false
+    for (const goal of goals) {
+      if (goal.reasoning?.selected_mode) modes.add(goal.reasoning.selected_mode)
+      if (goal.reasoning?.model_used) models.add(goal.reasoning.model_used)
+      const gate = forgeRunStore.getV5QualityGate(goal.goal_id)
+      if (gate?.compute_backend) {
+        backends.add(gate.compute_backend)
+        if (gate.compute_backend === 'external_api') externalApiUsed = true
+        if (gate.compute_backend === 'remote_compute') remoteComputeUsed = true
+      }
+      if (gate) qualityGateSummary.push({ goal_id: goal.goal_id, status: gate.status, summary: gate.summary })
+      if (goal.memory_writeback) {
+        memoryLessons.push({ goal_id: goal.goal_id, stored: goal.memory_writeback.ok !== false, key: goal.memory_writeback.cache_key || null, error: goal.memory_writeback.error || null })
+      }
+    }
+
+    // Honest status: only "completed" when every goal succeeded; never fake "done".
+    let status
+    if (failed.length && !completed.length) status = 'failed'
+    else if (blocked.length && !completed.length) status = 'blocked'
+    else if (completed.length && (failed.length || blocked.length || completed.length < goals.length)) status = 'partial'
+    else if (completed.length && completed.length === goals.length && goals.length) status = 'completed'
+    else status = goals.length ? 'planned' : 'prepared'
+
+    return {
+      project_id: projectId,
+      brief_summary: brief?.summary || '',
+      goals_completed: completed,
+      goals_failed: failed,
+      goals_blocked: blocked,
+      goals_prepared: goals.length,
+      evidence_summary: {
+        research_pack_id: research?.research_pack_id || null,
+        context_sufficient: research?.memory_findings?.sufficient ?? null,
+        relevant_files: research?.codebase_findings?.files_matched ?? null,
+        quality_gates_recorded: qualityGateSummary.length,
+      },
+      quality_gate_summary: qualityGateSummary.length ? qualityGateSummary : 'unavailable — no goal executed yet',
+      validation_summary: qualityGateSummary.length ? Object.fromEntries(qualityGateSummary.map(q => [q.goal_id, q.summary])) : 'unavailable',
+      sandbox_summary: 'unavailable',
+      artifacts: ['brief', 'research', 'goals', 'reasoning'],
+      memory_lessons: memoryLessons,
+      reasoning_modes_used: [...modes],
+      models_used: [...models],
+      compute_backends_used: [...backends],
+      external_api_used: externalApiUsed,
+      remote_compute_used: remoteComputeUsed,
+      privacy_level_summary: 'local_only (default for codebase goals)',
+      status,
+      generated_at: nowIso(),
+    }
+  }
+
+  function _findV7Goal(projectId, goalId, body = {}) {
+    const fromStore = forgeRunStore.findV5Goal?.(goalId)
+    if (fromStore && fromStore.project_id === projectId) return fromStore
+    const provided = body.goal && typeof body.goal === 'object' ? body.goal : null
+    if (provided) return { ...provided, goal_id: provided.goal_id || provided.id || goalId, project_id: projectId }
+    return null
+  }
+
+  function _v7Context(req, res) {
+    const project = findProject(req.params.projectId)
+    if (!project) {
+      res.status(404).json({ ok: false, error: 'project not found' })
+      return null
+    }
+    const goal = _findV7Goal(project.id, req.params.goalId, req.body || {})
+    if (!goal) {
+      res.status(404).json({ ok: false, error: 'goal not found', hint: 'Pass a V5 goal id or include a goal object in the body.' })
+      return null
+    }
+    return { project, goal }
+  }
+
+  function _v7Level(req, fallback = 0) {
+    const value = Number(req.body?.autonomy_level ?? req.query?.autonomy_level ?? fallback)
+    return Number.isFinite(value) ? value : fallback
+  }
+
+  function _latestV7(projectId, goalId) {
+    const proposal = _forgeV7.latestForGoal('patchProposals', projectId, goalId)
+    const workspace = _forgeV7.latestForGoal('workspaces', projectId, goalId)
+    const validation = _forgeV7.latestForGoal('validationRuns', projectId, goalId)
+    const approval = _forgeV7.latestForGoal('applyApprovals', projectId, goalId)
+    return { proposal, workspace, validation, approval }
+  }
+
+  router.get('/v7/projects/:projectId/execution-state', requireAuth, (req, res) => {
+    const project = findProject(req.params.projectId)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, project_id: project.id, v7: _forgeV7.list(project.id) })
+  })
+
+  router.get('/v7/workspaces/:workspaceId', requireAuth, (req, res) => {
+    const workspace = _forgeV7.find('workspaces', 'workspace_id', req.params.workspaceId)
+    if (!workspace) return res.status(404).json({ ok: false, error: 'workspace not found' })
+    res.json({ ok: true, workspace })
+  })
+
+  router.post('/v7/projects/:projectId/goals/:goalId/propose-patch', requireAuth, (req, res) => {
+    const ctx = _v7Context(req, res)
+    if (!ctx) return
+    if (_v7Level(req, 1) < 1) return res.status(403).json({ ok: false, error: 'autonomy level 1 required for patch proposals' })
+    try {
+      const proposal = _forgeV7.createPatchProposal(ctx.project, ctx.goal, req.body || {})
+      broadcastForge('forge:v7_patch_proposed', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, patch_proposal: proposal })
+      res.json({ ok: true, patch_proposal: proposal })
+    } catch (err) {
+      broadcastForge('forge:v7_execution_blocked', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, stage: 'propose_patch', error: err.message })
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/projects/:projectId/goals/:goalId/sandbox', requireAuth, (req, res) => {
+    const ctx = _v7Context(req, res)
+    if (!ctx) return
+    if (_v7Level(req, 2) < 2) return res.status(403).json({ ok: false, error: 'autonomy level 2 required for sandbox workspace creation' })
+    const proposal = req.body?.patch_artifact_id
+      ? _forgeV7.find('patchProposals', 'artifact_id', req.body.patch_artifact_id)
+      : _forgeV7.latestForGoal('patchProposals', ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
+    if (!proposal) return res.status(404).json({ ok: false, error: 'patch proposal not found' })
+    try {
+      const workspace = _forgeV7.createWorkspace(ctx.project, ctx.goal, proposal)
+      if (workspace.status !== 'created') {
+        broadcastForge('forge:v7_execution_blocked', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, stage: 'sandbox', workspace })
+        return res.status(409).json({ ok: false, error: 'sandbox workspace unavailable', workspace })
+      }
+      broadcastForge('forge:v7_sandbox_created', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, workspace })
+      res.json({ ok: true, workspace })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/workspaces/:workspaceId/apply-patch', requireAuth, (req, res) => {
+    const workspace = _forgeV7.find('workspaces', 'workspace_id', req.params.workspaceId)
+    if (!workspace) return res.status(404).json({ ok: false, error: 'workspace not found' })
+    if (_v7Level(req, 2) < 2) return res.status(403).json({ ok: false, error: 'autonomy level 2 required for sandbox patch apply' })
+    const project = findProject(workspace.project_id)
+    const proposal = _forgeV7.find('patchProposals', 'artifact_id', workspace.patch_artifact_id)
+    if (!project || !proposal) return res.status(404).json({ ok: false, error: 'project or patch proposal not found' })
+    try {
+      const result = _forgeV7.applyPatchInWorkspace(workspace, proposal, project)
+      broadcastForge('forge:v7_patch_applied_to_sandbox', { project_id: project.id, goal_id: workspace.goal_id, workspace: result.workspace, applied_diff: result.applied_diff })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      broadcastForge('forge:v7_execution_blocked', { project_id: project.id, goal_id: workspace.goal_id, stage: 'sandbox_apply', error: err.message, workspace: err.workspace || workspace })
+      res.status(err.status || 500).json({ ok: false, error: err.message, workspace: err.workspace || workspace })
+    }
+  })
+
+  router.post('/v7/workspaces/:workspaceId/validate', requireAuth, (req, res) => {
+    const workspace = _forgeV7.find('workspaces', 'workspace_id', req.params.workspaceId)
+    if (!workspace) return res.status(404).json({ ok: false, error: 'workspace not found' })
+    const project = findProject(workspace.project_id)
+    const proposal = _forgeV7.find('patchProposals', 'artifact_id', workspace.patch_artifact_id)
+    if (!project || !proposal) return res.status(404).json({ ok: false, error: 'project or patch proposal not found' })
+    broadcastForge('forge:v7_sandbox_validation_started', { project_id: project.id, goal_id: workspace.goal_id, workspace_id: workspace.workspace_id })
+    try {
+      const validation = _forgeV7.runValidation(project, workspace, proposal, 'sandbox')
+      broadcastForge('forge:v7_sandbox_validation_completed', { project_id: project.id, goal_id: workspace.goal_id, validation })
+      res.json({ ok: true, validation })
+    } catch (err) {
+      broadcastForge('forge:v7_execution_blocked', { project_id: project.id, goal_id: workspace.goal_id, stage: 'sandbox_validate', error: err.message })
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/projects/:projectId/goals/:goalId/request-apply', requireAuth, (req, res) => {
+    const ctx = _v7Context(req, res)
+    if (!ctx) return
+    if (_v7Level(req, 2) < 2) return res.status(403).json({ ok: false, error: 'autonomy level 2 required to request apply approval' })
+    const latest = _latestV7(ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
+    if (!latest.proposal || !latest.workspace) return res.status(404).json({ ok: false, error: 'patch proposal and sandbox workspace required first' })
+    try {
+      const approval = _forgeV7.requestApply(ctx.project, ctx.goal, latest.proposal, latest.workspace, latest.validation, req.body || {})
+      broadcastForge('forge:v7_apply_approval_requested', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, approval })
+      res.json({ ok: true, approval })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/approvals/:approvalId/approve', requireAuth, (req, res) => {
+    try {
+      const approval = _forgeV7.decideApproval(req.params.approvalId, 'approved', req.user?.email || 'operator', req.body?.reason || '')
+      broadcastForge('forge:v7_apply_approved', { project_id: approval.project_id, goal_id: approval.goal_id, approval })
+      res.json({ ok: true, approval })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/approvals/:approvalId/reject', requireAuth, (req, res) => {
+    try {
+      const approval = _forgeV7.decideApproval(req.params.approvalId, 'rejected', req.user?.email || 'operator', req.body?.reason || '')
+      broadcastForge('forge:v7_apply_rejected', { project_id: approval.project_id, goal_id: approval.goal_id, approval })
+      res.json({ ok: true, approval })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/projects/:projectId/goals/:goalId/apply', requireAuth, (req, res) => {
+    const ctx = _v7Context(req, res)
+    if (!ctx) return
+    if (_v7Level(req, 3) < 3) return res.status(403).json({ ok: false, error: 'autonomy level 3 required for main workspace apply' })
+    const latest = _latestV7(ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
+    const approval = req.body?.approval_id ? _forgeV7.find('applyApprovals', 'approval_id', req.body.approval_id) : latest.approval
+    if (!latest.proposal || !latest.workspace || !approval) return res.status(404).json({ ok: false, error: 'proposal, workspace, and approval required' })
+    try {
+      const result = _forgeV7.applyApproved(ctx.project, ctx.goal, latest.proposal, latest.workspace, approval, req.body || {})
+      broadcastForge('forge:v7_patch_applied_to_workspace', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, ...result })
+      broadcastForge('forge:v7_rollback_available', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, rollback: result.rollback })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      broadcastForge('forge:v7_execution_blocked', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, stage: 'workspace_apply', error: err.message })
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/projects/:projectId/goals/:goalId/post-validate', requireAuth, (req, res) => {
+    const ctx = _v7Context(req, res)
+    if (!ctx) return
+    const latest = _latestV7(ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
+    const change = _forgeV7.latestForGoal('appliedChanges', ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
+    const rollback = _forgeV7.latestForGoal('rollbackArtifacts', ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
+    if (!latest.proposal || !latest.workspace || !change) return res.status(404).json({ ok: false, error: 'applied change required before post-apply validation' })
+    broadcastForge('forge:v7_post_apply_validation_started', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id })
+    try {
+      const validation = _forgeV7.runValidation(ctx.project, latest.workspace, latest.proposal, 'post_apply')
+      const final = _forgeV7.writeReportAndMemory(ctx.project, ctx.goal, latest.proposal, latest.workspace, latest.validation, latest.approval, change, rollback, validation)
+      broadcastForge('forge:v7_post_apply_validation_completed', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, validation, report: final.report, memory_lesson: final.lesson })
+      res.json({ ok: true, validation, ...final })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/v7/projects/:projectId/goals/:goalId/rollback', requireAuth, _rl_forge_fs, (req, res) => {
+    const ctx = _v7Context(req, res)
+    if (!ctx) return
+    const rollbackId = req.body?.rollback_id ? _safeId(req.body.rollback_id, 'rollback_id') : ''
+    const rollback = rollbackId
+      ? _forgeV7.find('rollbackArtifacts', 'rollback_id', rollbackId)
+      : _forgeV7.latestForGoal('rollbackArtifacts', ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
+    if (!rollback) return res.status(404).json({ ok: false, error: 'rollback artifact not found' })
+    if (req.body?.confirm !== true) return res.status(409).json({ ok: false, error: 'confirm:true required before rollback', rollback })
+    const projectRoot = safeProjectRoot(ctx.project)
+    const patchFile = path.join(FORGE_HOME, 'v7', `${_safeId(rollback.rollback_id, 'rollback_id')}.reverse.patch`)
+    try {
+      ensureDir(path.dirname(patchFile))
+      fs.writeFileSync(patchFile, rollback.reverse_patch || '', 'utf8')
+      const applied = runGit(projectRoot, ['apply', '--whitespace=nowarn', patchFile], 30000)
+      try { fs.unlinkSync(patchFile) } catch { /* ignore */ }
+      if (!applied.ok) return res.status(409).json({ ok: false, error: applied.stderr || applied.stdout || 'rollback apply failed', rollback })
+      const updated = _forgeV7.upsert('rollbackArtifacts', { ...rollback, status: 'applied', applied_at: nowIso() }, 'rollback_id')
+      broadcastForge('forge:v7_rollback_applied', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, rollback: updated })
+      res.json({ ok: true, rollback: updated })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message, rollback })
+    }
+  })
+
+  router.post('/v5/projects/start', requireAuth, _rl_forge_fs, async (req, res) => {
+    const rawInput = String(req.body?.raw_input || req.body?.goal || '').trim()
+    if (!rawInput) return res.status(400).json({ ok: false, error: 'raw_input required' })
+
+    let project
+    try {
+      project = _ensureV5Project(req.body || {})
+    } catch (err) {
+      return res.status(err.status || 500).json({ ok: false, error: err.message })
+    }
+
+    try {
+      const projectPayload = _publicProject(project)
+      const briefResp = await callPythonV5('/api/v5/brief', { raw_input: rawInput, project_id: project.id, project: projectPayload }, 60000)
+      if (!briefResp?.ok || !briefResp.brief) return res.status(502).json({ ok: false, error: briefResp?.error || 'v5_brief_unavailable' })
+      const brief = briefResp.brief
+      _upsertV5Artifact(project.id, 'brief', brief)
+      broadcastForge('forge:v5_brief_created', { project_id: project.id, brief })
+
+      broadcastForge('forge:v5_research_started', { project_id: project.id })
+      const researchResp = await callPythonV5('/api/v5/research', { brief }, 120000)
+      if (!researchResp?.ok || !researchResp.research_pack) return res.status(502).json({ ok: false, error: researchResp?.error || 'v5_research_unavailable' })
+      const researchPack = researchResp.research_pack
+      _upsertV5Artifact(project.id, 'research', researchPack)
+      broadcastForge('forge:v5_research_completed', { project_id: project.id, research_pack: researchPack })
+
+      const goalsResp = await callPythonV5('/api/v5/goals', { brief, research_pack: researchPack }, 120000)
+      if (!goalsResp?.ok || !Array.isArray(goalsResp.goals)) return res.status(502).json({ ok: false, error: goalsResp?.error || 'v5_goals_unavailable' })
+      const reasoning = goalsResp.reasoning || null
+      if (reasoning) _upsertV5Artifact(project.id, 'reasoning', reasoning)
+
+      // Replace any prior goal set so re-running start does not accumulate duplicates.
+      forgeRunStore.clearV5Goals(project.id)
+      const goals = goalsResp.goals.map((goal, idx) => {
+        const backlog = forgeRunStore.upsertBacklogItem({
+          backlog_id: crypto.randomUUID(),
+          project_id: project.id,
+          title: goal.title || `V5 goal ${idx + 1}`,
+          description: goal.description || goal.title || '',
+          priority: typeof goal.priority === 'number' ? goal.priority : 100 - idx,
+          category: 'FEATURE',
+          status: 'IDEA',
+          risk_level: ['low', 'medium', 'high'].includes(goal.risk_level) ? goal.risk_level : 'low',
+          estimated_complexity: null,
+          dependencies: Array.isArray(goal.dependencies) ? goal.dependencies : [],
+          acceptance_criteria: Array.isArray(goal.evidence_requirements) ? goal.evidence_requirements.join('; ') : null,
+          linked_files: [],
+          source: 'forge_v5',
+          created_at: nowIso(),
+          updated_at: nowIso(),
+        })
+        return forgeRunStore.upsertV5Goal({ ...goal, project_id: project.id, status: 'proposed', backlog_id: backlog.backlog_id })
+      })
+      broadcastForge('forge:v5_goals_generated', { project_id: project.id, goals, reasoning })
+
+      const report = _buildV5Report(project.id)
+      _upsertV5Artifact(project.id, 'report', report)
+      broadcastForge('forge:v5_report_generated', { project_id: project.id, report })
+      emitForgeRuntimeSnapshot('v5_project_started', { project_id: project.id })
+      res.json({ ok: true, state: 'prepared', project, brief, research_pack: researchPack, goals, reasoning, report })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  function _readV5Json(subdir, id) {
+    try {
+      const p = _safeV5Path(subdir, id)
+      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'))
+    } catch { /* ignore */ }
+    return null
+  }
+
+  // Strip secrets from an object before it is persisted, broadcast, or returned.
+  // Two layers: (1) exact configured env values, (2) key-name + pattern scrubbing
+  // (Authorization, Bearer tokens, access/refresh tokens, private keys, api keys).
+  const _SECRET_KEY_RE = /(authorization|token|secret|password|passwd|api[_-]?key|private[_-]?key|bearer|access[_-]?token|refresh[_-]?token|gh[_-]?token|github[_-]?token)/i
+  function _redactSecrets(obj) {
+    const secrets = [process.env.GITHUB_TOKEN, process.env.GH_TOKEN, process.env.JWT_SECRET_KEY, process.env.JWT_SECRET, process.env.ANTHROPIC_API_KEY, process.env.OPENAI_API_KEY, process.env.OPENROUTER_API_KEY]
+      .filter(s => typeof s === 'string' && s.length >= 8)
+    const scrub = (val, key) => {
+      if (typeof key === 'string' && _SECRET_KEY_RE.test(key) && val != null && typeof val !== 'object') return '***REDACTED***'
+      if (typeof val === 'string') {
+        let s = val
+        for (const sec of secrets) if (sec) s = s.split(sec).join('***REDACTED***')
+        s = s.replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer ***REDACTED***')
+        s = s.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '***REDACTED_PRIVATE_KEY***')
+        return s
+      }
+      if (Array.isArray(val)) return val.map(v => scrub(v, key))
+      if (val && typeof val === 'object') {
+        const out = {}
+        for (const [k, v] of Object.entries(val)) out[k] = scrub(v, k)
+        return out
+      }
+      return val
+    }
+    try { return scrub(obj, null) } catch { return obj }
+  }
+
+  router.get('/v5/projects/:id/brief', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (project) return res.json({ ok: true, brief: forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || null })
+    const brief = _readV5Json('briefs', req.params.id)
+    if (!brief) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, brief })
+  })
+
+  router.get('/v5/projects/:id/research', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (project) return res.json({ ok: true, research_pack: forgeRunStore.getV5Artifact(project.id, 'research')?.payload || null })
+    // Filesystem fallback for orders-created projects
+    const brief = _readV5Json('briefs', req.params.id)
+    if (!brief) return res.status(404).json({ ok: false, error: 'project not found' })
+    const research_pack = _readV5Json('research_packs', req.params.id)
+    res.json({ ok: true, research_pack: research_pack || null })
+  })
+
+  router.post('/v5/projects/:id/research', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const brief = forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || req.body?.brief || null
+    const result = await callPythonV5('/api/v5/research', { brief, project_id: project.id, ...req.body }, 120000)
+    if (!result?.ok) return res.status(503).json({ ok: false, error: result?.error || 'Python runtime unavailable' })
+    if (result.research_pack) {
+      _upsertV5Artifact(project.id, 'research', result.research_pack)
+      broadcastForge('forge:v5_research_completed', { project_id: project.id, research_pack: result.research_pack })
+    }
+    res.json(result)
+  })
+
+  router.get('/v5/projects/:id/goals', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (project) return res.json({ ok: true, goals: forgeRunStore.getV5Goals(project.id), reasoning: forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || null })
+    // Filesystem fallback for orders-created projects
+    const brief = _readV5Json('briefs', req.params.id)
+    if (!brief) return res.status(404).json({ ok: false, error: 'project not found' })
+    const goals = _readV5Json('goals', req.params.id)
+    const goalsArr = !goals ? [] : Array.isArray(goals) ? goals : goals.goals || []
+    res.json({ ok: true, goals: goalsArr, reasoning: goals?.reasoning || null })
+  })
+
+  router.post('/v5/projects/:id/goals/plan', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const brief = forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || req.body?.brief || null
+    const research_pack = forgeRunStore.getV5Artifact(project.id, 'research')?.payload || req.body?.research_pack || null
+    const result = await callPythonV5('/api/v5/goals', { brief, research_pack, project_id: project.id, ...req.body }, 120000)
+    if (!result?.ok) return res.status(503).json({ ok: false, error: result?.error || 'Python runtime unavailable' })
+    if (Array.isArray(result.goals)) {
+      forgeRunStore.clearV5Goals(project.id) // replace prior goal set, don't accumulate
+      result.goals.forEach(g => forgeRunStore.upsertV5Goal({ ...g, project_id: project.id, status: 'proposed' }))
+      if (result.reasoning) _upsertV5Artifact(project.id, 'reasoning', result.reasoning)
+      broadcastForge('forge:v5_goals_generated', { project_id: project.id, goals: result.goals, reasoning: result.reasoning })
+    }
+    res.json(result)
+  })
+
+  router.post('/v5/goals/:gid/execute', requireAuth, async (req, res) => {
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
+    if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
+    const project = findProject(goal.project_id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    broadcastForge('forge:v5_goal_started', { project_id: project.id, goal_id: goal.goal_id, goal })
+    forgeRunStore.updateV5Goal(goal.goal_id, { status: 'in_progress' })
+    try {
+      const runResult = await _executeAgenticRun(project, goal.description || goal.title, {
+        autonomy_level: typeof req.body?.autonomy_level === 'number' ? req.body.autonomy_level : 2,
+        linked_backlog_id: goal.backlog_id || null,
+        max_iterations: typeof req.body?.max_iterations === 'number' ? req.body.max_iterations : (goal.max_iterations || 3),
+      })
+      const status = runResult?.waiting_approval ? 'waiting_approval' : runResult?.success ? 'completed' : 'failed'
+      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status, run_id: runResult?.run_id || runResult?.run?.run_id || null })
+      const qualityResp = await callPythonV5('/api/v5/quality', {
+        goal_id: goal.goal_id,
+        run_result: runResult || {},
+        verification: runResult?.verify || runResult?.verification || {},
+        reasoning: forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || {},
+      }, 30000)
+      const gate = qualityResp?.quality_gate
+        ? forgeRunStore.upsertV5QualityGate({ ...qualityResp.quality_gate, project_id: project.id })
+        : null
+      if (gate) broadcastForge('forge:v5_quality_gate_completed', { project_id: project.id, goal_id: goal.goal_id, quality_gate: gate })
+      // Structured memory writeback — honest result recorded on the goal, never silent.
+      const reasoning = forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || {}
+      const safeGoalId = _safeId(goal.goal_id, 'goal_id')
+      const memResp = await callPythonV5(`/api/v5/goals/${safeGoalId}/memory`, {
+        goal: updatedGoal, quality_gate: gate || {}, reasoning,
+        compute: { backend: gate?.compute_backend || null },
+      }, 15000)
+      const memOk = Boolean(memResp?.ok && memResp?.memory?.ok !== false)
+      forgeRunStore.updateV5Goal(goal.goal_id, { memory_writeback: memOk ? (memResp.memory || { ok: true }) : { ok: false, error: memResp?.error || memResp?.memory?.error || 'memory_writeback_failed' } })
+      if (memOk) broadcastForge('forge:v5_memory_written', { project_id: project.id, goal_id: goal.goal_id, memory: memResp.memory })
+      else broadcastForge('forge:v5_memory_write_failed', { project_id: project.id, goal_id: goal.goal_id, error: memResp?.error || memResp?.memory?.error || 'memory_writeback_failed' })
+      const report = _buildV5Report(project.id)
+      _upsertV5Artifact(project.id, 'report', report)
+      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, run_result: runResult })
+      broadcastForge('forge:v5_report_generated', { project_id: project.id, report })
+      res.json({ ok: true, goal: updatedGoal, run_result: runResult, quality_gate: gate, memory_writeback: memResp, report })
+    } catch (err) {
+      logger.warn('v5 goal execute failed: %s', err.message)
+      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status: 'failed', error: 'v5_goal_execute_failed' })
+      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, error: 'v5_goal_execute_failed' })
+      res.status(500).json({ ok: false, error: 'v5_goal_execute_failed', goal: updatedGoal })
+    }
+  })
+
+  router.post('/v5/projects/:id/goals/:gid/execute', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
+    if (!goal || goal.project_id !== project.id) return res.status(404).json({ ok: false, error: 'goal not found' })
+
+    broadcastForge('forge:v5_goal_started', { project_id: project.id, goal_id: goal.goal_id, goal })
+    forgeRunStore.updateV5Goal(goal.goal_id, { status: 'in_progress' })
+    try {
+      const runResult = await _executeAgenticRun(project, goal.description || goal.title, {
+        autonomy_level: typeof req.body?.autonomy_level === 'number' ? req.body.autonomy_level : 2,
+        linked_backlog_id: goal.backlog_id || null,
+        max_iterations: typeof req.body?.max_iterations === 'number' ? req.body.max_iterations : (goal.max_iterations || 3),
+      })
+      const status = runResult?.waiting_approval ? 'waiting_approval' : runResult?.success ? 'completed' : 'failed'
+      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status, run_id: runResult?.run_id || runResult?.run?.run_id || null })
+      const qualityResp = await callPythonV5('/api/v5/quality', {
+        goal_id: goal.goal_id,
+        run_result: runResult || {},
+        verification: runResult?.verify || runResult?.verification || {},
+        reasoning: forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || {},
+      }, 30000)
+      const gate = qualityResp?.quality_gate
+        ? forgeRunStore.upsertV5QualityGate({ ...qualityResp.quality_gate, project_id: project.id })
+        : null
+      if (gate) broadcastForge('forge:v5_quality_gate_completed', { project_id: project.id, goal_id: goal.goal_id, quality_gate: gate })
+      // Structured memory writeback — honest result recorded on the goal, never silent.
+      const reasoning = forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || {}
+      const safeGoalId = _safeId(goal.goal_id, 'goal_id')
+      const memResp = await callPythonV5(`/api/v5/goals/${safeGoalId}/memory`, {
+        goal: updatedGoal, quality_gate: gate || {}, reasoning,
+        compute: { backend: gate?.compute_backend || null },
+      }, 15000)
+      const memOk = Boolean(memResp?.ok && memResp?.memory?.ok !== false)
+      forgeRunStore.updateV5Goal(goal.goal_id, { memory_writeback: memOk ? (memResp.memory || { ok: true }) : { ok: false, error: memResp?.error || memResp?.memory?.error || 'memory_writeback_failed' } })
+      if (memOk) broadcastForge('forge:v5_memory_written', { project_id: project.id, goal_id: goal.goal_id, memory: memResp.memory })
+      else broadcastForge('forge:v5_memory_write_failed', { project_id: project.id, goal_id: goal.goal_id, error: memResp?.error || memResp?.memory?.error || 'memory_writeback_failed' })
+      const report = _buildV5Report(project.id)
+      _upsertV5Artifact(project.id, 'report', report)
+      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, run_result: runResult })
+      broadcastForge('forge:v5_report_generated', { project_id: project.id, report })
+      res.json({ ok: true, goal: updatedGoal, run_result: runResult, quality_gate: gate, memory_writeback: memResp, report })
+    } catch (err) {
+      logger.warn('v5 project goal execute failed: %s', err.message)
+      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status: 'failed', error: 'v5_goal_execute_failed' })
+      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, error: 'v5_goal_execute_failed' })
+      res.status(500).json({ ok: false, error: 'v5_goal_execute_failed', goal: updatedGoal })
+    }
+  })
+
+  router.get('/v5/goals/:gid/quality-gate', requireAuth, (req, res) => {
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
+    if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
+    if (!findProject(goal.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
+    res.json({ ok: true, quality_gate: forgeRunStore.getV5QualityGate(goal.goal_id) })
+  })
+
+  router.post('/v5/goals/:gid/quality-gate', requireAuth, async (req, res) => {
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
+    if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
+    if (!findProject(goal.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
+    let gate = req.body?.quality_gate || req.body?.gate || null
+    if (!gate) {
+      const qualityResp = await callPythonV5('/api/v5/quality', {
+        goal_id: goal.goal_id,
+        run_result: req.body?.run_result || {},
+        verification: req.body?.verification || {},
+        reasoning: req.body?.reasoning || {},
+        compute: req.body?.compute || {},
+      }, 30000)
+      gate = qualityResp?.quality_gate
+    }
+    if (!gate) return res.status(502).json({ ok: false, error: 'quality gate unavailable' })
+    const saved = forgeRunStore.upsertV5QualityGate({ ...gate, goal_id: goal.goal_id, project_id: goal.project_id })
+    broadcastForge('forge:v5_quality_gate_completed', { project_id: goal.project_id, goal_id: goal.goal_id, quality_gate: saved })
+    res.json({ ok: true, quality_gate: saved })
+  })
+
+  router.get('/v5/projects/:id/report', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) {
+      const brief = _readV5Json('briefs', req.params.id)
+      if (!brief) return res.status(404).json({ ok: false, error: 'project not found' })
+      return res.json({ ok: true, report: _readV5Json('reports', req.params.id) || null })
+    }
+    const report = forgeRunStore.getV5Artifact(project.id, 'report')?.payload || _buildV5Report(project.id)
+    res.json({ ok: true, report })
+  })
+
+  router.get('/v5/compute/backends', requireAuth, async (_req, res) => {
+    const result = await getPythonV5('/api/v5/compute/backends', 8000)
+    if (!result?.ok) return res.json({ ok: true, backends: {
+      local_cpu: { available: true, reason: 'fallback: Python runtime unavailable' },
+      local_gpu: { available: false, reason: 'Python runtime unavailable' },
+      remote_compute: { available: Boolean(process.env.REMOTE_COMPUTE_HOST), reason: process.env.REMOTE_COMPUTE_HOST ? 'REMOTE_COMPUTE_HOST configured' : 'REMOTE_COMPUTE_HOST not configured' },
+      external_api: { available: Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY), reason: (process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) ? 'external API key configured' : 'no external API key configured' },
+    }, fallback: true })
+    res.json(result)
+  })
+
+  router.get('/v5/models', requireAuth, async (_req, res) => {
+    const result = await getPythonV5('/api/v5/models/health', 8000)
+    if (!result?.ok) return res.json({ ok: true, models: { ollama: { available: false, models: [], reason: 'Python runtime unavailable' }, external: { anthropic: Boolean(process.env.ANTHROPIC_API_KEY), openai: Boolean(process.env.OPENAI_API_KEY) } }, fallback: true })
+    res.json(result)
+  })
+
+  router.get('/projects/:id/github/status', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found', handoff_hint: 'Import or convert handoff projects before publishing.' })
+    try {
+      res.json(buildGitHubStatus(project))
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/projects/:id/github/prepare', requireAuth, (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found', handoff_hint: 'Import or convert handoff projects before publishing.' })
+    try {
+      const status = buildGitHubStatus(project)
+      if (!status.git.inside) return res.status(409).json({ ok: false, error: 'project is not a git repository', status })
+      if (!status.remote.url) return res.status(409).json({ ok: false, error: 'origin remote is not configured', status })
+      if (!status.git.dirty_files.length) return res.status(409).json({ ok: false, error: 'no changed files to publish', status })
+      const draft = buildGitHubPublishDraft(project, status, req.body || {})
+      _upsertV5Artifact(project.id, 'github_publish_draft', draft)
+      appendAudit('forge_github_publish_prepared', { project_id: project.id, publish_id: draft.publish_id, branch_name: draft.branch_name, files: draft.files.length })
+      broadcastForge('forge:github_publish_prepared', { project_id: project.id, draft, status })
+      res.json({ ok: true, state: 'prepared', status, draft })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  router.post('/projects/:id/github/publish', requireAuth, async (req, res) => {
+    const project = findProject(req.params.id)
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found', handoff_hint: 'Import or convert handoff projects before publishing.' })
+    try {
+      const status = buildGitHubStatus(project)
+      if (!status.git.inside) return res.status(409).json({ ok: false, error: 'project is not a git repository', status })
+      if (!status.remote.url) return res.status(409).json({ ok: false, error: 'origin remote is not configured', status })
+      const storedDraft = latestV5ArtifactPayload(project.id, 'github_publish_draft')
+      // Approval gate — publishing pushes a real branch + opens a PR. Require an
+      // explicit prepared draft AND an explicit confirmation referencing it by id.
+      // No implicit publish from a bare POST, and never auto-triggered by prepare.
+      if (!storedDraft || !storedDraft.publish_id) {
+        return res.status(409).json({ ok: false, error: 'publish_requires_prepared_draft', hint: 'Call /github/prepare first to create a reviewable draft.' })
+      }
+      if (req.body?.confirm !== true) {
+        return res.status(409).json({
+          ok: false,
+          error: 'publish_requires_confirmation',
+          hint: 'Re-send with { confirm: true, publish_id } matching the prepared draft.',
+          publish_id: storedDraft.publish_id,
+          branch_name: storedDraft.branch_name,
+          files: Array.isArray(storedDraft.files) ? storedDraft.files.length : 0,
+        })
+      }
+      if (String(req.body?.publish_id || '') !== String(storedDraft.publish_id)) {
+        return res.status(409).json({
+          ok: false,
+          error: 'publish_id_mismatch',
+          hint: 'The prepared draft changed. Regenerate the draft (prepare) and confirm with the new publish_id.',
+          publish_id: storedDraft.publish_id,
+          branch_name: storedDraft.branch_name,
+        })
+      }
+      const draft = { ...storedDraft, ...(req.body?.draft || {}) }
+      const files = Array.isArray(draft.files) && draft.files.length ? draft.files : status.git.dirty_files.map(item => item.path).filter(Boolean)
+      if (!files.length) return res.status(409).json({ ok: false, error: 'no changed files to publish', status })
+
+      broadcastForge('forge:github_publish_started', { project_id: project.id, draft })
+      const checkout = runGit(status.git.root, ['checkout', '-B', draft.branch_name], 30000)
+      if (!checkout.ok) return res.status(409).json({ ok: false, error: 'failed to create publish branch', detail: checkout.stderr || checkout.stdout, status, draft })
+      const add = runGit(status.git.root, ['add', '--', ...files], 30000)
+      if (!add.ok) return res.status(409).json({ ok: false, error: 'failed to stage files', detail: add.stderr || add.stdout, status, draft })
+      const commit = runGit(status.git.root, ['commit', '-m', draft.commit_message], 60000)
+      if (!commit.ok) return res.status(409).json({ ok: false, error: 'failed to commit changes', detail: commit.stderr || commit.stdout, status, draft })
+      const push = runGit(status.git.root, ['push', '-u', 'origin', draft.branch_name], 120000)
+      if (!push.ok) {
+        const result = { ok: false, state: 'failed', draft, status, commit: commit.stdout, error: 'failed to push branch', detail: push.stderr || push.stdout }
+        _upsertV5Artifact(project.id, 'github_publish_result', result, 'failed')
+        broadcastForge('forge:github_publish_failed', { project_id: project.id, result })
+        return res.status(502).json(result)
+      }
+
+      const result = {
+        ok: true,
+        state: 'pushed',
+        project_id: project.id,
+        branch_name: draft.branch_name,
+        base_branch: draft.base_branch,
+        remote: status.remote,
+        files,
+        commit: commit.stdout,
+        push: push.stdout || push.stderr,
+        pr: { created: false, url: null, reason: null },
+        published_at: nowIso(),
+      }
+
+      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || ''
+      if (!token) {
+        result.ok = true
+        result.state = 'partial'
+        result.pr.reason = 'GITHUB_TOKEN or GH_TOKEN not configured'
+      } else if (!status.remote.is_github) {
+        result.ok = true
+        result.state = 'partial'
+        result.pr.reason = 'origin remote is not a GitHub repository'
+      } else {
+        const prResp = await fetch(`https://api.github.com/repos/${status.remote.owner}/${status.remote.repo}/pulls`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'AscendForge',
+          },
+          body: JSON.stringify({
+            title: draft.title,
+            head: draft.branch_name,
+            base: draft.base_branch,
+            body: draft.body,
+            draft: true,
+          }),
+        })
+        const prBody = await prResp.json().catch(() => ({}))
+        if (prResp.ok && prBody?.html_url) {
+          result.state = 'published'
+          result.pr = { created: true, url: prBody.html_url, number: prBody.number || null, reason: null }
+        } else {
+          result.state = 'partial'
+          result.pr.reason = prBody?.message || `GitHub PR API returned ${prResp.status}`
+          result.pr.detail = prBody
+        }
+      }
+
+      const safeResult = _redactSecrets(result)
+      _upsertV5Artifact(project.id, 'github_publish_result', safeResult, safeResult.state === 'published' ? 'available' : 'partial')
+      appendAudit('forge_github_publish_completed', { project_id: project.id, branch_name: safeResult.branch_name, state: safeResult.state, pr_url: safeResult.pr.url })
+      broadcastForge('forge:github_publish_completed', { project_id: project.id, result: safeResult })
+      res.status(safeResult.state === 'published' ? 200 : 207).json(safeResult)
+    } catch (err) {
+      const result = _redactSecrets({ ok: false, state: 'failed', error: err.message })
+      try {
+        _upsertV5Artifact(project.id, 'github_publish_result', result, 'failed')
+        broadcastForge('forge:github_publish_failed', { project_id: project.id, result })
+      } catch { /* ignore */ }
+      res.status(500).json(result)
+    }
   })
 
   // ── Inline advisory consultation (manual / external) ────────────────────────

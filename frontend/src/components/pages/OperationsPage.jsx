@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Panel, SectionLabel, StatusPill, EmptyState, ErrorState, NxButton } from '../nexus-ui'
 import { useLiveData } from '../../hooks/useLiveData'
 import { useAppStore } from '../../store/appStore'
+import { useForgeStore } from '../../store/forgeStore'
 import { toastSuccess, toastError, toastWarn } from '../nexus-ui/Toaster'
 import { fmtDate } from '../../utils/format'
 import './OperationsPage.css'
@@ -289,7 +290,7 @@ function Scheduler() {
   )
 }
 
-function InspectModal({ task, onClose }) {
+function InspectModal({ task, onClose, onOpenForge, relatedRuns }) {
   if (!task) return null
   return (
     <div className="ops-modal-overlay" onClick={onClose}>
@@ -317,6 +318,18 @@ function InspectModal({ task, onClose }) {
             <div className="ops-modal__row">
               <span className="ops-modal__key">Trace</span>
               <span className="ops-modal__val">{task.trace.length} event(s)</span>
+            </div>
+          )}
+          {!!relatedRuns?.length && (
+            <div className="ops-modal__row">
+              <span className="ops-modal__key">Forge</span>
+              <span className="ops-modal__val">
+                {relatedRuns.slice(0, 3).map(run => (
+                  <button key={run.run_id || run.id} className="ops-link-btn" type="button" onClick={() => onOpenForge(run)}>
+                    {run.run_id || run.id} · {run.status}
+                  </button>
+                ))}
+              </span>
             </div>
           )}
         </div>
@@ -365,6 +378,9 @@ function LiveProgressPanel({ tasks }) {
 
 export default function OperationsPage() {
   const setActiveSection = useAppStore(s => s.setActiveSection)
+  const forgeRuns = useForgeStore(s => s.runs)
+  const forgeActiveRun = useForgeStore(s => s.activeRun)
+  const forgeSelectRun = useForgeStore(s => s.selectRun)
   const [tab, setTab] = useState('board')
   const [inspecting, setInspecting] = useState(null)
   const [showForm, setShowForm] = useState(false)
@@ -382,6 +398,13 @@ export default function OperationsPage() {
 
   const tasks = data || []
   const history = useMemo(() => tasks.filter((task) => ['completed', 'failed', 'cancelled'].includes(task.status)), [tasks])
+  const relatedForgeRuns = useMemo(() => {
+    if (!inspecting) return []
+    const id = inspecting.id || inspecting.task_id || inspecting.turn_id
+    const matches = (forgeRuns || []).filter(run => run.task_id === id || run.linked_backlog_id === id || run.goal === inspecting.title || run.goal === inspecting.intent)
+    if (matches.length) return matches
+    return forgeActiveRun ? [forgeActiveRun] : []
+  }, [inspecting, forgeRuns, forgeActiveRun])
 
   async function submitTask() {
     setSubmitting(true); setSubmitError('')
@@ -492,7 +515,16 @@ export default function OperationsPage() {
       {tab === 'scheduler' && <Scheduler />}
       {!loading && !error && tab === 'history' && <TaskTable tasks={history} onInspect={setInspecting} onCreate={openCreateTask} />}
 
-      <InspectModal task={inspecting} onClose={() => setInspecting(null)} />
+      <InspectModal
+        task={inspecting}
+        onClose={() => setInspecting(null)}
+        relatedRuns={relatedForgeRuns}
+        onOpenForge={(run) => {
+          const runId = run?.run_id || run?.id
+          if (runId) forgeSelectRun(runId)
+          setActiveSection('ascend-forge')
+        }}
+      />
     </div>
   )
 }

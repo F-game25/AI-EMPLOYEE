@@ -156,6 +156,26 @@ def _dispatch(op: str, args: dict):
     if op == 'orders.hosting_status':
         return {'has_token': bool(os.environ.get('NETLIFY_API_TOKEN', ''))}
 
+    if op == 'orders.betaald':
+        m = _mod('core.pitch')
+        return m.markeer_betaald(args['id'], args.get('referentie', ''))
+
+    if op == 'orders.demo_quality':
+        m = _mod('core.demo_quality_gate')
+        return m.evaluate_order_demo(args['id'])
+
+    if op == 'orders.resource_plan':
+        m = _mod('core.orders_forge_handoff')
+        return m.build_resource_plan(args['id'])
+
+    if op == 'orders.forge_handoff':
+        m = _mod('core.orders_forge_handoff')
+        return m.create_forge_project_from_order(
+            args['id'],
+            base_url=args.get('base_url', ''),
+            override_payment=bool(args.get('override_payment', False)),
+        )
+
     # ── ecom ──────────────────────────────────────────────────────────────────
     if op == 'ecom.research':
         m = _mod('core.product_researcher')

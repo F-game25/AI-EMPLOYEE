@@ -3570,6 +3570,384 @@ def get_status():
   return JSONResponse(data)
 
 
+@app.post("/api/v5/brief")
+async def forge_v5_brief(payload: dict, _auth: None = Depends(require_auth)):
+  """Compute a Forge V5 project brief. Persistence stays in Node Forge."""
+  try:
+    from core.forge_v5_runtime import get_forge_v5_runtime
+
+    raw_input = str((payload or {}).get("raw_input") or "").strip()
+    project_id = str((payload or {}).get("project_id") or "").strip()
+    if not raw_input:
+      raise HTTPException(400, "raw_input required")
+    if not project_id:
+      raise HTTPException(400, "project_id required")
+    brief = await get_forge_v5_runtime().start_project_brief(
+      raw_input,
+      project_id,
+      (payload or {}).get("project") or {},
+    )
+    return {"ok": True, "brief": brief}
+  except HTTPException:
+    raise
+  except Exception as exc:
+    logger.warning("Forge V5 brief failed: %s", type(exc).__name__)
+    raise HTTPException(500, "forge_v5_brief_failed") from exc
+
+
+@app.post("/api/v5/research")
+async def forge_v5_research(payload: dict, _auth: None = Depends(require_auth)):
+  """Compute a Forge V5 research pack. No external action is executed here."""
+  try:
+    from core.forge_v5_runtime import get_forge_v5_runtime
+
+    brief = (payload or {}).get("brief") or {}
+    if not isinstance(brief, dict) or not brief.get("project_id"):
+      raise HTTPException(400, "brief required")
+    research = await get_forge_v5_runtime().run_research(brief)
+    return {"ok": True, "research_pack": research}
+  except HTTPException:
+    raise
+  except Exception as exc:
+    logger.warning("Forge V5 research failed: %s", type(exc).__name__)
+    raise HTTPException(500, "forge_v5_research_failed") from exc
+
+
+@app.post("/api/v5/goals")
+async def forge_v5_goals(payload: dict, _auth: None = Depends(require_auth)):
+  """Compute Forge V5 proposed goals from a brief and research pack."""
+  try:
+    from core.forge_v5_runtime import get_forge_v5_runtime
+
+    brief = (payload or {}).get("brief") or {}
+    if not isinstance(brief, dict) or not brief.get("project_id"):
+      raise HTTPException(400, "brief required")
+    result = await get_forge_v5_runtime().plan_goals(
+      brief,
+      (payload or {}).get("research_pack") or {},
+    )
+    return {"ok": True, **result}
+  except HTTPException:
+    raise
+  except Exception as exc:
+    logger.warning("Forge V5 goals failed: %s", type(exc).__name__)
+    raise HTTPException(500, "forge_v5_goals_failed") from exc
+
+
+@app.post("/api/v5/reason")
+async def forge_v5_reason(payload: dict, _auth: None = Depends(require_auth)):
+  """Compute QCE-backed reasoning metadata for Forge V5."""
+  try:
+    from core.forge_reasoning_orchestrator import get_forge_reasoning_orchestrator
+
+    goal = str((payload or {}).get("goal") or "").strip()
+    if not goal:
+      raise HTTPException(400, "goal required")
+    result = await get_forge_reasoning_orchestrator().reason(
+      phase=str((payload or {}).get("phase") or "planning"),
+      goal=goal,
+      context=(payload or {}).get("context") or {},
+      mode=(payload or {}).get("mode"),
+    )
+    return {"ok": True, "reasoning": result}
+  except HTTPException:
+    raise
+  except Exception as exc:
+    logger.warning("Forge V5 reasoning failed: %s", type(exc).__name__)
+    raise HTTPException(500, "forge_v5_reason_failed") from exc
+
+
+@app.post("/api/v5/quality")
+async def forge_v5_quality(payload: dict, _auth: None = Depends(require_auth)):
+  """Map existing Forge run/verification output into V5 quality dimensions."""
+  try:
+    from core.forge_sandbox_manager import get_forge_sandbox_manager
+
+    goal_id = str((payload or {}).get("goal_id") or "").strip()
+    if not goal_id:
+      raise HTTPException(400, "goal_id required")
+    gate = get_forge_sandbox_manager().build_quality_gate(
+      goal_id=goal_id,
+      run_result=(payload or {}).get("run_result") or {},
+      verification=(payload or {}).get("verification") or {},
+      reasoning=(payload or {}).get("reasoning") or {},
+      compute=(payload or {}).get("compute") or {},
+    )
+    return {"ok": True, "quality_gate": gate}
+  except HTTPException:
+    raise
+  except Exception as exc:
+    logger.warning("Forge V5 quality failed: %s", type(exc).__name__)
+    raise HTTPException(500, "forge_v5_quality_failed") from exc
+
+
+@app.get("/api/v5/compute/backends")
+async def forge_v5_compute_backends(_auth: None = Depends(require_auth)):
+  """Return honest compute backend availability for Forge V5."""
+  try:
+    from core.compute_router import get_compute_router
+
+    return {"ok": True, "backends": get_compute_router().health()}
+  except Exception as exc:
+    logger.warning("Forge V5 compute health failed: %s", type(exc).__name__)
+    raise HTTPException(500, "forge_v5_compute_failed") from exc
+
+
+@app.get("/api/v5/models/health")
+async def forge_v5_models_health(_auth: None = Depends(require_auth)):
+  """Return local/provider model health without claiming unavailable models."""
+  models: dict[str, Any] = {
+    "ollama": {"available": False, "models": [], "reason": "ollama unavailable"},
+    "external": {
+      "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
+      "openai": bool(os.getenv("OPENAI_API_KEY")),
+    },
+  }
+  try:
+    proc = await asyncio.create_subprocess_exec(
+      "ollama", "list",
+      stdout=asyncio.subprocess.PIPE,
+      stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=2)
+    if proc.returncode == 0:
+      lines = stdout.decode("utf-8", errors="ignore").splitlines()[1:]
+      models["ollama"] = {
+        "available": True,
+        "models": [line.split()[0] for line in lines if line.strip()],
+        "reason": "ollama list succeeded",
+      }
+  except Exception:
+    pass
+  return {"ok": True, "models": models}
+
+
+# ── Forge V5 project-scoped convenience endpoints ────────────────────────────
+
+def _v5_direct_projects_enabled() -> bool:
+    return os.getenv("FORGE_V5_DIRECT_PROJECT_ENDPOINTS") == "1"
+
+
+def _v5_direct_projects_disabled() -> None:
+    raise HTTPException(
+        status_code=410,
+        detail="direct_v5_project_endpoints_disabled_use_node_forge",
+    )
+
+
+_V5_STATE_SUBDIRS = {"briefs", "research_packs", "goals", "reports", "quality_gates"}
+
+
+def _v5_safe_id(value: str, field: str = "id") -> str:
+    safe = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", safe) or ".." in safe:
+        raise HTTPException(400, f"invalid_{field}")
+    return safe
+
+
+def _v5_state_path(subdir: str, item_id: str) -> Path:
+    if subdir not in _V5_STATE_SUBDIRS:
+        raise HTTPException(400, "invalid_v5_state_subdir")
+    d = (STATE_DIR / "forge" / subdir).resolve()
+    d.mkdir(parents=True, exist_ok=True)
+    # _v5_safe_id already whitelist-validates the id; this resolved-path
+    # containment is defence-in-depth (and a sanitiser CodeQL recognises).
+    p = (d / f"{_v5_safe_id(item_id)}.json").resolve()
+    if os.path.commonpath([str(d), str(p)]) != str(d):
+        raise HTTPException(400, "invalid_v5_state_path")
+    return p
+
+def _v5_read_json(path: str):
+    try:
+        with open(path) as _f:
+            import json as _json
+            return _json.load(_f)
+    except Exception:
+        return None
+
+
+@app.post("/api/v5/projects/start")
+async def forge_v5_projects_start(payload: dict, _auth: None = Depends(require_auth)):
+    """Convenience: brief + research + goals in one call, returns project_id."""
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    try:
+        from core.forge_v5_runtime import get_forge_v5_runtime
+        import uuid as _uuid
+        raw_input = str((payload or {}).get("raw_input") or "").strip()
+        if not raw_input:
+            raise HTTPException(400, "raw_input required")
+        project_id = _v5_safe_id((payload or {}).get("project_id") or f"p-{_uuid.uuid4().hex[:8]}", "project_id")
+        rt = get_forge_v5_runtime()
+        brief = await rt.start_project_brief(raw_input, project_id, (payload or {}).get("project") or {})
+        import json as _json
+        brief_path = _v5_state_path("briefs", project_id)
+        with open(brief_path, "w") as _bf:
+            _json.dump(brief, _bf, indent=2)
+        return {"ok": True, "project_id": project_id, "brief": brief, "status": "briefed"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Forge V5 projects/start failed: %s", type(exc).__name__)
+        raise HTTPException(500, "forge_v5_projects_start_failed") from exc
+
+
+@app.get("/api/v5/projects/{project_id}/brief")
+async def forge_v5_get_brief(project_id: str, _auth: None = Depends(require_auth)):
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("briefs", project_id))
+    if not data:
+        raise HTTPException(404, "brief not found")
+    return {"ok": True, "brief": data}
+
+
+@app.post("/api/v5/projects/{project_id}/research")
+async def forge_v5_project_research(project_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
+    """Run research for a project; reads brief from state if not provided."""
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    try:
+        from core.forge_v5_runtime import get_forge_v5_runtime
+        project_id = _v5_safe_id(project_id, "project_id")
+        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", project_id))
+        if not brief:
+            raise HTTPException(404, "brief not found — call /api/v5/brief first")
+        pack = await get_forge_v5_runtime().run_research(brief)
+        import json as _json
+        with open(_v5_state_path("research_packs", project_id), "w") as _rf:
+            _json.dump(pack, _rf, indent=2)
+        return {"ok": True, "research_pack": pack}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Forge V5 project research failed: %s", type(exc).__name__)
+        raise HTTPException(500, "forge_v5_project_research_failed") from exc
+
+
+@app.get("/api/v5/projects/{project_id}/research")
+async def forge_v5_get_research(project_id: str, _auth: None = Depends(require_auth)):
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("research_packs", project_id))
+    if not data:
+        raise HTTPException(404, "research pack not found")
+    return {"ok": True, "research_pack": data}
+
+
+@app.post("/api/v5/projects/{project_id}/goals/plan")
+async def forge_v5_project_goals_plan(project_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
+    """Plan goals for a project; reads brief/research from state if not provided."""
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    try:
+        from core.forge_v5_runtime import get_forge_v5_runtime
+        project_id = _v5_safe_id(project_id, "project_id")
+        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", project_id))
+        if not brief:
+            raise HTTPException(404, "brief not found — call /api/v5/brief first")
+        research_pack = (payload or {}).get("research_pack") or _v5_read_json(_v5_state_path("research_packs", project_id)) or {}
+        result = await get_forge_v5_runtime().plan_goals(brief, research_pack)
+        import json as _json
+        goals_data = result.get("goals", result)
+        with open(_v5_state_path("goals", project_id), "w") as _gf:
+            _json.dump(goals_data, _gf, indent=2)
+        return {"ok": True, **result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Forge V5 project goals plan failed: %s", type(exc).__name__)
+        raise HTTPException(500, "forge_v5_project_goals_plan_failed") from exc
+
+
+@app.get("/api/v5/projects/{project_id}/goals")
+async def forge_v5_get_goals(project_id: str, _auth: None = Depends(require_auth)):
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("goals", project_id))
+    if data is None:
+        raise HTTPException(404, "goals not found")
+    return {"ok": True, "goals": data if isinstance(data, list) else data.get("goals", [])}
+
+
+@app.post("/api/v5/goals/{goal_id}/execute")
+async def forge_v5_execute_goal(goal_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
+    """Prepare a goal for execution via the V5 runtime."""
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    try:
+        from core.forge_v5_runtime import get_forge_v5_runtime
+        goal = (payload or {}).get("goal") or {}
+        if not goal:
+            raise HTTPException(400, "goal object required in body")
+        brief = (payload or {}).get("brief") or {}
+        research_pack = (payload or {}).get("research_pack") or {}
+        result = await get_forge_v5_runtime().execute_goal(goal, brief, research_pack)
+        return {"ok": True, **result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Forge V5 execute goal failed: %s", type(exc).__name__)
+        raise HTTPException(500, "forge_v5_execute_goal_failed") from exc
+
+
+@app.get("/api/v5/projects/{project_id}/report")
+async def forge_v5_get_report(project_id: str, _auth: None = Depends(require_auth)):
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    project_id = _v5_safe_id(project_id, "project_id")
+    data = _v5_read_json(_v5_state_path("reports", project_id))
+    if not data:
+        raise HTTPException(404, "report not found")
+    return {"ok": True, "report": data}
+
+
+@app.get("/api/v5/goals/{goal_id}/quality-gate")
+async def forge_v5_get_quality_gate(goal_id: str, _auth: None = Depends(require_auth)):
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    goal_id = _v5_safe_id(goal_id, "goal_id")
+    data = _v5_read_json(_v5_state_path("quality_gates", goal_id))
+    if not data:
+        raise HTTPException(404, "quality gate not found")
+    return {"ok": True, "quality_gate": data}
+
+
+@app.post("/api/v5/goals/{goal_id}/memory")
+async def forge_v5_write_memory(goal_id: str, payload: dict = None, _auth: None = Depends(require_auth)):
+    """Write a structured memory lesson for a completed/failed goal.
+
+    Honest writeback: returns the real store() result (or the failure) so the
+    caller can record success or surface the failure — never a silent fake.
+    """
+    if not _v5_direct_projects_enabled():
+        _v5_direct_projects_disabled()
+    try:
+        from core.forge_v5_runtime import get_forge_v5_runtime
+        body = payload or {}
+        goal = body.get("goal") or {"goal_id": goal_id}
+        quality_gate = body.get("quality_gate") or {}
+        reasoning = body.get("reasoning") or {}
+        compute = body.get("compute") or {}
+        result = get_forge_v5_runtime().write_memory(goal, quality_gate, reasoning, compute)
+        # Persist the quality gate alongside the lesson so the report can read it.
+        if quality_gate:
+            import json as _json
+            goal_id = _v5_safe_id(goal_id, "goal_id")
+            with open(_v5_state_path("quality_gates", goal_id), "w") as _f:
+                _json.dump(quality_gate, _f)
+        return {"ok": bool(result.get("ok", True)), "memory": result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Forge V5 write memory failed: %s", type(exc).__name__)
+        # Honest failure — do not pretend the lesson was stored.
+        return {"ok": False, "error": "forge_v5_write_memory_failed", "memory_stored": False}
+
+
 @app.get("/api/wavefield/status")
 def get_wavefield_status():
   from core.wavefield_provider import get_wavefield_metrics, wavefield_healthcheck  # noqa: PLC0415

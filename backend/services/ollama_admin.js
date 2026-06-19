@@ -567,6 +567,44 @@ async function showModel(name) {
 
 const listLocalModels = listModels
 
+// ── Running models (currently loaded in VRAM) ────────────────────────────────
+
+async function listRunning() {
+  try {
+    const response = await fetch(`${ollamaHost()}/api/ps`, { signal: AbortSignal.timeout(5000) })
+    if (!response.ok) return { ok: false, models: [], error: `ollama ps failed (${response.status})` }
+    const data = await response.json()
+    return { ok: true, models: data.models || [] }
+  } catch (error) {
+    return { ok: false, models: [], error: error.message }
+  }
+}
+
+// ── Load model into VRAM (warm / keep_alive) ─────────────────────────────────
+
+async function loadModel(name, keepAlive = -1) {
+  if (!name) return { ok: false, error: 'name required' }
+  const started = await ensureStarted({ waitMs: 10000 })
+  if (!started.ok) return { ok: false, error: started.error }
+  try {
+    const response = await fetch(`${ollamaHost()}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: name, prompt: ' ', keep_alive: keepAlive, stream: false }),
+      signal: AbortSignal.timeout(30000),
+    })
+    return { ok: response.ok, name, keep_alive: keepAlive }
+  } catch (error) {
+    return { ok: false, error: enrichOllamaError(error.message) }
+  }
+}
+
+// ── Evict model from VRAM (keep_alive=0 forces unload) ───────────────────────
+
+async function evictModel(name) {
+  return loadModel(name, 0)
+}
+
 module.exports = {
   DEFAULT_HOST,
   DEFAULT_MODEL,
@@ -582,6 +620,9 @@ module.exports = {
   ensureStarted,
   listModels,
   listLocalModels,
+  listRunning,
+  loadModel,
+  evictModel,
   showModel,
   deleteModel,
   pullModel,

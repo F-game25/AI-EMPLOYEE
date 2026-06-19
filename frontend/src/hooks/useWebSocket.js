@@ -10,6 +10,7 @@ import { useSecurityStore } from '../store/securityStore'
 import { useEventFeedStore } from '../store/eventFeedStore'
 import { useLearningStore } from '../store/learningStore'
 import { useCompanionStore } from '../store/companionStore'
+import { useForgeStore, ensureForgeRuntimePolling } from '../store/forgeStore'
 import { WS_URL as API_WS_URL } from '../config/api'
 
 const WS_URL = API_WS_URL
@@ -95,6 +96,7 @@ function getTaskStore() { return useTaskStore.getState() }
 function getEconStore() { return useEconomyStore.getState() }
 function getSecStore() { return useSecurityStore.getState() }
 function getEvtStore() { return useEventFeedStore.getState() }
+function getForgeStore() { return useForgeStore.getState() }
 
 const HEALTH_MAP = { healthy: 90, degraded: 55, warning: 55, warn: 55, error: 20, critical: 10, idle: 40, unknown: 50 }
 function normalizeAgents(agents) {
@@ -139,6 +141,7 @@ function connectSingleton() {
     // node_ok = true on WS open; python_ok / llm_ok stay as-is until system:ready arrives
     sys.setBackendStatus?.({ node_ok: true, ws_connected: true })
     sys.addHeartbeatLog({ text: '[SYSTEM] WebSocket connected', level: 'success', ts: Date.now() })
+    ensureForgeRuntimePolling()
   }
 
   ws.onmessage = (evt) => {
@@ -169,6 +172,7 @@ function connectSingleton() {
     sys.setWs(null)
     // ws_connected → false; keep python_ok / llm_ok at last known (STALE not OFFLINE on brief reconnect)
     sys.setBackendStatus?.({ ws_connected: false })
+    ensureForgeRuntimePolling()
     clearTimeout(_typingTimeout)
     clearTelemetryTimers()
     task.setTyping(false)
@@ -225,6 +229,19 @@ function dispatchWsMessage({ event, data }) {
       window.dispatchEvent(new CustomEvent('ws:event', { detail: { type: event, data } }))
       // Generic fan-out for reactor/connection visualisers — type at root for cheap predicate checks
       window.dispatchEvent(new CustomEvent('ws:any', { detail: { type: event, data } }))
+
+      if (
+        event.startsWith('forge:') ||
+        event.startsWith('approval:') ||
+        event === 'workflow:update' ||
+        event === 'memory:added' ||
+        event === 'memory:pending_review' ||
+        event === 'system:ready' ||
+        event === 'system:status'
+      ) {
+        getForgeStore().applyForgeEvent(event, data || {})
+        getForgeStore().ensurePolling()
+      }
 
       // Route events to appropriate domain stores by prefix
       if (event.startsWith('system:')) {

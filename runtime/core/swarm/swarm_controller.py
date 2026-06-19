@@ -2,7 +2,9 @@
 
 Decomposes a goal into subtasks via the existing Planner, then runs each
 subtask as a ReActAgent instance concurrently using a ThreadPoolExecutor.
-Results are merged with a final LLM synthesis call.
+Subtasks with dependencies are executed in topological waves; each wave
+receives a ContextPacket summarising the findings of prior waves so models
+get exactly the context they need — compressed by the cheap llama3.2 model.
 """
 from __future__ import annotations
 
@@ -17,6 +19,29 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 logger = logging.getLogger("core.swarm")
+
+
+@dataclass
+class ContextPacket:
+    """Compressed context passed from upstream subtasks to downstream ones.
+
+    Built after each execution wave from the completed subtask outputs.
+    A cheap fast model (llama3.2) compresses the findings so the heavier
+    downstream model only receives what it needs.
+    """
+    goal: str               # original top-level goal — always carried forward
+    findings: str           # LLM-compressed summary of upstream outputs
+    trajectory_digest: str  # key steps taken (abbreviated, ≤ 300 chars)
+    next_task: str          # the specific downstream task this packet targets
+    source_subtask_ids: list[str] = field(default_factory=list)
+
+    def as_context_str(self) -> str:
+        parts = [f"Goal: {self.goal}"]
+        if self.findings:
+            parts.append(f"Prior findings: {self.findings}")
+        if self.trajectory_digest:
+            parts.append(f"Steps taken: {self.trajectory_digest}")
+        return "\n".join(parts)
 
 # Per-run step queues for SSE streaming
 _run_queues: dict[str, queue.Queue] = {}
@@ -88,26 +113,36 @@ class SwarmController:
         subtask_results: dict[str, Any] = {}
         total_tokens = 0
 
+        # Execute subtasks in topological waves so dependent tasks receive
+        # a ContextPacket summarising the findings of their dependencies.
+        waves = self._topological_waves(subtasks)
+        base_ctx = context or {}
+
         with ThreadPoolExecutor(max_workers=min(n_agents, len(subtasks) or 1)) as pool:
-            future_to_subtask = {
-                pool.submit(self._run_subtask, run_id, st, context or {}): st
-                for st in subtasks
-            }
-            for future in as_completed(future_to_subtask):
-                st = future_to_subtask[future]
-                try:
-                    result = future.result()
-                    subtask_results[st["id"]] = result
-                    total_tokens += result.get("tokens_used", 0)
-                    self._emit(run_id, {
-                        "type": "subtask_done",
-                        "subtask_id": st["id"],
-                        "agent": st.get("agent", "react_agent"),
-                        "status": result.get("status", "done"),
-                    })
-                except Exception as exc:
-                    logger.warning("subtask %s failed: %s", st["id"], exc)
-                    subtask_results[st["id"]] = {"status": "failed", "error": str(exc)}
+            for wave in waves:
+                # Build per-subtask context including upstream ContextPackets
+                future_to_subtask = {}
+                for st in wave:
+                    dep_results = [subtask_results[d] for d in st.get("dependencies", []) if d in subtask_results]
+                    ctx_packet = self._build_context_packet(goal, dep_results, st["task"]) if dep_results else None
+                    merged_ctx = {**base_ctx, **({"context_packet": ctx_packet.as_context_str()} if ctx_packet else {})}
+                    future_to_subtask[pool.submit(self._run_subtask, run_id, st, merged_ctx)] = st
+
+                for future in as_completed(future_to_subtask):
+                    st = future_to_subtask[future]
+                    try:
+                        result = future.result()
+                        subtask_results[st["id"]] = result
+                        total_tokens += result.get("tokens_used", 0)
+                        self._emit(run_id, {
+                            "type": "subtask_done",
+                            "subtask_id": st["id"],
+                            "agent": st.get("agent", "react_agent"),
+                            "status": result.get("status", "done"),
+                        })
+                    except Exception as exc:
+                        logger.warning("subtask %s failed: %s", st["id"], exc)
+                        subtask_results[st["id"]] = {"status": "failed", "error": str(exc)}
 
         # Synthesise all subtask outputs into a final answer
         try:
@@ -163,6 +198,80 @@ class SwarmController:
         if any(s in skill.lower() for s in code_skills):
             return "react_coder"
         return "react_coder"
+
+    def _topological_waves(self, subtasks: list[dict]) -> list[list[dict]]:
+        """Group subtasks into sequential waves respecting dependency order.
+
+        Wave 0 = no dependencies. Wave N = depends only on waves 0..N-1.
+        Within each wave all subtasks can run concurrently.
+        """
+        id_to_st = {st["id"]: st for st in subtasks}
+        wave_of: dict[str, int] = {}
+
+        def _wave(st_id: str) -> int:
+            if st_id in wave_of:
+                return wave_of[st_id]
+            st = id_to_st.get(st_id)
+            if not st or not st.get("dependencies"):
+                wave_of[st_id] = 0
+                return 0
+            w = 1 + max((_wave(d) for d in st["dependencies"] if d in id_to_st), default=-1)
+            wave_of[st_id] = w
+            return w
+
+        for st in subtasks:
+            _wave(st["id"])
+
+        max_wave = max(wave_of.values(), default=0)
+        waves: list[list[dict]] = [[] for _ in range(max_wave + 1)]
+        for st in subtasks:
+            waves[wave_of[st["id"]]].append(st)
+        return [w for w in waves if w]
+
+    def _build_context_packet(self, goal: str, dep_results: list[dict], next_task: str) -> ContextPacket:
+        """Compress upstream subtask outputs into a ContextPacket.
+
+        Uses the cheap llama3.2 model so summarisation doesn't burn VRAM
+        needed by the heavier downstream model.
+        """
+        raw_outputs = [r.get("output", "") for r in dep_results if r.get("output")]
+        source_ids = [r.get("run_id", "") for r in dep_results]
+        trajectory = "; ".join(
+            f"{r.get('steps', 0)} steps" for r in dep_results if r.get("steps")
+        )[:300]
+
+        if not raw_outputs:
+            return ContextPacket(goal=goal, findings="", trajectory_digest=trajectory, next_task=next_task, source_subtask_ids=source_ids)
+
+        combined = "\n\n".join(raw_outputs)
+        # Truncate to avoid burning VRAM on summary model
+        if len(combined) > 3000:
+            combined = combined[:3000] + "…"
+
+        findings = combined  # default: pass raw if summarisation unavailable
+        try:
+            from core.orchestrator import get_llm_client
+            llm = get_llm_client()
+            summary = llm.complete(
+                prompt=(
+                    f"Summarise the following findings in 2-3 sentences for the next task:\n\n"
+                    f"{combined}\n\nNext task: {next_task}"
+                ),
+                system="You are a context compressor. Be concise. No preamble.",
+                model="llama3.2",  # always use the cheap model for compression
+            )
+            if summary.get("output"):
+                findings = summary["output"]
+        except Exception as exc:
+            logger.debug("context_packet summarise skipped: %s", exc)
+
+        return ContextPacket(
+            goal=goal,
+            findings=findings,
+            trajectory_digest=trajectory,
+            next_task=next_task,
+            source_subtask_ids=source_ids,
+        )
 
     def _try_delegate_to_worker(self, run_id: str, subtask: dict, context: dict, vram_needed_mb: int) -> dict | None:
         """Attempt to run subtask on a cluster worker with sufficient free VRAM.
@@ -234,7 +343,11 @@ class SwarmController:
             max_risk=2,
             on_step=_on_step,
         )
-        result = react.run(subtask["task"], context=context)
+        # Inject upstream context into the task description when available
+        task_str = subtask["task"]
+        if context.get("context_packet"):
+            task_str = f"{context['context_packet']}\n\nTask: {task_str}"
+        result = react.run(task_str, context={k: v for k, v in context.items() if k != "context_packet"})
         return {
             "output": result.output,
             "status": result.status,

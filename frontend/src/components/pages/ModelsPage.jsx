@@ -226,14 +226,47 @@ function MainBrainPicker({ registryData }) {
   )
 }
 
+/* ── VRAM Gauge ─────────────────────────────────────────────────────────── */
+
+const VRAM_TOTAL_MB = 8192  // RTX 2070 Super 8 GB
+
+function VramGauge({ runningModels }) {
+  const usedMb = runningModels.reduce((s, m) => s + (m.size_vram || 0) / 1e6, 0)
+  const pct = Math.min(100, (usedMb / VRAM_TOTAL_MB) * 100)
+  const color = pct > 85 ? '#ef4444' : pct > 65 ? '#f59e0b' : '#22c55e'
+  return (
+    <div className="mp-vram-gauge">
+      <div className="mp-vram-gauge__label">
+        <span>VRAM</span>
+        <span style={{ color }}>{usedMb.toFixed(0)} / {VRAM_TOTAL_MB} MB ({pct.toFixed(0)}%)</span>
+      </div>
+      <div className="mp-vram-gauge__bar">
+        <div className="mp-vram-gauge__fill" style={{ width: `${pct}%`, background: color }} />
+        {runningModels.map((m, i) => {
+          const mbThis = (m.size_vram || 0) / 1e6
+          const pctThis = (mbThis / VRAM_TOTAL_MB) * 100
+          const pctStart = runningModels.slice(0, i).reduce((s, r) => s + (r.size_vram || 0) / 1e6, 0) / VRAM_TOTAL_MB * 100
+          return (
+            <div key={m.name} className="mp-vram-gauge__segment-label" style={{ left: `${pctStart + pctThis / 2}%` }}>
+              {m.name?.split(':')[0]}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /* ── Ollama Local Models Manager ────────────────────────────────────────── */
 
 function OllamaManager() {
-  const [models, setModels] = useState([])
-  const [error, setError]   = useState(null)
-  const [pullName, setPullName] = useState('')
-  const [pulling, setPulling]   = useState(false)
+  const [models, setModels]       = useState([])
+  const [running, setRunning]     = useState([])
+  const [error, setError]         = useState(null)
+  const [pullName, setPullName]   = useState('')
+  const [pulling, setPulling]     = useState(false)
   const [pullStatus, setPullStatus] = useState(null)
+  const [loadingModel, setLoadingModel] = useState(null)
 
   const refresh = useCallback(() => {
     api.get('/api/ollama/models')
@@ -241,7 +274,19 @@ function OllamaManager() {
       .catch(e => { setError(e.message || 'ollama unavailable'); setModels([]) })
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  const refreshRunning = useCallback(() => {
+    api.get('/api/ollama/ps')
+      .then(d => setRunning(d.models || []))
+      .catch(() => setRunning([]))
+  }, [])
+
+  useEffect(() => { refresh(); refreshRunning() }, [refresh, refreshRunning])
+
+  // Poll running models every 5s
+  useEffect(() => {
+    const id = setInterval(refreshRunning, 5000)
+    return () => clearInterval(id)
+  }, [refreshRunning])
 
   const remove = async (name) => {
     if (!confirm(`Delete model ${name}?`)) return
@@ -249,11 +294,36 @@ function OllamaManager() {
     refresh()
   }
 
+  const load = async (name) => {
+    setLoadingModel(name)
+    try {
+      await api.post('/api/ollama/load', { name, keep_alive: -1 })
+    } catch (err) {
+      console.error('Failed to load Ollama model:', err)
+      alert(`Model load failed: ${err?.message || err}`)
+    } finally {
+      setLoadingModel(null)
+      refreshRunning()
+    }
+  }
+
+  const evict = async (name) => {
+    setLoadingModel(name)
+    try {
+      await api.post('/api/ollama/evict', { name })
+    } catch (err) {
+      console.error('Failed to evict Ollama model:', err)
+      alert(`Model evict failed: ${err?.message || err}`)
+    } finally {
+      setLoadingModel(null)
+      refreshRunning()
+    }
+  }
+
   const pull = async () => {
     if (!pullName.trim()) return
     setPulling(true); setPullStatus({ status: 'starting' })
     try {
-      // streaming: raw fetch intentional (NDJSON pull-progress reader)
       const jwt = localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || ''
       const res = await fetch('/api/ollama/pull', {
         method: 'POST',
@@ -284,19 +354,58 @@ function OllamaManager() {
     }
   }
 
+  const runningNames = new Set(running.map(r => r.name))
+
   return (
     <div className="mp-ollama">
-      <div className="mp-section-label">OLLAMA LOCAL MODELS {error && <span className="mp-ollama__err">· {error}</span>}</div>
+      {/* VRAM gauge — always show when Ollama is reachable */}
+      {!error && <VramGauge runningModels={running} />}
+
+      {/* Currently loaded in VRAM */}
+      {running.length > 0 && (
+        <>
+          <div className="mp-section-label mp-section-label--sub">LOADED IN VRAM</div>
+          <div className="mp-ollama__list mp-ollama__list--running">
+            {running.map(m => (
+              <div key={m.name} className="mp-ollama__row mp-ollama__row--running">
+                <span className="mp-vram-dot" />
+                <span className="mp-ollama__name">{m.name}</span>
+                <span className="mp-ollama__size">{m.size_vram ? `${(m.size_vram/1e9).toFixed(2)} GB VRAM` : '—'}</span>
+                <span className="mp-ollama__expires">{m.expires_at ? `expires ${new Date(m.expires_at).toLocaleTimeString()}` : 'permanent'}</span>
+                <button
+                  className="mp-ghost-btn mp-ghost-btn--warn"
+                  onClick={() => evict(m.name)}
+                  disabled={loadingModel === m.name}
+                >{loadingModel === m.name ? '…' : 'EVICT'}</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* All installed models */}
+      <div className="mp-section-label mp-section-label--sub">
+        INSTALLED MODELS {error && <span className="mp-ollama__err">· {error}</span>}
+      </div>
       {models.length > 0 && (
         <div className="mp-ollama__list">
-          {models.map(m => (
-            <div key={m.name} className="mp-ollama__row">
-              <span className="mp-ollama__name">{m.name}</span>
-              <span className="mp-ollama__size">{m.size ? `${(m.size/1e9).toFixed(2)} GB` : '—'}</span>
-              <span className="mp-ollama__date">{m.modified_at?.slice(0,10) || '—'}</span>
-              <button className="mp-ghost-btn mp-ghost-btn--danger" onClick={() => remove(m.name)}>DELETE</button>
-            </div>
-          ))}
+          {models.map(m => {
+            const isLoaded = runningNames.has(m.name)
+            return (
+              <div key={m.name} className={`mp-ollama__row ${isLoaded ? 'mp-ollama__row--active' : ''}`}>
+                <span className="mp-ollama__name">{m.name}</span>
+                <span className="mp-ollama__size">{m.size ? `${(m.size/1e9).toFixed(2)} GB` : '—'}</span>
+                <span className="mp-ollama__date">{m.modified_at?.slice(0,10) || '—'}</span>
+                {isLoaded
+                  ? <span className="mp-badge mp-badge--green">IN VRAM</span>
+                  : <button className="mp-ghost-btn mp-ghost-btn--green" onClick={() => load(m.name)} disabled={loadingModel === m.name}>
+                      {loadingModel === m.name ? '…' : 'LOAD'}
+                    </button>
+                }
+                <button className="mp-ghost-btn mp-ghost-btn--danger" onClick={() => remove(m.name)}>DELETE</button>
+              </div>
+            )
+          })}
         </div>
       )}
       {!error && models.length === 0 && (

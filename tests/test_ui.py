@@ -36,7 +36,7 @@ def _jsx_files(directory: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 EXPECTED_PAGES = [
-    "DashboardPage.jsx",
+    "NexusOSDashboard.jsx",
     "ControlCenterPage.jsx",
     "AgentsPage.jsx",
     "AIControlPage.jsx",

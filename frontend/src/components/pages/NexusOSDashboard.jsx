@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, useReducer } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../store/appStore'
 import { useCognitiveStore } from '../../store/cognitiveStore'
@@ -8,6 +8,7 @@ import { useEconomyStore } from '../../store/economyStore'
 import { useSecurityStore } from '../../store/securityStore'
 import { useEventFeedStore } from '../../store/eventFeedStore'
 import { useSystemStore } from '../../store/systemStore'
+import { useForgeStore } from '../../store/forgeStore'
 import { useChannelState, STATE_COLOR } from '../../hooks/useChannelState'
 import { usePerformanceMode } from '../../hooks/usePerformanceMode'
 import CognitiveEye from '../avatar/CognitiveEye'
@@ -21,6 +22,70 @@ import SystemTelemetryNew from '../dashboard/SystemTelemetry'
 import TaskComposer from '../core/TaskComposer'
 import PanelConnections from '../nexus-ui/PanelConnections'
 import './NexusOSDashboard.css'
+
+// ── Banner stack ──────────────────────────────────────────────────────────────
+function BannerStack({ rateLimitSeconds, isOffline, onDismissRateLimit }) {
+  return (
+    <div style={{ position: 'relative', zIndex: 100 }}>
+      {isOffline && (
+        <div className="nxd__banner nxd__banner--red">
+          <span>AI backend offline — responses will be limited</span>
+        </div>
+      )}
+      {rateLimitSeconds > 0 && (
+        <div className="nxd__banner nxd__banner--amber">
+          <span>Rate limit hit — retry in {rateLimitSeconds}s</span>
+          <span className="nxd__banner__dismiss" onClick={onDismissRateLimit} aria-label="Dismiss">✕</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Node detail panel ──────────────────────────────────────────────────────────
+const NODE_META = {
+  mem:  { id: 'mem',  name: 'Memory System',  category: 'COGNITION',     description: 'Manages vector store, short-term cache, and tiered memory retrieval.' },
+  agt:  { id: 'agt',  name: 'Agent Swarm',    category: 'OPERATIONS',    description: 'Orchestrates 70+ active agents across tasks and pipelines.' },
+  rsrc: { id: 'rsrc', name: 'Resources',      category: 'ECONOMY',       description: 'Tracks revenue, token cost, active monetization pipelines, and ROI.' },
+  sec:  { id: 'sec',  name: 'Security',       category: 'INFRASTRUCTURE',description: 'Monitors threat level, CPU/GPU/RAM health, and system integrity.' },
+}
+
+function NodeDetailPanel({ node, isOnline, onClose }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  if (!node) return null
+  return (
+    <>
+      <div className="nxd__node-overlay" onClick={onClose} />
+      <div className="nxd__node-detail" role="dialog" aria-modal="true" aria-label={node.name}>
+        <div className="nxd__node-detail__header">
+          <div>
+            <div style={{ fontSize: 9, letterSpacing: '0.14em', color: 'rgba(200,212,232,0.45)', marginBottom: 4 }}>{node.category}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.04em', color: '#C8D4E8' }}>{node.name}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            <span className="nxd__node-detail__close" onClick={onClose} aria-label="Close">✕</span>
+            <span className="nxd__node-detail__badge" style={isOnline ? {} : { background: 'rgba(239,68,68,.2)', color: '#EF4444' }}>
+              {isOnline ? 'ONLINE' : 'OFFLINE'}
+            </span>
+          </div>
+        </div>
+        <p style={{ fontSize: 11, color: 'rgba(200,212,232,0.62)', lineHeight: 1.55, margin: 0 }}>{node.description}</p>
+        <button
+          className="nxd__node-detail__run"
+          type="button"
+          onClick={() => fetch(`/api/agents/${node.id}/run`, { method: 'POST' }).catch(() => {})}
+        >
+          RUN
+        </button>
+      </div>
+    </>
+  )
+}
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
 function fmt(ts, seconds = false) {
@@ -72,13 +137,14 @@ function Spark({ values = [], color = '#FFB800', w = 100, h = 22 }) {
 }
 
 // ── Corner subsystem panel ─────────────────────────────────────────────────────
-function CornerPanel({ pos, label, icon, accent, metrics = [], sparkData = [], channelState = 'LIVE', panelId }) {
+function CornerPanel({ pos, label, icon, accent, metrics = [], sparkData = [], channelState = 'LIVE', panelId, onClick }) {
   const dotColor = STATE_COLOR[channelState] || STATE_COLOR.OFFLINE
   return (
     <div
       className={`snode snode--${pos} snode--${channelState.toLowerCase()}`}
-      style={{ '--acc': accent }}
+      style={{ '--acc': accent, cursor: onClick ? 'pointer' : undefined }}
       {...(panelId ? { 'data-panel-id': panelId } : {})}
+      onClick={onClick}
     >
       <div className="snode__head">
         <span className="snode__icon">{icon}</span>
@@ -146,6 +212,55 @@ function CapabilityMatrix({ status, onRefresh, onOpenSetup }) {
           <div className="nxd-cap__empty">Capability status unavailable</div>
         )}
       </div>
+    </section>
+  )
+}
+
+function ForgeRuntimePanel({ forge, onOpenForge, onOpenApprovals, onOpenProof, onOpenMemory }) {
+  const run = forge.activeRun
+  const health = forge.health || {}
+  const validation = forge.validation || {}
+  const report = forge.reports?.[0]
+  const agentEngine = forge.agentEngine || {}
+  const pending = forge.pendingApprovals?.length || 0
+  const state = health.state || (forge.error ? 'degraded' : 'live')
+  return (
+    <section className="nxd-forge" aria-label="Forge operational runtime">
+      <div className="nxd-forge__head">
+        <div>
+          <div className="nxd-forge__kicker">ASCEND FORGE RUNTIME</div>
+          <div className="nxd-forge__title">{run?.status || 'NO ACTIVE RUN'}</div>
+        </div>
+        <span className={`nxd-forge__state nxd-forge__state--${state}`}>{state}</span>
+      </div>
+      <button className="nxd-forge__run" type="button" onClick={onOpenForge}>
+        <span>{run?.goal || 'Open Forge to create or select a task'}</span>
+        <b>{run?.run_id || run?.id || 'FORGE'}</b>
+      </button>
+      <div className="nxd-forge__grid">
+        <button type="button" onClick={onOpenApprovals}>
+          <span>APPROVALS</span>
+          <b>{pending}</b>
+        </button>
+        <button type="button" onClick={onOpenProof}>
+          <span>VALIDATION</span>
+          <b>{validation.status || 'unknown'}</b>
+        </button>
+        <button type="button" onClick={onOpenForge}>
+          <span>REPORTS</span>
+          <b>{forge.reports?.length || 0}</b>
+        </button>
+        <button type="button" onClick={onOpenMemory}>
+          <span>MEMORY</span>
+          <b>{forge.memoryLessons?.length || 0}</b>
+        </button>
+      </div>
+      <div className="nxd-forge__meta">
+        <span>AGENT ENGINE</span>
+        <b>{agentEngine.state || 'unknown'}</b>
+      </div>
+      {report?.summary && <div className="nxd-forge__report">{report.summary}</div>}
+      {forge.error && <div className="nxd-forge__error">{forge.error}</div>}
     </section>
   )
 }
@@ -282,10 +397,61 @@ export default function NexusOSDashboard() {
     useShallow(s => ({ systemStatus: s.systemStatus, capabilityStatus: s.capabilityStatus, fetchCapabilityStatus: s.fetchCapabilityStatus }))
   )
   const systemStatus = _systemStatus || {}
+  const forge = useForgeStore(
+    useShallow(s => ({
+      activeRun: s.activeRun,
+      health: s.health,
+      validation: s.validation,
+      reports: s.reports,
+      pendingApprovals: s.pendingApprovals,
+      memoryLessons: s.memoryLessons,
+      agentEngine: s.agentEngine,
+      error: s.error,
+      refresh: s.refresh,
+      ensurePolling: s.ensurePolling,
+    }))
+  )
+
+  // ── Banner state ──────────────────────────────────────────────────────────
+  const [rateLimitSecs, setRateLimitSecs] = useState(0)
+  const [isOffline, setIsOffline] = useState(false)
+
+  useEffect(() => {
+    const onRateLimit = e => setRateLimitSecs(e.detail?.seconds ?? 60)
+    window.addEventListener('nx:rate-limit', onRateLimit)
+    return () => window.removeEventListener('nx:rate-limit', onRateLimit)
+  }, [])
+
+  useEffect(() => {
+    if (rateLimitSecs <= 0) return
+    const t = setInterval(() => setRateLimitSecs(s => Math.max(0, s - 1)), 1000)
+    return () => clearInterval(t)
+  }, [rateLimitSecs])
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const r = await fetch('/api/health')
+        const j = await r.json().catch(() => ({}))
+        setIsOffline(j?.python_backend === 'offline')
+      } catch { setIsOffline(true) }
+    }
+    check()
+    const t = setInterval(check, 15_000)
+    return () => clearInterval(t)
+  }, [])
+
+  // ── Node detail state ─────────────────────────────────────────────────────
+  const [selectedNode, setSelectedNode] = useState(null)
 
   useEffect(() => {
     fetchCapabilityStatus?.()
   }, [fetchCapabilityStatus])
+
+  useEffect(() => {
+    forge.ensurePolling?.()
+    forge.refresh?.({ silent: true, reason: 'dashboard_mount' }).catch(() => {})
+  }, [forge.ensurePolling, forge.refresh])
 
   const fieldRef = useRef(null)
   useEffect(() => {
@@ -355,6 +521,16 @@ export default function NexusOSDashboard() {
 
   return (
     <div className="nxd">
+      <BannerStack
+        rateLimitSeconds={rateLimitSecs}
+        isOffline={isOffline}
+        onDismissRateLimit={() => setRateLimitSecs(0)}
+      />
+      <NodeDetailPanel
+        node={selectedNode ? NODE_META[selectedNode] : null}
+        isOnline={!isOffline}
+        onClose={() => setSelectedNode(null)}
+      />
       {/* ═══ CENTER STAGE ═════════════════════════════════════════════════════ */}
       <div className="nxd__center">
         {/* Top status strip */}
@@ -425,6 +601,7 @@ export default function NexusOSDashboard() {
               ['MEMORY WRITES',    `${num(memoryRate)}/s`],
             ]}
             sparkData={tokHist.current}
+            onClick={() => setSelectedNode('mem')}
           />
 
           {/* TOP-RIGHT — Operations · gold */}
@@ -442,6 +619,7 @@ export default function NexusOSDashboard() {
               ['EXEC TIME',     `${avgExecTime}s`],
             ]}
             sparkData={cpuHist.current}
+            onClick={() => setSelectedNode('agt')}
           />
 
           {/* BOTTOM-LEFT — Economy · purple */}
@@ -459,6 +637,7 @@ export default function NexusOSDashboard() {
               ['TOKEN COST',       money(tokenCost)],
             ]}
             sparkData={revHist.current}
+            onClick={() => setSelectedNode('rsrc')}
           />
 
           {/* BOTTOM-RIGHT — Infrastructure · green */}
@@ -476,6 +655,7 @@ export default function NexusOSDashboard() {
               ['GPU TEMP',   `${Math.round(gpuTemp)}°C`],
             ]}
             sparkData={ramHist.current}
+            onClick={() => setSelectedNode('sec')}
           />
         </div>
 
@@ -495,6 +675,14 @@ export default function NexusOSDashboard() {
       {/* ═══ RIGHT SIDEBAR ════════════════════════════════════════════════════ */}
       <div className="nxd__sidebar">
         <EventStream events={events} />
+        <div className="nxd__div" />
+        <ForgeRuntimePanel
+          forge={forge}
+          onOpenForge={() => setActiveSection('ascend-forge')}
+          onOpenApprovals={() => setActiveSection('approvals')}
+          onOpenProof={() => setActiveSection('proof')}
+          onOpenMemory={() => setActiveSection('memory')}
+        />
         <div className="nxd__div" />
         <CapabilityMatrix
           status={capabilityStatus}

@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import api from '../../api/client'
+import { useForgeStore } from '../../store/forgeStore'
 import './ProofCenter.css'
 
-const FILTERS = ['all', 'file', 'trace', 'memory_trace', 'fallback', 'provider_response', 'approval', 'task_error']
+const FILTERS = ['all', 'file', 'trace', 'memory_trace', 'fallback', 'provider_response', 'approval', 'task_error', 'forge_validation', 'forge_report', 'forge_artifact']
 
 function fmt(value) {
   if (!value) return 'Unknown'
@@ -49,29 +51,98 @@ function EmptyState({ title, detail, action }) {
 }
 
 export default function ProofCenter() {
+  const forge = useForgeStore(useShallow(s => ({
+    activeRun: s.activeRun,
+    validation: s.validation,
+    artifacts: s.artifacts,
+    reports: s.reports,
+    refresh: s.refresh,
+    applyForgeEvent: s.applyForgeEvent,
+  })))
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const [retrying, setRetrying] = useState(false)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      setData(await api.get('/api/proof/center'))
+      const [proof] = await Promise.all([
+        api.get('/api/proof/center'),
+        forge.refresh({ silent: true, reason: 'proof_center_load' }).catch(() => null),
+      ])
+      setData(proof)
     } catch (err) {
       setError(err?.message || 'Proof Center unavailable')
     } finally {
       setLoading(false)
     }
-  }
+  }, [forge])
 
   useEffect(() => {
     load()
-  }, [])
+  }, [load])
 
-  const items = useMemo(() => normalizeItems(data), [data])
+  useEffect(() => {
+    const handler = event => {
+      const type = event.detail?.type || ''
+      if (type === 'proof:ready' || type.startsWith('forge:validation_') || type === 'forge:report_generated') load()
+    }
+    window.addEventListener('ws:event', handler)
+    return () => window.removeEventListener('ws:event', handler)
+  }, [load])
+
+  const forgeItems = useMemo(() => {
+    const out = []
+    const runId = forge.activeRun?.run_id || forge.activeRun?.id || forge.validation?.run_id
+    if (forge.validation) {
+      out.push({
+        id: forge.validation.id || `forge-validation-${runId || 'active'}`,
+        name: `Forge validation ${forge.validation.status || 'unknown'}`,
+        type: 'forge_validation',
+        status: forge.validation.status || 'unknown',
+        source: 'forge',
+        task_id: forge.activeRun?.linked_backlog_id || null,
+        turn_id: runId || null,
+        path: null,
+        url: null,
+        created_at: forge.validation.latest?.verified_at || forge.activeRun?.updated_at || null,
+        degraded: forge.validation.status === 'failed',
+      })
+    }
+    for (const artifact of forge.artifacts || []) {
+      out.push({
+        id: artifact.id,
+        name: artifact.summary || artifact.file_path || artifact.artifact_type || 'Forge artifact',
+        type: 'forge_artifact',
+        status: artifact.status || 'unknown',
+        source: 'forge',
+        task_id: artifact.project_id || null,
+        turn_id: artifact.run_id || null,
+        path: artifact.file_path || null,
+        created_at: artifact.created_at || null,
+        degraded: ['failed', 'blocked', 'verify_failed'].includes(String(artifact.status || '').toLowerCase()),
+      })
+    }
+    for (const report of forge.reports || []) {
+      out.push({
+        id: report.id,
+        name: report.summary || 'Forge final report',
+        type: 'forge_report',
+        status: report.status || 'available',
+        source: 'forge',
+        task_id: report.project_id || null,
+        turn_id: report.run_id || null,
+        created_at: report.created_at || null,
+        degraded: false,
+      })
+    }
+    return out
+  }, [forge])
+  const items = useMemo(() => [...normalizeItems(data), ...forgeItems], [data, forgeItems])
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return items.filter(item => {
@@ -87,6 +158,26 @@ export default function ProofCenter() {
   const turns = Array.isArray(data?.turns) ? data.turns : []
   const degradedCount = items.filter(item => item.degraded || statusClass(item) === 'degraded').length
   const failedCount = items.filter(item => statusClass(item) === 'failed').length
+  const runId = forge.activeRun?.run_id || forge.activeRun?.id
+
+  const retryValidation = async () => {
+    if (!runId) {
+      setError('No active Forge run selected')
+      return
+    }
+    setRetrying(true)
+    setError(null)
+    try {
+      const result = await api.forge.verifyRun(runId, { ownerApproved: true })
+      if (result.run) forge.applyForgeEvent('forge:run_updated', { run: result.run })
+      if (result.test_result) forge.applyForgeEvent('forge:validation_completed', { run_id: runId, test_result: result.test_result, all_passed: result.ok !== false })
+      await load()
+    } catch (err) {
+      setError(err?.message || 'Forge validation retry failed')
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   return (
     <main className="proof-center">
@@ -96,9 +187,14 @@ export default function ProofCenter() {
           <h1>Execution Evidence</h1>
           <p>Generated files, traces, dry-run outputs, provider responses, approval records, and failed tool logs in one place.</p>
         </div>
-        <button type="button" className="proof-btn" onClick={load} disabled={loading}>
-          {loading ? 'Refreshing' : 'Refresh'}
-        </button>
+        <div className="proof-hero__actions">
+          <button type="button" className="proof-btn" onClick={load} disabled={loading}>
+            {loading ? 'Refreshing' : 'Refresh'}
+          </button>
+          <button type="button" className="proof-btn proof-btn--ghost" onClick={retryValidation} disabled={retrying || !runId}>
+            {retrying ? 'Retrying' : 'Retry Forge Validation'}
+          </button>
+        </div>
       </section>
 
       <section className="proof-metrics">

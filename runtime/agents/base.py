@@ -119,3 +119,38 @@ class BaseAgent:
         db = self._get_db()
         tenant_id = self._get_tenant_id()
         return db.update(table, data, where, params, tenant_id=tenant_id)
+
+    @classmethod
+    def wrap(cls, legacy, agent_id: str = 'unknown') -> '_LegacyAgentWrapper':
+        """Wrap a non-conforming object as a BaseAgent."""
+        entry = next((m for m in ('run', 'execute', 'process', 'handle', 'main') if hasattr(legacy, m)), None)
+        if entry is None and callable(legacy):
+            entry = '__call__'
+        return _LegacyAgentWrapper(legacy, agent_id, entry or 'run')
+
+
+class _LegacyAgentWrapper(BaseAgent):
+    def __init__(self, legacy, agent_id: str, entry_point: str):
+        super().__init__()
+        self.agent_id = agent_id
+        self._legacy = legacy
+        self._entry = entry_point
+
+    def execute(self, payload: dict) -> dict:
+        fn = getattr(self._legacy, self._entry, None)
+        if fn is None and callable(self._legacy):
+            fn = self._legacy
+        if fn is None:
+            return {'status': 'error', 'error': f'No entry point {self._entry}'}
+        try:
+            result = fn(payload)
+            return _normalize_legacy_output(result, self.agent_id)
+        except Exception as exc:
+            return {'status': 'error', 'agent_id': self.agent_id, 'error': str(exc)}
+
+
+def _normalize_legacy_output(raw, agent_id: str) -> dict:
+    """Coerce any legacy return value into the standard BaseAgent output shape."""
+    if isinstance(raw, dict):
+        return {'result': raw, 'status': raw.get('status', 'success'), 'agent_id': agent_id}
+    return {'result': str(raw) if raw is not None else None, 'status': 'success', 'agent_id': agent_id}

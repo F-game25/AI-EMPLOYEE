@@ -50,6 +50,9 @@ SecurityPolicy, get_security_policy = _load_security_policy()
 class AgentController:
     """Application-layer orchestrator with deterministic data flow."""
 
+    _agent_caps_cache: dict | None = None
+    _agent_caps_lock = __import__('threading').Lock()
+
     def __init__(
         self,
         *,
@@ -77,6 +80,7 @@ class AgentController:
         self._context_evaluator: Optional[ContextSufficiencyEvaluator] = None
         self._auto_researcher: Optional[AutoResearchAgent] = None
         self._broadcast_fn: Callable[[str, dict], None] = lambda _e, _p: None
+        self._broadcast_enabled = False
         # Per-task context-check user response futures, keyed by task/run id
         self._context_responses: dict[str, dict] = {}
         self._context_lock = threading.Lock()
@@ -117,11 +121,53 @@ class AgentController:
         try:
             from core.quantum.engine import get_qce
             qce = get_qce()
-            pack = await qce.process(goal=goal, task_type='execution')
+            timeout_ms = int(os.getenv("AGENT_CONTROLLER_QCE_TIMEOUT_MS", "300"))
+            pack = await qce.process(
+                goal=goal,
+                task_type='execution',
+                engine_filter=["agents", "tools", "tasks", "docs"],
+                max_results_per_engine=10,
+                timeout_ms=timeout_ms,
+            )
             agents = qce._router.route_agents(pack, preferred_agent_id=preferred_agent_id)
             return agents[0] if agents else None
         except Exception:
             return None
+
+    @staticmethod
+    def _qce_routing_enabled() -> bool:
+        return (os.getenv("AGENT_CONTROLLER_QCE_ROUTING") or "0").lower() in {"1", "true", "yes", "on"}
+
+    def _keyword_route_agent(self, goal: str) -> str | None:
+        import json, os
+        with AgentController._agent_caps_lock:
+            if AgentController._agent_caps_cache is None:
+                caps_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'agent_capabilities.json')
+                try:
+                    with open(os.path.normpath(caps_path)) as f:
+                        data = json.load(f)
+                    AgentController._agent_caps_cache = data.get('agents', data) if isinstance(data, dict) else {}
+                except Exception:
+                    AgentController._agent_caps_cache = {}
+        caps = AgentController._agent_caps_cache
+        if not caps:
+            return None
+        tokens = set(goal.lower().split())
+        best_id, best_score = None, 0
+        for agent_id, meta in caps.items():
+            if not isinstance(meta, dict):
+                continue
+            corpus = ' '.join([
+                meta.get('description', ''),
+                meta.get('category', ''),
+                ' '.join(meta.get('skills', [])),
+                ' '.join(meta.get('commands', [])),
+                ' '.join(meta.get('specialties', [])),
+            ]).lower()
+            score = sum(1 for t in tokens if t in corpus)
+            if score > best_score:
+                best_score, best_id = score, agent_id
+        return best_id if best_score > 0 else None
 
     def run_goal(
         self,
@@ -152,12 +198,26 @@ class AgentController:
             self._logger.log_event(component="controller", action="compute_plan_skipped",
                                    result="warn", latency_ms=0.0, meta={"err": str(_cp_err)})
 
-        # QCE agent routing — attempt amplitude-based selection, fall back to planner
+        # QCE agent routing — attempt amplitude-based selection, fall back to keyword router
         _qce_agent: str | None = None
-        try:
-            _qce_agent = asyncio.run(self._qce_route_agent(goal, preferred_agent_id))
-        except Exception:
-            _qce_agent = preferred_agent_id
+        _log = logging.getLogger(__name__)
+        if self._qce_routing_enabled():
+            try:
+                _qce_agent = asyncio.run(self._qce_route_agent(goal, preferred_agent_id))
+                if _qce_agent:
+                    _log.debug("agent routing: QCE selected '%s'", _qce_agent)
+                else:
+                    raise ValueError("QCE returned None")
+            except Exception:
+                _qce_agent = None
+        if not _qce_agent:
+            _kw_agent = self._keyword_route_agent(goal)
+            if _kw_agent:
+                _log.debug("agent routing: keyword fallback selected '%s'", _kw_agent)
+                _qce_agent = _kw_agent
+            else:
+                _qce_agent = preferred_agent_id
+                _log.debug("agent routing: no match, using preferred_agent_id='%s'", preferred_agent_id)
 
         if self._research.is_learn_command(goal):
             return self._run_learn_topic_goal(goal=goal, run_id=run_id, start=start, persist_task=persist_task)
@@ -415,6 +475,7 @@ class AgentController:
     def set_broadcast(self, fn: Callable[[str, dict], None]) -> None:
         """Allow the FastAPI server to inject its WS broadcaster."""
         self._broadcast_fn = fn or (lambda _e, _p: None)
+        self._broadcast_enabled = bool(fn)
         if self._auto_researcher is not None:
             self._auto_researcher._broadcast = self._broadcast_fn
 
@@ -495,6 +556,10 @@ class AgentController:
                 "memory_hits": eval_result.get("memory_hits", 0),
                 "graph_hits": eval_result.get("graph_hits", 0),
             })
+            if not self._broadcast_enabled:
+                summary["user_choice"] = "continue"
+                summary["headless"] = True
+                return summary
             timeout_s = float(os.getenv("CONTEXT_CHECK_TIMEOUT_S", "60"))
             choice = self._await_user_choice(run_id, timeout=timeout_s)
             if choice != "research":
@@ -540,6 +605,18 @@ class AgentController:
         goal = str(task_input.get("goal") or task_input.get("task") or "").strip()
         context = task_input.get("context")
 
+        if not self._llm_provider_available():
+            def _unavailable_executor(_p: dict) -> dict:
+                raise RuntimeError("llm_provider_unavailable")
+
+            return get_action_bus().emit(
+                action_type=action_type,
+                payload={"task_input": task_input, "action": action},
+                actor="agent_controller",
+                reason="executor dispatch",
+                executor=_unavailable_executor,
+            )
+
         def _llm_executor(_p: dict) -> dict:
             from engine.api import generate
             role = skill.replace("-", " ").replace("_", " ")
@@ -562,6 +639,27 @@ class AgentController:
             reason="executor dispatch",
             executor=_llm_executor,
         )
+
+    @staticmethod
+    def _llm_provider_available() -> bool:
+        api_keys = (
+            "GOOGLE_API_KEY",
+            "NVIDIA_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+        )
+        if any(os.getenv(key) for key in api_keys):
+            return True
+        try:
+            import urllib.request
+
+            host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+            timeout = float(os.getenv("AGENT_CONTROLLER_PROVIDER_CHECK_TIMEOUT_S", "0.5"))
+            req = urllib.request.Request(f"{host}/api/tags", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout):
+                return True
+        except Exception:
+            return False
 
 
 _instance: AgentController | None = None
