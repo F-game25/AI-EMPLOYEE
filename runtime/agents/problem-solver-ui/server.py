@@ -3757,9 +3757,15 @@ def _v5_state_path(subdir: str, item_id: str) -> Path:
         raise HTTPException(400, "invalid_v5_state_path")
     return p
 
-def _v5_read_json(path: str):
+def _v5_read_json(path: str | Path):
     try:
-        with open(path) as _f:
+        # Defence-in-depth: only read inside the V5 state tree (paths already come
+        # from _v5_state_path, which validates the id; this is the sanitiser CodeQL recognises).
+        root = (STATE_DIR / "forge").resolve()
+        p = Path(path).resolve()
+        if os.path.commonpath([str(root), str(p)]) != str(root):
+            return None
+        with open(p) as _f:
             import json as _json
             return _json.load(_f)
     except Exception:

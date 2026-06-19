@@ -29,9 +29,10 @@ class _ClauseSplitter:
         bounded = (text or "")[:4000]
         for marker in ("\n", ";", ","):
             bounded = bounded.replace(marker, ".")
-        for marker in (" and ", " AND ", " then ", " THEN "):
-            bounded = bounded.replace(marker, ".")
-        return bounded.split(".")
+        # Word-boundary match (no adjacent \s+ quantifiers) — case-insensitive
+        # and free of polynomial-backtracking ReDoS.
+        bounded = re.sub(r"(?i)\b(?:and|then)\b", ".", bounded)
+        return [c for c in bounded.split(".") if c.strip()]
 
 
 CLAUSE_SPLIT = _ClauseSplitter()
