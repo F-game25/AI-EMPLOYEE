@@ -53,6 +53,19 @@ const QuantumBrainPage   = lazy(() => import('./pages/QuantumBrainPage'))
 const DeepResearchPage   = lazy(() => import('./pages/DeepResearchPage'))
 const OrdersPage         = lazy(() => import('./pages/OrdersPage'))
 const CompanyBuilderPage = lazy(() => import('./pages/CompanyBuilderPage'))
+// Previously-orphaned pages — built but never mounted; surfaced under DIAGNOSTICS (C4).
+const DoctorPage         = lazy(() => import('./pages/DoctorPage'))
+const EvolutionPage      = lazy(() => import('./pages/EvolutionPage'))
+const HermesPage         = lazy(() => import('./pages/HermesPage'))
+const FairnessPage       = lazy(() => import('./pages/FairnessPage'))
+const VoicePage          = lazy(() => import('./pages/VoicePage'))
+const TrainingPage       = lazy(() => import('./pages/TrainingPage'))
+const HistoryPage        = lazy(() => import('./pages/HistoryPage'))
+const LearningLadderPage = lazy(() => import('./pages/LearningLadderPage'))
+const AIControlPage      = lazy(() => import('./pages/AIControlPage'))
+const ControlCenterPage  = lazy(() => import('./pages/ControlCenterPage'))
+const OnboardingPage     = lazy(() => import('./pages/OnboardingPage'))
+const NeuralBrainPage    = lazy(() => import('./pages/NeuralBrainPage'))
 import { API_URL } from '../config/api'
 import { usePerformanceMode } from '../hooks/usePerformanceMode'
 import TopBar from './dashboard/TopBar'
@@ -122,6 +135,19 @@ const PAGES = {
   'perspectives':   UserExperienceCenter,
   'avatar-lab':     AvatarLabPage,
   'quantum-brain':  QuantumBrainPage,
+  // DIAGNOSTICS — previously-orphaned pages, now surfaced (C4)
+  'doctor':          DoctorPage,
+  'evolution':       EvolutionPage,
+  'hermes':          HermesPage,
+  'fairness':        FairnessPage,
+  'voice':           VoicePage,
+  'training':        TrainingPage,
+  'history':         HistoryPage,
+  'learning-ladder': LearningLadderPage,
+  'ai-control':      AIControlPage,
+  'control-center':  ControlCenterPage,
+  'onboarding':      OnboardingPage,
+  'neural-brain':    NeuralBrainPage,
 }
 
 function DashboardMountedSignal({ section }) {

@@ -56,6 +56,11 @@ function HealthGauge({ value = 0 }) {
 // SYSTEM (8): Setup, Integrations, Models, Model Fabric, Compute, API Catalog, Perspectives, Settings
 // ─────────────────────────────────────────────────────────────────────────
 
+// Shared icon for the surfaced DIAGNOSTICS pages (C4).
+const DIAG_ICON = (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5v3.5l2.2 1.3"/></svg>
+)
+
 const NAV_GROUPS = [
   {
     group: 'CORE',
@@ -168,6 +173,24 @@ const NAV_GROUPS = [
         label: 'Prompt Inspector',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M4.5 6h7M4.5 8.5h4"/><circle cx="11.5" cy="11.5" r="2"/><path d="M13 13l1.5 1.5"/></svg>,
       },
+    ],
+  },
+  {
+    group: 'DIAGNOSTICS',
+    icon: '⚙',
+    items: [
+      { id: 'doctor', label: 'Doctor', icon: DIAG_ICON },
+      { id: 'evolution', label: 'Evolution', icon: DIAG_ICON },
+      { id: 'hermes', label: 'Hermes', icon: DIAG_ICON },
+      { id: 'fairness', label: 'Fairness', icon: DIAG_ICON },
+      { id: 'voice', label: 'Voice', icon: DIAG_ICON },
+      { id: 'training', label: 'Training', icon: DIAG_ICON },
+      { id: 'history', label: 'History', icon: DIAG_ICON },
+      { id: 'learning-ladder', label: 'Learning Ladder', icon: DIAG_ICON },
+      { id: 'ai-control', label: 'AI Control', icon: DIAG_ICON },
+      { id: 'control-center', label: 'Control Center', icon: DIAG_ICON },
+      { id: 'onboarding', label: 'Onboarding', icon: DIAG_ICON },
+      { id: 'neural-brain', label: 'Neural Brain', icon: DIAG_ICON },
     ],
   },
   {
