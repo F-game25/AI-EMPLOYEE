@@ -3744,6 +3744,8 @@ def _v5_direct_projects_disabled() -> None:
 
 
 _V5_STATE_SUBDIRS = {"briefs", "research_packs", "goals", "reports", "quality_gates"}
+_V5_DIRECT_STATE_FILE = (STATE_DIR / "forge" / "v5_direct_state.json").resolve()
+_V5_DIRECT_STATE_LOCK = threading.RLock()
 
 
 def _v5_safe_id(value: str, field: str = "id") -> str:
@@ -3757,44 +3759,63 @@ def _v5_safe_id(value: str, field: str = "id") -> str:
     return safe
 
 
-def _v5_state_dir(subdir: str) -> Path:
+def _v5_state_bucket(subdir: str) -> str:
     if subdir not in _V5_STATE_SUBDIRS:
         raise HTTPException(400, "invalid_v5_state_subdir")
-    directory = (STATE_DIR / "forge" / subdir).resolve()
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
+    return subdir
 
 
-def _v5_state_path(subdir: str, item_id: str, field: str = "id") -> Path:
-    directory = _v5_state_dir(subdir)
-    safe_name = os.path.basename(f"{_v5_safe_id(item_id, field)}.json")
-    path = (directory / safe_name).resolve()
+def _v5_direct_state_file() -> Path:
+    root = (STATE_DIR / "forge").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    path = _V5_DIRECT_STATE_FILE
     try:
-        path.relative_to(directory)
+        path.relative_to(root)
     except ValueError as exc:
-        raise HTTPException(400, "invalid_v5_state_path") from exc
-    if os.path.commonpath([str(directory), str(path)]) != str(directory):
+        raise HTTPException(500, "invalid_v5_state_path") from exc
+    if os.path.commonpath([str(root), str(path)]) != str(root):
         raise HTTPException(400, "invalid_v5_state_path")
     return path
 
 
-def _v5_read_state_json(subdir: str, item_id: str, field: str = "id"):
+def _v5_load_direct_state() -> dict[str, Any]:
+    path = _v5_direct_state_file()
     try:
-        path = _v5_state_path(subdir, item_id, field)
         if not path.is_file():
-            return None
+            return {}
         with path.open(encoding="utf-8") as state_file:
-            return json.load(state_file)
-    except HTTPException:
-        raise
+            data = json.load(state_file)
+        return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError):
-        return None
+        return {}
+
+
+def _v5_save_direct_state(state: dict[str, Any]) -> None:
+    path = _v5_direct_state_file()
+    with path.open("w", encoding="utf-8") as state_file:
+        json.dump(state, state_file, indent=2)
+
+
+def _v5_read_state_json(subdir: str, item_id: str, field: str = "id"):
+    bucket = _v5_state_bucket(subdir)
+    safe_id = _v5_safe_id(item_id, field)
+    with _V5_DIRECT_STATE_LOCK:
+        state = _v5_load_direct_state()
+        values = state.get(bucket, {})
+        return values.get(safe_id) if isinstance(values, dict) else None
 
 
 def _v5_write_state_json(subdir: str, item_id: str, data: Any, field: str = "id") -> None:
-    path = _v5_state_path(subdir, item_id, field)
-    with path.open("w", encoding="utf-8") as state_file:
-        json.dump(data, state_file, indent=2)
+    bucket = _v5_state_bucket(subdir)
+    safe_id = _v5_safe_id(item_id, field)
+    with _V5_DIRECT_STATE_LOCK:
+        state = _v5_load_direct_state()
+        values = state.setdefault(bucket, {})
+        if not isinstance(values, dict):
+            values = {}
+            state[bucket] = values
+        values[safe_id] = data
+        _v5_save_direct_state(state)
 
 
 @app.post("/api/v5/projects/start")

@@ -30,6 +30,7 @@ const forgeTraining = require('../services/forge_training')
 const forgeMemoryGraph = require('../services/forge_memory_graph')
 const forgeContextEngine = require('../services/forge_context_engine')
 const broadcaster = require('../events/broadcaster')
+const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 
 // Lightweight logger shim — several swarm/execute paths reference `logger.*`.
 // Maps to console so those paths log instead of throwing "logger is not defined".
@@ -1560,20 +1561,7 @@ async function callPythonChat(message, timeoutMs = 30000) {
   return { ok: false, error: 'No LLM available. Start Ollama (ollama serve) or set ANTHROPIC_API_KEY in ~/.ai-employee/.env for cloud fallback.' }
 }
 
-function _makeForgeRateLimit(max, windowMs = 60000) {
-  const hits = new Map()
-  return (req, res, next) => {
-    const key = req.ip || 'anon'
-    const now = Date.now()
-    const entry = hits.get(key) || { count: 0, reset: now + windowMs }
-    if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs }
-    entry.count++
-    hits.set(key, entry)
-    if (entry.count > max) return res.status(429).json({ ok: false, error: 'Too many requests' })
-    next()
-  }
-}
-const _rl_forge_fs = _makeForgeRateLimit(30)  // 30/min per IP for filesystem routes
+const forgeFilesystemRateLimit = createRouteRateLimit({ keyPrefix: 'forge-fs', max: 30, windowMs: 60_000 })
 const _SAFE_ID_RE = /^[A-Za-z0-9._-]{1,120}$/
 const _V5_JSON_SUBDIRS = new Set(['briefs', 'research_packs', 'goals', 'reports', 'quality_gates'])
 
@@ -1633,7 +1621,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     return false
   }
 
-  router.get('/engine/status', requireAuth, _rl_forge_fs, async (_req, res) => {
+  router.get('/engine/status', requireAuth, forgeFilesystemRateLimit, async (_req, res) => {
     const status = engine.getStatus()
     res.json({
       ...status,
@@ -2245,7 +2233,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   })
 
   // Rejects a staged action; removes its staged files from the workspace.
-  router.post('/runs/:id/reject-action', requireAuth, _rl_forge_fs, (req, res) => {
+  router.post('/runs/:id/reject-action', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const run = findRun(req.params.id)
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
     const actionId = String(req.body?.action_id || '').trim()
@@ -4528,7 +4516,7 @@ Output a JSON array:
     } catch { return [] }
   }
 
-  router.post('/projects/:id/decompose', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/projects/:id/decompose', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const { goal, add_to_backlog } = req.body || {}
@@ -4579,23 +4567,23 @@ Output a JSON array:
     return _loadForgeSkills().filter(s => (Array.isArray(s.triggers) ? s.triggers : []).some(t => goalLower.includes(t.toLowerCase())))
   }
 
-  router.get('/skills', requireAuth, _rl_forge_fs, (_req, res) => {
+  router.get('/skills', requireAuth, forgeFilesystemRateLimit, (_req, res) => {
     res.json({ ok: true, skills: _loadForgeSkills() })
   })
 
-  router.get('/skills/:skillId', requireAuth, _rl_forge_fs, (req, res) => {
+  router.get('/skills/:skillId', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const skill = _loadForgeSkills().find(s => s.skill_id === req.params.skillId)
     if (!skill) return res.status(404).json({ ok: false, error: 'skill not found' })
     res.json({ ok: true, skill })
   })
 
-  router.post('/skills/reload', requireAuth, _rl_forge_fs, (_req, res) => {
+  router.post('/skills/reload', requireAuth, forgeFilesystemRateLimit, (_req, res) => {
     _forgeSkillsCache = null
     const skills = _loadForgeSkills()
     res.json({ ok: true, count: skills.length, skills: skills.map(s => s.skill_id) })
   })
 
-  router.post('/runs/:id/apply-skill', requireAuth, _rl_forge_fs, (req, res) => {
+  router.post('/runs/:id/apply-skill', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const run = findRun(req.params.id)
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
     const { skill_id } = req.body || {}
@@ -5382,7 +5370,7 @@ Return JSON:
   })
 
   // POST /api/forge/training-runs/:id/evaluate — run evaluation gate
-  router.post('/training-runs/:id/evaluate', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/training-runs/:id/evaluate', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const tr = forgeRunStore.findTrainingRun(req.params.id)
     if (!tr) return res.status(404).json({ ok: false, error: 'training run not found' })
     const project = findProject(tr.project_id)
@@ -5995,7 +5983,7 @@ Return JSON:
     }
   })
 
-  router.post('/v7/projects/:projectId/goals/:goalId/rollback', requireAuth, _rl_forge_fs, (req, res) => {
+  router.post('/v7/projects/:projectId/goals/:goalId/rollback', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const ctx = _v7Context(req, res)
     if (!ctx) return
     const rollbackId = req.body?.rollback_id ? _safeId(req.body.rollback_id, 'rollback_id') : ''
@@ -6020,7 +6008,7 @@ Return JSON:
     }
   })
 
-  router.post('/v5/projects/start', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/v5/projects/start', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const rawInput = String(req.body?.raw_input || req.body?.goal || '').trim()
     if (!rawInput) return res.status(400).json({ ok: false, error: 'raw_input required' })
 
@@ -6120,7 +6108,7 @@ Return JSON:
     try { return scrub(obj, null) } catch { return obj }
   }
 
-  router.get('/v5/projects/:id/brief', requireAuth, _rl_forge_fs, (req, res) => {
+  router.get('/v5/projects/:id/brief', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const project = findProject(req.params.id)
     if (project) return res.json({ ok: true, brief: forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || null })
     const brief = _readV5Json('briefs', req.params.id)
@@ -6128,7 +6116,7 @@ Return JSON:
     res.json({ ok: true, brief })
   })
 
-  router.get('/v5/projects/:id/research', requireAuth, _rl_forge_fs, (req, res) => {
+  router.get('/v5/projects/:id/research', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const project = findProject(req.params.id)
     if (project) return res.json({ ok: true, research_pack: forgeRunStore.getV5Artifact(project.id, 'research')?.payload || null })
     // Filesystem fallback for orders-created projects
@@ -6138,7 +6126,7 @@ Return JSON:
     res.json({ ok: true, research_pack: research_pack || null })
   })
 
-  router.post('/v5/projects/:id/research', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/v5/projects/:id/research', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const brief = forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || req.body?.brief || null
@@ -6151,7 +6139,7 @@ Return JSON:
     res.json(result)
   })
 
-  router.get('/v5/projects/:id/goals', requireAuth, _rl_forge_fs, (req, res) => {
+  router.get('/v5/projects/:id/goals', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const project = findProject(req.params.id)
     if (project) return res.json({ ok: true, goals: forgeRunStore.getV5Goals(project.id), reasoning: forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || null })
     // Filesystem fallback for orders-created projects
@@ -6162,7 +6150,7 @@ Return JSON:
     res.json({ ok: true, goals: goalsArr, reasoning: goals?.reasoning || null })
   })
 
-  router.post('/v5/projects/:id/goals/plan', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/v5/projects/:id/goals/plan', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const brief = forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || req.body?.brief || null
@@ -6178,7 +6166,7 @@ Return JSON:
     res.json(result)
   })
 
-  router.post('/v5/goals/:gid/execute', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/v5/goals/:gid/execute', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
     if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
     const project = findProject(goal.project_id)
@@ -6227,7 +6215,7 @@ Return JSON:
     }
   })
 
-  router.post('/v5/projects/:id/goals/:gid/execute', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/v5/projects/:id/goals/:gid/execute', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
@@ -6277,14 +6265,14 @@ Return JSON:
     }
   })
 
-  router.get('/v5/goals/:gid/quality-gate', requireAuth, _rl_forge_fs, (req, res) => {
+  router.get('/v5/goals/:gid/quality-gate', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
     if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
     if (!findProject(goal.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
     res.json({ ok: true, quality_gate: forgeRunStore.getV5QualityGate(goal.goal_id) })
   })
 
-  router.post('/v5/goals/:gid/quality-gate', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/v5/goals/:gid/quality-gate', requireAuth, forgeFilesystemRateLimit, async (req, res) => {
     const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
     if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
     if (!findProject(goal.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
@@ -6305,7 +6293,7 @@ Return JSON:
     res.json({ ok: true, quality_gate: saved })
   })
 
-  router.get('/v5/projects/:id/report', requireAuth, _rl_forge_fs, (req, res) => {
+  router.get('/v5/projects/:id/report', requireAuth, forgeFilesystemRateLimit, (req, res) => {
     const project = findProject(req.params.id)
     if (!project) {
       const brief = _readV5Json('briefs', req.params.id)
