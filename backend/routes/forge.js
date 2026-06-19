@@ -5961,6 +5961,11 @@ Return JSON:
     const latest = _latestV7(ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
     const approval = req.body?.approval_id ? _forgeV7.find('applyApprovals', 'approval_id', req.body.approval_id) : latest.approval
     if (!latest.proposal || !latest.workspace || !approval) return res.status(404).json({ ok: false, error: 'proposal, workspace, and approval required' })
+    // Enforce the project write policy before touching the main workspace — mirrors
+    // /files/write and /runs/:id/apply so a read-only-imported project cannot be written via V7.
+    if (!ctx.project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
+    const blockedPath = (latest.proposal.files_intended || []).find(f => isProtectedPath(ctx.project, f))
+    if (blockedPath) return res.status(403).json({ ok: false, error: `protected path blocked: ${blockedPath}` })
     try {
       const result = _forgeV7.applyApproved(ctx.project, ctx.goal, latest.proposal, latest.workspace, approval, req.body || {})
       broadcastForge('forge:v7_patch_applied_to_workspace', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, ...result })

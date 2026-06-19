@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Any
 
 if os.environ.get("STATE_DIR"):
-    _DB_PATH = Path(os.environ["STATE_DIR"]) / "goals.db"
+    _DB_PATH = Path(os.path.expanduser(os.environ["STATE_DIR"])) / "goals.db"
 else:
-    _AI_HOME = Path(os.environ.get("AI_HOME", Path.home() / ".ai-employee"))
+    _AI_HOME = Path(os.path.expanduser(os.environ.get("AI_HOME") or str(Path.home() / ".ai-employee")))
     _DB_PATH = _AI_HOME / "state" / "goals.db"
 
 _CREATE_SQL = """
