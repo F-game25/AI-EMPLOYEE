@@ -22,7 +22,20 @@ ACTION_VERBS = {
 _BUILD_WORDS = {"build", "compile", "lint", "bundle", "package", "deploy"}
 _MANUAL_WORDS = {"look", "looks", "design", "style", "styling", "layout",
                  "visual", "animation", "polish", "color", "colour"}
-CLAUSE_SPLIT = re.compile(r"\s+and\s+|\s*[,;]\s+|\s+then\s+", re.IGNORECASE)
+
+
+class _ClauseSplitter:
+    def split(self, text: str) -> list[str]:
+        bounded = (text or "")[:4000]
+        for marker in ("\n", ";", ","):
+            bounded = bounded.replace(marker, ".")
+        # Word-boundary match (no adjacent \s+ quantifiers) — case-insensitive
+        # and free of polynomial-backtracking ReDoS.
+        bounded = re.sub(r"(?i)\b(?:and|then)\b", ".", bounded)
+        return [c for c in bounded.split(".") if c.strip()]
+
+
+CLAUSE_SPLIT = _ClauseSplitter()
 
 
 def _words(text: str) -> set[str]:
