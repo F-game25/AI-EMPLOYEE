@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ensureOperatorToken } from '../api/auth'
 import './BootMenu.css'
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -15,26 +16,6 @@ import './BootMenu.css'
 
 const AUTO_BOOT_SECONDS = 8
 const AUTO_UPDATE_SECONDS = 5
-
-function getToken() {
-  return localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || null
-}
-
-async function acquireToken() {
-  const existing = getToken()
-  if (existing) return existing
-  try {
-    const r = await fetch('/api/auth/auto-token', { signal: AbortSignal.timeout(5000) })
-    const d = r.ok ? await r.json() : null
-    if (d?.token) {
-      localStorage.setItem('ai_jwt', d.token)
-      sessionStorage.setItem('ai_jwt', d.token)
-      window.dispatchEvent(new CustomEvent('nx:auth-ready'))
-      return d.token
-    }
-  } catch { /* offline or auth disabled — menu still renders */ }
-  return null
-}
 
 export default function BootMenu({ onBoot }) {
   const [health, setHealth] = useState(null)          // {node, python}
@@ -54,7 +35,7 @@ export default function BootMenu({ onBoot }) {
 
   /* ── status checks ─────────────────────────────────────────────── */
   const refreshStatus = useCallback(async () => {
-    const token = await acquireToken()
+    const token = await ensureOperatorToken()
     const auth = token ? { Authorization: `Bearer ${token}` } : {}
     // health (public)
     try {
@@ -84,7 +65,7 @@ export default function BootMenu({ onBoot }) {
     setStage('starting')
     setLog([])
     appendLog('> Starting system update…')
-    const token = await acquireToken()
+    const token = await ensureOperatorToken()
     try {
       const res = await fetch('/api/system/run-update', {
         method: 'POST',
@@ -139,7 +120,7 @@ export default function BootMenu({ onBoot }) {
       return
     }
     setArmed(null)
-    const token = await acquireToken()
+    const token = await ensureOperatorToken()
     const auth = token ? { Authorization: `Bearer ${token}` } : {}
     if (kind === 'stop') {
       setBusy('halting')

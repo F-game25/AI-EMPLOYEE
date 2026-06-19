@@ -31,6 +31,24 @@ def _require_tenant(req: Request) -> str:
     return tid
 
 
+def _require_computer_use() -> None:
+    """Master Computer-Use switch — 403 unless enabled from the UI.
+
+    Gates the side-effecting RPA doors (spawn + action) so the toggle governs
+    both the companion's browser capabilities and the standalone RPA API.
+    """
+    try:
+        from companion.computer_use_mode import computer_use_enabled
+        on = computer_use_enabled()
+    except Exception:  # noqa: BLE001 — fail safe → treat as off
+        on = False
+    if not on:
+        raise HTTPException(
+            status_code=403,
+            detail="computer_use_disabled: enable Computer Use mode from the UI",
+        )
+
+
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
 class SpawnRequest(BaseModel):
@@ -62,6 +80,7 @@ class SaveWorkflowRequest(BaseModel):
 @router.post("/sessions")
 async def spawn_session(req: Request, body: SpawnRequest):
     tid = _require_tenant(req)
+    _require_computer_use()
     mgr = get_session_manager()
     active = [s for s in mgr.list_sessions(tid) if s.get("status") == "active"]
     if len(active) >= _MAX_SESSIONS_PER_TENANT:
@@ -95,6 +114,7 @@ async def terminate_session(session_id: str, req: Request):
 @router.post("/sessions/{session_id}/action")
 async def execute_action(session_id: str, req: Request, body: ActionRequest):
     tid = _require_tenant(req)
+    _require_computer_use()
     action = BrowserAction(
         type=ActionType(body.type),
         selector=body.selector,

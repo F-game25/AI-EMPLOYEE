@@ -27,16 +27,25 @@ failure yields ``ok=False`` with a safe error reply and ``avatar_state=error``
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
 from typing import Any, Optional
 
 from companion.schemas import CompanionRequest, CompanionResponse
-from companion.context_resolver import get_context_resolver
+from companion.context_resolver import get_context_resolver, resolve_option_selection
 from companion.intent_classifier import get_intent_classifier
 from companion.execution_broker import get_execution_broker
 from companion.avatar_state_engine import get_avatar_state_engine
+from companion.session_state import get_session_store
+from companion.response_policy import policy_for
+from companion.critique_engine import (
+    get_critique_engine,
+    STANCE_PROCEED,
+    STANCE_NEED_INFO,
+    STANCE_AGAINST,
+)
 
 from core.model_lanes import (
     tier_for_task,
@@ -48,6 +57,17 @@ logger = logging.getLogger("companion.conversation_runtime")
 
 _VALID_PAID_TARGETS = {"external_api", "rented_remote"}
 
+# Modes worth a critique pass. Plain conversation/monitoring/approval are NOT
+# critiqued — challenging chit-chat is noise, the opposite failure mode.
+_CRITIQUE_MODES = frozenset({"execution", "planning", "debugging"})
+# A command classified with low confidence also gets a critique pass.
+_LOW_CONFIDENCE_THRESHOLD = 0.55
+
+
+def _critique_enabled() -> bool:
+    """Master critique switch (default ON; ``COMPANION_CRITIQUE=0`` disables)."""
+    return os.getenv("COMPANION_CRITIQUE", "1").strip() != "0"
+
 
 class ConversationRuntime:
     """Orchestrates a single companion turn end-to-end."""
@@ -57,6 +77,8 @@ class ConversationRuntime:
         self._classifier = get_intent_classifier()
         self._broker = get_execution_broker()
         self._avatar = get_avatar_state_engine()
+        self._critic = get_critique_engine()
+        self._sessions = get_session_store()
 
     def handle(self, request: CompanionRequest) -> CompanionResponse:
         """Run a turn. Never raises — failures become ok=False responses."""
@@ -80,17 +102,53 @@ class ConversationRuntime:
         ctx = dict(request.context or {})
         ctx.setdefault("text", request.text)
 
-        # 1) Resolve vague references against live UI context.
-        resolved = self._resolver.resolve(request.text, ctx)
-        resolved_text = resolved.get("resolved_text") or request.text
+        # 0) Load short-term session memory and fold it into the context so a
+        #    follow-up like "option 2" / "do that" has a referent.
+        session = self._sessions.load(request.session_id or "anonymous",
+                                      request.tenant_id or "default")
+        for k, v in session.as_context().items():
+            ctx.setdefault(k, v)
+        session.note_user(request.text)
+
+        # 1) Resolve the message. An explicit option selection ("option 2",
+        #    "de tweede", "do that") binds to what the assistant just offered —
+        #    never a "what do you mean?" round-trip. Otherwise fall back to the
+        #    vague-reference resolver against live UI context.
+        opt = resolve_option_selection(request.text, session.last_options_given)
+        if opt is not None:
+            resolved = {"resolved_text": opt["resolved_text"], "referents": [],
+                        "focus": None, "confidence": 0.95,
+                        "kind": "option_selection", "selected_option": opt["option"]}
+            resolved_text = opt["resolved_text"]
+        else:
+            resolved = self._resolver.resolve(request.text, ctx)
+            resolved_text = resolved.get("resolved_text") or request.text
 
         # 2) Classify into a conversation mode.
         intent = self._classifier.classify(resolved_text, ctx)
         mode = intent.get("mode", "conversation")
 
+        # 2.5) Response policy — match answer length/shape to the intent
+        #      (short value answers, no unsolicited tutorials/options).
+        policy = policy_for(intent, user_text=request.text)
+        ctx["response_policy_hint"] = policy.system_prompt_hint()
+
         # 3) Pick a model target. Default = free local. Paid only on explicit
         #    opt-in, and even then it comes back requiring approval.
         model_info = self._select_target(intent, ctx)
+
+        # 3.5) Teammate critique — CHALLENGE consequential requests before acting.
+        #      Advisory only (separate from the safety/approval gate). On a
+        #      'need_info' stance we ask instead of executing. Skipped when the
+        #      user has explicitly selected an offered option (already decided).
+        critique = None if opt is not None else self._maybe_critique(
+            resolved_text, intent, ctx)
+        if critique is not None and critique.get("stance") == STANCE_NEED_INFO:
+            resp = self._clarification_response(
+                mode, critique, model_info, intent, resolved, request, t0)
+            session.note_assistant(resp.reply, intent=intent)
+            self._sessions.save(session)
+            return resp
 
         # 4) Act by mode.
         reply = ""
@@ -126,11 +184,23 @@ class ConversationRuntime:
             reply = self._generate_reply(resolved_text, ctx, model_info, mode)
             phase = "learning" if mode == "learning" else "generating"
 
+        # Enforce the response policy's length budget (only trims genuinely
+        # over-long value/error replies; structured/code answers are left intact).
+        reply = policy.shape(reply)
+
         # A pending paid upgrade always surfaces as an approval too.
         if model_info.get("requires_approval"):
             approvals.append(self._paid_upgrade_approval(model_info, intent))
             if phase not in ("error",):
                 phase = "awaiting_approval"
+
+        # Fold critique push-back into the spoken reply (when it has concerns).
+        if critique is not None and critique.get("stance") != STANCE_PROCEED:
+            reply = self._prepend_critique(reply, critique)
+            if critique.get("stance") == STANCE_AGAINST:
+                approvals.append(self._critique_recommendation(critique))
+                if phase not in ("error",):
+                    phase = "awaiting_approval"
 
         avatar_state = self._avatar.state_for(mode, phase)
 
@@ -152,6 +222,16 @@ class ConversationRuntime:
                 "tenant_id": request.tenant_id,
                 "latency_ms": int((time.time() - t0) * 1000),
         }
+        if critique is not None:
+            meta["critique"] = critique
+        if resolved.get("kind") == "option_selection":
+            meta["selected_option"] = resolved.get("selected_option")
+        meta["response_policy"] = policy.to_dict()
+
+        # Persist short-term session memory (captures any options this reply
+        # offered, so the next "option N" resolves).
+        session.note_assistant(reply, intent=intent, actions=actions)
+        self._sessions.save(session)
 
         # Voice channel: also carry a short, spoken-friendly summary. The full
         # `reply` still goes to chat/action panel; TTS speaks `voice_summary`.
@@ -180,12 +260,98 @@ class ConversationRuntime:
         target["tier"] = tier
         return target
 
+    # ── Teammate critique (advisory — NOT the safety/approval gate) ─────────────
+
+    def _maybe_critique(self, goal: str, intent: dict, ctx: dict) -> Optional[dict]:
+        """Run the critique once per turn for consequential / low-confidence
+        commands. Returns None when critique is disabled or not warranted."""
+        if not _critique_enabled():
+            return None
+        mode = intent.get("mode", "")
+        low_conf_cmd = bool(intent.get("is_command")) and (
+            float(intent.get("confidence", 1.0) or 0.0) < _LOW_CONFIDENCE_THRESHOLD)
+        if mode not in _CRITIQUE_MODES and not low_conf_cmd:
+            return None
+        return self._critic.critique(goal, intent, ctx)
+
+    def _clarification_response(self, mode: str, critique: dict,
+                                model_info: dict, intent: dict,
+                                resolved: dict, request: CompanionRequest,
+                                t0: float) -> CompanionResponse:
+        """A 'need_info' turn: ask the clarifying question, run NOTHING."""
+        question = (critique.get("clarifying_question")
+                    or "Could you clarify the exact outcome and scope you want?")
+        reply = question
+        avatar_state = self._avatar.state_for(mode, "awaiting_approval")
+        meta: dict[str, Any] = {
+            "intent": intent,
+            "resolution_confidence": resolved.get("confidence"),
+            "focus": resolved.get("focus"),
+            "model": {
+                "tier": model_info.get("tier"),
+                "target": model_info.get("target"),
+                "provider": model_info.get("provider"),
+                "model": model_info.get("model"),
+            },
+            "critique": critique,
+            "awaiting_clarification": True,
+            "channel": request.channel,
+            "session_id": request.session_id,
+            "tenant_id": request.tenant_id,
+            "latency_ms": int((time.time() - t0) * 1000),
+        }
+        if (request.channel or "").lower() == "voice":
+            meta["voice_summary"] = self._voice_summary(reply)
+        return CompanionResponse(
+            ok=True, mode=mode, reply=reply, actions=[], approvals_required=[],
+            avatar_state=avatar_state, meta=meta,
+        )
+
+    @staticmethod
+    def _prepend_critique(reply: str, critique: dict) -> str:
+        """Lead the reply with a short, spoken-friendly push-back."""
+        pushback = critique.get("pushback")
+        alternative = critique.get("alternative")
+        lead_parts: list[str] = []
+        if critique.get("stance") == STANCE_AGAINST:
+            lead_parts.append("I'd recommend against this as-is.")
+        else:
+            lead_parts.append("Before I do this — one concern:")
+        if pushback:
+            lead_parts.append(pushback)
+        if alternative:
+            lead_parts.append(f"Better path: {alternative}")
+        lead_parts.append("Want me to proceed anyway?")
+        lead = " ".join(p.rstrip() for p in lead_parts if p)
+        return f"{lead}\n\n{reply}".strip() if reply else lead
+
+    @staticmethod
+    def _critique_recommendation(critique: dict) -> dict:
+        """Surface a 'recommend_against' stance with approval-card visibility so
+        the runtime never silently complies — the user can still override."""
+        return {
+            "cap": "companion.critique_override",
+            "action": "Proceed despite teammate recommendation",
+            "summary": critique.get("pushback")
+                       or "The teammate recommends against this request as-is.",
+            "why": "; ".join(critique.get("risks") or []) or "advisory push-back",
+            "risk": "advisory",
+            "affects": "the requested action",
+            "side_effects": list(critique.get("risks") or []),
+            "rollback": critique.get("alternative"),
+            "needs_explicit_confirm": True,
+            "advisory": True,
+        }
+
     # ── LLM-backed steps (degrade to canned text when LLM unavailable) ──────────
 
     def _generate_reply(self, text: str, ctx: dict, model_info: dict, mode: str) -> str:
         system = ("You are the companion assistant for an AI operating system. "
                   "Be concise, factual, and never claim to have taken actions you "
                   "did not take.")
+        hint = ctx.get("response_policy_hint")
+        if hint:
+            system = f"{system} {hint}"
         prompt = text
         page = ctx.get("current_page")
         if page:
@@ -295,6 +461,28 @@ class ConversationRuntime:
     @staticmethod
     def _summarize_monitoring(out: dict) -> str:
         results = out.get("results", [])
+        # Direct system-info answers (local time / cwd / hardware): one real line,
+        # not a tutorial — the teammate answered with the measured value.
+        for r in results:
+            cap, res = r.get("cap"), (r.get("result") or {})
+            if cap == "system_local_time" and res.get("hhmm"):
+                tz = res.get("timezone")
+                return f"It's {res['hhmm']} local time on this PC{f' ({tz})' if tz else ''}."
+            if cap == "system_cwd" and res.get("cwd"):
+                return f"You're in {res['cwd']}."
+            if cap == "system_hardware":
+                cpu, ram, gpu = (res.get("cpu") or {}), (res.get("ram") or {}), (res.get("gpu") or {})
+                parts: list[str] = []
+                if cpu.get("model"):
+                    cores = cpu.get("cores_physical") or cpu.get("cores_logical")
+                    parts.append(f"CPU {cpu['model']}" + (f" ({cores} cores)" if cores else ""))
+                if ram.get("total_gb"):
+                    parts.append(f"{ram['total_gb']} GB RAM")
+                names = [str(g.get("name")) for g in (gpu.get("gpus") or []) if g.get("name")]
+                if names:
+                    parts.append("GPU " + ", ".join(names))
+                if parts:
+                    return "This PC — " + "; ".join(parts) + "."
         ok = [r for r in results if r.get("status") == "ok"]
         if ok:
             ids = ", ".join(r["cap"] for r in ok)

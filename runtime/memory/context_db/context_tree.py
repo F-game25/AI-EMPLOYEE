@@ -65,7 +65,8 @@ def _ts() -> str:
 
 def node_id_for(tenant: str, norm_path: str) -> str:
     """Stable node id derived from tenant + normalized path."""
-    return hashlib.sha1(f"{tenant}:{norm_path}".encode("utf-8")).hexdigest()[:16]
+    # Deterministic stable id using a strong hash; truncation keeps the short-id format.
+    return hashlib.sha256(f"{tenant}:{norm_path}".encode("utf-8")).hexdigest()[:16]
 
 
 def summarize(text: str, limit: int = _SUMMARY_CHARS) -> str:

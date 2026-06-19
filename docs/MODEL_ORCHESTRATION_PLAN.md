@@ -218,3 +218,72 @@ Show: installed models, VRAM each uses, which is loaded now, RAM/VRAM gauges, on
 4. **Phase 3** (context handoff) — makes multi-model tasks seamless
 5. **Phase 4** (OpenRouter overflow) — adds capacity
 6. **Phase 6** (UI) — visibility & control
+
+---
+
+## Phase 7 — Conversation Runtime Layer (real teammate behavior)  ★ added 2026-06-17
+
+This is an **architecture problem, not a prompt bug.** The chat currently behaves like a generic chatbot: it forgets that "optie 2" refers to its own previous answer, it *explains how to check the time manually* instead of fetching it, and it sends a tutorial when one short sentence was asked for. Three failures: **context retention**, **intent detection**, **answer discipline**.
+
+A teammate needs a runtime layer between UI and model:
+`user message → intent classifier → context linker → memory/session resolver → tool/action router → response policy → LLM/tool execution → short teammate response`.
+
+### 7.0 Diagnosis of the CURRENT chat pipeline (grounded)
+
+There are **two parallel conversational paths**, and the dumb-chatbot behavior comes from the chat box using the plain one:
+
+| Path | Route | Behaviour |
+|---|---|---|
+| **Teammate (good)** | `/api/companion/message` → `companion.message` → `runtime/companion/conversation_runtime.py` `ConversationRuntime.handle()` | resolve context → classify intent → select model → broker execute → response (+ critique, clarification) |
+| **Legacy (plain)** | `/api/chat` → `backend/services/turn-runner.js` `runTurn()` → `requestPythonChatPayload()` (`backend/server.js:2193`) → Python chat | plain LLM call; **does not** pass through intent/context/policy |
+
+`frontend/src/components/core/ChatPanel.jsx` wires to **both** (`useCompanionStore.sendMessage` *and* `sendChatMessage` over WS). So the UI can silently take the plain path and bypass the teammate runtime entirely.
+
+**What already exists — DO NOT rebuild, integrate:**
+- `runtime/companion/conversation_runtime.py` — the turn loop (context → intent → target → act → respond).
+- `runtime/companion/intent_classifier.py` — intent classification (returns `mode`, `task_type`, `is_command`, `confidence`).
+- `runtime/companion/context_resolver.py` — context resolution.
+- `runtime/companion/execution_broker.py` — tool/action routing (`broker.execute(intent, …)`).
+- `runtime/companion/safety_gate.py` — the consequential-action gate (ties to the PC-control gate in the quantization plan).
+
+**What is genuinely MISSING (the real fixes):**
+1. **Session option-memory + reference resolver** — nothing stores `last_options_given`, so "optie 2 / doe 2 / de tweede / ja die / doe dat" cannot be mapped back. (Verify how far `context_resolver` already resolves references; extend it.)
+2. **Response-policy engine** — no rule selecting length/style by intent; the model defaults to long multi-option answers.
+3. **System-info tools** — `runtime/tools/` has **no** `local_time` / `hardware` / `cwd` tool, so system questions can only be "explained," never executed. This is the direct cause of the time-question failure.
+4. **Single path** — the live chat surface must route through `ConversationRuntime`; the legacy plain path must delegate to it (or be removed), so intent/context/policy always apply.
+
+### 7.1 Components to add / wire
+
+1. **Session Context Manager** — per-chat rolling state available before *every* model call: `current_topic`, `last_user_message`, `last_assistant_message`, `last_options_given:[{id,summary}]`, `pending_decision`, `active_task_state`, `recent_tool_results`. Persist per `session_id` (the companion request already carries `session_id`). Home: extend `runtime/companion/context_resolver.py` + a `state/sessions/<id>.json` (tenant-scoped via existing file-lock).
+2. **Option / Reference Resolver** — when the user message matches a selection ("option 2", "doe 2", "de tweede", "pak optie twee", "ja die", "doe dat") **and** `last_options_given` is non-empty, resolve to that option and continue — **never** ask "waar heb je het over?".
+3. **Intent Classifier (extend existing)** — ensure these intents exist: `system_info.local_time`, `system_info.hardware`, `file.open/read/write`, `browser.open`, `web.research`, `code.inspect/modify`, `task.start/continue`, `question.simple/complex`, `clarification.answer`, `option.selection`, `command.execute`.
+4. **Tool/Action Router (extend broker)** — operational requests call a tool, not a tutorial. Add the missing **system-info tools** to `runtime/tools/` + register in `tools/registry.py` and wire into `execution_broker`: `system.local_time` (OS datetime), `system.hardware` (reuse the `hardware_profiler` from the quantization plan), `system.cwd`.
+5. **Response Policy Engine** — choose length/style by intent: simple value → max 1–2 sentences; direct action → confirm + execute + summarize; complex planning → structured allowed; error → short + next best action. No tutorials/multi-option unless explicitly requested.
+6. **Conversation Compression** — summarize long history into the rolling session state so the model always knows: what the user is doing, current task, what was just offered, what was selected, what tool/action comes next. (Reuse `runtime/memory/context_db/session_compressor.py`.)
+7. **Debug Visibility** — in dev/debug mode surface: detected intent, resolved references, selected tool/action, context objects used, response policy chosen, whether session context was injected.
+
+### 7.2 Hard teammate rules (non-negotiable)
+- **The assistant must not explain how the user can do something manually when the system can do it itself.** ("Hoe laat is het?" → call the tool → "Het is 14:37." — never "kijk rechtsonder.")
+- After options are offered, a selection reference (`optie 2`, `doe dat`) **always** resolves against `last_options_given` — never a context question.
+- Simple operational question → execute / one short answer; no tutorial, no unsolicited options.
+- Ask **one** short clarifying question only when genuinely unresolved.
+
+### 7.3 Regression tests (prove the fix)
+- **A** — Assistant offered "Option 1: explain manually / Option 2: fetch local time"; user says "option 2" → system resolves it and calls the local-time tool.
+- **B** — "what time is it on my pc?" → calls local-time tool, answers in one sentence.
+- **C** — "open the file we just discussed" → resolves the file from session context (or one short clarification only if none exists).
+- **D** — "do that" → resolves "that" from the previous proposed action.
+- **E** — a simple operational question → no long explanation, no options, no tutorial.
+
+### 7.4 Integration requirement & quality bar
+Integrate into the existing pipeline — **not** an isolated prototype. Touch points: `frontend/src/components/core/ChatPanel.jsx` + `store/companionStore` (single teammate path), `backend/routes/companion.js`, `backend/services/turn-runner.js` (delegate the chat kind to the companion runtime), `runtime/companion/*`, `runtime/memory/memory_router.py` (session/short-term), `runtime/tools/registry.py` (system tools). **Done = ** remembers the immediate conversation, understands short references, performs actions instead of explaining, short answers for simple requests, uses tools when available, asks only necessary clarification, never loses track after an option is selected.
+
+### 7.5 Execution order
+1. **7.0 single-path fix** — route the chat box through `ConversationRuntime` (biggest behavior win).
+2. **System-info tools** (7.1.4) — unblocks the time/hardware/cwd class immediately.
+3. **Session option-memory + resolver** (7.1.1–7.1.2) — fixes "optie 2".
+4. **Response policy** (7.1.5) — answer discipline.
+5. **Intent coverage + compression + debug** (7.1.3/6/7).
+6. **Regression tests A–E**, then ship.
+
+> Sequence per the user's directive: first inspect the codebase → diagnosis (done above) → exact files → detailed plan → tests → **implement only after the plan is approved.**

@@ -237,11 +237,21 @@ def act_node(state: BrainState) -> BrainState:
                 "args": action.get("args", {}),
                 "context": state.get("input", ""),
             })
-            fallback_output = lam_result.get("output") or f"Simulated execution of {skill_name}"
+            lam_output = lam_result.get("output")
+            if lam_output:
+                return {
+                    **state,
+                    "action": action,
+                    "action_result": {"status": "fallback", "output": lam_output},
+                    "trace": traces + [trace],
+                }
+            # No real output — fail honestly instead of fabricating a
+            # "Simulated execution of X" result that reads like success.
             return {
                 **state,
                 "action": action,
-                "action_result": {"status": "fallback", "output": fallback_output},
+                "action_result": {"status": "failed",
+                                  "error": f"skill '{skill_name}' produced no result (no executor; LAM empty)"},
                 "trace": traces + [trace],
             }
         except Exception:

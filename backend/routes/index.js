@@ -149,6 +149,10 @@ const ROUTE_REGISTRY = [
   { method: 'POST',   path: '/api/autonomy/mode',                   auth: true,        file: 'server.js' },
   { method: 'POST',   path: '/api/autonomy/emergency-stop',         auth: true,        file: 'server.js' },
 
+  // ── Computer-Use mode (browser/desktop master switch) ───────────────────────
+  { method: 'GET',    path: '/api/computer-use/mode',               auth: true,        file: 'routes/security-ops.js' },
+  { method: 'POST',   path: '/api/computer-use/mode',               auth: true,        file: 'routes/security-ops.js' },
+
   // ── Evolution ─────────────────────────────────────────────────────────────
   { method: 'GET',    path: '/api/evolution/status',                auth: true,        file: 'routes/evolution.js' },
   { method: 'GET',    path: '/api/evolution/traces',                auth: true,        file: 'routes/evolution.js' },
@@ -226,6 +230,8 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/api/models/routing',                  auth: true,        file: 'server.js' },
   { method: 'POST',   path: '/api/models/routing',                  auth: true,        file: 'server.js' },
   { method: 'GET',    path: '/api/models/providers',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/models/roles',                    auth: true,        file: 'routes/forge-ops.js' },
+  { method: 'GET',    path: '/api/models/benchmarks',               auth: true,        file: 'routes/forge-ops.js' },
   { method: 'POST',   path: '/api/model/route-plan',                auth: true,        file: 'server.js' },
 
   // Model Fabric (proxy → Python, loop-generated)
@@ -528,6 +534,25 @@ const ROUTE_REGISTRY = [
   { method: 'POST',   path: '/api/companion/voice-control',         auth: true,        file: 'routes/companion.js' },
   { method: 'GET',    path: '/api/companion/capabilities',          auth: true,        file: 'routes/companion.js' },
   { method: 'GET',    path: '/api/companion/state',                 auth: true,        file: 'routes/companion.js' },
+
+  // ── Work Acquisition + Delivery Engine (Module 4) ─────────────────────────
+  { method: 'POST',   path: '/api/work/opportunities',              auth: true,        file: 'routes/work-engine.js' },
+  { method: 'GET',    path: '/api/work/opportunities',              auth: true,        file: 'routes/work-engine.js' },
+  { method: 'GET',    path: '/api/work/opportunities/:id',          auth: true,        file: 'routes/work-engine.js' },
+  { method: 'POST',   path: '/api/work/opportunities/:id/evaluate', auth: true,        file: 'routes/work-engine.js' },
+  { method: 'POST',   path: '/api/work/opportunities/:id/quote',    auth: true,        file: 'routes/work-engine.js' },
+  { method: 'POST',   path: '/api/work/opportunities/:id/deliver',  auth: true,        file: 'routes/work-engine.js' },
+
+  // ── CompanyOS (P10) — validate-before-build company builder ──────────────────
+  { method: 'POST',   path: '/api/company',                         auth: true,        file: 'routes/company.js' },
+  { method: 'GET',    path: '/api/company',                         auth: true,        file: 'routes/company.js' },
+  { method: 'GET',    path: '/api/company/:id',                     auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/validate',            auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/refine',                  auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/build',               auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/plan',                auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/cycle',               auth: true,        file: 'routes/company.js' },
+  { method: 'POST',   path: '/api/company/:id/export',              auth: true,        file: 'routes/company.js' },
 
   // ── Service Control & Compute Routing (P9) ───────────────────────────────
   { method: 'GET',    path: '/api/services/status',                 auth: true,        file: 'routes/services.js' },

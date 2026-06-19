@@ -3,6 +3,7 @@ import { useAppStore } from '../../store/appStore'
 import { Panel, Badge, StatCard, DataRow } from '../ui/primitives'
 import { EmptyState } from '../nexus-ui'
 import api from '../../api/client'
+import ComputerUseToggle from '../dashboard/ComputerUseToggle'
 
 const FALLBACK_RULES = [
   { id:'r1', name:'Memory compaction trigger',     condition:'memory_usage > 75%',       action:'Run memory sweep → archive old embeddings', active:true,  runs:14, last:'2h ago'  },
@@ -135,6 +136,11 @@ export default function ControlCenterPage() {
             <span>⚠ Agents READ-ONLY</span>
           </div>
         )}
+      </Panel>
+
+      {/* Computer-Use mode — let the teammate drive a browser/computer */}
+      <Panel title="Computer Use" badge={<Badge label="teammate control" variant="teal"/>}>
+        <ComputerUseToggle />
       </Panel>
 
       {/* Live System Map */}

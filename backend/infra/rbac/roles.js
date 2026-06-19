@@ -17,6 +17,7 @@ const ROLES = Object.freeze({
   SUPER_ADMIN:       'super_admin',
   ORG_ADMIN:         'org_admin',
   MANAGER:           'manager',
+  OPERATOR:          'operator',
   EMPLOYEE:          'employee',
   AUDITOR:           'auditor',
   SECURITY_OFFICER:  'security_officer',
@@ -120,6 +121,22 @@ const ROLE_PERMISSIONS = {
     PERMISSIONS.EVOLUTION_READ,
   ],
 
+  // OPERATOR — the default day-to-day runner (the role the local auto-token
+  // issues). Can run agents/tasks/workflows + RPA/browser sandbox, approve HITL,
+  // but not manage users/secrets/tenants. Aligns Node RBAC with the role the
+  // Python auth layer actually issues (was previously undefined → zero perms).
+  [ROLES.OPERATOR]: [
+    PERMISSIONS.AGENTS_READ, PERMISSIONS.AGENTS_EXECUTE, PERMISSIONS.AGENTS_STOP,
+    PERMISSIONS.TASKS_READ, PERMISSIONS.TASKS_SUBMIT, PERMISSIONS.TASKS_CANCEL,
+    PERMISSIONS.WORKFLOWS_READ, PERMISSIONS.WORKFLOWS_START, PERMISSIONS.WORKFLOWS_SIGNAL,
+    PERMISSIONS.HITL_READ, PERMISSIONS.HITL_APPROVE, PERMISSIONS.HITL_REJECT,
+    PERMISSIONS.SANDBOX_EXECUTE,
+    PERMISSIONS.SYSTEM_READ,
+    PERMISSIONS.AUDIT_READ,
+    PERMISSIONS.FINANCE_READ,
+    PERMISSIONS.EVOLUTION_READ,
+  ],
+
   [ROLES.EMPLOYEE]: [
     PERMISSIONS.AGENTS_READ, PERMISSIONS.AGENTS_EXECUTE,
     PERMISSIONS.TASKS_READ, PERMISSIONS.TASKS_SUBMIT,
@@ -163,6 +180,9 @@ function getRolePermissions(role) {
  * Check if role has permission (supports wildcard e.g. tasks:*)
  */
 function roleHasPermission(role, permission) {
+  // Fail closed on a malformed/undefined permission rather than crashing the
+  // request pipeline (a missing PERMISSIONS.* constant must deny, not 500).
+  if (typeof permission !== 'string' || !permission) return false;
   const grants = getRolePermissions(role);
   if (grants.has(permission)) return true;
   // Wildcard check: if role has 'tasks:*', all 'tasks:X' granted

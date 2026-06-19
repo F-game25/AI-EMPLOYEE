@@ -119,14 +119,29 @@ class ToolRegistry:
         self.register("llm_infer", self._llm_infer, 0, "Run LLM inference")
         self.register("embed_text", self._embed_text, 0, "Embed text to vector")
         self.register("get_memory", self._get_memory, 0, "Retrieve from memory")
+        # Risk 0 — system-info probes (real OS values, never fabricated)
+        try:
+            from .system_info import register_system_tools
+            register_system_tools(self)
+        except Exception as e:  # noqa: BLE001 — defaults must never fail to load
+            logger.debug("system-info tools unavailable: %s", e)
         # Risk 1 — local write
         self.register("write_file", self._write_file, 1, "Write a file")
         self.register("create_file", self._create_file, 1, "Create a new file")
         self.register("update_db", self._update_db, 1, "Update database")
+        # Risk 1 — local offline media generation (sd-cli); cloud (MuAPI) is opt-in
+        self.register("media_generate", self._media_generate, 1,
+                      "Generate an image locally/offline (stable-diffusion.cpp); cloud opt-in")
         # Risk 3 — external
         self.register("send_email", self._send_email, 3, "Send an email")
         self.register("call_api", self._call_api, 3, "Call an external API")
         self.register("browser_fetch", self._browser_fetch, 3, "Fetch a URL")
+
+    def _media_generate(self, prompt: str, model: str | None = None,
+                        media_type: str = "image", provider: str = "local", **opts):
+        from content.content_factory import get_content_factory
+        return get_content_factory().generate_media(
+            prompt, model=model, media_type=media_type, provider=provider, **opts)
 
     def _web_search(self, query: str, limit: int = 5, **_):
         try:
@@ -215,6 +230,7 @@ def _autoregister() -> None:
         from . import react_tools  # noqa: F401
         from . import write_file_tool     # noqa: F401
         from . import http_request_tool   # noqa: F401
+        from . import system_info         # noqa: F401
     except Exception as e:
         logger.debug("tool autoregister partial failure: %s", e)
 

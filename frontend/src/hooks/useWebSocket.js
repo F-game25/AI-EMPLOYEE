@@ -262,7 +262,7 @@ function dispatchWsMessage({ event, data }) {
       if (event.startsWith('economy:') || event.startsWith('objective:') || event.startsWith('money:')) {
         return dispatchEconomyEvent(event, data)
       }
-      if (event.startsWith('security:') || event.startsWith('blacklight:') || event.startsWith('auth:')) {
+      if (event.startsWith('security:') || event.startsWith('blacklight:') || event.startsWith('auth:') || event.startsWith('computer-use:')) {
         return dispatchSecurityEvent(event, data)
       }
       if (event.startsWith('companion:')) {
@@ -839,6 +839,9 @@ function dispatchSecurityEvent(event, data) {
       break
     case 'autonomy:status':
       sec.setAutonomyStatus(data)
+      break
+    case 'computer-use:status':
+      sec.setComputerUseStatus(data)
       break
   }
 }

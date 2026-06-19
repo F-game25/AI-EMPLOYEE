@@ -486,7 +486,7 @@ def decompose_to_tasks(
 
 # ── Fix 4 — Real execution verification ──────────────────────────────────────
 
-# Patterns that indicate a placeholder/simulated result rather than real execution
+# Exact-match outputs that indicate a placeholder result rather than real execution
 _SIMULATED_OUTPUT_PATTERNS = frozenset({
     "task completed",
     "successfully completed",
@@ -495,6 +495,24 @@ _SIMULATED_OUTPUT_PATTERNS = frozenset({
     "success",
     "",
 })
+
+# Substrings that unambiguously mark fabricated/placeholder output even when the
+# surrounding text is long. Any match → the task is NOT a real execution and its
+# claimed success is downgraded so it never shows as a real outcome.
+_PLACEHOLDER_MARKERS = (
+    "completed deterministic local execution",
+    "simulated execution of",
+    "[ceo simulated response]",
+    "placeholder",
+    "not yet implemented",
+    "not_implemented",
+    "todo: implement",
+    "lorem ipsum",
+)
+
+
+def _has_placeholder_marker(out_text: str) -> bool:
+    return any(m in out_text for m in _PLACEHOLDER_MARKERS)
 
 
 def _is_real_execution(result: dict[str, Any]) -> bool:
@@ -517,6 +535,8 @@ def _is_real_execution(result: dict[str, Any]) -> bool:
         out_text = str(out.get("output") or out.get("text") or "").strip().lower()
     else:
         out_text = str(out).strip().lower()
+    if _has_placeholder_marker(out_text):
+        return False
     return out_text not in _SIMULATED_OUTPUT_PATTERNS and len(out_text) > 10
 
 
@@ -551,7 +571,21 @@ def execute_tasks(
                 "output": task_info.get("output"),
             }
             result["real_execution"] = _is_real_execution(result)
-            if not result["real_execution"]:
+            # Downgrade CONFIRMED fabricated output (placeholder markers) so a
+            # fake-success never propagates as a real success. Generic short
+            # outputs are only annotated (real_execution flag), not failed.
+            out = result.get("output")
+            out_text = (str(out.get("output") or out.get("text") or "") if isinstance(out, dict)
+                        else str(out or "")).strip().lower()
+            if result.get("status") == "success" and _has_placeholder_marker(out_text):
+                result["status"] = "simulated"
+                result["success"] = False
+                result["execution_warning"] = "output matched a placeholder marker — not a real execution"
+                logger.warning(
+                    "[EXECUTION CHECK] task_id=%s skill=%s downgraded success→simulated (placeholder output)",
+                    result["task_id"], result["skill"],
+                )
+            elif not result["real_execution"]:
                 logger.debug(
                     "[EXECUTION CHECK] task_id=%s skill=%s appears simulated",
                     result["task_id"],
@@ -858,6 +892,50 @@ def validate_pipeline_integrity(run: _PipelineRun) -> None:
 
 # ── Phase 1 — Primary entry point ────────────────────────────────────────────
 
+def _direct_conversation_reply(goal_plan: dict, message: str) -> str | None:
+    """Direct reply for utility/chat turns that must never enter the task executor
+    (time/date/greeting/empty). Returns None for normal questions (→ full pipeline)."""
+    response_type = str(goal_plan.get("response_type") or "").lower()
+    if response_type == "time":
+        from datetime import datetime
+        now = datetime.now().astimezone()
+        return f"It is {now.strftime('%H:%M:%S')} ({now.tzname() or 'local time'})."
+    if response_type == "date":
+        from datetime import datetime
+        now = datetime.now().astimezone()
+        return f"Today is {now.strftime('%A, %B')} {now.day}, {now.year}."
+    if response_type == "greeting":
+        return "I’m here. Tell me what you want to build, fix, research, or run."
+    if response_type == "empty":
+        return "Send me a question or a task and I’ll route it properly."
+    return None  # normal question → conversational LLM path
+
+
+def _intent_fast_path(input_text: str) -> str | None:
+    """Pipeline Phase 0: goal-parse the input once and short-circuit the two
+    non-conversational cases — a direct utility reply, or a structured goal run on
+    the real execution engine. Returns a reply to short-circuit, else None to
+    continue the full pipeline. Folds in the former server.py chat bypass so
+    process_user_input is the genuine single entry (Coherence C1)."""
+    from core.goal_parser import parse_goal
+    goal_plan = parse_goal(input_text)
+    if not goal_plan.get("is_goal"):
+        direct = _direct_conversation_reply(goal_plan, input_text)
+        if direct:
+            return direct
+    if goal_plan.get("is_goal") and goal_plan.get("task_plan"):
+        from core.real_execution_engine import RealExecutionEngine
+        logger.info("[REAL_ENGINE] Goal detected — %d steps planned", len(goal_plan["task_plan"]))
+        engine = RealExecutionEngine()
+        exec_result = engine.run(goal_plan["task_plan"], goal=input_text)
+        reply = engine.format_for_chat(exec_result)
+        structured = goal_plan.get("structured_goal", {})
+        if structured.get("action"):
+            reply = f"Executing: **{structured['action']}**\n\n" + reply
+        return reply
+    return None
+
+
 def process_user_input(
     input_text: str,
     *,
@@ -965,6 +1043,20 @@ def process_user_input(
             if critical:
                 run.degraded = True
             return fallback()
+
+    # ── Phase 0: fast-path intent routing (folded-in chat bypass — C1) ─────────
+    # Utility turns (time/date/greeting) and structured goals short-circuit here,
+    # with full STRICT_PIPELINE respect — instead of being pre-pipeline returns in
+    # server.py. This makes process_user_input the genuine single entry point.
+    try:
+        _fast = _intent_fast_path(input_text)
+        if isinstance(_fast, str):
+            logger.info("pipeline fast-path short-circuit (chars=%d)", len(_fast))
+            return _fast
+    except Exception as _fp_exc:  # noqa: BLE001
+        if STRICT_PIPELINE:
+            raise
+        logger.warning("fast-path intent routing failed (non-fatal): %s", _fp_exc)
 
     # ── Phase 1: Graph retrieval ──────────────────────────────────────────────
     run.graph_data = _phase(

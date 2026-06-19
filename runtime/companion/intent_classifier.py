@@ -67,6 +67,24 @@ _MONITOR = (
     "live metrics", "active tasks", "running tasks", "what is active",
 )
 
+# ── System-info probes (answer with a real OS value, never a tutorial) ─────────
+_SYS_LOCAL_TIME = (
+    "what time is it", "what's the time", "whats the time", "what is the time",
+    "current time", "local time", "time on my pc", "time on this pc",
+    "time on this computer", "tell me the time", "hoe laat is het", "wat is de tijd",
+)
+_SYS_HARDWARE = (
+    "my cpu", "what cpu", "which cpu", "what's my cpu", "whats my cpu", "my gpu",
+    "what gpu", "which gpu", "how much ram", "my ram", "what hardware",
+    "what's my hardware", "system specs", "hardware specs", "my specs",
+    "what are my specs", "wat is mijn cpu", "welke gpu", "mijn hardware",
+)
+_SYS_CWD = (
+    "current directory", "current folder", "which directory", "which folder",
+    "what directory", "what folder", "where am i", "working directory",
+    "print working directory", "welke map", "huidige map", "in welke map",
+)
+
 # ── Debugging (root-cause / why-failed) ────────────────────────────────────────
 _DEBUG = (
     "why did", "why does", "why is", "why won't", "why wont", "why can't",
@@ -94,6 +112,23 @@ _EXEC_GENERIC = (
     "schedule", "install", "uninstall", "clean up", "cleanup", "optimize",
     "optimise", "apply",
 )
+
+# ── Browser / computer-use (drive a web page like a human) ─────────────────────
+# Phrases that mean "use the browser" → execution, task_type='browser', so the
+# runtime routes to the browser.* capabilities (gated by Computer-Use mode).
+_BROWSER_VERBS = (
+    "browse to", "navigate to", "go to the website", "go to the site", "go to ",
+    "visit ", "open the browser", "open a browser", "open the website",
+    "open the page", "open the url", "open the site", "on the page",
+    "fill in the", "fill out the", "click the", "click on", "scroll the page",
+    "screenshot the page", "take a screenshot of the page", "type into the",
+    "search the web and open", "log in to", "sign in to",
+)
+# A URL or bare domain (example.com, https://…, www.…) strongly implies browser use.
+_URL_RE = re.compile(r"(https?://|www\.|\b[a-z0-9-]+\.(com|org|net|io|ai|co|dev|app|gov|edu)\b)", re.I)
+# Generic verbs that only mean "browser" when paired with a URL/web cue.
+# (bare tokens — _starts_with_verb compares the first word)
+_BROWSER_OPEN_VERBS = ("open", "load", "read", "check", "visit", "fetch")
 
 # ── Planning ───────────────────────────────────────────────────────────────────
 _PLAN = (
@@ -181,6 +216,18 @@ class IntentClassifier:
             return self._result(MODE_APPROVAL, "chat", 0.9, False,
                                  "rejection phrase")
 
+        # 1.5) System-info probes — answer with a real OS value (checked before
+        #      monitoring/analysis so "what is the time" isn't caught as analysis).
+        if _hit(t, _SYS_LOCAL_TIME):
+            return self._result(MODE_MONITORING, "system_info.local_time", 0.95,
+                                 False, "system-info: local time")
+        if _hit(t, _SYS_HARDWARE):
+            return self._result(MODE_MONITORING, "system_info.hardware", 0.92,
+                                 False, "system-info: hardware")
+        if _hit(t, _SYS_CWD):
+            return self._result(MODE_MONITORING, "system_info.cwd", 0.9,
+                                 False, "system-info: cwd")
+
         # 2) Monitoring — status questions.
         if (m := _hit(t, _MONITOR)):
             return self._result(MODE_MONITORING, "monitoring", 0.9, False,
@@ -191,6 +238,14 @@ class IntentClassifier:
         if (d := _hit(t, _DEBUG)):
             return self._result(MODE_DEBUGGING, "analysis", 0.9, False,
                                  f"debugging cue: '{d}'")
+
+        # 3.5) Browser / computer-use — "browse to X", "open <url>", "click the…".
+        #      Routes to browser.* (themselves gated by Computer-Use mode).
+        has_url = bool(_URL_RE.search(t))
+        browser_cue = _hit(t, _BROWSER_VERBS)
+        if browser_cue or (has_url and _starts_with_verb(t, _BROWSER_OPEN_VERBS)):
+            return self._result(MODE_EXECUTION, "browser", 0.85, True,
+                                 f"browser cue: '{browser_cue or 'url'}'")
 
         # 4) Execution — imperative leading verb ⇒ is_command.
         for verbs, ttype in ((_EXEC_CODE, "code"),

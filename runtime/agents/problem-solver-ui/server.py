@@ -1022,28 +1022,6 @@ def _load_chat_history(n_exchanges: int = 8) -> list:
     return history
 
 
-def _direct_conversation_reply(goal_plan: dict, message: str) -> str | None:
-    """Handle utility/chat turns that must never enter the task executor."""
-    response_type = str(goal_plan.get("response_type") or "").lower()
-    if response_type == "time":
-        from datetime import datetime
-
-        now = datetime.now().astimezone()
-        return f"It is {now.strftime('%H:%M:%S')} ({now.tzname() or 'local time'})."
-    if response_type == "date":
-        from datetime import datetime
-
-        now = datetime.now().astimezone()
-        day = str(now.day)
-        return f"Today is {now.strftime('%A, %B')} {day}, {now.year}."
-    if response_type == "greeting":
-        return "I’m here. Tell me what you want to build, fix, research, or run."
-    if response_type == "empty":
-        return "Send me a question or a task and I’ll route it properly."
-    # Let normal questions use the conversational LLM path.
-    return None
-
-
 def _generate_llm_response(
     message: str,
     routed_agent: str,
@@ -2335,6 +2313,36 @@ try:
                 _get_priv().get_mode().value)
 except Exception as _priv_err:
     logger.warning("⚠️  Privacy/Telemetry/Updates failed: %s", _priv_err)
+
+# ── Computer-Use mode + RPA browser-control router ──────────────────
+# Master switch (default OFF) gating the teammate's browser/desktop use, plus
+# the RPA FastAPI router (was built but never mounted → /api/rpa/* was dead).
+try:
+    from pydantic import BaseModel as _CUBaseModel
+
+    class _ComputerUseModeBody(_CUBaseModel):
+        enabled: bool
+
+    @app.get("/api/computer-use/mode", tags=["computer-use"])
+    def _get_computer_use_mode():
+        from companion.computer_use_mode import get_mode
+        return get_mode()
+
+    @app.post("/api/computer-use/mode", tags=["computer-use"])
+    def _set_computer_use_mode(body: _ComputerUseModeBody):
+        from companion.computer_use_mode import set_mode
+        return set_mode(body.enabled)
+
+    logger.info("✅ Computer-Use mode endpoints loaded")
+except Exception as _cu_err:  # noqa: BLE001
+    logger.warning("⚠️  Computer-Use mode endpoints failed: %s", _cu_err)
+
+try:
+    from infra.rpa.rpa_routes import router as _rpa_router
+    app.include_router(_rpa_router, prefix="/rpa")
+    logger.info("✅ RPA browser-control router mounted at /rpa")
+except Exception as _rpa_err:  # noqa: BLE001
+    logger.warning("⚠️  RPA router mount failed: %s", _rpa_err)
 
 # ── Privacy-safe operational telemetry middleware ────────────────
 try:
@@ -3998,6 +4006,77 @@ def post_models_reload(_auth: None = Depends(require_auth), _rbac=Depends(requir
     except Exception as exc:
         logger.warning("models/reload failed: %s", exc)
         return JSONResponse({"ok": False, "error": "operation_failed"}, status_code=500)
+
+
+@app.get("/api/models/roles")
+def get_models_roles():
+    """Live role → installed model@quant resolution for every configured role (Phase A7).
+
+    Source of truth: core.model_role_resolver.resolve_role (installed + quant-floor +
+    VRAM fit) plus model_lanes.tier_models() and a live hardware snapshot. No model
+    name, role list, or VRAM number is hardcoded — roles come from model_roles.json,
+    numbers from live probes. Honest failure: if the resolver layer is unavailable the
+    endpoint says so instead of fabricating a resolution.
+    """
+    try:
+        from core import model_lanes as ml
+        from core import model_role_resolver as rr
+        from engine.compute.hardware_profiler import snapshot as hw_snapshot
+    except Exception:  # noqa: BLE001
+        logger.exception("models/roles import failed")
+        return JSONResponse(
+            {"ok": False, "error": "model_orchestration_unavailable", "detail": "internal_error"},
+            status_code=503,
+        )
+    try:
+        roles = {role: rr.resolve_role(role) for role in ml._model_roles().keys()}
+        return JSONResponse({
+            "ok": True,
+            "roles": roles,
+            "tiers": ml.tier_models(),
+            "hardware": hw_snapshot(),
+        })
+    except Exception:  # noqa: BLE001
+        logger.exception("models/roles resolution failed")
+        return JSONResponse(
+            {"ok": False, "error": "role_resolution_failed", "detail": "internal_error"},
+            status_code=500,
+        )
+
+
+@app.get("/api/models/benchmarks")
+def get_models_benchmarks():
+    """Measured tok/s + VRAM per model from state/model_benchmarks.json (Phase A7).
+
+    State dir resolved via the canonical helper (no hardcoded path). Honest failure:
+    a missing/unparseable benchmark file returns a clear structured error so the UI
+    shows an empty state instead of fabricated numbers.
+    """
+    try:
+        from core.state_paths import canonical_state_dir
+        path = canonical_state_dir() / "model_benchmarks.json"
+    except Exception:  # noqa: BLE001
+        logger.exception("models/benchmarks state path failed")
+        return JSONResponse(
+            {"ok": False, "error": "state_dir_unavailable", "detail": "internal_error"},
+            status_code=500,
+        )
+    if not path.exists():
+        return JSONResponse(
+            {"ok": False, "error": "benchmarks_not_found", "path": str(path),
+             "detail": "Run scripts/benchmark_models.py to generate measured tok/s."},
+            status_code=404,
+        )
+    try:
+        with open(path, "r") as fh:
+            data = json.load(fh)
+        return JSONResponse({"ok": True, **data})
+    except Exception:  # noqa: BLE001
+        logger.exception("models/benchmarks read failed")
+        return JSONResponse(
+            {"ok": False, "error": "benchmarks_unreadable", "path": str(path), "detail": "internal_error"},
+            status_code=500,
+        )
 
 
 @app.get("/api/evolution/status")
@@ -5819,34 +5898,12 @@ def handle_command(
         except Exception as _bias_exc:
             logger.debug("bias check error (non-fatal): %s", _bias_exc)
 
-    # ── Real execution engine — structured goal → real tool calls ────────────
-    # If the message is a goal (not a question), parse it into a structured plan
-    # and execute it step-by-step with real tools. Rules: no fake results, every
-    # step maps to a real tool, errors are explicit.
-    try:
-        from core.goal_parser import parse_goal as _parse_goal  # noqa: PLC0415
-        from core.real_execution_engine import RealExecutionEngine as _RealExecEngine  # noqa: PLC0415
-        _goal_plan = _parse_goal(message)
-        if not _goal_plan.get("is_goal"):
-            _direct_reply = _direct_conversation_reply(_goal_plan, message)
-            if _direct_reply:
-                return _direct_reply
-        if _goal_plan.get("is_goal") and _goal_plan.get("task_plan"):
-            logger.info("[REAL_ENGINE] Goal detected — %d steps planned", len(_goal_plan["task_plan"]))
-            _engine = _RealExecEngine()
-            _exec_result = _engine.run(_goal_plan["task_plan"], goal=message)
-            _chat_reply = _engine.format_for_chat(_exec_result)
-            # Prepend brief goal summary
-            _structured = _goal_plan.get("structured_goal", {})
-            if _structured.get("action"):
-                _chat_reply = f"Executing: **{_structured['action']}**\n\n" + _chat_reply
-            return _chat_reply
-    except Exception as _real_exc:
-        logger.warning("real_execution_engine failed (non-fatal): %s", _real_exc)
-
-    # ── Unified pipeline — single controlled execution path ───────────────────
-    # All remaining user inputs are routed through process_user_input() which
-    # enforces the full pipeline: graph → LLM → agents → result → forge.
+    # ── Unified pipeline — THE single controlled execution path (C1) ──────────
+    # The former pre-pipeline bypass (goal-parse → direct utility reply / real
+    # execution engine) now lives INSIDE process_user_input as Phase 0, so every
+    # chat input flows through one entry with full telemetry + STRICT_PIPELINE.
+    # All user inputs are routed through process_user_input() which enforces the
+    # full pipeline: graph → LLM → agents → result → forge.
     # The already-resolved routed_agent and mode are forwarded via a closure
     # so server-side keyword routing is preserved while the pipeline adds
     # graph context, task decomposition, and telemetry around every LLM call.
@@ -10401,10 +10458,11 @@ async def ceo_chat(payload: dict):
             logger.warning("CEO agent call failed", exc_info=True)
             response_text = "[CEO Agent unavailable — Ollama or AI provider not running]"
     else:
+        # Honest: no AI provider wired — do NOT fabricate a CEO acknowledgement
+        # that reads as if the directive was actioned.
         response_text = (
-            f"[CEO simulated response] Mission acknowledged. "
-            f"I have received your message: '{message[:80]}'. "
-            f"Coordinating team to execute on this directive."
+            "[CEO Agent unavailable — no AI provider configured. "
+            "Start Ollama or set an API key to get a real response.]"
         )
 
     # Store as a ticket for traceability

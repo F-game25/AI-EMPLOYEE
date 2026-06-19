@@ -11,10 +11,10 @@ import Toaster from './components/nexus-ui/Toaster'
 import SearchOmnibar from './components/ui/SearchOmnibar'
 import LoginPage from './components/LoginPage'
 import { PerformanceModeProvider } from './context/PerformanceModeContext'
+import { ensureOperatorToken, getStoredToken } from './api/auth'
 
 const Dashboard = lazy(() => import('./components/Dashboard'))
 import ContextCheckModal from './components/dashboard/ContextCheckModal'
-let localAuthPromise = null
 const READINESS_POLL_MS = 1500
 const READINESS_DEGRADED_AFTER_MS = 12000
 const BOOT_MIN_MS = 2800
@@ -33,39 +33,16 @@ function notifyBootPhase(phase, message, extra = {}) {
   }
 }
 
-function getStoredToken() {
-  return localStorage.getItem('ai_jwt') || sessionStorage.getItem('ai_jwt') || null
-}
-
 function ensureLocalOperatorToken() {
-  const existing = getStoredToken()
-  if (existing) return Promise.resolve(existing)
-  if (localAuthPromise) return localAuthPromise
-
   notifyBootPhase('auth', 'Requesting local operator token')
-  localAuthPromise = fetch('/api/auth/auto-token', { signal: AbortSignal.timeout(5000) })
-    .then(r => r.ok ? r.json() : null)
-    .then(d => {
-      if (d?.token) {
-        // Persist in both storages: localStorage survives restarts, sessionStorage
-        // is required by useWebSocket.js and the main.jsx fetch interceptor.
-        localStorage.setItem('ai_jwt', d.token)
-        sessionStorage.setItem('ai_jwt', d.token)
-        notifyBootPhase('auth', 'Operator token acquired', { status: 'ok' })
-        window.dispatchEvent(new CustomEvent('nx:auth-ready'))
-        return d.token
-      }
-      notifyBootPhase('auth', 'Operator token unavailable — login required', { status: 'degraded' })
-      return null
-    })
-    .catch(err => {
-      notifyBootPhase('auth', err?.message || 'Auth token request failed', { status: 'degraded' })
-      return null
-    })
-    .finally(() => {
-      localAuthPromise = null
-    })
-  return localAuthPromise
+  return ensureOperatorToken().then(token => {
+    notifyBootPhase(
+      'auth',
+      token ? 'Operator token acquired' : 'Operator token unavailable — login required',
+      { status: token ? 'ok' : 'degraded' },
+    )
+    return token
+  })
 }
 
 function AppLoadingFallback() {

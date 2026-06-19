@@ -227,9 +227,10 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 
 ---
 
-### P9 — Remote / Voice / PC Control Layer — PARTIAL (cc865062, 6d24630a)
+### P9 — Remote / Voice / PC Control Layer — CORE VERIFIED WORKING (cc865062, 6d24630a; verified 2026-06-15)
 
-**Done:** unified `/api/services` (status probes node/python/ollama/neo4j, lanes.status routing, safe pid-verified python restart), ServiceControlPanel + ComputeRouterStatus on Infrastructure page, pre-boot SYSTEM MENU (Boot/Update/Refresh/Reboot/Stop + auto-update). **Remaining:** live remote-GPU provisioning (needs provider keys — fabric is dry-run-gated by design), artifact sync-back, data-sync panel.
+**Done + LIVE-VERIFIED:** unified `/api/services` (status probes node/python/ollama/neo4j, lanes.status routing, safe pid-verified python restart), ServiceControlPanel + ComputeRouterStatus on Infrastructure page, pre-boot SYSTEM MENU (Boot/Update/Refresh/Reboot/Stop + auto-update). **Compute fabric (`backend/compute_fabric/` + `/api/compute/*`) verified end-to-end live:** real GPU telemetry (nvidia-smi), job lifecycle (start/stop = kill switch), **artifact sync-back with sha256-verified manifest**, `unsynced_warning` (outputs not yet synced), heartbeat + checkpoints + `recover` (resume after remote shutdown), spend tracking with daily/total caps. This is the artifact-sync-back / data-persistence / kill-switch the plan called for — it already exists and works (not fake).
+**Only remaining:** **live paid remote-GPU provisioning** — intentionally gated (`COMPUTE_FABRIC_LIVE=0`, no Vast/RunPod adapters/keys) so a real charge is physically impossible by default. Enabling it requires the owner's provider credentials + a verified single-use approval token; the dry-run framework + sync-back are ready to receive real jobs once a provider adapter + keys are added.
 
 **Goal:** Make local/remote/voice/compute a unified, visible operational layer (nr5 extra context).
 
@@ -350,6 +351,14 @@ Full design captured (build deferred to final phase):
 - **Interfaces:** `open(url,profile) -> session_id`; `snapshot(s) -> {tree,refs}`; `act(s,action,ref,value)`; `extract(s,kind,ref)`; `capture(s,kind)`; `eval(s,js)` (read-only default). WS: `browser:status/action_started/finished/approval_required`.
 - **Governance:** nav/snapshot/extract = L0 free; **L3 approval** for submit/purchase/account-change/outreach/download/writing eval. Sandboxed per-task profiles; every action logs snapshot+screenshot.
 - **DoD:** open→snapshot→click-ref→screenshot read path free; side-effecting actions produce approval cards; profile isolation verified.
+
+### Computer-Use Mode  *(DONE — cd8638ca; master switch over Module 1)*
+- **What:** a persisted master toggle (`runtime/companion/computer_use_mode.py`, default OFF) gating the `browser`/`desktop` subsystems in the execution broker. OFF → every `browser.*` cap is refused (`status:disabled`, not an approval); ON → Module 1's risk model applies (read/look free, `browser.act` L3 approval). One chokepoint → voice + chat both inherit it.
+- **Usability link:** `intent_classifier` routes "browse to / open <url> / go to / click / screenshot the page" → `execution` + `task_type=browser` so the runtime actually reaches the browser caps ("open the file" / "read the report" stay non-browser).
+- **Surfaces:** `GET/POST /api/computer-use/mode` (Python authoritative; Node proxy in `security-ops.js`); WS `computer-use:status`; UI `ComputerUseToggle.jsx` (confirm-on-enable) on Control Center; `securityStore.computerUseStatus`. Also **mounted the previously-dead RPA router** (`/api/rpa/*`) and gated its spawn/action by the same mode.
+- **Live-verified:** OFF → "browse to example.com" runs only `system.health.read`; ON → `browser.extract/capture/snapshot` execute.
+- **Screen perception (how it "sees"):** primary = the **accessibility snapshot** (`browser.snapshot` → DOM/a11y tree with stable `@eN` refs: role/name/bbox) — structured, not pixels, so the model reasons + acts precisely; secondary = **screenshot** (`browser.capture`) → the vision pipeline (`runtime/agents/ascend-forge/ui-engine/vision/vision_runner.py`) for pixel/OCR grounding; `action_executor` already does before/after screenshot-diff to confirm an action took effect.
+- **Follow-ups:** (1) **Desktop Phase 2** — `runtime/infra/rpa/desktop_worker.py` (pyautogui mouse/keyboard/screenshot) is built but orphaned + pyautogui linux-gated/uninstalled; to enable: ungate+install pyautogui, add `desktop.*` caps (screenshot L0; click/type/hotkey L3 approval) behind the SAME mode, prefer a dedicated virtual display (Xvfb) over the real desktop, keep FAILSAFE + global emergency-stop. (2) **RPA proxy auth** — Node `makeProxy('RPA')` doesn't forward a Python-valid token, so `/api/rpa/*` returns 500 at the boundary (router now mounted + mode-gated, but the proxy needs a service token). The companion path is the primary teammate door; the standalone RPA HTTP API is secondary.
 
 ### Module 2 — Context Database Layer  *(NEW — on existing retrieval; P7/P8)*
 - **Ref:** OpenViking (filesystem context, L0/L1/L2, retrieval trajectories) + turbovec (hybrid retrieve, stable IDs, allowlist). **Builds on** `vector_store.py`/`bm25.py`/`memory_router.py` — does NOT replace them.

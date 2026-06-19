@@ -365,6 +365,87 @@ def _seed(reg: CapabilityRegistry) -> None:
             side_effects=[],
             examples=["check this research report for fabricated sources", "is this report publishable"],
         ),
+        Capability(
+            id="skills.run",
+            subsystem="skills",
+            name="Run a business/content/research skill",
+            description=("Run a business, marketing, content, writing, copy, blog, email, social, "
+                         "sales, outreach, research, analytics, finance, or operations skill from "
+                         "the skill library to produce a deliverable: draft, plan, copy, post, "
+                         "description, analysis, or report."),
+            input_schema={"goal": "str", "skill_id": "str?", "context": "str?"},
+            output_schema={"skill_id": "str", "skill_name": "str", "output": "str", "match_score": "float"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=[],
+            examples=["write a blog post about pricing", "draft a cold email sequence",
+                      "create a press release for our launch", "write product descriptions",
+                      "research the market for AI note-takers", "write a linkedin post about hiring"],
+        ),
+        Capability(
+            id="content.produce",
+            subsystem="content",
+            name="Produce multi-platform content (Content Factory)",
+            description=("Generate real content for one or more platforms (blog/twitter/linkedin/"
+                         "instagram/tiktok), save artifacts, and stage them in the approval-gated "
+                         "publish queue. Supports batches/variants. Never auto-publishes."),
+            input_schema={"topic": "str", "platforms": "list?", "content_type": "str?", "variants": "int?"},
+            output_schema={"artifacts": "list", "queued": "list", "real_drafts": "int"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=["writes content artifacts; stages items in the publish queue (no posting)"],
+            examples=["make a content batch about our launch for twitter and linkedin",
+                      "produce 3 blog variants about ai pricing",
+                      "create a content calendar piece for instagram"],
+        ),
+        Capability(
+            id="finance.draft",
+            subsystem="finance",
+            name="Finance draft (advisory only)",
+            description=("Draft a business model, pricing analysis, revenue forecast, or investor "
+                         "pitch/memo. ADVISORY ONLY — estimates for human review, no transaction, "
+                         "trade, payment, or final tax/legal advice."),
+            input_schema={"request": "str", "context": "str?", "inputs": "dict?"},
+            output_schema={"kind": "str", "draft": "str", "advisory": "bool", "requires_human_signoff": "bool"},
+            risk_level=L1,
+            requires_approval=False,
+            side_effects=[],
+            examples=["draft a business model for an ai note-taker",
+                      "pricing analysis for our pro tier", "revenue forecast for next year",
+                      "write an investor pitch memo"],
+        ),
+        Capability(
+            id="company.validate",
+            subsystem="company",
+            name="Validate a business idea before building (CompanyOS)",
+            description=("Score real market demand/competition/monetization/feasibility for a "
+                         "business idea and return a verdict (build/pivot/need_evidence/reject). "
+                         "Validate-before-build: refuses weak ideas instead of wasting time/money."),
+            input_schema={"idea": "str", "answers": "dict?"},
+            output_schema={"verdict": "str", "composite": "float", "recommendation": "str"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["validate the idea: an ai note-taker for lawyers",
+                      "should we build a meal-prep app — validate demand first",
+                      "is this business idea worth building"],
+        ),
+        Capability(
+            id="company.refine",
+            subsystem="company",
+            name="Refine a weak idea into a buildable one (CompanyOS)",
+            description=("Turn a weak business idea into a usable one: validates it, then proposes "
+                         "concrete pivots targeting its weakest dimensions (demand/competition/"
+                         "monetization/feasibility) plus an improved idea statement."),
+            input_schema={"idea": "str"},
+            output_schema={"suggestions": "list", "improved_idea": "str", "weak_dimensions": "list"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["this idea seems weak, how do we make it work",
+                      "turn 'a social app for cats' into something buildable",
+                      "improve my business idea"],
+        ),
     ]
     for c in caps:
         reg.register(c)

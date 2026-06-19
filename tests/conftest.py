@@ -146,6 +146,9 @@ def isolated_ai_home(tmp_path, monkeypatch):
 
     monkeypatch.setenv("AI_HOME", str(fake_home))
     monkeypatch.setenv("AUTO_RESEARCH_MODE", "off")
+    # Skills dispatch defaults to REAL LLM in production; keep tests deterministic
+    # and offline (no backend required) with the placeholder executor.
+    monkeypatch.setenv("SKILLS_PLACEHOLDER", "1")
     # Patch the module-level constants that were already bound at import time
     # for ascend_forge and turbo_quant.
     for mod_name in ("ascend_forge", "turbo_quant"):

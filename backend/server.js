@@ -153,6 +153,7 @@ const SCHEMAS = {
   securityOfflineSync: z.object({ online: z.boolean().optional() }),
   securityGatewayStrict: z.object({ enabled: z.boolean().optional() }),
   autonomyMode:       z.object({ mode: z.enum(['OFF','ON','AUTO']) }),
+  computerUseMode:    z.object({ enabled: z.boolean() }),
   automationControl:  z.object({ action: z.enum(['start','stop','override']), goal: _zStrMax(4000).optional(), override_action_id: _zStrMax(200).optional() }),
   moneyPipeline:      z.object({ goal: _zStrMax(4000).optional(), config: z.record(z.any()).optional() }),
   adminSafetyAction:  z.object({ action_id: _zStrMax(100).min(1), reason: _zStrMax(1000).min(8), confirmation: _zStrMax(200).min(1), execution_mode: _zStrMax(50).optional() }),
@@ -583,6 +584,10 @@ app.use('/api/orders', require('./routes/orders')(requireAuth));
 
 // Companion Gateway — conversation runtime + capability registry (Python worker)
 app.use('/api/companion', require('./routes/companion')(requireAuth));
+
+// Work Acquisition + Delivery Engine — opportunity→evaluate→quote(HITL)→deliver(HITL) (Module 4)
+app.use('/api/work', require('./routes/work-engine')(requireAuth));
+app.use('/api/company', require('./routes/company')(requireAuth));
 
 // Service Control & Compute Routing — per-service status/restart + model-lane visibility (P9)
 app.use('/api/services', require('./routes/services')(requireAuth));

@@ -297,6 +297,13 @@ _OLLAMA_MODELS="${OLLAMA_MODELS:-$AI_HOME/models/ollama}"
 export OLLAMA_HOST="$_OLLAMA_HOST"
 export OLLAMA_MODELS="$_OLLAMA_MODELS"
 export OLLAMA_NO_CLOUD="${OLLAMA_NO_CLOUD:-1}"
+# Local-VRAM tuning (plan §2.3): q8_0 KV-cache ≈ half the KV memory at ~zero
+# quality loss (needs flash-attn); one heavy model at a time and serialized
+# requests so an 8GB GPU isn't over-committed. All overridable via env.
+export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
+export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
+export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
 mkdir -p "$_OLLAMA_MODELS"
 
 _OLLAMA_BIN="${OLLAMA_BIN:-}"
@@ -327,7 +334,7 @@ if [[ -n "$_OLLAMA_BIN" && -x "$_OLLAMA_BIN" ]]; then
   else
     _log "Starting managed Ollama..."
     _OLLAMA_PID_FILE="$APP_RUN_DIR/ollama.pid"
-    nohup env OLLAMA_HOST="$_OLLAMA_HOST" OLLAMA_MODELS="$_OLLAMA_MODELS" OLLAMA_LIBRARY_PATH="${OLLAMA_LIBRARY_PATH:-}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" OLLAMA_NO_CLOUD="$OLLAMA_NO_CLOUD" "$_OLLAMA_BIN" serve >> "$APP_LOG_DIR/ollama.log" 2>&1 </dev/null &
+    nohup env OLLAMA_HOST="$_OLLAMA_HOST" OLLAMA_MODELS="$_OLLAMA_MODELS" OLLAMA_LIBRARY_PATH="${OLLAMA_LIBRARY_PATH:-}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" OLLAMA_NO_CLOUD="$OLLAMA_NO_CLOUD" OLLAMA_FLASH_ATTENTION="$OLLAMA_FLASH_ATTENTION" OLLAMA_KV_CACHE_TYPE="$OLLAMA_KV_CACHE_TYPE" OLLAMA_NUM_PARALLEL="$OLLAMA_NUM_PARALLEL" OLLAMA_MAX_LOADED_MODELS="$OLLAMA_MAX_LOADED_MODELS" "$_OLLAMA_BIN" serve >> "$APP_LOG_DIR/ollama.log" 2>&1 </dev/null &
     echo "$!" > "$_OLLAMA_PID_FILE"
     for _oi in $(seq 1 20); do
       sleep 0.5

@@ -49,6 +49,16 @@ from core.unified_pipeline import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_intent_fast_path():
+    """These tests target the downstream pipeline phases. The Phase 0 fast-path
+    (added in Coherence C1 — utility direct-reply / structured-goal short-circuit)
+    is covered separately in test_pipeline_single_entry_c1.py; disable it here so
+    placeholder inputs like 'test'/'hello' exercise the full pipeline as intended."""
+    with patch("core.unified_pipeline._intent_fast_path", return_value=None):
+        yield
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1214,3 +1224,17 @@ class TestDegradedFlag:
 
         latest = list(up._TRACE_STORE)[-1]
         assert latest.get("degraded") is True
+
+
+# ── Fake-success enforcement (System Reality Audit) ──────────────────────────
+def test_placeholder_markers_are_not_real_execution():
+    from core.unified_pipeline import _is_real_execution, _has_placeholder_marker
+    assert _has_placeholder_marker("x completed deterministic local execution for: y")
+    assert _has_placeholder_marker("simulated execution of market_research")
+    assert not _has_placeholder_marker("A genuine detailed answer, well over ten chars.")
+    # success + placeholder output → not a real execution
+    assert _is_real_execution({"task_id": "t", "status": "success",
+                               "output": "completed deterministic local execution"}) is False
+    # success + real output → real execution
+    assert _is_real_execution({"task_id": "t", "status": "success",
+                               "output": "A real, substantive result string."}) is True

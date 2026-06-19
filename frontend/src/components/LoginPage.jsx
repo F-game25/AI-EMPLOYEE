@@ -1,9 +1,28 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { ensureOperatorToken } from '../api/auth'
 
 export default function LoginPage({ onSuccess }) {
   const [secret, setSecret] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // 'auto' while attempting the localhost auto-token; 'manual' once it fails
+  // and an operator secret is genuinely required (non-localhost access).
+  const [phase, setPhase] = useState('auto')
+
+  const tryAuto = useCallback(() => {
+    let cancelled = false
+    setPhase('auto')
+    setError('')
+    ensureOperatorToken({ force: true }).then(token => {
+      if (cancelled) return
+      if (token) onSuccess(token)
+      else setPhase('manual')
+    })
+    return () => { cancelled = true }
+  }, [onSuccess])
+
+  // On localhost the operator never needs a secret — the app self-unlocks.
+  useEffect(() => tryAuto(), [tryAuto])
 
   const submit = async (e) => {
     e.preventDefault()
@@ -30,12 +49,25 @@ export default function LoginPage({ onSuccess }) {
     }
   }
 
+  if (phase === 'auto') {
+    return (
+      <div style={styles.overlay}>
+        <div style={styles.card}>
+          <div style={{ ...styles.logo, animation: 'nxLoginPulse 1.4s ease-in-out infinite' }}>◆</div>
+          <h1 style={styles.title}>NEXUS OS</h1>
+          <p style={styles.sub}>Connecting to local instance…</p>
+          <style>{'@keyframes nxLoginPulse{0%,100%{opacity:.5}50%{opacity:1}}'}</style>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={styles.overlay}>
       <form onSubmit={submit} style={styles.card}>
         <div style={styles.logo}>◆</div>
         <h1 style={styles.title}>NEXUS OS</h1>
-        <p style={styles.sub}>Enter your operator secret to continue</p>
+        <p style={styles.sub}>Remote access — enter your operator secret to continue</p>
         <input
           type="password"
           autoFocus
@@ -50,8 +82,12 @@ export default function LoginPage({ onSuccess }) {
         <button type="submit" style={styles.btn} disabled={busy || !secret.trim()}>
           {busy ? 'Authenticating…' : 'Unlock'}
         </button>
+        <button type="button" onClick={tryAuto} style={styles.linkBtn} disabled={busy}>
+          Retry automatic unlock
+        </button>
         <p style={styles.hint}>
-          Secret is in <code style={styles.code}>~/.ai-employee/.env</code> as <code style={styles.code}>JWT_SECRET_KEY</code>
+          On this machine no secret is needed. From another device, the secret is in
+          {' '}<code style={styles.code}>~/.ai-employee/.env</code> as <code style={styles.code}>JWT_SECRET_KEY</code>
         </p>
       </form>
     </div>
@@ -105,6 +141,11 @@ const styles = {
     color: '#14110a', fontSize: 13, fontWeight: 700,
     letterSpacing: '0.1em', textTransform: 'uppercase',
     cursor: 'pointer',
+  },
+  linkBtn: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: '#9ca3af', fontSize: 11, letterSpacing: '0.08em',
+    textDecoration: 'underline', padding: 0,
   },
   hint: {
     margin: 0, fontSize: 11, color: '#374151', textAlign: 'center',
