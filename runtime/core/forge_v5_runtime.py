@@ -102,14 +102,13 @@ def _is_under(path: Path, root: Path) -> bool:
 
 def _safe_scan_root(project: dict[str, Any]) -> Path:
     target = str(project.get("root_path") or project.get("path") or "").strip()
-    if not target or "\x00" in target:
-        return _REPO_ROOT
-    try:
-        candidate = Path(target).expanduser().resolve(strict=False)
-    except Exception:
-        return _REPO_ROOT
-    if candidate.exists() and (_is_under(candidate, _REPO_ROOT) or _is_under(candidate, _AI_HOME_ROOT)):
-        return candidate
+    if target and "\x00" not in target:
+        trusted_roots = {
+            str(_REPO_ROOT): _REPO_ROOT,
+            str(_AI_HOME_ROOT): _AI_HOME_ROOT,
+        }
+        if target in trusted_roots:
+            return trusted_roots[target]
     return _REPO_ROOT
 
 

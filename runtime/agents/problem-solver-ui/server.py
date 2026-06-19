@@ -3748,36 +3748,53 @@ _V5_STATE_SUBDIRS = {"briefs", "research_packs", "goals", "reports", "quality_ga
 
 def _v5_safe_id(value: str, field: str = "id") -> str:
     safe = str(value or "").strip()
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", safe) or ".." in safe:
+    if (
+        not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", safe)
+        or ".." in safe
+        or safe != os.path.basename(safe)
+    ):
         raise HTTPException(400, f"invalid_{field}")
     return safe
 
 
-def _v5_state_path(subdir: str, item_id: str) -> Path:
+def _v5_state_dir(subdir: str) -> Path:
     if subdir not in _V5_STATE_SUBDIRS:
         raise HTTPException(400, "invalid_v5_state_subdir")
-    d = (STATE_DIR / "forge" / subdir).resolve()
-    d.mkdir(parents=True, exist_ok=True)
-    # _v5_safe_id already whitelist-validates the id; this resolved-path
-    # containment is defence-in-depth (and a sanitiser CodeQL recognises).
-    p = (d / f"{_v5_safe_id(item_id)}.json").resolve()
-    if os.path.commonpath([str(d), str(p)]) != str(d):
-        raise HTTPException(400, "invalid_v5_state_path")
-    return p
+    directory = (STATE_DIR / "forge" / subdir).resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
-def _v5_read_json(path: str | Path):
+
+def _v5_state_path(subdir: str, item_id: str, field: str = "id") -> Path:
+    directory = _v5_state_dir(subdir)
+    safe_name = os.path.basename(f"{_v5_safe_id(item_id, field)}.json")
+    path = (directory / safe_name).resolve()
     try:
-        # Defence-in-depth: only read inside the V5 state tree (paths already come
-        # from _v5_state_path, which validates the id; this is the sanitiser CodeQL recognises).
-        root = (STATE_DIR / "forge").resolve()
-        p = Path(path).resolve()
-        if os.path.commonpath([str(root), str(p)]) != str(root):
+        path.relative_to(directory)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid_v5_state_path") from exc
+    if os.path.commonpath([str(directory), str(path)]) != str(directory):
+        raise HTTPException(400, "invalid_v5_state_path")
+    return path
+
+
+def _v5_read_state_json(subdir: str, item_id: str, field: str = "id"):
+    try:
+        path = _v5_state_path(subdir, item_id, field)
+        if not path.is_file():
             return None
-        with open(p) as _f:
-            import json as _json
-            return _json.load(_f)
-    except Exception:
+        with path.open(encoding="utf-8") as state_file:
+            return json.load(state_file)
+    except HTTPException:
+        raise
+    except (OSError, json.JSONDecodeError):
         return None
+
+
+def _v5_write_state_json(subdir: str, item_id: str, data: Any, field: str = "id") -> None:
+    path = _v5_state_path(subdir, item_id, field)
+    with path.open("w", encoding="utf-8") as state_file:
+        json.dump(data, state_file, indent=2)
 
 
 @app.post("/api/v5/projects/start")
@@ -3794,10 +3811,7 @@ async def forge_v5_projects_start(payload: dict, _auth: None = Depends(require_a
         project_id = _v5_safe_id((payload or {}).get("project_id") or f"p-{_uuid.uuid4().hex[:8]}", "project_id")
         rt = get_forge_v5_runtime()
         brief = await rt.start_project_brief(raw_input, project_id, (payload or {}).get("project") or {})
-        import json as _json
-        brief_path = _v5_state_path("briefs", project_id)
-        with open(brief_path, "w") as _bf:
-            _json.dump(brief, _bf, indent=2)
+        _v5_write_state_json("briefs", project_id, brief, "project_id")
         return {"ok": True, "project_id": project_id, "brief": brief, "status": "briefed"}
     except HTTPException:
         raise
@@ -3810,8 +3824,7 @@ async def forge_v5_projects_start(payload: dict, _auth: None = Depends(require_a
 async def forge_v5_get_brief(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    project_id = _v5_safe_id(project_id, "project_id")
-    data = _v5_read_json(_v5_state_path("briefs", project_id))
+    data = _v5_read_state_json("briefs", project_id, "project_id")
     if not data:
         raise HTTPException(404, "brief not found")
     return {"ok": True, "brief": data}
@@ -3825,13 +3838,11 @@ async def forge_v5_project_research(project_id: str, payload: dict = None, _auth
     try:
         from core.forge_v5_runtime import get_forge_v5_runtime
         project_id = _v5_safe_id(project_id, "project_id")
-        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", project_id))
+        brief = (payload or {}).get("brief") or _v5_read_state_json("briefs", project_id, "project_id")
         if not brief:
             raise HTTPException(404, "brief not found — call /api/v5/brief first")
         pack = await get_forge_v5_runtime().run_research(brief)
-        import json as _json
-        with open(_v5_state_path("research_packs", project_id), "w") as _rf:
-            _json.dump(pack, _rf, indent=2)
+        _v5_write_state_json("research_packs", project_id, pack, "project_id")
         return {"ok": True, "research_pack": pack}
     except HTTPException:
         raise
@@ -3844,8 +3855,7 @@ async def forge_v5_project_research(project_id: str, payload: dict = None, _auth
 async def forge_v5_get_research(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    project_id = _v5_safe_id(project_id, "project_id")
-    data = _v5_read_json(_v5_state_path("research_packs", project_id))
+    data = _v5_read_state_json("research_packs", project_id, "project_id")
     if not data:
         raise HTTPException(404, "research pack not found")
     return {"ok": True, "research_pack": data}
@@ -3859,15 +3869,13 @@ async def forge_v5_project_goals_plan(project_id: str, payload: dict = None, _au
     try:
         from core.forge_v5_runtime import get_forge_v5_runtime
         project_id = _v5_safe_id(project_id, "project_id")
-        brief = (payload or {}).get("brief") or _v5_read_json(_v5_state_path("briefs", project_id))
+        brief = (payload or {}).get("brief") or _v5_read_state_json("briefs", project_id, "project_id")
         if not brief:
             raise HTTPException(404, "brief not found — call /api/v5/brief first")
-        research_pack = (payload or {}).get("research_pack") or _v5_read_json(_v5_state_path("research_packs", project_id)) or {}
+        research_pack = (payload or {}).get("research_pack") or _v5_read_state_json("research_packs", project_id, "project_id") or {}
         result = await get_forge_v5_runtime().plan_goals(brief, research_pack)
-        import json as _json
         goals_data = result.get("goals", result)
-        with open(_v5_state_path("goals", project_id), "w") as _gf:
-            _json.dump(goals_data, _gf, indent=2)
+        _v5_write_state_json("goals", project_id, goals_data, "project_id")
         return {"ok": True, **result}
     except HTTPException:
         raise
@@ -3880,8 +3888,7 @@ async def forge_v5_project_goals_plan(project_id: str, payload: dict = None, _au
 async def forge_v5_get_goals(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    project_id = _v5_safe_id(project_id, "project_id")
-    data = _v5_read_json(_v5_state_path("goals", project_id))
+    data = _v5_read_state_json("goals", project_id, "project_id")
     if data is None:
         raise HTTPException(404, "goals not found")
     return {"ok": True, "goals": data if isinstance(data, list) else data.get("goals", [])}
@@ -3912,8 +3919,7 @@ async def forge_v5_execute_goal(goal_id: str, payload: dict = None, _auth: None 
 async def forge_v5_get_report(project_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    project_id = _v5_safe_id(project_id, "project_id")
-    data = _v5_read_json(_v5_state_path("reports", project_id))
+    data = _v5_read_state_json("reports", project_id, "project_id")
     if not data:
         raise HTTPException(404, "report not found")
     return {"ok": True, "report": data}
@@ -3923,8 +3929,7 @@ async def forge_v5_get_report(project_id: str, _auth: None = Depends(require_aut
 async def forge_v5_get_quality_gate(goal_id: str, _auth: None = Depends(require_auth)):
     if not _v5_direct_projects_enabled():
         _v5_direct_projects_disabled()
-    goal_id = _v5_safe_id(goal_id, "goal_id")
-    data = _v5_read_json(_v5_state_path("quality_gates", goal_id))
+    data = _v5_read_state_json("quality_gates", goal_id, "goal_id")
     if not data:
         raise HTTPException(404, "quality gate not found")
     return {"ok": True, "quality_gate": data}
@@ -3949,10 +3954,7 @@ async def forge_v5_write_memory(goal_id: str, payload: dict = None, _auth: None 
         result = get_forge_v5_runtime().write_memory(goal, quality_gate, reasoning, compute)
         # Persist the quality gate alongside the lesson so the report can read it.
         if quality_gate:
-            import json as _json
-            goal_id = _v5_safe_id(goal_id, "goal_id")
-            with open(_v5_state_path("quality_gates", goal_id), "w") as _f:
-                _json.dump(quality_gate, _f)
+            _v5_write_state_json("quality_gates", goal_id, quality_gate, "goal_id")
         return {"ok": bool(result.get("ok", True)), "memory": result}
     except HTTPException:
         raise
