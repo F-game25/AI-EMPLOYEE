@@ -151,6 +151,7 @@ module.exports = function createMediaRouter(deps) {
   // a permissive CSP so the page (incl. Google Fonts) renders cleanly in a tab.
   const DEMOS_DIR = path.join(AI_HOME, 'state', 'artifacts', 'demos');
   const DEMOS_ROOT = path.resolve(DEMOS_DIR);
+  router.use('/api/demos', rateLimit);
 
   function _sendDemo(res, absPath) {
     // Confine to the demos dir — defence in depth against path traversal.
@@ -175,7 +176,7 @@ module.exports = function createMediaRouter(deps) {
 
   // Publicly serve uploaded order photos used in demos: /api/demos/_assets/<id>/<file>
   // (3 path segments — never matches the 1-/2-segment demo routes below.)
-  router.get('/api/demos/_assets/:id/:file', rateLimit, (req, res) => {
+  router.get('/api/demos/_assets/:id/:file', (req, res) => {
     const id = path.basename(req.params.id);
     const file = path.basename(req.params.file);
     const fpath = path.resolve(path.join(DEMOS_DIR, '_assets', id, file));
@@ -185,7 +186,7 @@ module.exports = function createMediaRouter(deps) {
   });
 
   // Sub-page within a site folder: /api/demos/<slug>/<page>.html
-  router.get('/api/demos/:slug/:page', rateLimit, (req, res) => {
+  router.get('/api/demos/:slug/:page', (req, res) => {
     const slug = path.basename(req.params.slug);
     const page = path.basename(req.params.page);
     if (!page.endsWith('.html')) return res.status(400).send('Only HTML files allowed');
@@ -193,7 +194,7 @@ module.exports = function createMediaRouter(deps) {
   });
 
   // Folder root or legacy single file: /api/demos/<slug>(/)  |  /api/demos/<file>.html
-  router.get('/api/demos/:slug', rateLimit, (req, res) => {
+  router.get('/api/demos/:slug', (req, res) => {
     const slug = path.basename(req.params.slug);
     if (slug.endsWith('.html')) return _sendDemo(res, path.join(DEMOS_DIR, slug)); // legacy
     const dir = path.join(DEMOS_DIR, slug);
