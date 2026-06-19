@@ -4016,10 +4016,10 @@ def get_models_roles():
         from core import model_lanes as ml
         from core import model_role_resolver as rr
         from engine.compute.hardware_profiler import snapshot as hw_snapshot
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/roles import failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/roles import failed")
         return JSONResponse(
-            {"ok": False, "error": "model_orchestration_unavailable", "detail": str(exc)},
+            {"ok": False, "error": "model_orchestration_unavailable", "detail": "internal_error"},
             status_code=503,
         )
     try:
@@ -4030,10 +4030,10 @@ def get_models_roles():
             "tiers": ml.tier_models(),
             "hardware": hw_snapshot(),
         })
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/roles resolution failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/roles resolution failed")
         return JSONResponse(
-            {"ok": False, "error": "role_resolution_failed", "detail": str(exc)},
+            {"ok": False, "error": "role_resolution_failed", "detail": "internal_error"},
             status_code=500,
         )
 
@@ -4049,10 +4049,10 @@ def get_models_benchmarks():
     try:
         from core.state_paths import canonical_state_dir
         path = canonical_state_dir() / "model_benchmarks.json"
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/benchmarks state path failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/benchmarks state path failed")
         return JSONResponse(
-            {"ok": False, "error": "state_dir_unavailable", "detail": str(exc)},
+            {"ok": False, "error": "state_dir_unavailable", "detail": "internal_error"},
             status_code=500,
         )
     if not path.exists():
@@ -4065,10 +4065,10 @@ def get_models_benchmarks():
         with open(path, "r") as fh:
             data = json.load(fh)
         return JSONResponse({"ok": True, **data})
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("models/benchmarks read failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("models/benchmarks read failed")
         return JSONResponse(
-            {"ok": False, "error": "benchmarks_unreadable", "path": str(path), "detail": str(exc)},
+            {"ok": False, "error": "benchmarks_unreadable", "path": str(path), "detail": "internal_error"},
             status_code=500,
         )
 

@@ -65,7 +65,9 @@ def _ts() -> str:
 
 def node_id_for(tenant: str, norm_path: str) -> str:
     """Stable node id derived from tenant + normalized path."""
-    return hashlib.sha1(f"{tenant}:{norm_path}".encode("utf-8")).hexdigest()[:16]
+    # Non-cryptographic stable id (not security-sensitive); usedforsecurity=False
+    # keeps the digest stable and marks intent for CodeQL.
+    return hashlib.sha1(f"{tenant}:{norm_path}".encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
 
 
 def summarize(text: str, limit: int = _SUMMARY_CHARS) -> str:
