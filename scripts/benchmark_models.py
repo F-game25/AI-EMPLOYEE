@@ -144,7 +144,7 @@ def main() -> int:
         out_path = ROOT / "state" / "model_benchmarks.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
-    print(f"\nwrote {out_path.name} ({len([r for r in results if r.get('status') == 'ok'])} measured)")
+    print(f"\nbenchmark results written ({len([r for r in results if r.get('status') == 'ok'])} measured)")
     return 0
 
 
