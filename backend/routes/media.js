@@ -1,7 +1,21 @@
 'use strict';
-const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
-const rateLimit = createRouteRateLimit({ keyPrefix: 'media-demo-assets', max: 60, windowMs: 60_000 });
+const _mediaBuckets = new Map();
+
+function rateLimit(req, res, next) {
+  const rawIp = req.ip || req.connection?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 60_000;
+  const key = `media-demo-assets:${rawIp}`;
+  const hits = (_mediaBuckets.get(key) || []).filter((ts) => now - ts < windowMs);
+  hits.push(now);
+  _mediaBuckets.set(key, hits);
+  if (hits.length > 60) {
+    res.set('Retry-After', String(Math.ceil(windowMs / 1000)));
+    return res.status(429).json({ ok: false, error: 'Rate limit exceeded' });
+  }
+  next();
+}
 
 module.exports = function createMediaRouter(deps) {
   const router = require('express').Router();
