@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _strategy_to_dict(strategy: Any) -> dict[str, Any]:
@@ -54,7 +57,8 @@ class ForgeReasoningOrchestrator:
                 "rejected_paths": paths[1:],
                 "search_id": getattr(pack, "search_id", None),
             }
-        except Exception as exc:
+        except Exception:
+            logger.exception("ForgeReasoningOrchestrator.reason failed")
             return {
                 "ok": False,
                 "phase": phase,
@@ -68,7 +72,7 @@ class ForgeReasoningOrchestrator:
                 "paths_considered": [],
                 "chosen_path": None,
                 "rejected_paths": [],
-                "error": str(exc),
+                "error": "reasoning_unavailable",
                 "fallback": True,
             }
 
@@ -89,13 +93,14 @@ class ForgeReasoningOrchestrator:
                 "source": "qce_amplitude_router",
             }
         except Exception as exc:
+            logger.warning("ForgeReasoningOrchestrator.select_model failed: %s", type(exc).__name__)
             return {
                 "model": None,
                 "task_type": task_type,
                 "quality": quality,
                 "privacy": privacy,
                 "source": "unavailable",
-                "error": str(exc),
+                "error": "model_selection_unavailable",
             }
 
     def _select_mode(self, goal: str, context: dict[str, Any]) -> str:
