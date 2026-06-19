@@ -37,7 +37,10 @@ class QuantumCognitiveEngine:
 
     async def process(self, goal: str, tenant_id: str = '',
                       preferred_agent_id: str | None = None,
-                      task_type: str = '') -> ContextPack:
+                      task_type: str = '',
+                      engine_filter: list[str] | None = None,
+                      max_results_per_engine: int | None = None,
+                      timeout_ms: int | None = None) -> ContextPack:
         complexity = classify(goal)
         rounds = ROUNDS[complexity]
         cap = POOL_CAP[complexity]
@@ -54,6 +57,12 @@ class QuantumCognitiveEngine:
             tenant_id=tenant_id,
             max_results_per_engine=cap,
         )
+        if engine_filter is not None:
+            req.engine_filter = list(engine_filter)
+        if max_results_per_engine is not None:
+            req.max_results_per_engine = max(1, int(max_results_per_engine))
+        if timeout_ms is not None:
+            req.timeout_ms = max(50, int(timeout_ms))
         context_pack = await self._orchestrator.build_context_pack(req)
         context_pack.complexity = complexity
 

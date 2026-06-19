@@ -19,7 +19,7 @@ psutil>=5.9.0
 
 # Auth / encryption (loaded transitively by server modules under test)
 bcrypt>=4.0.0
-cryptography>=40.0.0
+cryptography>=48.0.1
 python-jose[cryptography]>=3.3.0
 
 # Config / serialisation

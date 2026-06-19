@@ -927,7 +927,7 @@ html[data-perf="medium"] .snode {
   .snode { display: none; } /* corner panels too complex for mobile */
 }
 
-/* ── Banners ────────────────────────────────────────────────────────────────*/
+/* ── Banners ──────────────────────────────────────────────────────────────── */
 .nxd__banner{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;font-size:12px;font-weight:600;letter-spacing:.04em;z-index:100}
 .nxd__banner--amber{background:rgba(245,158,11,.15);border-bottom:1px solid rgba(245,158,11,.4);color:#F59E0B}
 .nxd__banner--red{background:rgba(239,68,68,.15);border-bottom:1px solid rgba(239,68,68,.4);color:#EF4444}

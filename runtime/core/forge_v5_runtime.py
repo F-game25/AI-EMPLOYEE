@@ -5,6 +5,7 @@ publish externally, spend money, or bypass existing Forge approvals.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -16,17 +17,21 @@ from core.compute_router import ComputeWorkload, decision_to_dict, get_compute_r
 from core.forge_reasoning_orchestrator import get_forge_reasoning_orchestrator
 from core.forge_sandbox_manager import get_forge_sandbox_manager
 
+logger = logging.getLogger(__name__)
+
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def _sentences(text: str) -> list[str]:
-    return [part.strip(" .\n\t") for part in re.split(r"[.;\n]+", text or "") if part.strip()]
+    normalized = (text or "")[:8000].replace("\n", ".").replace(";", ".")
+    return [part.strip(" .\t") for part in normalized.split(".") if part.strip()]
 
 
 # repo root = .../AI-EMPLOYEE (this file lives at runtime/core/forge_v5_runtime.py)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_AI_HOME_ROOT = Path(os.environ.get("AI_HOME") or Path.home() / ".ai-employee").resolve()
 _SKIP_DIRS = {".git", "node_modules", "dist", "build", "__pycache__", ".venv", "venv", "state", ".cache", "coverage"}
 _CODE_EXT = {".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".md", ".sh", ".css"}
 _STOPWORDS = {
@@ -87,6 +92,26 @@ def _scan_codebase(keywords: list[str], root: Path | None = None, max_hits: int 
     return sorted(hits, key=lambda h: h["confidence"], reverse=True)
 
 
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_scan_root(project: dict[str, Any]) -> Path:
+    target = str(project.get("root_path") or project.get("path") or "").strip()
+    if target and "\x00" not in target:
+        trusted_roots = {
+            str(_REPO_ROOT): _REPO_ROOT,
+            str(_AI_HOME_ROOT): _AI_HOME_ROOT,
+        }
+        if target in trusted_roots:
+            return trusted_roots[target]
+    return _REPO_ROOT
+
+
 class ForgeV5Runtime:
     def __init__(self) -> None:
         self.reasoning = get_forge_reasoning_orchestrator()
@@ -131,13 +156,13 @@ class ForgeV5Runtime:
             from core.context_evaluator import get_context_evaluator
 
             context_eval = get_context_evaluator().evaluate(goal)
-        except Exception as exc:
-            context_eval = {"score": 0.0, "sufficient": False, "gaps": [], "error": str(exc)}
+        except Exception:
+            logger.exception("Forge V5 context evaluation failed")
+            context_eval = {"score": 0.0, "sufficient": False, "gaps": [], "error": "context_evaluation_failed"}
 
         # ── Real codebase inspection ─────────────────────────────────────────
         project = brief.get("project") or {}
-        target = project.get("root_path") or project.get("path")
-        root = Path(target) if target and Path(target).exists() else _REPO_ROOT
+        root = _safe_scan_root(project)
         # Derive keywords from the whole brief, not just raw input.
         kw_source = " ".join(str(x) for x in [
             brief.get("title"), brief.get("summary"), brief.get("desired_outcome"),
@@ -167,8 +192,9 @@ class ForgeV5Runtime:
                     "text": (m.get("text") or "")[:240],
                     "score": m.get("_score"),
                 })
-        except Exception as exc:
-            memory_error = str(exc)
+        except Exception:
+            logger.exception("Forge V5 memory retrieval failed")
+            memory_error = "memory_retrieval_failed"
 
         # ── Online research — honest availability only ───────────────────────
         search_keys = [k for k in ("BRAVE_API_KEY", "BING_API_KEY", "SERPAPI_API_KEY", "TAVILY_API_KEY") if os.getenv(k)]
@@ -182,12 +208,14 @@ class ForgeV5Runtime:
         runtime_findings: dict[str, Any] = {"source_type": "runtime"}
         try:
             runtime_findings["compute_backends"] = self.compute.health()
-        except Exception as exc:
-            runtime_findings["compute_backends"] = {"available": False, "reason": str(exc)}
+        except Exception:
+            logger.exception("Forge V5 compute health failed")
+            runtime_findings["compute_backends"] = {"available": False, "reason": "unavailable"}
         try:
             runtime_findings["model_routing"] = self.reasoning.select_model("research", quality="balanced", privacy="local_ok")
-        except Exception as exc:
-            runtime_findings["model_routing"] = {"available": False, "reason": str(exc)}
+        except Exception:
+            logger.exception("Forge V5 model routing failed")
+            runtime_findings["model_routing"] = {"available": False, "reason": "unavailable"}
         runtime_findings["approval_boundary"] = "Node Forge remains the execution and persistence boundary"
 
         # ── End-state recommended goals (not loose todos) ────────────────────
@@ -354,7 +382,8 @@ class ForgeV5Runtime:
             )
             return {"ok": bool(stored.get("vector_stored") or stored.get("cache_key")), "lesson": lesson, **stored}
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "memory_stored": False, "lesson": lesson}
+            logger.warning("Forge V5 write_memory failed: %s", type(exc).__name__, exc_info=True)
+            return {"ok": False, "error": "forge_v5_memory_store_failed", "memory_stored": False, "lesson": lesson}
 
     async def generate_report(
         self,

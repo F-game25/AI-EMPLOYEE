@@ -80,7 +80,7 @@ class AgentController:
         self._context_evaluator: Optional[ContextSufficiencyEvaluator] = None
         self._auto_researcher: Optional[AutoResearchAgent] = None
         self._broadcast_fn: Callable[[str, dict], None] = lambda _e, _p: None
-        self._broadcast_configured = False
+        self._broadcast_enabled = False
         # Per-task context-check user response futures, keyed by task/run id
         self._context_responses: dict[str, dict] = {}
         self._context_lock = threading.Lock()
@@ -121,11 +121,22 @@ class AgentController:
         try:
             from core.quantum.engine import get_qce
             qce = get_qce()
-            pack = await qce.process(goal=goal, task_type='execution')
+            timeout_ms = int(os.getenv("AGENT_CONTROLLER_QCE_TIMEOUT_MS", "300"))
+            pack = await qce.process(
+                goal=goal,
+                task_type='execution',
+                engine_filter=["agents", "tools", "tasks", "docs"],
+                max_results_per_engine=10,
+                timeout_ms=timeout_ms,
+            )
             agents = qce._router.route_agents(pack, preferred_agent_id=preferred_agent_id)
             return agents[0] if agents else None
         except Exception:
             return None
+
+    @staticmethod
+    def _qce_routing_enabled() -> bool:
+        return (os.getenv("AGENT_CONTROLLER_QCE_ROUTING") or "0").lower() in {"1", "true", "yes", "on"}
 
     def _keyword_route_agent(self, goal: str) -> str | None:
         import json, os
@@ -187,13 +198,10 @@ class AgentController:
             self._logger.log_event(component="controller", action="compute_plan_skipped",
                                    result="warn", latency_ms=0.0, meta={"err": str(_cp_err)})
 
-        # QCE agent routing is opt-in here. The controller is used by fast,
-        # deterministic unit tests and local request handlers; QCE has its own
-        # direct test surface and can leave async resources alive in restricted
-        # environments.
+        # QCE agent routing — attempt amplitude-based selection, fall back to keyword router
         _qce_agent: str | None = None
         _log = logging.getLogger(__name__)
-        if os.getenv("AGENT_CONTROLLER_QCE") == "1":
+        if self._qce_routing_enabled():
             try:
                 _qce_agent = asyncio.run(self._qce_route_agent(goal, preferred_agent_id))
                 if _qce_agent:
@@ -467,7 +475,7 @@ class AgentController:
     def set_broadcast(self, fn: Callable[[str, dict], None]) -> None:
         """Allow the FastAPI server to inject its WS broadcaster."""
         self._broadcast_fn = fn or (lambda _e, _p: None)
-        self._broadcast_configured = bool(fn)
+        self._broadcast_enabled = bool(fn)
         if self._auto_researcher is not None:
             self._auto_researcher._broadcast = self._broadcast_fn
 
@@ -548,9 +556,9 @@ class AgentController:
                 "memory_hits": eval_result.get("memory_hits", 0),
                 "graph_hits": eval_result.get("graph_hits", 0),
             })
-            if not self._broadcast_configured:
+            if not self._broadcast_enabled:
                 summary["user_choice"] = "continue"
-                summary["ask_skipped_reason"] = "no_broadcast_channel"
+                summary["headless"] = True
                 return summary
             timeout_s = float(os.getenv("CONTEXT_CHECK_TIMEOUT_S", "60"))
             choice = self._await_user_choice(run_id, timeout=timeout_s)
@@ -597,22 +605,19 @@ class AgentController:
         goal = str(task_input.get("goal") or task_input.get("task") or "").strip()
         context = task_input.get("context")
 
-        def _llm_executor(_p: dict) -> dict:
-            # Real LLM execution is the DEFAULT — skills do genuine work out of the
-            # box. Opt out with SKILLS_PLACEHOLDER=1 (used by the test suite, or for
-            # backend-less smoke runs). The legacy AGENT_CONTROLLER_REAL_LLM=0 also
-            # forces placeholder for backward compatibility.
-            placeholder = (
-                os.getenv("SKILLS_PLACEHOLDER") == "1"
-                or os.getenv("AGENT_CONTROLLER_REAL_LLM") == "0"
+        if not self._llm_provider_available():
+            def _unavailable_executor(_p: dict) -> dict:
+                raise RuntimeError("llm_provider_unavailable")
+
+            return get_action_bus().emit(
+                action_type=action_type,
+                payload={"task_input": task_input, "action": action},
+                actor="agent_controller",
+                reason="executor dispatch",
+                executor=_unavailable_executor,
             )
-            if placeholder:
-                return {
-                    "skill": skill,
-                    "goal": goal,
-                    "output": f"{skill} completed deterministic local execution for: {goal or str(task_input)}",
-                    "mode": "deterministic_local",
-                }
+
+        def _llm_executor(_p: dict) -> dict:
             from engine.api import generate
             role = skill.replace("-", " ").replace("_", " ")
             system = (
@@ -634,6 +639,27 @@ class AgentController:
             reason="executor dispatch",
             executor=_llm_executor,
         )
+
+    @staticmethod
+    def _llm_provider_available() -> bool:
+        api_keys = (
+            "GOOGLE_API_KEY",
+            "NVIDIA_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+        )
+        if any(os.getenv(key) for key in api_keys):
+            return True
+        try:
+            import urllib.request
+
+            host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+            timeout = float(os.getenv("AGENT_CONTROLLER_PROVIDER_CHECK_TIMEOUT_S", "0.5"))
+            req = urllib.request.Request(f"{host}/api/tags", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout):
+                return True
+        except Exception:
+            return False
 
 
 _instance: AgentController | None = None

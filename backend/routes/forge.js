@@ -30,6 +30,7 @@ const forgeTraining = require('../services/forge_training')
 const forgeMemoryGraph = require('../services/forge_memory_graph')
 const forgeContextEngine = require('../services/forge_context_engine')
 const broadcaster = require('../events/broadcaster')
+const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 
 // Lightweight logger shim — several swarm/execute paths reference `logger.*`.
 // Maps to console so those paths log instead of throwing "logger is not defined".
@@ -703,10 +704,17 @@ function parseGitHubRemote(url) {
   const value = String(url || '').trim()
   if (!value) return null
   let match = value.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i)
-  if (match) return { owner: match[1], repo: match[2].replace(/\.git$/i, '') }
+  if (match) return _normalizeGitHubRepo(match[1], match[2])
   match = value.match(/^https:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?$/i)
-  if (match) return { owner: match[1], repo: match[2].replace(/\.git$/i, '') }
+  if (match) return _normalizeGitHubRepo(match[1], match[2])
   return null
+}
+
+function _normalizeGitHubRepo(owner, repo) {
+  const cleanOwner = String(owner || '').trim()
+  const cleanRepo = String(repo || '').replace(/\.git$/i, '').trim()
+  const re = /^[A-Za-z0-9_.-]{1,100}$/
+  return re.test(cleanOwner) && re.test(cleanRepo) ? { owner: cleanOwner, repo: cleanRepo } : null
 }
 
 function parseGitStatus(stdout) {
@@ -1277,12 +1285,18 @@ function _httpGetJson(url, timeoutMs = 10000, extraHeaders = {}) {
 }
 
 function callPythonV5(pathname, payload = {}, timeoutMs = 120000) {
+  if (!/^\/api\/v5\/[A-Za-z0-9_./-]+$/.test(pathname) || pathname.includes('..')) {
+    return Promise.resolve({ ok: false, error: 'invalid_v5_path' })
+  }
   const token = _codeIndexToken()
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
   return _httpJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}${pathname}`, payload, timeoutMs, headers)
 }
 
 function getPythonV5(pathname, timeoutMs = 10000) {
+  if (!/^\/api\/v5\/[A-Za-z0-9_./-]+$/.test(pathname) || pathname.includes('..')) {
+    return Promise.resolve({ ok: false, error: 'invalid_v5_path' })
+  }
   const token = _codeIndexToken()
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
   return _httpGetJson(`http://127.0.0.1:${PYTHON_BACKEND_PORT_FORGE}${pathname}`, timeoutMs, headers)
@@ -1547,20 +1561,32 @@ async function callPythonChat(message, timeoutMs = 30000) {
   return { ok: false, error: 'No LLM available. Start Ollama (ollama serve) or set ANTHROPIC_API_KEY in ~/.ai-employee/.env for cloud fallback.' }
 }
 
-function _makeForgeRateLimit(max, windowMs = 60000) {
-  const hits = new Map()
-  return (req, res, next) => {
-    const key = req.ip || 'anon'
-    const now = Date.now()
-    const entry = hits.get(key) || { count: 0, reset: now + windowMs }
-    if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs }
-    entry.count++
-    hits.set(key, entry)
-    if (entry.count > max) return res.status(429).json({ ok: false, error: 'Too many requests' })
-    next()
+const rateLimit = createRouteRateLimit({ keyPrefix: 'forge-fs', max: 30, windowMs: 60_000 })
+const _SAFE_ID_RE = /^[A-Za-z0-9._-]{1,120}$/
+const _V5_JSON_SUBDIRS = new Set(['briefs', 'research_packs', 'goals', 'reports', 'quality_gates'])
+
+function _safeId(value, label = 'id') {
+  const id = String(value || '').trim()
+  if (!_SAFE_ID_RE.test(id) || id.includes('..')) {
+    const err = new Error(`${label} contains unsupported characters`)
+    err.status = 400
+    throw err
   }
+  return id
 }
-const _rl_forge_fs = _makeForgeRateLimit(30)  // 30/min per IP for filesystem routes
+
+function _normalizeVerifyCommands(commands, fallback, isAllowed) {
+  const source = Array.isArray(commands) && commands.length ? commands : fallback
+  return (Array.isArray(source) ? source : [])
+    .map(c => String(c || '').trim())
+    .filter(c => c && isAllowed(c))
+    .slice(0, 5)
+}
+
+function _safeV5Path(subdir, id) {
+  if (!_V5_JSON_SUBDIRS.has(subdir)) throw new Error('unsupported_v5_subdir')
+  return path.join(FORGE_HOME, subdir, `${_safeId(id, 'v5 id')}.json`)
+}
 
 module.exports = function createForgeRouter(requireAuth, opts = {}) {
   const rlRuns = opts.rlRuns || ((_req, _res, next) => next())
@@ -1595,7 +1621,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     return false
   }
 
-  router.get('/engine/status', requireAuth, async (_req, res) => {
+  router.get('/engine/status', rateLimit, requireAuth, async (_req, res) => {
     const status = engine.getStatus()
     res.json({
       ...status,
@@ -2059,9 +2085,12 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
       const workspace = runWorkspaceRoot(run.id)
       if (!fs.existsSync(workspace)) return res.status(409).json({ ok: false, error: 'run workspace missing; approve/stage a patch first' })
-      const cmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
-        ? req.body.commands
-        : (run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project))
+      const cmds = _normalizeVerifyCommands(
+        req.body?.commands,
+        run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project),
+        isVerifyAllowed,
+      )
+      if (!cmds.length) return res.status(400).json({ ok: false, error: 'no allowed verification commands' })
       broadcastForge('forge:validation_started', { run_id: runIdOf(run), project_id: project.id, commands: cmds })
       const verify = await runVerifyCommands(project, cmds, workspace)
       const workspaceMeta = readWorkspaceMetadata(workspace)
@@ -2204,7 +2233,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   })
 
   // Rejects a staged action; removes its staged files from the workspace.
-  router.post('/runs/:id/reject-action', requireAuth, _rl_forge_fs, (req, res) => {
+  router.post('/runs/:id/reject-action', rateLimit, requireAuth, (req, res) => {
     const run = findRun(req.params.id)
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
     const actionId = String(req.body?.action_id || '').trim()
@@ -2970,9 +2999,12 @@ print(json.dumps({'winner': winner, 'confidence': round(conf, 3), 'distribution'
     if (!requireOwnerApproval(req, res, 'forge_verify')) return
     const project = findProject(req.body?.project_id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    const cmds = (Array.isArray(req.body?.commands) && req.body.commands.length)
-      ? req.body.commands
-      : (project.verification_commands || defaultVerificationCommands(project))
+    const cmds = _normalizeVerifyCommands(
+      req.body?.commands,
+      project.verification_commands || defaultVerificationCommands(project),
+      isVerifyAllowed,
+    )
+    if (!cmds.length) return res.status(400).json({ ok: false, error: 'no allowed verification commands' })
     const root = safeProjectRoot(project)
     const verify = await runVerifyCommands(project, cmds, root)
     const results = verify.results
@@ -4484,7 +4516,7 @@ Output a JSON array:
     } catch { return [] }
   }
 
-  router.post('/projects/:id/decompose', requireAuth, async (req, res) => {
+  router.post('/projects/:id/decompose', rateLimit, requireAuth, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const { goal, add_to_backlog } = req.body || {}
@@ -4535,23 +4567,23 @@ Output a JSON array:
     return _loadForgeSkills().filter(s => (Array.isArray(s.triggers) ? s.triggers : []).some(t => goalLower.includes(t.toLowerCase())))
   }
 
-  router.get('/skills', requireAuth, (_req, res) => {
+  router.get('/skills', rateLimit, requireAuth, (_req, res) => {
     res.json({ ok: true, skills: _loadForgeSkills() })
   })
 
-  router.get('/skills/:skillId', requireAuth, (req, res) => {
+  router.get('/skills/:skillId', rateLimit, requireAuth, (req, res) => {
     const skill = _loadForgeSkills().find(s => s.skill_id === req.params.skillId)
     if (!skill) return res.status(404).json({ ok: false, error: 'skill not found' })
     res.json({ ok: true, skill })
   })
 
-  router.post('/skills/reload', requireAuth, (_req, res) => {
+  router.post('/skills/reload', rateLimit, requireAuth, (_req, res) => {
     _forgeSkillsCache = null
     const skills = _loadForgeSkills()
     res.json({ ok: true, count: skills.length, skills: skills.map(s => s.skill_id) })
   })
 
-  router.post('/runs/:id/apply-skill', requireAuth, (req, res) => {
+  router.post('/runs/:id/apply-skill', rateLimit, requireAuth, (req, res) => {
     const run = findRun(req.params.id)
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
     const { skill_id } = req.body || {}
@@ -5338,7 +5370,7 @@ Return JSON:
   })
 
   // POST /api/forge/training-runs/:id/evaluate — run evaluation gate
-  router.post('/training-runs/:id/evaluate', requireAuth, _rl_forge_fs, async (req, res) => {
+  router.post('/training-runs/:id/evaluate', rateLimit, requireAuth, async (req, res) => {
     const tr = forgeRunStore.findTrainingRun(req.params.id)
     if (!tr) return res.status(404).json({ ok: false, error: 'training run not found' })
     const project = findProject(tr.project_id)
@@ -5917,6 +5949,11 @@ Return JSON:
     const latest = _latestV7(ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
     const approval = req.body?.approval_id ? _forgeV7.find('applyApprovals', 'approval_id', req.body.approval_id) : latest.approval
     if (!latest.proposal || !latest.workspace || !approval) return res.status(404).json({ ok: false, error: 'proposal, workspace, and approval required' })
+    // Enforce the project write policy before touching the main workspace — mirrors
+    // /files/write and /runs/:id/apply so a read-only-imported project cannot be written via V7.
+    if (!ctx.project.write_access) return res.status(403).json({ ok: false, error: 'project is not writable' })
+    const blockedPath = (latest.proposal.files_intended || []).find(f => isProtectedPath(ctx.project, f))
+    if (blockedPath) return res.status(403).json({ ok: false, error: `protected path blocked: ${blockedPath}` })
     try {
       const result = _forgeV7.applyApproved(ctx.project, ctx.goal, latest.proposal, latest.workspace, approval, req.body || {})
       broadcastForge('forge:v7_patch_applied_to_workspace', { project_id: ctx.project.id, goal_id: ctx.goal.goal_id || ctx.goal.id, ...result })
@@ -5946,16 +5983,17 @@ Return JSON:
     }
   })
 
-  router.post('/v7/projects/:projectId/goals/:goalId/rollback', requireAuth, (req, res) => {
+  router.post('/v7/projects/:projectId/goals/:goalId/rollback', rateLimit, requireAuth, (req, res) => {
     const ctx = _v7Context(req, res)
     if (!ctx) return
-    const rollback = req.body?.rollback_id
-      ? _forgeV7.find('rollbackArtifacts', 'rollback_id', req.body.rollback_id)
+    const rollbackId = req.body?.rollback_id ? _safeId(req.body.rollback_id, 'rollback_id') : ''
+    const rollback = rollbackId
+      ? _forgeV7.find('rollbackArtifacts', 'rollback_id', rollbackId)
       : _forgeV7.latestForGoal('rollbackArtifacts', ctx.project.id, ctx.goal.goal_id || ctx.goal.id)
     if (!rollback) return res.status(404).json({ ok: false, error: 'rollback artifact not found' })
     if (req.body?.confirm !== true) return res.status(409).json({ ok: false, error: 'confirm:true required before rollback', rollback })
     const projectRoot = safeProjectRoot(ctx.project)
-    const patchFile = path.join(FORGE_HOME, 'v7', `${rollback.rollback_id}.reverse.patch`)
+    const patchFile = path.join(FORGE_HOME, 'v7', `${_safeId(rollback.rollback_id, 'rollback_id')}.reverse.patch`)
     try {
       ensureDir(path.dirname(patchFile))
       fs.writeFileSync(patchFile, rollback.reverse_patch || '', 'utf8')
@@ -5970,7 +6008,7 @@ Return JSON:
     }
   })
 
-  router.post('/v5/projects/start', requireAuth, async (req, res) => {
+  router.post('/v5/projects/start', rateLimit, requireAuth, async (req, res) => {
     const rawInput = String(req.body?.raw_input || req.body?.goal || '').trim()
     if (!rawInput) return res.status(400).json({ ok: false, error: 'raw_input required' })
 
@@ -6037,7 +6075,7 @@ Return JSON:
 
   function _readV5Json(subdir, id) {
     try {
-      const p = path.join(FORGE_HOME, subdir, `${id}.json`)
+      const p = _safeV5Path(subdir, id)
       if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'))
     } catch { /* ignore */ }
     return null
@@ -6070,7 +6108,7 @@ Return JSON:
     try { return scrub(obj, null) } catch { return obj }
   }
 
-  router.get('/v5/projects/:id/brief', requireAuth, (req, res) => {
+  router.get('/v5/projects/:id/brief', rateLimit, requireAuth, (req, res) => {
     const project = findProject(req.params.id)
     if (project) return res.json({ ok: true, brief: forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || null })
     const brief = _readV5Json('briefs', req.params.id)
@@ -6078,7 +6116,7 @@ Return JSON:
     res.json({ ok: true, brief })
   })
 
-  router.get('/v5/projects/:id/research', requireAuth, (req, res) => {
+  router.get('/v5/projects/:id/research', rateLimit, requireAuth, (req, res) => {
     const project = findProject(req.params.id)
     if (project) return res.json({ ok: true, research_pack: forgeRunStore.getV5Artifact(project.id, 'research')?.payload || null })
     // Filesystem fallback for orders-created projects
@@ -6088,7 +6126,7 @@ Return JSON:
     res.json({ ok: true, research_pack: research_pack || null })
   })
 
-  router.post('/v5/projects/:id/research', requireAuth, async (req, res) => {
+  router.post('/v5/projects/:id/research', rateLimit, requireAuth, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const brief = forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || req.body?.brief || null
@@ -6101,7 +6139,7 @@ Return JSON:
     res.json(result)
   })
 
-  router.get('/v5/projects/:id/goals', requireAuth, (req, res) => {
+  router.get('/v5/projects/:id/goals', rateLimit, requireAuth, (req, res) => {
     const project = findProject(req.params.id)
     if (project) return res.json({ ok: true, goals: forgeRunStore.getV5Goals(project.id), reasoning: forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || null })
     // Filesystem fallback for orders-created projects
@@ -6112,7 +6150,7 @@ Return JSON:
     res.json({ ok: true, goals: goalsArr, reasoning: goals?.reasoning || null })
   })
 
-  router.post('/v5/projects/:id/goals/plan', requireAuth, async (req, res) => {
+  router.post('/v5/projects/:id/goals/plan', rateLimit, requireAuth, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const brief = forgeRunStore.getV5Artifact(project.id, 'brief')?.payload || req.body?.brief || null
@@ -6128,8 +6166,8 @@ Return JSON:
     res.json(result)
   })
 
-  router.post('/v5/goals/:gid/execute', requireAuth, async (req, res) => {
-    const goal = forgeRunStore.findV5Goal(req.params.gid)
+  router.post('/v5/goals/:gid/execute', rateLimit, requireAuth, async (req, res) => {
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
     if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
     const project = findProject(goal.project_id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
@@ -6155,7 +6193,8 @@ Return JSON:
       if (gate) broadcastForge('forge:v5_quality_gate_completed', { project_id: project.id, goal_id: goal.goal_id, quality_gate: gate })
       // Structured memory writeback — honest result recorded on the goal, never silent.
       const reasoning = forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || {}
-      const memResp = await callPythonV5(`/api/v5/goals/${goal.goal_id}/memory`, {
+      const safeGoalId = _safeId(goal.goal_id, 'goal_id')
+      const memResp = await callPythonV5(`/api/v5/goals/${safeGoalId}/memory`, {
         goal: updatedGoal, quality_gate: gate || {}, reasoning,
         compute: { backend: gate?.compute_backend || null },
       }, 15000)
@@ -6169,16 +6208,17 @@ Return JSON:
       broadcastForge('forge:v5_report_generated', { project_id: project.id, report })
       res.json({ ok: true, goal: updatedGoal, run_result: runResult, quality_gate: gate, memory_writeback: memResp, report })
     } catch (err) {
-      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status: 'failed', error: err.message })
-      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, error: err.message })
-      res.status(500).json({ ok: false, error: err.message, goal: updatedGoal })
+      logger.warn('v5 goal execute failed: %s', err.message)
+      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status: 'failed', error: 'v5_goal_execute_failed' })
+      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, error: 'v5_goal_execute_failed' })
+      res.status(500).json({ ok: false, error: 'v5_goal_execute_failed', goal: updatedGoal })
     }
   })
 
-  router.post('/v5/projects/:id/goals/:gid/execute', requireAuth, async (req, res) => {
+  router.post('/v5/projects/:id/goals/:gid/execute', rateLimit, requireAuth, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    const goal = forgeRunStore.findV5Goal(req.params.gid)
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
     if (!goal || goal.project_id !== project.id) return res.status(404).json({ ok: false, error: 'goal not found' })
 
     broadcastForge('forge:v5_goal_started', { project_id: project.id, goal_id: goal.goal_id, goal })
@@ -6203,7 +6243,8 @@ Return JSON:
       if (gate) broadcastForge('forge:v5_quality_gate_completed', { project_id: project.id, goal_id: goal.goal_id, quality_gate: gate })
       // Structured memory writeback — honest result recorded on the goal, never silent.
       const reasoning = forgeRunStore.getV5Artifact(project.id, 'reasoning')?.payload || {}
-      const memResp = await callPythonV5(`/api/v5/goals/${goal.goal_id}/memory`, {
+      const safeGoalId = _safeId(goal.goal_id, 'goal_id')
+      const memResp = await callPythonV5(`/api/v5/goals/${safeGoalId}/memory`, {
         goal: updatedGoal, quality_gate: gate || {}, reasoning,
         compute: { backend: gate?.compute_backend || null },
       }, 15000)
@@ -6217,21 +6258,22 @@ Return JSON:
       broadcastForge('forge:v5_report_generated', { project_id: project.id, report })
       res.json({ ok: true, goal: updatedGoal, run_result: runResult, quality_gate: gate, memory_writeback: memResp, report })
     } catch (err) {
-      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status: 'failed', error: err.message })
-      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, error: err.message })
-      res.status(500).json({ ok: false, error: err.message, goal: updatedGoal })
+      logger.warn('v5 project goal execute failed: %s', err.message)
+      const updatedGoal = forgeRunStore.updateV5Goal(goal.goal_id, { status: 'failed', error: 'v5_goal_execute_failed' })
+      broadcastForge('forge:v5_goal_completed', { project_id: project.id, goal_id: goal.goal_id, goal: updatedGoal, error: 'v5_goal_execute_failed' })
+      res.status(500).json({ ok: false, error: 'v5_goal_execute_failed', goal: updatedGoal })
     }
   })
 
-  router.get('/v5/goals/:gid/quality-gate', requireAuth, (req, res) => {
-    const goal = forgeRunStore.findV5Goal(req.params.gid)
+  router.get('/v5/goals/:gid/quality-gate', rateLimit, requireAuth, (req, res) => {
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
     if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
     if (!findProject(goal.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
     res.json({ ok: true, quality_gate: forgeRunStore.getV5QualityGate(goal.goal_id) })
   })
 
-  router.post('/v5/goals/:gid/quality-gate', requireAuth, async (req, res) => {
-    const goal = forgeRunStore.findV5Goal(req.params.gid)
+  router.post('/v5/goals/:gid/quality-gate', rateLimit, requireAuth, async (req, res) => {
+    const goal = forgeRunStore.findV5Goal(_safeId(req.params.gid, 'goal_id'))
     if (!goal) return res.status(404).json({ ok: false, error: 'goal not found' })
     if (!findProject(goal.project_id)) return res.status(404).json({ ok: false, error: 'project not found' })
     let gate = req.body?.quality_gate || req.body?.gate || null
@@ -6251,7 +6293,7 @@ Return JSON:
     res.json({ ok: true, quality_gate: saved })
   })
 
-  router.get('/v5/projects/:id/report', requireAuth, (req, res) => {
+  router.get('/v5/projects/:id/report', rateLimit, requireAuth, (req, res) => {
     const project = findProject(req.params.id)
     if (!project) {
       const brief = _readV5Json('briefs', req.params.id)
