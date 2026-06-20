@@ -383,10 +383,14 @@ def classify_decision(
     selected_agents: list[str] = []
     execution_plan = ""
 
-    # Step A — Intent classification via TaskOrchestrator (lightweight LLM-based)
+    # Step A — Intent classification via the shared intent seam (coherence): one
+    # classifier for chat/tasks/companion. Internally reuses
+    # TaskOrchestrator.classify_intent, so the label here is unchanged; the seam
+    # also exposes conversation_mode + registry-backed candidate agents that the
+    # other entrypoints adopt as they are unified onto it.
     try:
-        from core.orchestrator import TaskOrchestrator  # noqa: PLC0415
-        intent = TaskOrchestrator().classify_intent(input_text)
+        from core.intent_service import get_intent_service  # noqa: PLC0415
+        intent = get_intent_service().classify(input_text).business_intent
     except Exception as exc:
         logger.debug("Intent classification failed (non-fatal): %s", exc)
 
