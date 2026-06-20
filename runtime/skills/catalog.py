@@ -220,6 +220,83 @@ class ExecutableSkillCatalog(SkillCatalog):
         except Exception as e:
             return {"ok": False, "skill": name, "error": str(e)}
 
+    # ── Unified dispatch (the one skill chain) ─────────────────────────────────
+
+    def dispatch_for_goal(self, goal: str, ctx: dict | None = None) -> dict:
+        """Run a free-text goal through the SAME skill chain the Executor uses.
+
+        Two entry shapes, one chain: the Executor dispatches by skill *name*
+        (``get(name).execute``); goal-shaped callers (companion broker, agents)
+        dispatch here by *goal*. We first try a tool-composing executable skill
+        (skill -> ToolRegistry -> real tools), and only fall back to the library
+        LLM-prompt path when no executable skill matches. Never raises.
+        """
+        ctx = ctx or {}
+        goal = (goal or "").strip()
+        if not goal:
+            return {"status": "error", "note": "no goal provided"}
+
+        # 1) Tool-composing executable skill — explicit id or best description match.
+        wanted = str(ctx.get("skill_id") or "").strip()
+        name = wanted if (wanted and self.get_skill(wanted)) else None
+        if name is None:
+            matches = self.find_for_goal(goal)
+            name = matches[0]["name"] if matches else None
+        if name:
+            # Executable skill fns take a primary free-text arg (topic/query/goal)
+            # + **kwargs; pass all aliases and let the fn pick. Wrong-shaped skills
+            # (e.g. needing a file path) raise -> caught -> library fallback.
+            res = self.execute_skill(name, {"topic": goal, "query": goal, "goal": goal},
+                                     agent_id=str(ctx.get("agent_id") or "system"))
+            if res.get("ok"):
+                return {"status": "ok", "skill_id": name, "via": "skill_catalog_tools",
+                        "tools": (self.get_skill(name) or {}).get("tools", []),
+                        "output": res.get("result")}
+
+        # 2) Library skill via the LLM, guided by its own system_prompt.
+        return self._run_library_skill(goal, ctx)
+
+    @staticmethod
+    def _run_library_skill(goal: str, ctx: dict) -> dict:
+        """Select the best-matching library skill and run it via the LLM, guided
+        by the skill's own system_prompt/execution_steps. Honest: no match or no
+        LLM -> structured note, never a fabricated success."""
+        try:
+            from forge.lifecycle.skill_selector import select_skills, _load_skills
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "note": f"skill selector not importable: {exc}"}
+        skill = None
+        wanted = str(ctx.get("skill_id") or "").strip()
+        if wanted:
+            skill = next((s for s in _load_skills() if s.get("id") == wanted), None)
+        if skill is None:
+            picks = select_skills(goal, str(ctx.get("task_type") or "chat"), max_skills=1)
+            skill = picks[0] if picks else None
+        if skill is None:
+            return {"status": "no_skill", "note": "no matching skill in the library for this goal"}
+        system = str(skill.get("system_prompt") or
+                     f"You are the '{skill.get('name', 'specialist')}' capability. "
+                     "Complete the user's goal concretely and concisely.")
+        steps = skill.get("execution_steps")
+        if isinstance(steps, list) and steps:
+            system += "\n\nFollow these steps:\n" + "\n".join(f"- {s}" for s in steps[:8])
+        try:
+            from engine.api import generate
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "note": f"LLM engine not importable: {exc}"}
+        try:
+            context = ctx.get("context")
+            text = (generate(prompt=goal, system=system,
+                             context=context if isinstance(context, str) else None) or "").strip()
+            if not text:
+                return {"status": "error", "skill_id": skill.get("id"),
+                        "error": "skill produced no output"}
+            return {"status": "ok", "skill_id": skill.get("id"), "via": "skill_library_llm",
+                    "skill_name": skill.get("name"), "output": text,
+                    "match_score": skill.get("match_score")}
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
+
     # ── Default skills ────────────────────────────────────────────────────────
 
     def _register_exec_defaults(self) -> None:
