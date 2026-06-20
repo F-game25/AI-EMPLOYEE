@@ -96,6 +96,16 @@ state/generated_images/
 state/research_screenshots/
 state/boot_metrics.json
 state/*.pre-chroma
+# Runtime stores — generated at runtime in the canonical state dir (C0), never source.
+state/knowledge_store.json
+state/memory_index.json
+state/model-registry.json
+state/model_benchmarks.json
+state/research_budget.json
+state/security_sync_queue.json
+state/security_sync_history.log
+state/tasks.json
+state/vector_store.json
 .claude/scheduled_tasks.lock
 
 # Local voice-core bundle payloads are downloaded/generated, not source.

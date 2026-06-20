@@ -15,8 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const STATE_DIR = process.env.AI_EMPLOYEE_STATE_DIR
-  || path.join(process.env.AI_EMPLOYEE_REPO_DIR || path.join(__dirname, '..', '..'), 'state');
+const STATE_DIR = require('../state-paths').STATE_DIR;  // canonical, not repo-local (C0)
 const BLOCKED_IPS_FILE = path.join(STATE_DIR, 'blocked_ips.json');
 const SENSITIVE_LOCK_FILE = path.join(STATE_DIR, 'sensitive_lock.json');
 const TTL_MS = 1500;

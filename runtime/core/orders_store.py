@@ -116,6 +116,32 @@ def status_bijwerken(order_id: str, nieuwe_status: str, demo_pad: str = "") -> d
     return order_ophalen(order_id)
 
 
+def order_bijwerken(
+    order_id: str,
+    *,
+    bedrijfsnaam: str | None = None,
+    plaats: str | None = None,
+    branche: str | None = None,
+    contact: str | None = None,
+    prijs: float | None = None,
+) -> dict[str, Any]:
+    """Update an order's editable core fields. Only non-None fields are changed.
+    Returns {ok, order}. Backs POST /api/orders/:id/update (SalesPage Leads step)."""
+    updates: list[tuple[str, Any]] = [
+        ("bedrijfsnaam", bedrijfsnaam), ("plaats", plaats), ("branche", branche),
+        ("contact", contact), ("prijs", prijs),
+    ]
+    sets = [(c, v) for c, v in updates if v is not None]
+    if not sets:
+        return {"ok": True, "order": order_ophalen(order_id)}
+    if not order_ophalen(order_id):
+        return {"ok": False, "error": f"Order {order_id} niet gevonden"}
+    cols = ", ".join(f"{c}=?" for c, _ in sets)
+    with _conn() as conn:
+        conn.execute(f"UPDATE orders SET {cols} WHERE id=?", [v for _, v in sets] + [order_id])
+    return {"ok": True, "order": order_ophalen(order_id)}
+
+
 def order_ophalen(order_id: str) -> dict[str, Any] | None:
     with _conn() as conn:
         row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()

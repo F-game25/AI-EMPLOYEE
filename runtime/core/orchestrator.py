@@ -308,7 +308,7 @@ class LLMClient:
         if not model:
             try:
                 import json as _json
-                _rp = os.path.join(os.path.dirname(__file__), "..", "..", "state", "model-routing.json")
+                _rp = str(canonical_state_dir() / "model-routing.json")
                 model = _json.load(open(_rp)).get("openrouter_model", "openai/gpt-4o")
             except Exception:
                 model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o")

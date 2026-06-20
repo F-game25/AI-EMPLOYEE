@@ -532,6 +532,9 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
   { method: 'PATCH',  path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
   { method: 'DELETE', path: '/api/orders/:id',                      auth: true,        file: 'routes/orders.js' },
+  { method: 'POST',   path: '/api/orders/:id/update',               auth: true,        file: 'routes/orders.js' },
+  { method: 'POST',   path: '/api/orders/:id/photo',                auth: true,        file: 'routes/orders.js' },
+  { method: 'GET',    path: '/api/orders/:id/stuur-link',           auth: true,        file: 'routes/orders.js' },
 
   // ── Companion Gateway ─────────────────────────────────────────────────────
   { method: 'POST',   path: '/api/companion/message',               auth: true,        file: 'routes/companion.js' },

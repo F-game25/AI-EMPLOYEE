@@ -1,4 +1,22 @@
 'use strict';
+
+const _mediaBuckets = new Map();
+
+function rateLimit(req, res, next) {
+  const rawIp = req.ip || req.connection?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 60_000;
+  const key = `media-demo-assets:${rawIp}`;
+  const hits = (_mediaBuckets.get(key) || []).filter((ts) => now - ts < windowMs);
+  hits.push(now);
+  _mediaBuckets.set(key, hits);
+  if (hits.length > 60) {
+    res.set('Retry-After', String(Math.ceil(windowMs / 1000)));
+    return res.status(429).json({ ok: false, error: 'Rate limit exceeded' });
+  }
+  next();
+}
+
 module.exports = function createMediaRouter(deps) {
   const router = require('express').Router();
   const { requireAuth, path, fs, AI_HOME, ARTIFACTS_DIR, readJsonLinesRecent, statePath } = deps;
@@ -133,6 +151,7 @@ module.exports = function createMediaRouter(deps) {
   // a permissive CSP so the page (incl. Google Fonts) renders cleanly in a tab.
   const DEMOS_DIR = path.join(AI_HOME, 'state', 'artifacts', 'demos');
   const DEMOS_ROOT = path.resolve(DEMOS_DIR);
+  router.use('/api/demos', rateLimit);
 
   function _sendDemo(res, absPath) {
     // Confine to the demos dir — defence in depth against path traversal.
@@ -154,6 +173,17 @@ module.exports = function createMediaRouter(deps) {
     });
     res.send(html);
   }
+
+  // Publicly serve uploaded order photos used in demos: /api/demos/_assets/<id>/<file>
+  // (3 path segments — never matches the 1-/2-segment demo routes below.)
+  router.get('/api/demos/_assets/:id/:file', (req, res) => {
+    const id = path.basename(req.params.id);
+    const file = path.basename(req.params.file);
+    const fpath = path.resolve(path.join(DEMOS_DIR, '_assets', id, file));
+    if (!fpath.startsWith(DEMOS_ROOT)) return res.status(400).send('Ongeldig pad');
+    if (!fs.existsSync(fpath) || !fs.statSync(fpath).isFile()) return res.status(404).send('Niet gevonden');
+    res.sendFile(fpath);
+  });
 
   // Sub-page within a site folder: /api/demos/<slug>/<page>.html
   router.get('/api/demos/:slug/:page', (req, res) => {

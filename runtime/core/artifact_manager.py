@@ -27,12 +27,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_ARTIFACTS_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "state", "artifacts")
-)
-_VERSION_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "state", "version.json")
-)
+from core.state_paths import canonical_state_dir  # canonical state tree (C0)
+
+_ARTIFACTS_DIR = str(canonical_state_dir() / "artifacts")
+_VERSION_PATH = str(canonical_state_dir() / "version.json")
 
 _LANG_EXT: dict[str, str] = {
     "python": "py", "py": "py",
