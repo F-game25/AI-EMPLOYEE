@@ -73,6 +73,7 @@ class NeuralMemoryManager:
         bridge_emit: Callable[[str, dict], None] | None = None,
         reranker: CrossEncoderReranker | None = None,
         proxy_legacy: bool = False,
+        unified_store: Any = None,
     ) -> None:
         self.chroma = chroma
         self.mem0 = mem0
@@ -81,6 +82,15 @@ class NeuralMemoryManager:
         self._emit = bridge_emit
         self.reranker = reranker
         self.proxy_legacy = proxy_legacy
+        self._unified = unified_store if unified_store is not None else self._init_unified_store()
+
+    @staticmethod
+    def _init_unified_store() -> Any:
+        try:
+            from memory.unified_store import UnifiedMemoryStore
+            return UnifiedMemoryStore()
+        except Exception:
+            return None
 
     # ---------------------------------------------------------------- remember
 
@@ -114,14 +124,21 @@ class NeuralMemoryManager:
         except Exception as e:
             logger.debug("mem0.add swallowed: %s", e)
 
-        # 3. Graph — extract simple concepts and link.
+        # 3. Canonical unified memory — best effort.
+        if self._unified is not None:
+            try:
+                await asyncio.to_thread(self._store_unified, item)
+            except Exception as e:
+                logger.debug("unified memory write skipped: %s", e)
+
+        # 4. Graph — extract simple concepts and link.
         if self.graph is not None:
             try:
                 await asyncio.to_thread(self._graph_link, item, content)
             except Exception as e:
                 logger.warning("graph link failed: %s", e)
 
-        # 4. Optional legacy proxy.
+        # 5. Optional legacy proxy.
         if self.proxy_legacy:
             try:
                 from memory import memory_router  # type: ignore
@@ -134,7 +151,7 @@ class NeuralMemoryManager:
             except Exception as e:
                 logger.debug("legacy memory proxy skipped: %s", e)
 
-        # 5. Bridge event.
+        # 6. Bridge event.
         self._safe_emit(
             "nb:memory_write",
             {
@@ -146,6 +163,27 @@ class NeuralMemoryManager:
         )
 
         return item.id
+
+    def _store_unified(self, item: MemoryItem) -> None:
+        if self._unified is None:
+            return
+        from memory.schema import MemoryRecord
+        record = MemoryRecord.create(
+            item.text,
+            id=item.id,
+            tenant_id=item.user_id or "default",
+            user_id=item.user_id,
+            memory_type=item.type,
+            source=item.source or "neural_brain",
+            importance=item.importance,
+            agent="neural_brain",
+            metadata={
+                **item.metadata,
+                "origin_store": "neural_memory_manager",
+                "created_at_epoch": item.created_at,
+            },
+        )
+        self._unified.upsert(record)
 
     def _graph_link(self, item: MemoryItem, content: str) -> None:
         if self.graph is None:
@@ -210,6 +248,21 @@ class NeuralMemoryManager:
         elif self.mem0.enabled:
             stores_queried.append("mem0")
             all_hits.extend(mem0_hits or [])
+
+        if self._unified is not None:
+            try:
+                unified_hits = await asyncio.to_thread(
+                    self._recall_unified,
+                    query,
+                    k=k,
+                    types=types,
+                    user_id=user_id,
+                )
+                if unified_hits:
+                    stores_queried.append("unified")
+                    all_hits.extend(unified_hits)
+            except Exception as e:
+                logger.debug("unified recall failed: %s", e)
 
         # Graph neighborhood — seeded by chroma top-3 ids.
         if self.graph is not None and with_graph:
@@ -322,15 +375,28 @@ class NeuralMemoryManager:
             await asyncio.to_thread(self.mem0.delete, id)
         except Exception as e:
             logger.debug("mem0.delete swallowed: %s", e)
-        return ok_chroma
+        ok_unified = False
+        if self._unified is not None:
+            try:
+                ok_unified = await asyncio.to_thread(self._unified.delete, id)
+            except Exception as e:
+                logger.debug("unified delete swallowed: %s", e)
+        return ok_chroma or ok_unified
 
     # ------------------------------------------------------------------ stats
 
     def stats(self) -> dict[str, Any]:
+        unified_count = 0
+        if self._unified is not None:
+            try:
+                unified_count = self._unified.count()
+            except Exception:
+                unified_count = 0
         return {
             "chroma": self.chroma.stats(),
             "mem0": self.mem0.health(),
             "graph": "connected" if self.graph is not None else "missing",
+            "unified_count": unified_count,
             "embed_dim": self.embedder.dim,
         }
 
@@ -345,6 +411,7 @@ class NeuralMemoryManager:
         return {
             "chroma": {"ok": chroma_ok, "error": chroma_err},
             "mem0": self.mem0.health(),
+            "unified": {"ok": self._unified is not None},
             "embedder": {
                 "model": self.embedder.model_name,
                 "dim": self.embedder.dim,
@@ -353,6 +420,38 @@ class NeuralMemoryManager:
         }
 
     # ------------------------------------------------------------------ helpers
+
+    def _recall_unified(
+        self,
+        query: str,
+        *,
+        k: int,
+        types: list[MemoryType] | None,
+        user_id: str,
+    ) -> list[RecallHit]:
+        if self._unified is None:
+            return []
+        wanted = set(types or [])
+        records = self._unified.search(query=query, tenant_id=user_id or None, limit=k)
+        hits: list[RecallHit] = []
+        for record in records:
+            mtype = record.memory_type if record.memory_type in {
+                "episodic", "semantic", "procedural", "outcome", "interactions"
+            } else "semantic"
+            if wanted and mtype not in wanted:
+                continue
+            score = max(0.0, min(1.0, record.importance * 0.3 + record.confidence * 0.2 + 0.5))
+            hits.append(
+                RecallHit(
+                    id=record.id,
+                    text=record.text,
+                    score=score,
+                    type=mtype,  # type: ignore[arg-type]
+                    source_store="unified",
+                    metadata=record.vector_metadata(),
+                )
+            )
+        return hits[:k]
 
     def _safe_emit(self, channel: str, payload: dict) -> None:
         if self._emit is None:

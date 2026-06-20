@@ -41,7 +41,13 @@ def mem0_disabled():
 
 
 @pytest.fixture
-def manager(chroma, mem0_disabled, embedder):
+def unified_store(tmp_path: Path):
+    from memory.unified_store import UnifiedMemoryStore
+    return UnifiedMemoryStore(path=tmp_path / "state" / "memory" / "unified_memory.json")
+
+
+@pytest.fixture
+def manager(chroma, mem0_disabled, embedder, unified_store):
     return NeuralMemoryManager(
         chroma=chroma,
         mem0=mem0_disabled,
@@ -50,6 +56,7 @@ def manager(chroma, mem0_disabled, embedder):
         bridge_emit=None,
         reranker=None,
         proxy_legacy=False,
+        unified_store=unified_store,
     )
 
 
@@ -102,6 +109,27 @@ def test_forget_removes_from_chroma(manager):
     assert all(h.id != mid for h in res.hits)
 
 
+def test_remember_recall_and_forget_use_unified_store(manager, unified_store):
+    mid = _run(manager.remember(
+        "Canonical neural memory about premium dashboard orbit status.",
+        type="semantic",
+        user_id="user-a",
+        importance=0.9,
+        source="pytest",
+    ))
+
+    record = unified_store.get(mid)
+    assert record is not None
+    assert record.source == "pytest"
+    assert record.user_id == "user-a"
+
+    res = _run(manager.recall("premium dashboard orbit", k=5, user_id="user-a"))
+    assert any(h.id == mid and h.source_store == "unified" for h in res.hits)
+
+    assert _run(manager.forget(mid)) is True
+    assert unified_store.get(mid) is None
+
+
 def test_stats_health(manager):
     s = manager.stats()
     assert "chroma" in s
@@ -113,7 +141,7 @@ def test_stats_health(manager):
     assert "embedder" in h
 
 
-def test_emit_called(chroma, mem0_disabled, embedder):
+def test_emit_called(chroma, mem0_disabled, embedder, unified_store):
     emit = MagicMock()
     mgr = NeuralMemoryManager(
         chroma=chroma,
@@ -123,6 +151,7 @@ def test_emit_called(chroma, mem0_disabled, embedder):
         bridge_emit=emit,
         reranker=None,
         proxy_legacy=False,
+        unified_store=unified_store,
     )
     _run(mgr.remember("Bridge emit smoke test.", type="semantic"))
     channels = [c.args[0] for c in emit.call_args_list]
