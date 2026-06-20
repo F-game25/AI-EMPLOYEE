@@ -20,6 +20,29 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+def _url_is_public(url: str) -> bool:
+    """SSRF guard: True only for http(s) URLs whose every resolved IP is public
+    (no loopback/private/link-local/reserved/multicast/unspecified)."""
+    try:
+        import ipaddress
+        import socket
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        for *_rest, sockaddr in socket.getaddrinfo(parsed.hostname, port, proto=socket.IPPROTO_TCP):
+            ip = ipaddress.ip_address(sockaddr[0])
+            if (ip.is_private or ip.is_loopback or ip.is_link_local
+                    or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+                return False
+        return True
+    except Exception:
+        return False
+
+
 _CONTENT_ROI_MULTIPLIER = 0.03
 _LEAD_CONVERSION_MULTIPLIER = 0.08
 _OUTREACH_CONVERSION_MULTIPLIER = 0.22
@@ -748,17 +771,23 @@ class MoneyMode:
         if already_scraped:
             return {"ok": True, "url": url, "words_extracted": 0, "stored": False, "duplicate": True}
 
+        # ── SSRF guard: only fetch public http(s) hosts (block loopback / private /
+        #    link-local / reserved, after DNS resolution) ──────────────────────
+        if not _url_is_public(url):
+            logger.warning("data_scrape_filter_store: refused non-public/unsafe URL")
+            return {"ok": False, "url": url, "error": "url_not_allowed", "words_extracted": 0, "stored": False, "duplicate": False}
+
         # ── Fetch ─────────────────────────────────────────────────────────────
         try:
             req = urllib.request.Request(
                 url,
                 headers={"User-Agent": "AIEmployee-Scraper/1.0 (research; contact: admin@example.com)"},
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — scheme+host validated by _url_is_public
                 raw_html = resp.read().decode("utf-8", errors="replace")
         except Exception as exc:
-            logger.warning("data_scrape_filter_store: fetch failed for %s — %s", url, exc)
-            return {"ok": False, "url": url, "error": str(exc), "words_extracted": 0, "stored": False, "duplicate": False}
+            logger.warning("data_scrape_filter_store: fetch failed for %s — %s", url, type(exc).__name__)
+            return {"ok": False, "url": url, "error": "fetch_failed", "words_extracted": 0, "stored": False, "duplicate": False}
 
         # ── Extract text — strip HTML tags ────────────────────────────────────
         text = re.sub(r"<[^>]+>", " ", raw_html)

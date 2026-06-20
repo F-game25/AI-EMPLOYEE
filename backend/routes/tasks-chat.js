@@ -340,10 +340,9 @@ module.exports = function createTasksChatRouter(deps) {
       if (m && m[1] && m[1].trim().length > 2) { learnTopic = m[1].trim(); break; }
     }
     if (learnTopic) {
-      // Fire learning session via Node proxy (don't block chat response)
-      const proto = req.protocol || 'http';
-      const host = req.get('host') || `localhost:${PORT}`;
-      fetch(`${proto}://${host}/api/learning/execute`, {
+      // Fire learning session via Node proxy (don't block chat response).
+      // Self-call our own API on loopback — never the client Host header (SSRF).
+      fetch(`http://127.0.0.1:${PORT}/api/learning/execute`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'authorization': req.headers.authorization || '' },
         body: JSON.stringify({ topic: learnTopic, depth: 'normal' }),
