@@ -3,9 +3,14 @@
 // M1 goal: never show a white screen. The splash window appears instantly and
 // streams live boot phases + logs. The Rust shell spawns the Node gateway +
 // Python AI backend with the correct environment (incl. JWT_SECRET_KEY, which
-// backend/server.js requires or it fatals), then GATES on /api/health before
-// creating + showing the dashboard window. Any failure shows a diagnostics
+// backend/server.js requires or it fatals), then GATES on /health before
+// navigating the window to the dashboard. Any failure shows a diagnostics
 // view with Retry / Open Logs instead of a dead WebView.
+//
+// M2: before spawning, reuse an already-healthy Nexus runtime (e.g. a start.sh
+// stack on :8787, or our own runtime surviving an app restart) and pick free
+// ports otherwise — no duplicate spawn, no EADDRINUSE. A runtime lock records
+// what we own so we only tear down what we started.
 
 use std::collections::VecDeque;
 use std::io::Write as _;
@@ -33,8 +38,11 @@ struct ChildProc {
 struct AppState {
     repo_dir: PathBuf,
     app_home: PathBuf,
-    node_port: u16,
-    python_port: u16,
+    node_port: u16,             // desired (default) node port
+    python_port: u16,           // desired (default) python port
+    active_node: Mutex<u16>,    // port the dashboard is actually on (reused or chosen)
+    active_python: Mutex<u16>,
+    own_runtime: Mutex<bool>,   // true only if WE spawned the runtime (→ we tear it down)
     children: Mutex<Vec<ChildProc>>,
     logs: Mutex<VecDeque<String>>,
     phases_done: Mutex<Vec<String>>,
@@ -368,6 +376,7 @@ async fn http_ok(url: &str) -> bool {
 }
 
 struct ReadinessInfo {
+    node_ready: bool,
     python_ready: bool,
     frontend_ready: bool,
 }
@@ -381,9 +390,47 @@ async fn fetch_readiness(origin: &str) -> Option<ReadinessInfo> {
     }
     let v: serde_json::Value = resp.json().await.ok()?;
     Some(ReadinessInfo {
+        node_ready: v.get("nodeReady").and_then(|x| x.as_bool()).unwrap_or(true),
         python_ready: v.get("pythonReady").and_then(|x| x.as_bool()).unwrap_or(false),
         frontend_ready: v.get("frontendIndex").and_then(|x| x.as_bool()).unwrap_or(true),
     })
+}
+
+// ── Runtime lock + free-port selection (M2) ──────────────────────────────────
+
+fn lock_path(state: &SharedState) -> PathBuf {
+    state.app_home.join("run/runtime-lock.json")
+}
+
+fn read_lock(state: &SharedState) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(lock_path(state)).ok()?).ok()
+}
+
+fn write_lock(state: &SharedState, node: u16, python: u16, pids: &[i64], nonce: &str) {
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let v = json!({ "node": node, "python": python, "pids": pids, "nonce": nonce, "startedAt": started });
+    let _ = std::fs::create_dir_all(state.app_home.join("run"));
+    let _ = std::fs::write(lock_path(state), serde_json::to_string_pretty(&v).unwrap_or_default());
+}
+
+fn remove_lock(state: &SharedState) {
+    let _ = std::fs::remove_file(lock_path(state));
+}
+
+/// Pick a free TCP port starting at `start` (handles a foreign process holding it).
+async fn choose_free_port(host: &str, start: u16) -> u16 {
+    if !tcp_open(host, start).await {
+        return start;
+    }
+    for p in (start + 1)..(start + 25) {
+        if !tcp_open(host, p).await {
+            return p;
+        }
+    }
+    start
 }
 
 async fn wait_tcp(state: &SharedState, host: &str, port: u16, cap_s: u64) -> bool {
@@ -460,7 +507,7 @@ async fn boot(app: AppHandle) {
 
     let host = "127.0.0.1";
 
-    // Pre-flight: runtime files + binaries present.
+    // Pre-flight: runtime files present.
     emit_status(&app, "Running pre-flight checks");
     if !state.repo_dir.join("backend/server.js").exists()
         || !state.repo_dir.join("frontend/dist/index.html").exists()
@@ -474,6 +521,42 @@ async fn boot(app: AppHandle) {
         *state.booting.lock().unwrap() = false;
         return;
     }
+    emit_phase(&app, &state, "preflight", "Pre-flight OK");
+
+    // ── M2: reuse an already-healthy Nexus runtime instead of spawning a duplicate.
+    // Candidates: the last locked port (our runtime surviving a restart) + the
+    // desired port (e.g. a start.sh stack already on :8787).
+    let mut candidates: Vec<u16> = Vec::new();
+    if let Some(lock) = read_lock(&state) {
+        if let Some(p) = lock.get("node").and_then(|x| x.as_u64()) {
+            candidates.push(p as u16);
+        }
+    }
+    candidates.push(state.node_port);
+    candidates.dedup();
+    for cand in candidates {
+        let origin = format!("http://{}:{}", host, cand);
+        if let Some(rd) = fetch_readiness(&origin).await {
+            if rd.node_ready {
+                emit_log(&app, &state, "launcher", &format!("Reusing healthy runtime on :{}", cand), "info");
+                *state.active_node.lock().unwrap() = cand;
+                *state.own_runtime.lock().unwrap() = false;
+                emit_phase(&app, &state, "backend-spawn", "Reusing existing runtime");
+                emit_phase(&app, &state, "node-port-bound", "Gateway listening");
+                emit_phase(&app, &state, "health-ok", "Health passing");
+                if !rd.python_ready {
+                    emit_log(&app, &state, "launcher", "Python AI backend not ready — degraded mode", "warn");
+                }
+                emit_status(&app, "Opening dashboard");
+                open_main(&app, &origin);
+                emit_phase(&app, &state, "dashboard", "Dashboard");
+                *state.booting.lock().unwrap() = false;
+                return;
+            }
+        }
+    }
+
+    // ── No reusable runtime → spawn our own ──
     let node = which_runtime(&["node"]);
     let python = which_runtime(&["python3", "python"]);
     if node.is_none() {
@@ -481,7 +564,6 @@ async fn boot(app: AppHandle) {
         *state.booting.lock().unwrap() = false;
         return;
     }
-    emit_phase(&app, &state, "preflight", "Pre-flight OK");
 
     // Optional debug hold so the boot splash can be observed (default off, env-gated).
     if let Ok(ms) = std::env::var("NEXUS_BOOT_DELAY_MS") {
@@ -493,15 +575,21 @@ async fn boot(app: AppHandle) {
         }
     }
 
+    // Pick free ports (avoid EADDRINUSE when something foreign holds the desired port).
+    let node_port = choose_free_port(host, state.node_port).await;
+    let python_port = choose_free_port(host, state.python_port).await;
+    *state.active_node.lock().unwrap() = node_port;
+    *state.active_python.lock().unwrap() = python_port;
+    let nonce = rand_hex(16);
     let base = base_env(&state);
+    let mut pids: Vec<i64> = Vec::new();
 
-    // Spawn services.
     emit_status(&app, "Spawning backend services");
 
     if let Some(py) = python {
         let mut envs = base.clone();
-        push_env(&mut envs, "PROBLEM_SOLVER_UI_PORT", state.python_port.to_string());
-        push_env(&mut envs, "PYTHON_BACKEND_PORT", state.python_port.to_string());
+        push_env(&mut envs, "PROBLEM_SOLVER_UI_PORT", python_port.to_string());
+        push_env(&mut envs, "PYTHON_BACKEND_PORT", python_port.to_string());
         push_env(&mut envs, "PROBLEM_SOLVER_UI_HOST", "127.0.0.1".to_string());
         let server_py = state.repo_dir.join("runtime/agents/problem-solver-ui/server.py");
         let logf = state.app_home.join("logs/python-backend.log");
@@ -515,7 +603,12 @@ async fn boot(app: AppHandle) {
             &state.repo_dir,
             &logf,
         ) {
-            Ok(c) => state.children.lock().unwrap().push(ChildProc { name: "python".into(), child: c }),
+            Ok(c) => {
+                if let Some(id) = c.id() {
+                    pids.push(id as i64);
+                }
+                state.children.lock().unwrap().push(ChildProc { name: "python".into(), child: c });
+            }
             Err(e) => emit_log(&app, &state, "python", &format!("spawn failed: {}", e), "warn"),
         }
     } else {
@@ -523,9 +616,10 @@ async fn boot(app: AppHandle) {
     }
 
     let mut nenvs = base.clone();
-    push_env(&mut nenvs, "PORT", state.node_port.to_string());
-    push_env(&mut nenvs, "PROBLEM_SOLVER_UI_PORT", state.node_port.to_string());
-    push_env(&mut nenvs, "PYTHON_BACKEND_PORT", state.python_port.to_string());
+    push_env(&mut nenvs, "PORT", node_port.to_string());
+    push_env(&mut nenvs, "PROBLEM_SOLVER_UI_PORT", node_port.to_string());
+    push_env(&mut nenvs, "PYTHON_BACKEND_PORT", python_port.to_string());
+    push_env(&mut nenvs, "AI_EMPLOYEE_RUNTIME_NONCE", nonce.clone());
     // NOTE: deliberately NOT setting NODE_ENV=production. The canonical start.sh
     // runtime runs without it; production mode additionally requires
     // SETTINGS_ENCRYPTION_KEY (backend/routes/settings.js). Enabling production +
@@ -544,7 +638,12 @@ async fn boot(app: AppHandle) {
         &nlog,
     ) {
         Ok(c) => {
+            if let Some(id) = c.id() {
+                pids.push(id as i64);
+            }
             state.children.lock().unwrap().push(ChildProc { name: "node".into(), child: c });
+            *state.own_runtime.lock().unwrap() = true;
+            write_lock(&state, node_port, python_port, &pids, &nonce);
             emit_phase(&app, &state, "backend-spawn", "Services spawned");
         }
         Err(e) => {
@@ -555,17 +654,17 @@ async fn boot(app: AppHandle) {
     }
 
     // Gate: wait for the Node gateway to bind, then pass health.
-    emit_status(&app, &format!("Waiting for gateway on :{}", state.node_port));
-    if !wait_tcp(&state, host, state.node_port, 60).await {
+    emit_status(&app, &format!("Waiting for gateway on :{}", node_port));
+    if !wait_tcp(&state, host, node_port, 60).await {
         let reason = node_crashed(&state)
-            .unwrap_or_else(|| format!("Gateway did not bind :{} within 60s", state.node_port));
+            .unwrap_or_else(|| format!("Gateway did not bind :{} within 60s", node_port));
         emit_fail(&app, &state, "node-port-bound", &reason);
         *state.booting.lock().unwrap() = false;
         return;
     }
     emit_phase(&app, &state, "node-port-bound", "Gateway listening");
 
-    let origin = format!("http://{}:{}", host, state.node_port);
+    let origin = format!("http://{}:{}", host, node_port);
     emit_status(&app, "Verifying health");
     // /health is the unauthenticated liveness endpoint (/api/health requires auth).
     if !wait_http(&state, &format!("{}/health", origin), 45).await {
@@ -599,6 +698,14 @@ async fn boot(app: AppHandle) {
 
 #[tauri::command]
 async fn retry_boot(app: AppHandle) {
+    // Tear down only a runtime WE started, then re-evaluate (reuse or spawn).
+    {
+        let st = app.state::<SharedState>();
+        if *st.own_runtime.lock().unwrap() {
+            remove_lock(&st.inner().clone());
+        }
+        *st.own_runtime.lock().unwrap() = false;
+    }
     kill_children(&app);
     {
         let st = app.state::<SharedState>();
@@ -638,8 +745,9 @@ fn get_boot_state(app: AppHandle) -> serde_json::Value {
         "phases_done": phases,
         "failed": failed.is_some(),
         "fail_reason": failed,
-        "node_port": st.node_port,
-        "python_port": st.python_port,
+        "node_port": *st.active_node.lock().unwrap(),
+        "python_port": *st.active_python.lock().unwrap(),
+        "own_runtime": *st.own_runtime.lock().unwrap(),
     })
 }
 
@@ -700,6 +808,9 @@ pub fn run() {
         app_home,
         node_port,
         python_port,
+        active_node: Mutex::new(node_port),
+        active_python: Mutex::new(python_port),
+        own_runtime: Mutex::new(false),
         children: Mutex::new(Vec::new()),
         logs: Mutex::new(VecDeque::new()),
         phases_done: Mutex::new(Vec::new()),
@@ -731,7 +842,12 @@ pub fn run() {
         .expect("error while building Nexus OS")
         .run(|app, event| {
             if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+                let st = app.state::<SharedState>().inner().clone();
+                let owns = *st.own_runtime.lock().unwrap();
                 kill_children(app);
+                if owns {
+                    remove_lock(&st);
+                }
             }
         });
 }
