@@ -123,6 +123,9 @@ jobs:
       - name: Run rate-limit cache tests
         run: node tests/test_rate_limit_cache.js
 
+      - name: Run agent real-completion tests
+        run: node tests/test_agent_real_completion.js
+
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
   # ─────────────────────────────────────────────────────────────────
