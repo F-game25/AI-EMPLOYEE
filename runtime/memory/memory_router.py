@@ -59,6 +59,7 @@ from typing import Any
 from memory.vector_store import VectorStore, get_vector_store
 from memory.short_term_cache import ShortTermCache, get_short_term_cache
 from memory.strategy_store import StrategyStore, get_strategy_store
+from memory.service import MemoryService
 from memory.bm25 import BM25
 
 try:
@@ -106,6 +107,12 @@ class MemoryRouter:
         self._cache = cache or get_short_term_cache()
         self._ss = strategy_store or get_strategy_store()
         self._graph = NativeGraphStore() if NativeGraphStore is not None else None
+        self._service = MemoryService(
+            vector_store=self._vs,
+            cache=self._cache,
+            strategy_store=self._ss,
+            graph=self._graph,
+        )
         self._stats: dict[str, int] = {
             "cache_writes": 0,
             "vector_writes": 0,
@@ -145,49 +152,22 @@ class MemoryRouter:
         Returns:
             A routing summary with ``cache_key``, ``vector_stored``, and ``ts``.
         """
-        mt = memory_type if memory_type in _TTL_POLICY else "default"
-        ttl = _TTL_POLICY[mt]
-        threshold = _IMPORTANCE_THRESHOLD.get(mt, _IMPORTANCE_THRESHOLD["default"])
-
-        metadata: dict[str, Any] = {
-            "memory_type": mt,
-            "source": source,
-            "agent": agent,
-            **(extra or {}),
-        }
-
         with _LOCK:
-            # Always write to short-term cache
-            self._cache.set(key, {"text": text, "metadata": metadata}, ttl=ttl)
+            routed = self._service.remember(
+                text,
+                key=key,
+                memory_type=memory_type,
+                source=source,
+                importance=importance,
+                agent=agent,
+                extra=extra,
+            )
             self._stats["cache_writes"] += 1
-
-            # Promote to vector store based on type + importance
-            vector_stored = False
-            if mt != "outcome" and float(importance) >= threshold:
-                self._vs.store(key, text, metadata=metadata, importance=importance)
+            if routed.get("vector_stored"):
                 self._stats["vector_writes"] += 1
-                vector_stored = True
-                if self._graph is not None:
-                    try:
-                        self._graph.upsert_node(
-                            key,
-                            metadata.get("title") or key,
-                            type=mt,
-                            group="memory",
-                            source=source or "python_memory_router",
-                            confidence=float(importance),
-                            metadata={**metadata, "content": text},
-                        )
-                        self._stats["graph_writes"] += 1
-                    except Exception as e:
-                        logger.debug("native graph memory write skipped: %s", e)
-
-        return {
-            "cache_key": key,
-            "vector_stored": vector_stored,
-            "memory_type": mt,
-            "ts": _ts(),
-        }
+            if routed.get("graph_stored"):
+                self._stats["graph_writes"] += 1
+            return routed
 
     # ------------------------------------------------------------------
     # Read
@@ -214,46 +194,9 @@ class MemoryRouter:
             List of memory dicts with ``key``, ``text``, ``metadata``, and ``_score``.
         """
         with _LOCK:
-            seen: set[str] = set()
-            results: list[dict[str, Any]] = []
-
-            # 1. Short-term cache: scan live entries by keyword
-            query_tokens = set(query.lower().split())
-            for k, entry in self._cache.snapshot().items():
-                if not isinstance(entry, dict):
-                    continue
-                if memory_type:
-                    mt = entry.get("metadata", {}).get("memory_type")
-                    if mt and mt != memory_type:
-                        continue
-                text = (entry.get("text") or "").lower()
-                score = sum(1.0 for t in query_tokens if len(t) > 2 and t in text) / max(
-                    len(query_tokens), 1
-                )
-                if score > 0:
-                    results.append({
-                        "key": k,
-                        "text": entry.get("text", ""),
-                        "metadata": entry.get("metadata", {}),
-                        "_score": round(score * 0.5, 4),  # cache scores capped at 0.5
-                        "_source": "cache",
-                    })
-                    seen.add(k)
             self._stats["cache_reads"] += 1
-
-            # 2. Long-term vector store
-            vs_results = self._vs.search(query, top_k=top_k, memory_type=memory_type)
-            for r in vs_results:
-                k = r.get("key", "")
-                if k and k not in seen:
-                    results.append({**r, "_source": "vector"})
-                    seen.add(k)
             self._stats["vector_reads"] += 1
-
-        sorted_results = sorted(
-            results, key=lambda x: float(x.get("_score", 0.0)), reverse=True
-        )
-        return sorted_results[:top_k]
+            return self._service.retrieve(query, memory_type=memory_type, top_k=top_k)
 
     async def retrieve_qce(self, query: str, tenant_id: str = '', **kwargs) -> list:
         """QCE-powered retrieval via SearchOrchestrator. Falls back to retrieve() on error."""
@@ -274,13 +217,7 @@ class MemoryRouter:
         Checks short-term cache first, then vector store.
         """
         with _LOCK:
-            cached = self._cache.get(key)
-            if cached is not None:
-                return {"key": key, **cached, "_source": "cache"}
-            vs_entry = self._vs.retrieve(key)
-            if vs_entry:
-                return {**vs_entry, "_source": "vector"}
-            return None
+            return self._service.get(key)
 
     # ------------------------------------------------------------------
     # Outcome recording (forwards to strategy store + learning)
@@ -310,66 +247,20 @@ class MemoryRouter:
         Returns:
             A dict with ``strategy_recorded`` and ``memory_stored``.
         """
-        outcome_score = 1.0 if success else 0.0
-        result = result or {}
-        summary = f"[{action}] {'✓' if success else '✗'} {context[:120]}"
-
         with _LOCK:
-            # Strategy store: track which agent + config won
-            self._ss.record(
+            routed = self._service.record_outcome(
+                action=action,
+                success=success,
+                context=context,
+                result=result,
                 goal_type=goal_type,
-                agent=action,
-                config=result,
-                outcome_score=outcome_score,
             )
             self._stats["strategy_writes"] += 1
-
-            # Cache: transient outcome signal
-            cache_key = f"outcome:{action}:{int(time.monotonic() * 1000)}"
-            self._cache.set(
-                cache_key,
-                {"text": summary, "metadata": {"memory_type": "outcome", "action": action}},
-                ttl=_TTL_POLICY["outcome"],
-            )
             self._stats["cache_writes"] += 1
-
-            # Promote successes to long-term episodic memory
-            ep_key = f"ep:{action}:{abs(hash(context)) % 100_000}"
-            promoted = False
-            if success:
-                self._vs.store(
-                    ep_key,
-                    summary,
-                    metadata={
-                        "memory_type": "episodic",
-                        "action": action,
-                        "goal_type": goal_type,
-                    },
-                    importance=0.6,
-                )
+            if routed.get("memory_stored"):
+                self._stats["cache_writes"] += 1
                 self._stats["vector_writes"] += 1
-                if self._graph is not None:
-                    try:
-                        self._graph.upsert_node(
-                            ep_key,
-                            action,
-                            type="episodic",
-                            group="memory",
-                            source="python_memory_router",
-                            confidence=0.6,
-                            metadata={"content": summary, "action": action, "goal_type": goal_type},
-                        )
-                        self._stats["graph_writes"] += 1
-                    except Exception as e:
-                        logger.debug("native graph outcome write skipped: %s", e)
-                promoted = True
-
-        return {
-            "strategy_recorded": True,
-            "memory_stored": promoted,
-            "cache_key": cache_key,
-            "ts": _ts(),
-        }
+            return routed
 
     # ------------------------------------------------------------------
     # Introspection
@@ -378,18 +269,22 @@ class MemoryRouter:
     def stats(self) -> dict[str, Any]:
         """Return I/O statistics."""
         with _LOCK:
+            service_stats = self._service.stats()
             return {
                 **self._stats,
                 "cache_size": self._cache.size(),
                 "vector_count": self._vs.count(),
+                "canonical_count": service_stats.get("canonical_count", 0),
                 "ts": _ts(),
             }
 
     def health(self) -> dict[str, Any]:
         """Return a brief health summary suitable for the dashboard."""
         with _LOCK:
+            service_stats = self._service.stats()
             return {
                 "status": "ok",
+                "canonical_entries": service_stats.get("canonical_count", 0),
                 "cache_live_entries": self._cache.size(),
                 "vector_entries": {
                     "total": self._vs.count(),
