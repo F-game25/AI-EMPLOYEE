@@ -162,6 +162,9 @@ class RoadmapEngine:
         )
         self._save(roadmap)
         logger.info("roadmap_engine: created %s for tenant=%s goal='%s'", roadmap.id, tenant_id, goal[:60])
+        # Cross-layer goal identity (best-effort; never breaks roadmap creation).
+        from core.goal_registry import register_goal, SOURCE_ROADMAP  # noqa: PLC0415
+        register_goal(roadmap.goal, SOURCE_ROADMAP, roadmap.id, tenant_id=tenant_id)
         return roadmap
 
     def generate_milestones(self, roadmap: Roadmap) -> Roadmap:

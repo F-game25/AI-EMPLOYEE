@@ -107,6 +107,9 @@ class GoalEngine:
             )
             self._log_event(conn, goal.id, "created", actor, {"title": title})
         logger.info("Goal created: id=%s tenant=%s title=%r", goal_id, tenant_id, title)
+        # Cross-layer goal identity (best-effort; never breaks goal creation).
+        from core.goal_registry import register_goal, SOURCE_OBJECTIVE  # noqa: PLC0415
+        register_goal(title, SOURCE_OBJECTIVE, goal.id, tenant_id=tenant_id)
         return goal
 
     def get_goal(self, goal_id: str, tenant_id: str) -> Goal | None:

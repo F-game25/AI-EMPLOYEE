@@ -64,6 +64,9 @@ class GoalStore:
                    VALUES (?, ?, ?, 'pending', ?, 'null', ?, ?)""",
                 (goal_id, message, goal_type, json.dumps(task_plan), now, now),
             )
+        # Cross-layer goal identity (best-effort; never breaks goal creation).
+        from core.goal_registry import register_goal, SOURCE_RUN_GOAL  # noqa: PLC0415
+        register_goal(message, SOURCE_RUN_GOAL, goal_id)
         return goal_id
 
     def start(self, goal_id: str) -> None:
