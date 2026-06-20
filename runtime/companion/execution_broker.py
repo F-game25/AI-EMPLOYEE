@@ -980,53 +980,22 @@ class ExecutionBroker:
 
     @staticmethod
     def _exec_skills_run(cap: Capability, ctx: dict) -> dict:
-        """Select the best-matching library skill for the goal and run it via the LLM.
+        """Run the goal through the ONE shared skill chain.
 
-        This bridges the 200-skill library into the companion: the teammate can
-        produce a real deliverable (copy/plan/analysis) guided by the skill's
-        own system_prompt. Honest — no skill match or no LLM → structured note.
+        Coherence: the companion no longer has its own skill-execution path — it
+        delegates to ``SkillCatalog.dispatch_for_goal`` (the same catalog the
+        AgentController Executor uses). That tries a tool-composing executable
+        skill first, then the library LLM-prompt path. Two entry shapes (by-goal
+        here, by-name in the Executor), one chain.
         """
         goal = str(ctx.get("goal") or ctx.get("text") or "").strip()
         if not goal:
             return {"status": "error", "note": "no goal provided"}
-        # 1) Resolve a skill — explicit id wins, else best match from the library.
         try:
-            from forge.lifecycle.skill_selector import select_skills, _load_skills
-        except Exception as exc:
-            return {"status": "unavailable", "note": f"skill selector not importable: {exc}"}
-        skill = None
-        wanted = str(ctx.get("skill_id") or "").strip()
-        if wanted:
-            skill = next((s for s in _load_skills() if s.get("id") == wanted), None)
-        if skill is None:
-            picks = select_skills(goal, str(ctx.get("task_type") or "chat"), max_skills=1)
-            skill = picks[0] if picks else None
-        if skill is None:
-            return {"status": "no_skill", "note": "no matching skill in the library for this goal"}
-        # 2) Execute it via the LLM, guided by the skill's own system_prompt.
-        system = str(skill.get("system_prompt") or
-                     f"You are the '{skill.get('name','specialist')}' capability. "
-                     "Complete the user's goal concretely and concisely.")
-        steps = skill.get("execution_steps")
-        if isinstance(steps, list) and steps:
-            system += "\n\nFollow these steps:\n" + "\n".join(f"- {s}" for s in steps[:8])
-        try:
-            from engine.api import generate
-        except Exception as exc:
-            return {"status": "unavailable", "note": f"LLM engine not importable: {exc}"}
-        try:
-            context = ctx.get("context")
-            text = generate(prompt=goal, system=system,
-                            context=context if isinstance(context, str) else None)
-            text = (text or "").strip()
-            if not text:
-                return {"status": "error", "skill_id": skill.get("id"),
-                        "error": "skill produced no output"}
-            return {"status": "ok", "skill_id": skill.get("id"),
-                    "skill_name": skill.get("name"), "output": text,
-                    "match_score": skill.get("match_score")}
-        except Exception as exc:
-            return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
+            from skills.catalog import get_skill_catalog
+            return get_skill_catalog().dispatch_for_goal(goal, ctx)
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "unavailable", "note": f"skill catalog unavailable: {exc}"}
 
     @staticmethod
     def _exec_content_produce(cap: Capability, ctx: dict) -> dict:
