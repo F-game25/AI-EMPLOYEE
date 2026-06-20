@@ -8,6 +8,7 @@ const { classifyMessage, classifyCategory } = require('../routing');
 const brain = require('../brain/active_brain');
 const {
   enqueueTask,
+  completeTask,
   getMode,
   getAgents,
   getRunningAgentCount,
@@ -315,14 +316,19 @@ function submitTask(message, options = {}) {
 
 onAgentEvent('task:completed', ({ agent, task }) => {
   const requestedBy = task?.metadata?.requestedBy || 'user:default';
-  brain.feedback({
-    taskId: task.id,
-    status: 'success',
-    subsystem: task.subsystem || 'general',
-    durationMs: brain.normalizeLatencyMs(task.startedAt, new Date().toISOString()),
-    notes: task.message,
-    userId: requestedBy,
-  });
+  // Learn ONLY from real (verified) completions — never from the scheduler's
+  // unverified watchdog timer, which does not run the agent. This stops the
+  // brain training on fabricated success.
+  if (task?.verified === true) {
+    brain.feedback({
+      taskId: task.id,
+      status: 'success',
+      subsystem: task.subsystem || 'general',
+      durationMs: brain.normalizeLatencyMs(task.startedAt, new Date().toISOString()),
+      notes: task.message,
+      userId: requestedBy,
+    });
+  }
 
   // Skip generic reply for chat tasks — the Python LLM proxy delivers the
   // real response directly via broadcaster.broadcast('orchestrator:message').
@@ -373,4 +379,4 @@ function on(eventName, handler) {
   events.on(eventName, handler);
 }
 
-module.exports = { router, submitTask, on, fallbackResponse, nnProcess };
+module.exports = { router, submitTask, completeTask, on, fallbackResponse, nnProcess };

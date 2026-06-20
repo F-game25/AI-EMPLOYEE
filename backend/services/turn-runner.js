@@ -373,13 +373,18 @@ function createTurnRunner(deps) {
               label: `Performance ${pyPayload.performance_score ?? 'n/a'} / success ${pyPayload.success_rate ?? 'n/a'}`,
               status: 'completed',
             });
+            // Real AgentController result drives the agent task's VERIFIED
+            // completion — not the scheduler's timer.
+            try { deps.orchestrator.completeTask?.(queued.taskId, { ok: true, result: pyPayload }); } catch { /* non-fatal */ }
           } else {
             degraded = true;
             errors.push({ stage: 'agent_controller', message: `Python returned ${pyPayload?._http_status || 'non-ok'}` });
+            try { deps.orchestrator.completeTask?.(queued.taskId, { ok: false, error: `python_${pyPayload?._http_status || 'non_ok'}` }); } catch { /* non-fatal */ }
           }
         } catch (error) {
           degraded = true;
           errors.push({ stage: 'agent_controller', message: compactError(error) });
+          try { deps.orchestrator.completeTask?.(queued.taskId, { ok: false, error: 'agent_controller_error' }); } catch { /* non-fatal */ }
         }
         broadcast('action:completed', { turn_id: turnId, task_id: queued.taskId, action: 'agent_controller', status: source === 'agent_controller' ? 'completed' : 'failed' });
       }

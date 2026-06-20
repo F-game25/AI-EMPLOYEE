@@ -250,9 +250,13 @@ function _tick() {
           finishedAt: new Date().toISOString(),
         });
       } else {
+        // Watchdog completion only — the Node scheduler does NOT run the agent
+        // (real work runs in the Python AgentController). Flag it unverified so
+        // the brain never learns success from a timer. completeTask() emits the
+        // verified completion when the real result arrives.
         events.emit('task:completed', {
           agent: snapshot(agent),
-          task: completedTask,
+          task: { ...completedTask, verified: false },
           finishedAt: new Date().toISOString(),
         });
       }
@@ -395,6 +399,34 @@ function enqueueTask({ message, subsystem = 'general', categoryHint = null, meta
   };
 }
 
+// Complete a queued/active task with the REAL execution outcome (e.g. the
+// Python AgentController result), emitting a verified task:completed/failed.
+// This is how real work — not a timer — drives agent activity + brain learning.
+function completeTask(taskId, { ok = true, result = null, error = null } = {}) {
+  for (const agent of agents) {
+    const inFlight = agent.currentTask && agent.currentTask.id === taskId;
+    const queued = inFlight ? agent.currentTask
+      : agent.taskQueue.find((q) => q.id === taskId);
+    if (!queued) continue;
+    if (inFlight) agent.currentTask = null;
+    else agent.taskQueue = agent.taskQueue.filter((q) => q.id !== taskId);
+    agent.tasksCompleted += 1;
+    agent.lastActivityAt = _now();
+    _setState(agent, 'running');
+    agent.location = formatLocation('completed', queued.subsystem);
+    const finishedAt = new Date().toISOString();
+    const evt = ok ? 'task:completed' : 'task:failed';
+    events.emit(evt, {
+      agent: snapshot(agent),
+      task: { ...queued, result, error: ok ? undefined : (error || 'execution_failed'), verified: true },
+      finishedAt,
+    });
+    _broadcastAgentUpdate();
+    return true;
+  }
+  return false;
+}
+
 function getAgents() {
   return agents.map(snapshot);
 }
@@ -435,6 +467,7 @@ function on(eventName, handler) {
 module.exports = {
   getAgents,
   enqueueTask,
+  completeTask,
   activateAgents,
   getRunningAgentCount,
   setMode,
