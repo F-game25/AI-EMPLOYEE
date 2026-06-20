@@ -36,3 +36,27 @@ def test_memory_decay_reduces_importance(tmp_path):
     idx.apply_decay()
     decayed = idx.snapshot()[0]
     assert decayed["importance"] < 1.0
+
+
+def test_memory_index_writes_unified_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+    idx = MemoryIndex(path=tmp_path / "state" / "memory_index.json")
+
+    stored = idx.add_memory("premium command center status memory", importance=0.8)
+
+    from memory.unified_store import UnifiedMemoryStore
+
+    unified = UnifiedMemoryStore(path=tmp_path / "state" / "memory" / "unified_memory.json")
+    record = unified.get(stored["id"])
+    assert record is not None
+    assert record.memory_type == "long_term"
+    assert record.source == "memory_index"
+
+    results = idx.get_relevant_memories("command center status", top_k=3)
+    assert any(row["id"] == stored["id"] for row in results)
+
+    before = record.importance
+    idx.apply_feedback([stored], 1.0)
+    refreshed = unified.get(stored["id"])
+    assert refreshed is not None
+    assert refreshed.importance >= before
