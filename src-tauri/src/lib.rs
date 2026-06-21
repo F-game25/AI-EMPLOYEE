@@ -64,6 +64,12 @@ fn resolve_repo_dir() -> PathBuf {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(p) = exe.parent() {
+            // M5: packaged layout — Tauri Linux puts bundled resources under
+            // <prefix>/lib/<bin>/ while the binary lives in <prefix>/bin/. Probe those
+            // (and the staged "repo" payload dir) before the dev-tree walk below.
+            for rel in ["../lib/nexus-os", "../lib/Nexus OS", "resources", "repo", "../lib/nexus-os/repo"] {
+                roots.push(p.join(rel));
+            }
             roots.push(p.to_path_buf());
         }
     }
@@ -484,6 +490,11 @@ fn open_main(app: &AppHandle, origin: &str) {
         let _ = w.show();
         let _ = w.set_focus();
         let _ = app.emit("boot://ready", ());
+        // M4: opportunistic self-update check once the dashboard is live (OFF by default).
+        if auto_update_enabled() {
+            let h = app.clone();
+            tauri::async_runtime::spawn(async move { check_for_update(h, false).await; });
+        }
     } else {
         let state = app.state::<SharedState>().inner().clone();
         emit_fail(app, &state, "dashboard", "Main window is missing");
@@ -757,6 +768,205 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+// ── M4: Self-update (unsigned v1 — HTTPS + sha256 integrity) ──────────────────
+// Fetches a `latest.json` manifest from GitHub Releases, compares versions, and on a
+// newer release downloads the AppImage, verifies its sha256, replaces the running
+// $APPIMAGE, and relaunches. Unsigned per the v1 decision: trust = GitHub + TLS + sha256.
+// Signed (minisign) updates are the M8 hardening follow-up. Auto-check is OFF unless
+// NEXUS_AUTO_UPDATE is set; a tray item + JS command trigger a manual check.
+
+#[derive(serde::Deserialize)]
+struct UpdateManifest {
+    version: String,
+    url: String,
+    sha256: String,
+    #[serde(default)]
+    notes: String,
+}
+
+fn current_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+fn update_manifest_url() -> String {
+    std::env::var("NEXUS_UPDATE_MANIFEST_URL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            "https://github.com/F-game25/AI-EMPLOYEE/releases/latest/download/latest.json".into()
+        })
+}
+
+fn auto_update_enabled() -> bool {
+    matches!(
+        std::env::var("NEXUS_AUTO_UPDATE")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// True if `candidate` is a strictly newer dotted-int version than `current`.
+fn version_gt(candidate: &str, current: &str) -> bool {
+    fn parts(v: &str) -> Vec<u64> {
+        v.trim()
+            .trim_start_matches('v')
+            .split(['.', '-', '+'])
+            .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
+            .map(|s| s.parse::<u64>().unwrap_or(0))
+            .collect()
+    }
+    let (a, b) = (parts(candidate), parts(current));
+    for i in 0..a.len().max(b.len()) {
+        let x = a.get(i).copied().unwrap_or(0);
+        let y = b.get(i).copied().unwrap_or(0);
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+fn emit_update(app: &AppHandle, event: &str, payload: serde_json::Value) {
+    let _ = app.emit(&format!("update://{}", event), payload);
+}
+
+/// Show (or create) the dedicated update window. The main window has navigated to the
+/// dashboard by update-time, so the update UI gets its own self-contained webview.
+fn show_update_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("update") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let _ = tauri::WebviewWindowBuilder::new(app, "update", tauri::WebviewUrl::App("update.html".into()))
+        .title("Nexus OS — Update")
+        .inner_size(560.0, 440.0)
+        .resizable(false)
+        .center()
+        .build();
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+async fn check_for_update(app: AppHandle, manual: bool) {
+    let url = update_manifest_url();
+    if manual {
+        show_update_window(&app);
+    }
+    emit_update(&app, "checking", json!({ "manual": manual }));
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            emit_update(&app, "error", json!({ "reason": format!("client: {e}") }));
+            return;
+        }
+    };
+
+    // 1. Fetch + parse the manifest.
+    let manifest: UpdateManifest = match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+        Ok(resp) => match resp.json().await {
+            Ok(m) => m,
+            Err(e) => {
+                if manual {
+                    emit_update(&app, "error", json!({ "reason": format!("bad manifest: {e}") }));
+                }
+                return;
+            }
+        },
+        Err(e) => {
+            if manual {
+                emit_update(&app, "error", json!({ "reason": format!("no manifest: {e}") }));
+            }
+            return;
+        }
+    };
+
+    // 2. Compare versions — bail if not newer.
+    if !version_gt(&manifest.version, current_version()) {
+        emit_update(&app, "none", json!({ "current": current_version(), "latest": manifest.version }));
+        return;
+    }
+    show_update_window(&app);
+    emit_update(&app, "available", json!({ "version": manifest.version, "notes": manifest.notes }));
+
+    // 3. Only a packaged AppImage can self-replace; a source checkout gets a clear message.
+    let target = match std::env::var("APPIMAGE") {
+        Ok(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => {
+            emit_update(&app, "manual_required", json!({
+                "version": manifest.version,
+                "reason": "Self-update applies to the packaged AppImage. For a source checkout run: git pull && npm run tauri:build."
+            }));
+            return;
+        }
+    };
+
+    // 4. Download the new AppImage.
+    emit_update(&app, "downloading", json!({ "version": manifest.version }));
+    let bytes = match client.get(&manifest.url).send().await.and_then(|r| r.error_for_status()) {
+        Ok(resp) => match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                emit_update(&app, "error", json!({ "reason": format!("download: {e}") }));
+                return;
+            }
+        },
+        Err(e) => {
+            emit_update(&app, "error", json!({ "reason": format!("download: {e}") }));
+            return;
+        }
+    };
+
+    // 5. Verify sha256 integrity (no signature in v1 — fail closed on mismatch).
+    emit_update(&app, "verifying", json!({}));
+    let got = sha256_hex(&bytes);
+    if !got.eq_ignore_ascii_case(manifest.sha256.trim()) {
+        emit_update(&app, "error", json!({
+            "reason": "checksum mismatch — refusing to apply", "expected": manifest.sha256, "got": got
+        }));
+        return;
+    }
+
+    // 6. Apply: stage beside the current AppImage, chmod +x, atomically rename over it.
+    emit_update(&app, "applying", json!({}));
+    let tmp = target.with_extension("new");
+    if let Err(e) = std::fs::write(&tmp, &bytes) {
+        emit_update(&app, "error", json!({ "reason": format!("write: {e}") }));
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+    }
+    if let Err(e) = std::fs::rename(&tmp, &target) {
+        let _ = std::fs::remove_file(&tmp);
+        emit_update(&app, "error", json!({ "reason": format!("replace: {e}") }));
+        return;
+    }
+
+    // 7. Relaunch into the new version (diverges).
+    emit_update(&app, "relaunching", json!({ "version": manifest.version }));
+    app.restart();
+}
+
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) {
+    check_for_update(app, true).await;
+}
+
 // ── Tray ─────────────────────────────────────────────────────────────────────
 
 fn focus_any(app: &AppHandle) {
@@ -769,7 +979,8 @@ fn focus_any(app: &AppHandle) {
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit Nexus OS", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Dashboard", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let updates = MenuItem::with_id(app, "check_updates", "Check for Updates…", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &updates, &quit])?;
     TrayIconBuilder::new()
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -778,6 +989,11 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 app.exit(0);
             }
             "show" => focus_any(app),
+            "check_updates" => {
+                focus_any(app);
+                let h = app.clone();
+                tauri::async_runtime::spawn(async move { check_for_update(h, true).await; });
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -836,7 +1052,8 @@ pub fn run() {
             retry_boot,
             open_logs_folder,
             get_boot_state,
-            quit_app
+            quit_app,
+            check_for_updates
         ])
         .build(tauri::generate_context!())
         .expect("error while building Nexus OS")
