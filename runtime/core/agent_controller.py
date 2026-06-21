@@ -189,6 +189,10 @@ class AgentController:
             self._broadcast_fn("task:compute_plan", {
                 "strategy": _compute_plan.strategy,
                 "model": _compute_plan.model,
+                "tier": getattr(_compute_plan, "tier", ""),
+                "quant": getattr(_compute_plan, "quant", None),
+                "offload_layers": getattr(_compute_plan, "offload_layers", 0),
+                "fits_local": getattr(_compute_plan, "fits_local", True),
                 "estimated_cost_usd": _compute_plan.estimated_cost_usd,
                 "vram_needed_mb": _compute_plan.vram_needed_mb,
                 "rationale": _compute_plan.rationale,
@@ -197,6 +201,16 @@ class AgentController:
         except Exception as _cp_err:
             self._logger.log_event(component="controller", action="compute_plan_skipped",
                                    result="warn", latency_ms=0.0, meta={"err": str(_cp_err)})
+
+        # ── Resolve the gated execution route (deny-by-default egress/spend) ──
+        _route = None
+        if _compute_plan is not None:
+            try:
+                from core.model_escalation import apply_compute_plan
+                _route = apply_compute_plan(_compute_plan, broadcast_fn=self._broadcast_fn)
+            except Exception as _esc_err:
+                self._logger.log_event(component="controller", action="compute_route_skipped",
+                                       result="warn", latency_ms=0.0, meta={"err": str(_esc_err)})
 
         # QCE agent routing — attempt amplitude-based selection, fall back to keyword router
         _qce_agent: str | None = None
@@ -222,64 +236,69 @@ class AgentController:
         if self._research.is_learn_command(goal):
             return self._run_learn_topic_goal(goal=goal, run_id=run_id, start=start, persist_task=persist_task)
 
-        # ── Context sufficiency + autonomous research loop ────────────────
-        ctx_summary = self._run_context_research_loop(goal=goal, run_id=run_id)
+        # ── Execute under the cost-first route (per-run model/provider hint, auto-reset) ──
+        from core.run_model_context import preferred_model_scope
+        _rt_model = _route.model if _route is not None else None
+        _rt_provider = _route.provider if _route is not None else None
+        with preferred_model_scope(_rt_model, _rt_provider):
+            # ── Context sufficiency + autonomous research loop ────────────────
+            ctx_summary = self._run_context_research_loop(goal=goal, run_id=run_id)
 
-        # ── Planning with retry on validation failure ──────────────────────
-        graph = None
-        last_failure: str = ""
-        effective_goal = goal
-        for attempt in range(max(1, max_retry)):
-            try:
-                graph = self.build_task_graph(goal=effective_goal, run_id=run_id)
-                graph.validate_no_cycles()
-                break
-            except Exception as exc:
-                last_failure = str(exc)
-                self._logger.log_event(
-                    component="controller",
-                    action="plan_retry",
-                    result="retrying",
-                    latency_ms=0.0,
-                    meta={"attempt": attempt + 1, "reason": last_failure},
-                )
-                # Inject failure context into the goal so the planner gets a richer signal
-                effective_goal = f"{goal}\n[previous plan failed: {last_failure}]"
-        if graph is None:
-            raise RuntimeError(f"Planning failed after {max_retry} attempts: {last_failure}")
+            # ── Planning with retry on validation failure ──────────────────────
+            graph = None
+            last_failure: str = ""
+            effective_goal = goal
+            for attempt in range(max(1, max_retry)):
+                try:
+                    graph = self.build_task_graph(goal=effective_goal, run_id=run_id)
+                    graph.validate_no_cycles()
+                    break
+                except Exception as exc:
+                    last_failure = str(exc)
+                    self._logger.log_event(
+                        component="controller",
+                        action="plan_retry",
+                        result="retrying",
+                        latency_ms=0.0,
+                        meta={"attempt": attempt + 1, "reason": last_failure},
+                    )
+                    # Inject failure context into the goal so the planner gets a richer signal
+                    effective_goal = f"{goal}\n[previous plan failed: {last_failure}]"
+            if graph is None:
+                raise RuntimeError(f"Planning failed after {max_retry} attempts: {last_failure}")
 
-        # ── Plan quality scoring ───────────────────────────────────────────
-        quality_score, estimated_cost_tokens = self._score_plan_quality(goal, graph)
-        self._broadcast_fn("task:plan_quality", {
-            "goal": goal,
-            "task_count": len(graph.tasks),
-            "quality_score": round(quality_score, 3),
-            "estimated_cost_tokens": estimated_cost_tokens,
-        })
+            # ── Plan quality scoring ───────────────────────────────────────────
+            quality_score, estimated_cost_tokens = self._score_plan_quality(goal, graph)
+            self._broadcast_fn("task:plan_quality", {
+                "goal": goal,
+                "task_count": len(graph.tasks),
+                "quality_score": round(quality_score, 3),
+                "estimated_cost_tokens": estimated_cost_tokens,
+            })
 
-        if ctx_summary and graph.tasks:
-            # Tag first task with context score + findings for downstream skills
-            graph.tasks[0].context_score = float(ctx_summary.get("final_score", 0.0))
-            graph.tasks[0].research_findings = ctx_summary
-        tasks = self._executor.execute_graph(graph)
-        for task in tasks:
-            verdict = self._validator.validate(task)
-            task.passed = verdict.passed
-            task.score = verdict.score
-            if persist_task:
-                persist_task(run_id, task)
-            self._feedback_loop(goal=goal, task=task)
-        summary = self._build_summary(run_id=run_id, goal=goal, graph=graph)
-        summary["plan_quality_score"] = round(quality_score, 3)
-        summary["estimated_cost_tokens"] = estimated_cost_tokens
-        self._logger.log_event(
-            component="controller",
-            action="run_goal",
-            result="success",
-            latency_ms=(time.perf_counter() - start) * 1000,
-            meta={"run_id": run_id, "tasks": len(tasks), "quality_score": quality_score},
-        )
-        return summary
+            if ctx_summary and graph.tasks:
+                # Tag first task with context score + findings for downstream skills
+                graph.tasks[0].context_score = float(ctx_summary.get("final_score", 0.0))
+                graph.tasks[0].research_findings = ctx_summary
+            tasks = self._executor.execute_graph(graph)
+            for task in tasks:
+                verdict = self._validator.validate(task)
+                task.passed = verdict.passed
+                task.score = verdict.score
+                if persist_task:
+                    persist_task(run_id, task)
+                self._feedback_loop(goal=goal, task=task)
+            summary = self._build_summary(run_id=run_id, goal=goal, graph=graph)
+            summary["plan_quality_score"] = round(quality_score, 3)
+            summary["estimated_cost_tokens"] = estimated_cost_tokens
+            self._logger.log_event(
+                component="controller",
+                action="run_goal",
+                result="success",
+                latency_ms=(time.perf_counter() - start) * 1000,
+                meta={"run_id": run_id, "tasks": len(tasks), "quality_score": quality_score},
+            )
+            return summary
 
     @staticmethod
     def _score_plan_quality(goal: str, graph: TaskGraph) -> tuple[float, int]:
