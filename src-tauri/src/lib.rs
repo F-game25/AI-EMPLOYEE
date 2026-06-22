@@ -23,6 +23,7 @@ use serde_json::json;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
+use std::net::ToSocketAddrs;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
@@ -562,7 +563,7 @@ fn provision_python_env(app: &AppHandle, state: &SharedState) -> Result<bool, St
 
     emit_phase(app, state, "setup-venv", "Creating Python environment");
     emit_log(app, state, "setup", "Creating virtual environment…", "info");
-    let out = Command::new(&base)
+    let out = std::process::Command::new(&base)
         .args(["-m", "venv", &venv.to_string_lossy()])
         .output()
         .map_err(|e| format!("venv create failed: {e}"))?;
@@ -589,7 +590,7 @@ fn provision_python_env(app: &AppHandle, state: &SharedState) -> Result<bool, St
             }
         }
     }
-    let out = Command::new(&vpy)
+    let out = std::process::Command::new(&vpy)
         .args(&args)
         .output()
         .map_err(|e| format!("pip install failed: {e}"))?;
@@ -616,7 +617,7 @@ async fn check_ollama(app: AppHandle, state: SharedState) {
             if !model.is_empty() {
                 if let Some(ollama) = which_runtime(&["ollama"]) {
                     emit_log(&app, &state, "setup", &format!("Pulling model {model} (consented)…"), "info");
-                    let _ = Command::new(ollama).args(["pull", &model]).output();
+                    let _ = std::process::Command::new(ollama).args(["pull", &model]).output();
                 }
             }
         }
@@ -625,6 +626,81 @@ async fn check_ollama(app: AppHandle, state: SharedState) {
             "Ollama not detected — on-device models are optional. Install from https://ollama.com and reopen to enable them.",
             "warn");
     }
+}
+
+/// Fast, synchronous Ollama liveness probe for the setup screen (no async runtime needed).
+fn ollama_present() -> bool {
+    let hostport = std::env::var("OLLAMA_HOST")
+        .ok()
+        .and_then(|h| {
+            let h = h.trim_end_matches('/').replace("http://", "").replace("https://", "");
+            if h.contains(':') { Some(h) } else { None }
+        })
+        .unwrap_or_else(|| "127.0.0.1:11434".to_string());
+    hostport
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .map(|addr| std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok())
+        .unwrap_or(false)
+}
+
+/// Show (or focus) the dedicated first-run setup window. Mirrors the update window: the splash
+/// stays behind it; on completion run_setup() closes it and resumes boot.
+fn show_setup_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("setup") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let _ = tauri::WebviewWindowBuilder::new(app, "setup", tauri::WebviewUrl::App("setup.html".into()))
+        .title("Nexus OS — First-run setup")
+        .inner_size(580.0, 560.0)
+        .resizable(false)
+        .center()
+        .build();
+}
+
+/// M3 setup screen: report detected components without mutating anything.
+#[tauri::command]
+fn setup_status(app: AppHandle) -> serde_json::Value {
+    let state = app.state::<SharedState>().inner().clone();
+    json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "python_found": which_runtime(&["python3", "python"]).is_some(),
+        "wheelhouse_found": find_wheelhouse(&state.repo_dir).is_some(),
+        "venv_ready": venv_ready(&state.app_home),
+        "ollama_running": ollama_present(),
+    })
+}
+
+/// M3 setup screen: provision the venv (offline) with the user's consent, optionally pull a model
+/// if Ollama is present, then close the setup window and resume boot. Progress streams via the
+/// existing boot://log + boot://phase events the screen listens to. Errors propagate to the UI.
+#[tauri::command]
+async fn run_setup(app: AppHandle, pull_model: Option<String>) -> Result<(), String> {
+    let state = app.state::<SharedState>().inner().clone();
+    let ah = app.clone();
+    let st = state.clone();
+    tauri::async_runtime::spawn_blocking(move || provision_python_env(&ah, &st))
+        .await
+        .map_err(|e| format!("setup task error: {e}"))??;
+
+    if let Some(model) = pull_model {
+        if !model.trim().is_empty() {
+            // Consented, one-time pull — surfaced inside check_ollama (no silent downloads).
+            std::env::set_var("NEXUS_SETUP_PULL_MODEL", model.trim());
+        }
+    }
+    check_ollama(app.clone(), state.clone()).await;
+
+    let _ = app.emit("setup://done", json!({}));
+    if let Some(w) = app.get_webview_window("setup") {
+        let _ = w.close();
+    }
+    // venv now exists → re-entering boot proceeds straight to spawning services + dashboard.
+    tauri::async_runtime::spawn(boot(app));
+    Ok(())
 }
 
 // ── Boot sequence ────────────────────────────────────────────────────────────
@@ -701,15 +777,23 @@ async fn boot(app: AppHandle) {
         return;
     }
 
-    // ── M3: first-run setup — provision the Python venv from the offline wheelhouse ──
-    // Runs once (no venv yet). Blocking pip work goes on a blocking thread so the async
-    // runtime stays responsive and the splash keeps streaming setup phases/logs.
+    // ── M3: first-run setup ───────────────────────────────────────────────────
+    // Interactive by default: open the guided setup window and let the user consent +
+    // watch progress; run_setup() provisions the venv (offline) then re-enters boot.
+    // Headless/CI auto-provisions inline with NEXUS_SETUP_AUTO=1 (no window / unattended).
     if !venv_ready(&state.app_home) {
+        let auto = std::env::var("NEXUS_SETUP_AUTO").map(|v| v == "1" || v == "true").unwrap_or(false);
+        if !auto {
+            emit_status(&app, "First-run setup required");
+            emit_log(&app, &state, "setup", "First run detected — opening guided setup…", "info");
+            show_setup_window(&app);
+            *state.booting.lock().unwrap() = false; // run_setup() re-enters boot once provisioned
+            return;
+        }
         let ah = app.clone();
         let st = state.clone();
         match tauri::async_runtime::spawn_blocking(move || provision_python_env(&ah, &st)).await {
-            Ok(Ok(true)) => emit_log(&app, &state, "setup", "First-run setup complete.", "info"),
-            Ok(Ok(false)) => {}
+            Ok(Ok(_)) => {}
             Ok(Err(reason)) => emit_log(&app, &state, "setup", &format!("Setup skipped: {reason}"), "warn"),
             Err(e) => emit_log(&app, &state, "setup", &format!("Setup task error: {e}"), "warn"),
         }
@@ -1197,7 +1281,9 @@ pub fn run() {
             open_logs_folder,
             get_boot_state,
             quit_app,
-            check_for_updates
+            check_for_updates,
+            setup_status,
+            run_setup
         ])
         .build(tauri::generate_context!())
         .expect("error while building Nexus OS")

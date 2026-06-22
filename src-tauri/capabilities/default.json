@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core IPC for the main + update windows (events, app commands, window control).",
-  "windows": ["main", "update"],
+  "description": "Core IPC for the main + setup + update windows (events, app commands, window control).",
+  "windows": ["main", "setup", "update"],
   "permissions": [
     "core:default",
     "core:event:default",
