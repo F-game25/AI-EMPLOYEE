@@ -2291,6 +2291,73 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
     }
   })
 
+  // B2 auto-debug loop: on a verify_failed run, compress the failure → re-codegen a
+  // fix → re-stage → re-verify, bounded by FORGE_DEBUG_MAX_ITERS. NEVER applies —
+  // "iterate then stop at approval" (the human/owner still approves the apply).
+  async function performAutoDebug(run, project, opts = {}) {
+    const maxIters = Math.max(1, Math.min(5, parseInt(process.env.FORGE_DEBUG_MAX_ITERS, 10) || opts.maxIters || 2))
+    const iterations = []
+    let current = run
+    for (let i = 1; i <= maxIters; i++) {
+      const latest = (current.test_results || []).slice(-1)[0]
+      if (latest?.all_passed) break
+      const failSummary = (latest?.results || []).filter(r => !r.pass)
+        .map(r => `[FAIL] ${r.command}\n${String(r.output || '').slice(0, 500)}`).join('\n\n') || 'verification failed'
+      broadcastForge('forge:diagnostic', { level: 'info', event: 'auto_debug_iter', run_id: runIdOf(current), iter: i, max: maxIters })
+
+      const writeActions = (current.actions || []).filter(a => RUN_WRITE_ACTIONS.has(a.type))
+      const codeCtx = writeActions.map(a => {
+        const p = a.file_path || (a.files && a.files[0] && a.files[0].path) || 'file'
+        const body = a.proposed_content || a.content || (a.files && a.files[0] && a.files[0].content) || ''
+        return `--- ${p} ---\n${String(body).slice(0, 1500)}`
+      }).join('\n\n')
+      const fixPrompt = `${buildForgeSystemPrompt(project, '', '')}\nThe previous implementation FAILED verification. Return corrected file(s) only.\n\nGoal: ${current.goal}\n\nFailing verification:\n${failSummary}\n\nCurrent code:\n${codeCtx}`
+
+      // eslint-disable-next-line no-await-in-loop
+      const cg = await forgeCodegen(fixPrompt, current.goal, opts.body || {})
+      const newActions = cg.text ? extractCodeActions(cg.text, project).slice(0, 12) : []
+      if (!newActions.length) { iterations.push({ iter: i, status: 'no_codegen' }); break }
+
+      let staged = 0
+      for (const a of newActions) {
+        a.run_id = runIdOf(current); a.plan_id = current.plan?.id || null; a.approval_required = true
+        a.created_at = nowIso(); a.updated_at = nowIso()
+        const pol = validateRunActionPolicy(a, project)
+        a.policy_decision = pol; a.risk = pol.risk_level; a.status = pol.allowed ? 'staged' : 'blocked'
+        if (pol.allowed) { const sr = stageRunAction(current, project, a); if (sr.ok) staged++ }
+      }
+      saveActions([...newActions, ...loadActions()])
+      current = updateRun(runIdOf(current), { actions: [...(current.actions || []), ...newActions], status: 'staged' })
+
+      // eslint-disable-next-line no-await-in-loop
+      const vr = await performRunVerification(current, project, opts.commands, 'auto-debug')
+      if (vr.ok) current = vr.updated
+      const passed = vr.ok ? vr.all_passed : null
+      iterations.push({ iter: i, codegen_mode: cg.mode, staged, all_passed: passed })
+      appendAudit('forge_auto_debug_iter', { run_id: runIdOf(current), iter: i, staged, all_passed: passed })
+      if (passed) break
+    }
+    const fixed = (current.test_results || []).slice(-1)[0]?.all_passed === true
+    const final = updateRun(runIdOf(current), { debug_iterations: iterations })
+    broadcastForge('forge:run_updated', { run: final, action: 'auto_debug' })
+    appendAudit('forge_auto_debug_done', { run_id: runIdOf(final), iters: iterations.length, fixed })
+    return { run: final, iterations, fixed }
+  }
+
+  router.post('/runs/:id/auto-debug', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_run_auto_debug')) return
+    try {
+      const run = findRun(req.params.id)
+      if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+      const project = findProject(run.project_id)
+      if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+      const dbg = await performAutoDebug(run, project, { body: req.body || {}, commands: req.body?.commands })
+      res.json({ ok: true, state: 'live', fixed: dbg.fixed, iterations: dbg.iterations, run: dbg.run })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
   router.post('/runs/:id/apply', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_run_apply')) return
     try {
