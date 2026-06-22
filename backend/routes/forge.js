@@ -4275,6 +4275,91 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'rejected', item: updated, action: updated })
   })
 
+  // ── Orchestrator bridge (Phase 4) ─────────────────────────────────────────────
+  // Lets an external brain (Claude/OpenAI via MCP) plan → decompose → review over
+  // the scoped-token surface. The brain NEVER executes: decomposed tasks land as
+  // `proposed` forge_queue_items that flow through the existing approval →
+  // dispatcher → run_goal loop. Reads are compressed so the API plans cheaply.
+
+  // GET /context-pack — compressed project context for planning (no whole-repo read).
+  router.get('/context-pack', requireScope('read'), async (req, res) => {
+    const project = findProject(String(req.query.project_id || '').trim())
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const goal = String(req.query.goal || '').trim()
+    try {
+      const context_pack = await buildContextPack(project, goal, {})
+      res.json({ ok: true, project_id: project.id, goal, context_pack })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // POST /orchestrate — emit a decomposed task graph (task-emit scope). Each task
+  // becomes a proposed forge_queue_item; nothing executes until owner approval.
+  const ORCHESTRATE_MAX_TASKS = Math.max(1, parseInt(process.env.FORGE_ORCHESTRATE_MAX_TASKS, 10) || 25)
+  router.post('/orchestrate', requireScope('task-emit'), (req, res) => {
+    const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : []
+    if (!tasks.length) return res.status(400).json({ ok: false, error: 'tasks[] required' })
+    if (tasks.length > ORCHESTRATE_MAX_TASKS) return res.status(400).json({ ok: false, error: `too many tasks (max ${ORCHESTRATE_MAX_TASKS})` })
+    const projectId = req.body?.project_id || null
+    const project = projectId ? findProject(projectId) : null
+    if (projectId && !project) return res.status(404).json({ ok: false, error: 'project not found' })
+
+    const orchestrationId = `orc-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+    const overallGoal = String(req.body?.goal || '').slice(0, 280)
+    const created = []
+    for (let i = 0; i < tasks.length; i++) {
+      const t = tasks[i] || {}
+      const goal = String(t.goal || t.description || t.title || '').trim()
+      if (!goal) return res.status(400).json({ ok: false, error: `task[${i}] missing goal` })
+      const action = makeAction('forge_queue_item', {
+        project_id: project?.id || null,
+        label: String(t.title || goal).slice(0, 140),
+        description: goal,
+        risk: t.risk || 'review',
+        expected_result: 'Queue item reviewed before conversion into a Forge run or approved work item.',
+        approval_reason: 'Orchestrated task requires owner review before execution.',
+        rollback_plan: 'No code changes are made by queue submission.',
+      })
+      action.priority = String(t.priority || 'normal')
+      action.mode = t.mode || 'builder'
+      action.queue_kind = 'forge_queue'
+      action.submitted_by = req.user?.email || 'orchestrator'
+      action.orchestration_id = orchestrationId
+      action.task_index = i
+      action.overall_goal = overallGoal || null
+      action.affected_files = Array.isArray(t.affected_files) ? t.affected_files.slice(0, 50).map(String) : []
+      action.verification_command = t.verification_command ? String(t.verification_command).slice(0, 300) : null
+      created.push(action)
+    }
+    persistActions(created)
+    appendAudit('forge_orchestrate_submitted', { orchestration_id: orchestrationId, project_id: project?.id || null, count: created.length, goal: overallGoal })
+    broadcastForge('forge:queue_update', { items: loadActions().filter(a => ['proposed', 'pending', 'approved'].includes(a.status)) })
+    emitForgeRuntimeSnapshot('orchestrate_submitted', { project_id: project?.id || null })
+    res.json({ ok: true, state: 'queued', orchestration_id: orchestrationId, goal: overallGoal, count: created.length, tasks: created })
+  })
+
+  // GET /runs/:id/failures — compressed failure context for review (read scope).
+  // Returns only failure messages, never full logs, to keep the API review cheap.
+  router.get('/runs/:id/failures', requireScope('read'), (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const tests = Array.isArray(run.test_results) ? run.test_results : []
+    const failedTests = tests
+      .filter(t => t && t.all_passed === false)
+      .map(t => ({ all_passed: false, summary: String(t.summary || t.output || '').slice(0, 600) }))
+    const actionErrors = collectRunActions(run)
+      .filter(a => a && (a.error || a.status === 'failed' || a.status === 'blocked'))
+      .map(a => ({ id: a.id, type: a.type, status: a.status, error: String(a.error || a.policy_decision?.reason || '').slice(0, 400) }))
+    res.json({
+      ok: true,
+      run_id: run.run_id || run.id,
+      status: run.status,
+      failures: { tests: failedTests, actions: actionErrors },
+      summary: `${failedTests.length} failed test group(s), ${actionErrors.length} failed/blocked action(s).`,
+    })
+  })
+
   // ── Code understanding (WS4): index a project + retrieve architecture/context ──
   router.post('/index', requireAuth, async (req, res) => {
     const project = findProject(req.body?.project_id)

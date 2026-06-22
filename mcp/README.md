@@ -17,7 +17,10 @@ in the dashboard, the server-side dispatcher runs it through the agent engine.
 | `get_forge_runs` | `GET /api/forge/runs` | read | recent runs |
 | `get_forge_run` | `GET /api/forge/runs/:id` | read | one run + report |
 | `get_forge_queue` | `GET /api/forge/queue` | read | pending/approved queue |
-| `forge_submit` | `POST /api/forge/submit` | task-emit | **queues** work for your approval (does **not** execute) |
+| `forge_submit` | `POST /api/forge/submit` | task-emit | **queues** a single goal for your approval (does **not** execute) |
+| `get_context_pack` | `GET /api/forge/context-pack` | read | compressed project context for cheap planning (no whole-repo read) |
+| `orchestrate` | `POST /api/forge/orchestrate` | task-emit | **plan/decompose**: emit a task graph as proposals for your approval |
+| `get_run_failures` | `GET /api/forge/runs/:id/failures` | read | compressed failure context (messages only) to review/fix cheaply |
 
 ## Install
 

@@ -140,11 +140,17 @@ Approval/safety: tenancy.js (tenant gate) → requireAuth/requireScope → HITL 
 - **Severity:** CRITICAL · **Files:** forge.js, forge_v5_runtime.py, forge/lifecycle/*
 - **Fix:** make `/api/forge/runs` delegate to the Python lifecycle (one canonical pipeline) OR explicitly demote one path. Do not maintain two.
 
-### GAP-2 — No orchestrator bridge for Claude/OpenAI as planners (CRITICAL → partially addressed today)
-- **Evidence:** Today's work added scoped service tokens + MCP connector + forge→AgentController dispatcher, but the only write tool is `forge_submit` (a single goal). No `plan`/`decompose`/`review-failures` contract.
-- **Why it matters:** goal of the system is API-as-orchestrator, local-as-executor. We have the *transport* now, not the *loop*.
-- **Severity:** CRITICAL · **Files:** mcp/server.js (new), forge.js, system_api.py
-- **Fix:** add an orchestrator bridge (Phase 4) exposing plan/decompose/review over the same scoped-token surface.
+### GAP-2 — Orchestrator bridge for Claude/OpenAI as planners (CRITICAL → ADDRESSED 2026-06-22)
+> **Status update:** the orchestrator bridge now exists over the scoped-token + MCP surface:
+> `GET /api/forge/context-pack` (read — compressed context for cheap planning),
+> `POST /api/forge/orchestrate` (task-emit — emit a decomposed task graph as `proposed`
+> forge_queue_items linked by `orchestration_id`), and `GET /api/forge/runs/:id/failures`
+> (read — compressed failure context). MCP tools: `get_context_pack`, `orchestrate`,
+> `get_run_failures`. The brain now plans/decomposes/reviews; tasks flow through the existing
+> approval → dispatcher → run_goal loop. The brain still NEVER executes directly.
+> Remaining follow-up: feed `verification_command`/`affected_files` into the dispatcher's
+> run + auto-pull failures back to the brain (Phase 6 result-verifier loop).
+
 
 ### GAP-3 — Remote compute has no provider adapter (HIGH)
 - **Evidence:** [compute_fabric/index.js:50-51](backend/compute_fabric/index.js#L50) `runpod`/`vastai` `enabled:false`; `compute_planner` lists `rent_gpu` but routing falls back ([compute_planner.py:112-119](runtime/engine/compute/compute_planner.py#L112)).
@@ -471,8 +477,8 @@ The components of a real AI engineering engine are largely present and largely r
 
 **What must be fixed first (in order):**
 1. ✅ **Unify the forge execution path (GAP-1)** — DONE 2026-06-22: cockpit `/runs` now runs the lifecycle gate (spec→plan→review→test) before codegen, blocking vague/unsafe goals with clarifying questions. Follow-up: use plan slices to target codegen + surface open_questions in UI.
-2. **Build the orchestrator bridge (GAP-2, Phase 4)** ← NEXT — on top of the scoped-token + dispatcher surface shipped today, so Claude/OpenAI plan/decompose/review while local agents execute.
-3. **Enforce context compression + token budget + cache (Phase 3)** so the API-as-orchestrator design is cost-correct.
+2. ✅ **Orchestrator bridge (GAP-2, Phase 4)** — DONE 2026-06-22: `context-pack` + `orchestrate` (task graph) + `runs/:id/failures` over the scoped-token + MCP surface. The brain now plans/decomposes/reviews; local agents execute after approval.
+3. **Enforce context compression + token budget + cache (Phase 3)** ← NEXT — so the API-as-orchestrator design is cost-correct (no semantic cache / enforced budget yet — GAP-5).
 4. **Then** remote compute (Phase 7) and swarm routing (Phase 8) for scale.
 
 Today's session closed the highest-leverage prerequisites (clean baseline, programmatic least-privilege auth, and the approval→execution loop). The next highest-leverage move is **GAP-1 (unify the pipeline)**, then **Phase 4 (orchestrator bridge)**.

@@ -197,6 +197,87 @@ const TOOLS = [
       return toolResult(await api('POST', '/api/forge/submit', { scope: 'task-emit', body }), '/api/forge/submit');
     },
   },
+  {
+    name: 'get_context_pack',
+    description:
+      'Get a COMPRESSED project context pack (tree + relevant files + constraints) so you can plan ' +
+      'without reading the whole repo. Read-only. Use this before orchestrate to plan cheaply.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Forge project id. Required.' },
+        goal: { type: 'string', description: 'The goal you are planning for (focuses relevance). Optional.' },
+      },
+      required: ['project_id'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const pid = String(args?.project_id || '').trim();
+      if (!pid) return toolError('project_id is required', '/api/forge/context-pack');
+      const qs = new URLSearchParams({ project_id: pid });
+      if (args?.goal) qs.set('goal', String(args.goal));
+      return toolResult(await api('GET', `/api/forge/context-pack?${qs.toString()}`), '/api/forge/context-pack');
+    },
+  },
+  {
+    name: 'orchestrate',
+    description:
+      'Emit a DECOMPOSED task graph: one overall goal split into smaller tasks. Each task is QUEUED ' +
+      'as a proposal for human approval — nothing executes until Lars approves. This is the planner/' +
+      'decomposer role: read context, decompose, emit. Local agents execute after approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Forge project id (optional).' },
+        goal: { type: 'string', description: 'The overall goal being decomposed (optional but recommended).' },
+        tasks: {
+          type: 'array',
+          description: 'The decomposed tasks. Each is queued as a separate proposal.',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Short label.' },
+              goal: { type: 'string', description: 'What this task should accomplish. Required.' },
+              affected_files: { type: 'array', items: { type: 'string' }, description: 'Files this task likely touches (optional).' },
+              verification_command: { type: 'string', description: 'How to verify success, e.g. a test command (optional).' },
+              risk: { type: 'string', description: 'Risk hint, e.g. "review" (optional).' },
+              priority: { type: 'string', enum: ['low', 'normal', 'high'], description: 'Optional.' },
+            },
+            required: ['goal'],
+            additionalProperties: false,
+          },
+          minItems: 1,
+        },
+      },
+      required: ['tasks'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const tasks = Array.isArray(args?.tasks) ? args.tasks : [];
+      if (!tasks.length) return toolError('tasks[] is required (at least one task)', '/api/forge/orchestrate');
+      const body = { tasks };
+      if (args?.project_id) body.project_id = String(args.project_id);
+      if (args?.goal) body.goal = String(args.goal);
+      return toolResult(await api('POST', '/api/forge/orchestrate', { scope: 'task-emit', body }), '/api/forge/orchestrate');
+    },
+  },
+  {
+    name: 'get_run_failures',
+    description:
+      'Get COMPRESSED failure context for a run (failed tests + failed/blocked actions, messages only — ' +
+      'no full logs) so you can review and propose fixes cheaply. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: { run_id: { type: 'string', description: 'Run id.' } },
+      required: ['run_id'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const id = encodeURIComponent(String(args?.run_id || '').trim());
+      if (!id) return toolError('run_id is required', '/api/forge/runs/:id/failures');
+      return toolResult(await api('GET', `/api/forge/runs/${id}/failures`), `/api/forge/runs/${id}/failures`);
+    },
+  },
 ];
 
 // ── Server wiring ─────────────────────────────────────────────────────────────
