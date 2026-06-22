@@ -296,7 +296,19 @@ more features.
   logged, audited handling. Accept: a thrown error is visible in `python-backend.log`/audit. Risk: low.
 
 ### Phase B — Make it reliable
-> **Progress 2026-06-23:** B1 *core* + C1 shipped. `backend/services/result_verifier.js`
+> **Progress 2026-06-23 (B1+B2+B3+C2 SHIPPED):**
+> - **B1** wired as a real gate: auto-verify on approve (FORGE_AUTO_VERIFY) + apply blocked
+>   unless `all_passed` + force-bypass now logs `forge_apply_forced_unverified risk=high`.
+>   Also fixed a pre-existing staging crash (`forgeWorkspace.resolveInsideWorkspace`→forgePath).
+> - **B2** `POST /runs/:id/auto-debug`: bounded verify-fail→re-codegen→re-verify loop
+>   (FORGE_DEBUG_MAX_ITERS), never auto-applies (iterate-then-approve). Verified live.
+> - **B3** `prompt_guard.js`: untrusted repo/history/web content wrapped in unspoofable fences
+>   + injection patterns neutralized, wired into all codegen/auto-debug prompts.
+> - **C2** `POST /forge/research-summary`: sourced + guarded + cached + verifier-scored research
+>   (first-target workflow). `npm run bench` now 4/4 PASS.
+> REMAINING: deepen the top-20 skills (C2 pattern applied broadly), C3 quality/regression scoring
+> in routing, C4 memory closed-loop, D1 live remote provider adapter.
+> **Earlier progress note (B1 core + C1):** `backend/services/result_verifier.js`
 > (code→sandbox via injected runner; research/text→quality criteria with hard gates on
 > non-empty + sources) and `tests/benchmarks/` + `npm run bench` (research-first). Live:
 > 3/3 PASS (research_summary 0.75, lifecycle blocks-vague, lifecycle allows-clear). REMAINING
