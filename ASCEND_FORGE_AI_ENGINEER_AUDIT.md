@@ -125,7 +125,15 @@ Approval/safety: tenancy.js (tenant gate) → requireAuth/requireScope → HITL 
 
 # 4. Critical Gaps
 
-### GAP-1 — Two disconnected forge execution paths (CRITICAL)
+### GAP-1 — Two disconnected forge execution paths (CRITICAL → ADDRESSED 2026-06-22)
+> **Status update:** the cockpit `POST /api/forge/runs` (+`/runs/stream`) now runs the
+> deterministic lifecycle gate (spec→plan→review→test→ship) in front of codegen via a new
+> `lifecycle` op in `run_forge.py` + `runLifecycleGate()` in forge.js. Vague spec / P0 review /
+> failed tests block the run (with open questions) before any codegen; otherwise the lifecycle
+> result is attached to `run.lifecycle`. Env-gated (`FORGE_LIFECYCLE_RUNS`), graceful fallback,
+> approval gate unchanged. Remaining follow-up: feed lifecycle plan slices into codegen targeting,
+> and surface `open_questions` in the cockpit UI (Phase 9).
+
 - **Evidence:** Node `/api/forge/runs` uses `_callOllama` for codegen ([forge.js:1551](backend/routes/forge.js#L1551)); the structured lifecycle (`planning_engine`/`implementation_engine`/`test_engine`/`review_engine`) is only invoked from [companion/execution_broker.py:1286](runtime/companion/execution_broker.py#L1286) and [forge_v5_runtime.py:272](runtime/core/forge_v5_runtime.py#L272).
 - **Why it matters:** the UI-facing engine is the *weaker* one (single LLM, no test/review gating); the *stronger* lifecycle is hidden behind the companion.
 - **What breaks:** runs created from the cockpit don't get plan→test→review rigor; quality is inconsistent; "verified result" promise is weak on the default path.
@@ -462,8 +470,8 @@ Only the connective tissue — existing equivalents are reused, not duplicated:
 The components of a real AI engineering engine are largely present and largely real: project indexing, context compression, multi-provider model routing, a sandbox, a Python lifecycle, distillation, a swarm scaffold, a full UI, and tests. What's missing is the **connective tissue** that turns parts into a system.
 
 **What must be fixed first (in order):**
-1. **Unify the forge execution path (GAP-1)** — make the cockpit `/runs` use the Python lifecycle (plan→implement→test→review) instead of single-LLM Ollama codegen. Without this, "verified results" are not guaranteed on the default path.
-2. **Build the orchestrator bridge (GAP-2, Phase 4)** on top of the scoped-token + dispatcher surface shipped today, so Claude/OpenAI plan/decompose/review while local agents execute.
+1. ✅ **Unify the forge execution path (GAP-1)** — DONE 2026-06-22: cockpit `/runs` now runs the lifecycle gate (spec→plan→review→test) before codegen, blocking vague/unsafe goals with clarifying questions. Follow-up: use plan slices to target codegen + surface open_questions in UI.
+2. **Build the orchestrator bridge (GAP-2, Phase 4)** ← NEXT — on top of the scoped-token + dispatcher surface shipped today, so Claude/OpenAI plan/decompose/review while local agents execute.
 3. **Enforce context compression + token budget + cache (Phase 3)** so the API-as-orchestrator design is cost-correct.
 4. **Then** remote compute (Phase 7) and swarm routing (Phase 8) for scale.
 
