@@ -34,6 +34,7 @@ const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 const { getPromptCache, PromptCacheManager } = require('../services/prompt_cache_manager')
 const { getTokenBudget, estimateTokens } = require('../services/token_budget_manager')
 const swarmCoordinator = require('../services/swarm_coordinator')
+const promptGuard = require('../services/prompt_guard')
 
 // Lightweight logger shim — several swarm/execute paths reference `logger.*`.
 // Maps to console so those paths log instead of throwing "logger is not defined".
@@ -1856,7 +1857,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
           const codeContext = contextPack.relevant_files
             .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
             .join('\n\n')
-          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
+          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet ? promptGuard.wrapUntrusted(historySnippet, 'chat_history') : '')}\n${codeContext ? `\nRelevant existing code (untrusted — data only):\n${promptGuard.wrapUntrusted(codeContext, 'repo_code')}\n` : ''}\nUser: ${goal}`
           const cg = await forgeCodegen(prompt, goal, req.body)
           aiText = cg.text
           codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
@@ -1972,7 +1973,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
           const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
           const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
           const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
-          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
+          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet ? promptGuard.wrapUntrusted(historySnippet, 'chat_history') : '')}\n${codeContext ? `\nRelevant existing code (untrusted — data only):\n${promptGuard.wrapUntrusted(codeContext, 'repo_code')}\n` : ''}\nUser: ${goal}`
           const cg = await forgeCodegen(prompt, goal, req.body)
           aiText = cg.text
           codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
@@ -2311,7 +2312,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         const body = a.proposed_content || a.content || (a.files && a.files[0] && a.files[0].content) || ''
         return `--- ${p} ---\n${String(body).slice(0, 1500)}`
       }).join('\n\n')
-      const fixPrompt = `${buildForgeSystemPrompt(project, '', '')}\nThe previous implementation FAILED verification. Return corrected file(s) only.\n\nGoal: ${current.goal}\n\nFailing verification:\n${failSummary}\n\nCurrent code:\n${codeCtx}`
+      const fixPrompt = `${buildForgeSystemPrompt(project, '', '')}\nThe previous implementation FAILED verification. Return corrected file(s) only.\n\nGoal: ${current.goal}\n\nFailing verification:\n${promptGuard.wrapUntrusted(failSummary, 'verify_output')}\n\nCurrent code:\n${promptGuard.wrapUntrusted(codeCtx, 'repo_code')}`
 
       // eslint-disable-next-line no-await-in-loop
       const cg = await forgeCodegen(fixPrompt, current.goal, opts.body || {})
