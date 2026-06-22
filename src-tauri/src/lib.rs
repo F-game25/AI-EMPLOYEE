@@ -501,6 +501,132 @@ fn open_main(app: &AppHandle, origin: &str) {
     }
 }
 
+// ── M3: first-run Python environment provisioning (offline, from wheelhouse) ──
+// A bundled / clean machine has no project Python deps. On first run we create a venv
+// under app data and install the core deps from the bundled wheelhouse with --no-index
+// (no network). The backend then runs on that venv. Reuses the same offline-install
+// pattern as scripts/build_python_core_bundle.py. Ollama stays managed separately.
+
+fn venv_dir(app_home: &Path) -> PathBuf {
+    app_home.join("venv")
+}
+
+fn venv_python(venv: &Path) -> PathBuf {
+    if cfg!(windows) {
+        venv.join("Scripts").join("python.exe")
+    } else {
+        venv.join("bin").join("python")
+    }
+}
+
+fn venv_ready(app_home: &Path) -> bool {
+    venv_python(&venv_dir(app_home)).exists()
+}
+
+/// Offline package set produced by `npm run build:python-core` (or bundled under repo/).
+fn find_wheelhouse(repo_dir: &Path) -> Option<PathBuf> {
+    for c in ["runtime/wheelhouse", "repo/runtime/wheelhouse"] {
+        let p = repo_dir.join(c);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Resolve the Python interpreter: env override → provisioned venv → system python3.
+fn resolve_python(state: &SharedState) -> Option<String> {
+    if let Ok(p) = std::env::var("AI_EMPLOYEE_PYTHON") {
+        if !p.is_empty() && Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    let vp = venv_python(&venv_dir(&state.app_home));
+    if vp.exists() {
+        return Some(vp.to_string_lossy().into_owned());
+    }
+    which_runtime(&["python3", "python"])
+}
+
+/// First-run: create the venv + offline-install core deps from the wheelhouse.
+/// Ok(true) = provisioned now, Ok(false) = already ready, Err = actionable reason.
+fn provision_python_env(app: &AppHandle, state: &SharedState) -> Result<bool, String> {
+    if venv_ready(&state.app_home) {
+        return Ok(false);
+    }
+    let base = which_runtime(&["python3", "python"])
+        .ok_or("Python 3 is required for the AI backend. Install Python 3 and reopen Nexus OS.")?;
+    let wheelhouse = find_wheelhouse(&state.repo_dir)
+        .ok_or("Offline package set (wheelhouse) not found — rebuild with `npm run build:python-core`.")?;
+    let venv = venv_dir(&state.app_home);
+
+    emit_phase(app, state, "setup-venv", "Creating Python environment");
+    emit_log(app, state, "setup", "Creating virtual environment…", "info");
+    let out = Command::new(&base)
+        .args(["-m", "venv", &venv.to_string_lossy()])
+        .output()
+        .map_err(|e| format!("venv create failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("venv create failed: {}", strip_ansi(&String::from_utf8_lossy(&out.stderr))));
+    }
+
+    let vpy = venv_python(&venv);
+    emit_log(app, state, "setup", "Installing core dependencies (offline)…", "info");
+    let mut args: Vec<String> = vec![
+        "-m".into(), "pip".into(), "install".into(),
+        "--no-index".into(),
+        "--find-links".into(), wheelhouse.to_string_lossy().into_owned(),
+    ];
+    let req = state.repo_dir.join("runtime/requirements-core.txt");
+    if req.exists() {
+        args.push("-r".into());
+        args.push(req.to_string_lossy().into_owned());
+    } else if let Ok(entries) = std::fs::read_dir(&wheelhouse) {
+        // No pinned core file: install every wheel present in the offline set.
+        for e in entries.flatten() {
+            if e.file_name().to_string_lossy().ends_with(".whl") {
+                args.push(e.path().to_string_lossy().into_owned());
+            }
+        }
+    }
+    let out = Command::new(&vpy)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("pip install failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("dependency install failed: {}", strip_ansi(&String::from_utf8_lossy(&out.stderr))));
+    }
+    emit_phase(app, state, "setup-venv", "Python environment ready");
+    Ok(true)
+}
+
+/// M3: detect Ollama (managed separately, not bundled) and inform the user. Never installs
+/// or pulls without consent — only an explicit NEXUS_SETUP_PULL_MODEL triggers a one-time pull.
+async fn check_ollama(app: AppHandle, state: SharedState) {
+    let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".into());
+    let url = format!("{}/api/tags", host.trim_end_matches('/'));
+    let running = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() {
+        Ok(c) => c.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false),
+        Err(_) => false,
+    };
+    if running {
+        emit_log(&app, &state, "setup", "Ollama detected — on-device models available.", "info");
+        // Opt-in (consented) one-time model pull — no silent downloads.
+        if let Ok(model) = std::env::var("NEXUS_SETUP_PULL_MODEL") {
+            if !model.is_empty() {
+                if let Some(ollama) = which_runtime(&["ollama"]) {
+                    emit_log(&app, &state, "setup", &format!("Pulling model {model} (consented)…"), "info");
+                    let _ = Command::new(ollama).args(["pull", &model]).output();
+                }
+            }
+        }
+    } else {
+        emit_log(&app, &state, "setup",
+            "Ollama not detected — on-device models are optional. Install from https://ollama.com and reopen to enable them.",
+            "warn");
+    }
+}
+
 // ── Boot sequence ────────────────────────────────────────────────────────────
 
 async fn boot(app: AppHandle) {
@@ -569,12 +695,30 @@ async fn boot(app: AppHandle) {
 
     // ── No reusable runtime → spawn our own ──
     let node = which_runtime(&["node"]);
-    let python = which_runtime(&["python3", "python"]);
     if node.is_none() {
         emit_fail(&app, &state, "preflight", "Node.js not found on PATH");
         *state.booting.lock().unwrap() = false;
         return;
     }
+
+    // ── M3: first-run setup — provision the Python venv from the offline wheelhouse ──
+    // Runs once (no venv yet). Blocking pip work goes on a blocking thread so the async
+    // runtime stays responsive and the splash keeps streaming setup phases/logs.
+    if !venv_ready(&state.app_home) {
+        let ah = app.clone();
+        let st = state.clone();
+        match tauri::async_runtime::spawn_blocking(move || provision_python_env(&ah, &st)).await {
+            Ok(Ok(true)) => emit_log(&app, &state, "setup", "First-run setup complete.", "info"),
+            Ok(Ok(false)) => {}
+            Ok(Err(reason)) => emit_log(&app, &state, "setup", &format!("Setup skipped: {reason}"), "warn"),
+            Err(e) => emit_log(&app, &state, "setup", &format!("Setup task error: {e}"), "warn"),
+        }
+    }
+
+    // M3: detect/inform Ollama (managed separately; consent-gated). Bounded 2s probe.
+    check_ollama(app.clone(), state.clone()).await;
+
+    let python = resolve_python(&state);
 
     // Optional debug hold so the boot splash can be observed (default off, env-gated).
     if let Ok(ms) = std::env::var("NEXUS_BOOT_DELAY_MS") {
