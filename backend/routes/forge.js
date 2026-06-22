@@ -33,6 +33,7 @@ const broadcaster = require('../events/broadcaster')
 const { createRouteRateLimit } = require('../middleware/route-rate-limit')
 const { getPromptCache, PromptCacheManager } = require('../services/prompt_cache_manager')
 const { getTokenBudget, estimateTokens } = require('../services/token_budget_manager')
+const swarmCoordinator = require('../services/swarm_coordinator')
 
 // Lightweight logger shim — several swarm/execute paths reference `logger.*`.
 // Maps to console so those paths log instead of throwing "logger is not defined".
@@ -1625,6 +1626,40 @@ async function cachedForgeChat(prompt, timeoutMs = 60000) {
   return { ...result, _cache: 'miss', _tokens: 0 }
 }
 
+// Forge codegen entry: route a goal to the parallel swarm or a single agent
+// (Phase 8). The swarm coordinator decides based on the swarm enable flag, the
+// token budget, explicit opt-in/out (body.use_swarm), and a heavy-goal heuristic.
+// Single source of truth used by both /runs and /runs/stream. Always degrades
+// gracefully (swarm failure → single-agent cached chat) so a run never breaks.
+async function forgeCodegen(prompt, goal, body = {}) {
+  const decision = swarmCoordinator.decide({
+    goal,
+    useSwarm: body?.use_swarm,
+    swarmEnabled: isSwarmEnabled(),
+    taskType: 'code',
+    agentCount: swarmAgents('code'),
+    budgetOk: getTokenBudget().check(estimateTokens(prompt)).allowed,
+  })
+
+  if (decision.mode === 'swarm') {
+    try {
+      const sw = await callSwarm(prompt, decision.task_type || 'code', { n_agents: decision.n_agents })
+      const text = sw?.answer || ''
+      if (text) {
+        try { getTokenBudget().record(estimateTokens(prompt) + estimateTokens(text), { provider: 'swarm', n_agents: decision.n_agents }) } catch { /* best-effort */ }
+      }
+      return { text, mode: 'swarm', n_agents: decision.n_agents, confidence: sw?.confidence ?? null, reason: decision.reason }
+    } catch (err) {
+      // Swarm path failed — fall back to single-agent cached chat, never break the run.
+      const r = await cachedForgeChat(prompt, 60000)
+      return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: `swarm failed (${err.message || 'error'}) — single-agent fallback`, fallback: true }
+    }
+  }
+
+  const r = await cachedForgeChat(prompt, 60000)
+  return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: decision.reason }
+}
+
 const rateLimit = createRouteRateLimit({ keyPrefix: 'forge-fs', max: 30, windowMs: 60_000 })
 const _SAFE_ID_RE = /^[A-Za-z0-9._-]{1,120}$/
 const _V5_JSON_SUBDIRS = new Set(['briefs', 'research_packs', 'goals', 'reports', 'quality_gates'])
@@ -1809,6 +1844,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       const lifecycleBlocked = lifecycle.status === 'blocked'
 
       let aiText = ''
+      let codegenInfo = null
       if (!lifecycleBlocked) {
         try {
           const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
@@ -1821,8 +1857,9 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
             .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
             .join('\n\n')
           const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-          const aiResult = await cachedForgeChat(prompt, 60000)
-          aiText = aiResult?.response || aiResult?.reply || ''
+          const cg = await forgeCodegen(prompt, goal, req.body)
+          aiText = cg.text
+          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
         } catch { /* degraded plan-only run */ }
       }
 
@@ -1872,6 +1909,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         approvals: [],
         test_results: [],
         lifecycle,
+        codegen: codegenInfo,
         review: {
           status: lifecycleBlocked ? 'spec_blocked' : (patches.length ? 'policy_checked' : 'plan_only'),
           summary: lifecycleBlocked
@@ -1927,6 +1965,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       if (lifecycleBlocked) send('progress', { stage: 'blocked', message: `Lifecycle gate blocked: ${lifecycle.reason} — clarify the goal.` })
 
       let aiText = ''
+      let codegenInfo = null
       if (!lifecycleBlocked) {
         send('progress', { stage: 'llm', message: 'Calling AI model…' })
         try {
@@ -1934,8 +1973,10 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
           const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
           const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
           const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-          const aiResult = await cachedForgeChat(prompt, 60000)
-          aiText = aiResult?.response || aiResult?.reply || ''
+          const cg = await forgeCodegen(prompt, goal, req.body)
+          aiText = cg.text
+          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
+          if (cg.mode === 'swarm') send('progress', { stage: 'swarm', message: `Swarm: ${cg.n_agents} agents (${cg.reason})` })
           if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
         } catch { /* degraded plan-only */ }
       }
@@ -1965,7 +2006,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         id: runId, run_id: runId, project_id: project.id, goal, status: lifecycleBlocked ? 'blocked' : (patches.some(p => p.policy?.allowed === false) ? 'blocked' : 'awaiting_approval'),
         mode: req.body?.mode || 'supervised', provider: req.body?.provider || 'local-first',
         max_iterations: Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3)),
-        context_pack: contextPack, plan, actions, patches, approvals: [], test_results: [], lifecycle,
+        context_pack: contextPack, plan, actions, patches, approvals: [], test_results: [], lifecycle, codegen: codegenInfo,
         review: {
           status: lifecycleBlocked ? 'spec_blocked' : (patches.length ? 'policy_checked' : 'plan_only'),
           summary: lifecycleBlocked ? `Lifecycle gate blocked this run (${lifecycle.reason}). Clarify the goal and resubmit.` : (patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated.'),

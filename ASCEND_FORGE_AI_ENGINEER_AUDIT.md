@@ -158,10 +158,22 @@ Approval/safety: tenancy.js (tenant gate) → requireAuth/requireScope → HITL 
 - **Severity:** HIGH · **Files:** compute_fabric/index.js, compute_fabric/persistence.js, compute_router.py
 - **Fix:** Phase 7 worker protocol + one real provider adapter, owner-gated by `COMPUTE_FABRIC_LIVE=1`.
 
-### GAP-4 — Swarm exists but forge never uses it (HIGH)
-- **Evidence:** `business_swarm/*` + `/api/forge/swarm` + `/mirofish` exist; `/runs` codegen path never calls them.
-- **Why it matters:** heavy/parallel coding work can't fan out.
-- **Severity:** HIGH · **Fix:** Phase 8 — route heavy run tasks through swarm coordinator after the orchestrator decides parallelism is warranted.
+### GAP-4 — Swarm exists but forge never uses it (HIGH → ADDRESSED 2026-06-23)
+> **Status update:** added `backend/services/swarm_coordinator.js` (pure `decide()`:
+> swarm enable flag → token budget → explicit opt-in/out (`use_swarm`) → heavy-goal heuristic
+> → single default) and `forgeCodegen()` in forge.js, used by both `/runs` and `/runs/stream`.
+> Heavy/explicit goals now fan out to the parallel swarm (`callSwarm` → core/swarm_engine, N
+> agents + belief propagation); simple goals stay single-agent. Swarm failure degrades to the
+> single-agent cached path (never breaks a run); `run.codegen` records {mode,n_agents,confidence}.
+> Verified live: `use_swarm:true` ran 2 agents (confidence 0.949); swarm-off → single.
+
+### GAP-7 (NEW) — Remote compute had no worker protocol (HIGH → ADDRESSED 2026-06-23)
+> **Status update (Phase 7):** added `backend/services/remote_worker_registry.js` +
+> `backend/routes/remote-compute.js` (`/api/remote-compute`): HMAC single-use pairing tokens,
+> worker registration (deny-by-default, untrusted by default), heartbeat/staleness, owner-set
+> trust, capability matching, and `assign()` that dispatches remote ONLY when
+> `COMPUTE_FABRIC_LIVE=1` + a compatible worker exists, else falls back to local. Complements
+> compute_fabric (provisioning) — no duplication. Verified: 19 unit tests + live HTTP matrix.
 
 ### GAP-5 — Semantic/prompt cache + enforced token budget (MEDIUM → ADDRESSED 2026-06-22)
 > **Status update:** added `backend/services/prompt_cache_manager.js` (content-addressed cache —
