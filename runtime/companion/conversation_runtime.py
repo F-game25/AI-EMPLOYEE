@@ -101,6 +101,8 @@ class ConversationRuntime:
     def _handle_inner(self, request: CompanionRequest, t0: float) -> CompanionResponse:
         ctx = dict(request.context or {})
         ctx.setdefault("text", request.text)
+        ctx.setdefault("tenant_id", request.tenant_id or "default")
+        ctx.setdefault("channel", request.channel or "chat")
 
         # 0) Load short-term session memory and fold it into the context so a
         #    follow-up like "option 2" / "do that" has a referent.
@@ -171,7 +173,7 @@ class ConversationRuntime:
                 "executing" if out["executed"] else "generating")
         elif mode == "monitoring":
             out = self._broker.execute(intent, resolved, ctx,
-                                       only_subsystems={"system"})
+                                       only_subsystems={"system", "teammate"})
             actions = out["results"]
             approvals = out["approvals_required"]
             reply = self._summarize_monitoring(out)
@@ -230,13 +232,14 @@ class ConversationRuntime:
 
         # Persist short-term session memory (captures any options this reply
         # offered, so the next "option N" resolves).
-        session.note_assistant(reply, intent=intent, actions=actions)
+        session.note_assistant(reply, intent=intent, actions=actions,
+                               tool_results=actions)
         self._sessions.save(session)
 
         # Voice channel: also carry a short, spoken-friendly summary. The full
         # `reply` still goes to chat/action panel; TTS speaks `voice_summary`.
         if (request.channel or "").lower() == "voice":
-            meta["voice_summary"] = self._voice_summary(reply)
+            meta["voice_summary"] = self._voice_summary_for_actions(reply, actions)
 
         return CompanionResponse(
             ok=True,
@@ -356,8 +359,33 @@ class ConversationRuntime:
         page = ctx.get("current_page")
         if page:
             prompt = f"[context: user is on the '{page}' page]\n{text}"
+        session_context = self._session_context_prompt(ctx)
+        if session_context:
+            prompt = f"{session_context}\n\nUser: {prompt}"
         return self._llm(prompt, system, model_info,
                          fallback=self._canned_reply(text, mode))
+
+    @staticmethod
+    def _session_context_prompt(ctx: dict) -> str:
+        """Small factual context block for conversational follow-ups."""
+        parts: list[str] = []
+        last_assistant = str(ctx.get("last_assistant_message") or "").strip()
+        if last_assistant:
+            parts.append(f"Previous assistant reply: {last_assistant[:900]}")
+        tool_results = ctx.get("recent_tool_results") or []
+        if isinstance(tool_results, list) and tool_results:
+            try:
+                import json as _json
+                packed = _json.dumps(tool_results[-3:], ensure_ascii=False, default=str)
+            except Exception:
+                packed = str(tool_results[-3:])
+            parts.append(f"Recent real tool results: {packed[:1600]}")
+        pending = ctx.get("pending_decision")
+        if pending:
+            parts.append(f"Pending decision: {str(pending)[:500]}")
+        if not parts:
+            return ""
+        return "[session context]\n" + "\n".join(parts)
 
     def _generate_plan(self, text: str, ctx: dict, model_info: dict) -> str:
         system = ("You are a planning assistant. Produce a short, numbered, "
@@ -438,6 +466,18 @@ class ConversationRuntime:
             summary = summary.rstrip(".!? ") + ". The full details are in the chat."
         return summary
 
+    @classmethod
+    def _voice_summary_for_actions(cls, reply: str, actions: list[dict[str, Any]]) -> str:
+        """Prefer capability-authored spoken summaries when available."""
+        for action in actions or []:
+            if not isinstance(action, dict):
+                continue
+            data = action.get("data") if isinstance(action.get("data"), dict) else {}
+            spoken = str(data.get("spoken_summary") or "").strip()
+            if action.get("cap") == "briefing.morning" and spoken:
+                return spoken
+        return cls._voice_summary(reply)
+
     # ── Result summarisers ───────────────────────────────────────────────────────
 
     @staticmethod
@@ -464,7 +504,10 @@ class ConversationRuntime:
         # Direct system-info answers (local time / cwd / hardware): one real line,
         # not a tutorial — the teammate answered with the measured value.
         for r in results:
-            cap, res = r.get("cap"), (r.get("result") or {})
+            cap = r.get("cap")
+            res = r.get("data") or r.get("result") or {}
+            if cap == "briefing.morning" and isinstance(res, dict):
+                return ConversationRuntime._format_morning_brief(res)
             if cap == "system_local_time" and res.get("hhmm"):
                 tz = res.get("timezone")
                 return f"It's {res['hhmm']} local time on this PC{f' ({tz})' if tz else ''}."
@@ -492,6 +535,37 @@ class ConversationRuntime:
             return ("Monitoring adapters for these aren't wired yet (no fabricated "
                     f"data): {', '.join(stubs)}.")
         return "Nothing to report from the monitoring read."
+
+    @staticmethod
+    def _format_morning_brief(data: dict) -> str:
+        """Full chat reply for a morning brief; TTS gets a shorter voice_summary."""
+        headline = data.get("headline") or "Morning brief"
+        summary = data.get("summary") or "No summary available."
+        focus = data.get("focus") if isinstance(data.get("focus"), list) else []
+        risks = data.get("risks") if isinstance(data.get("risks"), list) else []
+        metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
+        lines = [str(headline), "", str(summary)]
+        if focus:
+            lines += ["", "Focus:"]
+            lines += [f"{idx}. {item}" for idx, item in enumerate(focus[:5], 1)]
+        if risks:
+            lines += ["", "Risks:"]
+            lines += [f"- {item}" for item in risks[:5]]
+        if metrics:
+            lines += [
+                "",
+                "Snapshot:",
+                (
+                    f"- Active tasks: {metrics.get('active_tasks', 0)} | "
+                    f"Pipeline leads: {metrics.get('active_pipeline_leads', 0)} | "
+                    f"Pipeline value: ${float(metrics.get('pipeline_value', 0) or 0):,.0f} | "
+                    f"Collected revenue: ${float(metrics.get('revenue_paid', 0) or 0):,.0f}"
+                ),
+            ]
+        prompt = data.get("follow_up_prompt")
+        if prompt:
+            lines += ["", str(prompt)]
+        return "\n".join(lines).strip()
 
     @staticmethod
     def _paid_upgrade_approval(model_info: dict, intent: dict) -> dict:

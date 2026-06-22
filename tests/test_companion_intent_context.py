@@ -37,6 +37,37 @@ def test_monitoring_question():
     assert out["task_type"] == "monitoring"
 
 
+def test_morning_brief_routes_to_readonly_briefing():
+    for phrase in ("give me my morning brief", "daily briefing", "what should I focus on today"):
+        out = _clf().classify(phrase)
+        assert out["mode"] == MODE_MONITORING
+        assert out["is_command"] is False
+        assert out["task_type"] == "briefing.morning"
+
+
+def test_teammate_morning_brief_routine_routes_to_configure():
+    for phrase in ("brief me every morning at 8", "set up morning brief",
+                   "turn off morning brief"):
+        out = _clf().classify(phrase)
+        assert out["mode"] == MODE_EXECUTION
+        assert out["is_command"] is True
+        assert out["task_type"] == "teammate.routine.configure"
+
+
+def test_briefing_followup_task_routes_to_teammate_task_creation():
+    out = _clf().classify("turn first focus into a task")
+    assert out["mode"] == MODE_EXECUTION
+    assert out["is_command"] is True
+    assert out["task_type"] == "teammate.briefing.create_task"
+
+
+def test_teammate_routine_status_routes_to_monitoring():
+    out = _clf().classify("morning brief settings")
+    assert out["mode"] == MODE_MONITORING
+    assert out["is_command"] is False
+    assert out["task_type"] == "teammate.routine.status"
+
+
 def test_execution_command_is_command():
     out = _clf().classify("fix the avatar lag")
     assert out["mode"] == MODE_EXECUTION
