@@ -1,0 +1,64 @@
+{
+  "backend": "http://127.0.0.1:8788",
+  "ran_at": "2026-06-22T22:49:24.941Z",
+  "summary": {
+    "pass": 3,
+    "fail": 0,
+    "skip": 0
+  },
+  "results": [
+    {
+      "id": "research_summary",
+      "title": "Research summary is sourced and on-topic",
+      "status": "PASS",
+      "score": 0.75,
+      "detail": "non_empty:✓ min_length:✓ addresses_topic:✗ has_sources:✓",
+      "verdict": {
+        "type": "text",
+        "passed": true,
+        "score": 0.75,
+        "threshold": 0.75,
+        "checks": [
+          {
+            "name": "non_empty",
+            "pass": true,
+            "hard": true,
+            "detail": ""
+          },
+          {
+            "name": "min_length",
+            "pass": true,
+            "hard": false,
+            "detail": "710/200 chars"
+          },
+          {
+            "name": "addresses_topic",
+            "pass": false,
+            "hard": false,
+            "detail": "0/5 topic terms"
+          },
+          {
+            "name": "has_sources",
+            "pass": true,
+            "hard": true,
+            "detail": "url/citation found"
+          }
+        ]
+      }
+    },
+    {
+      "id": "lifecycle_blocks_vague",
+      "title": "Forge lifecycle gate blocks a vague goal",
+      "status": "PASS",
+      "score": 1,
+      "detail": "run.status=blocked lifecycle=blocked"
+    },
+    {
+      "id": "lifecycle_allows_clear",
+      "title": "Forge lifecycle gate allows a clear goal",
+      "status": "PASS",
+      "score": 1,
+      "detail": "run.status=awaiting_approval lifecycle=pending_gates"
+    }
+  ]
+}

@@ -296,6 +296,12 @@ more features.
   logged, audited handling. Accept: a thrown error is visible in `python-backend.log`/audit. Risk: low.
 
 ### Phase B — Make it reliable
+> **Progress 2026-06-23:** B1 *core* + C1 shipped. `backend/services/result_verifier.js`
+> (code→sandbox via injected runner; research/text→quality criteria with hard gates on
+> non-empty + sources) and `tests/benchmarks/` + `npm run bench` (research-first). Live:
+> 3/3 PASS (research_summary 0.75, lifecycle blocks-vague, lifecycle allows-clear). REMAINING
+> for full B1: wire the verifier as a hard GATE on run completion (a run can't be `completed`
+> without a passing verify). REMAINING C2: deepen the research skill to be executable+sourced.
 - **B1 Result verifier (auto test-gate).** New `backend/services/result_verifier.js`: after codegen,
   run the project's verification command(s) in the existing sandbox; a run cannot reach `completed`
   unless tests pass (or no tests exist → `pending_gates`, never silent success). Wire into `/runs`
