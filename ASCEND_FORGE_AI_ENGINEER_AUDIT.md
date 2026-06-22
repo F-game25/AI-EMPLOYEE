@@ -163,10 +163,17 @@ Approval/safety: tenancy.js (tenant gate) → requireAuth/requireScope → HITL 
 - **Why it matters:** heavy/parallel coding work can't fan out.
 - **Severity:** HIGH · **Fix:** Phase 8 — route heavy run tasks through swarm coordinator after the orchestrator decides parallelism is warranted.
 
-### GAP-5 — No semantic/prompt cache; compression not enforced on API path (MEDIUM)
-- **Evidence:** `compressContext` exists but `/runs` builds context independently; no cache layer found for repeated LLM calls.
-- **Why it matters:** token waste when the brain re-reads context; violates the cost goal.
-- **Severity:** MEDIUM · **Fix:** Phase 3 — token budget manager + semantic cache in front of every API call.
+### GAP-5 — Semantic/prompt cache + enforced token budget (MEDIUM → ADDRESSED 2026-06-22)
+> **Status update:** added `backend/services/prompt_cache_manager.js` (content-addressed cache —
+> sha256(model+system+prompt); a hit is only ever byte-identical, so invalidation is automatic)
+> and `backend/services/token_budget_manager.js` (per-day token guard; `FORGE_LLM_DAILY_TOKEN_BUDGET`,
+> default 0 = unlimited/track-only — safe default, never silently blocks). Both wired into the
+> Forge codegen path via `cachedForgeChat()`: identical prompt → cached response (0 tokens);
+> over-budget → call skipped, codegen degrades to plan-only. Observable via `GET /api/forge/usage`
+> + MCP `get_usage`. Complements (does not duplicate) the Python USD ledger `cost_ledger.py`.
+> Verified live: repeated goal served from cache (0 new tokens); over-budget run skipped the call.
+> Remaining: extend the same wrapper to the Python engine LLM path + add semantic (embedding)
+> similarity beyond exact-match.
 
 ### GAP-6 — `/metrics` 500 + broken programmatic auth (HIGH → FIXED today)
 - **Evidence (now fixed):** `/metrics` missing `taskMetrics`/`startTime` deps (500); `/api/auth/token` missing `JWT_EXPIRES_IN` dep (500); `/api/auth/service-token` blocked by tenancy allowlist.
@@ -478,7 +485,7 @@ The components of a real AI engineering engine are largely present and largely r
 **What must be fixed first (in order):**
 1. ✅ **Unify the forge execution path (GAP-1)** — DONE 2026-06-22: cockpit `/runs` now runs the lifecycle gate (spec→plan→review→test) before codegen, blocking vague/unsafe goals with clarifying questions. Follow-up: use plan slices to target codegen + surface open_questions in UI.
 2. ✅ **Orchestrator bridge (GAP-2, Phase 4)** — DONE 2026-06-22: `context-pack` + `orchestrate` (task graph) + `runs/:id/failures` over the scoped-token + MCP surface. The brain now plans/decomposes/reviews; local agents execute after approval.
-3. **Enforce context compression + token budget + cache (Phase 3)** ← NEXT — so the API-as-orchestrator design is cost-correct (no semantic cache / enforced budget yet — GAP-5).
-4. **Then** remote compute (Phase 7) and swarm routing (Phase 8) for scale.
+3. ✅ **Token budget + prompt cache (Phase 3 / GAP-5)** — DONE 2026-06-22: cache (0 tokens on repeat) + per-day token guard (over-budget → degrade) on the Forge codegen path, observable via `/api/forge/usage`. Follow-up: extend to the Python engine path + embedding-similarity cache.
+4. **Then** remote compute (Phase 7) and swarm routing (Phase 8) for scale ← NEXT.
 
 Today's session closed the highest-leverage prerequisites (clean baseline, programmatic least-privilege auth, and the approval→execution loop). The next highest-leverage move is **GAP-1 (unify the pipeline)**, then **Phase 4 (orchestrator bridge)**.

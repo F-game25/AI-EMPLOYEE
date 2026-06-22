@@ -31,6 +31,8 @@ const forgeMemoryGraph = require('../services/forge_memory_graph')
 const forgeContextEngine = require('../services/forge_context_engine')
 const broadcaster = require('../events/broadcaster')
 const { createRouteRateLimit } = require('../middleware/route-rate-limit')
+const { getPromptCache, PromptCacheManager } = require('../services/prompt_cache_manager')
+const { getTokenBudget, estimateTokens } = require('../services/token_budget_manager')
 
 // Lightweight logger shim — several swarm/execute paths reference `logger.*`.
 // Maps to console so those paths log instead of throwing "logger is not defined".
@@ -1588,6 +1590,41 @@ async function callPythonChat(message, timeoutMs = 30000) {
   return { ok: false, error: 'No LLM available. Start Ollama (ollama serve) or set ANTHROPIC_API_KEY in ~/.ai-employee/.env for cloud fallback.' }
 }
 
+// Cache- and budget-aware wrapper around callPythonChat for Forge codegen.
+//  - Identical prompts return the cached response (0 tokens) — the prompt embeds
+//    the project context, so a hit is only ever byte-identical (no staleness).
+//  - Over the daily token budget (FORGE_LLM_DAILY_TOKEN_BUDGET, 0 = unlimited)
+//    the call is skipped so codegen degrades to plan-only instead of spending.
+// Token counts are estimates (~4 chars/token); the budget is a coarse guard, not
+// billing. The authoritative USD ledger remains runtime/core/cost_ledger.py.
+async function cachedForgeChat(prompt, timeoutMs = 60000) {
+  const cache = getPromptCache()
+  const budget = getTokenBudget()
+  const key = PromptCacheManager.key('forge-chat', '', prompt)
+
+  const hit = cache.get(key)
+  if (hit != null) {
+    budget.recordCacheHit()
+    return { ok: true, response: hit, _cache: 'hit', _tokens: 0 }
+  }
+
+  const estIn = estimateTokens(prompt)
+  const gate = budget.check(estIn)
+  if (!gate.allowed) {
+    return { ok: false, error: 'forge_llm_budget_exceeded', _budget: gate.reason, _cache: 'skip', _tokens: 0 }
+  }
+
+  const result = await callPythonChat(prompt, timeoutMs)
+  const text = result?.response || result?.reply || ''
+  if (text) {
+    const used = estIn + estimateTokens(text)
+    budget.record(used, { provider: 'forge-chat' })
+    cache.set(key, text, { len: text.length })
+    return { ...result, _cache: 'miss', _tokens: used }
+  }
+  return { ...result, _cache: 'miss', _tokens: 0 }
+}
+
 const rateLimit = createRouteRateLimit({ keyPrefix: 'forge-fs', max: 30, windowMs: 60_000 })
 const _SAFE_ID_RE = /^[A-Za-z0-9._-]{1,120}$/
 const _V5_JSON_SUBDIRS = new Set(['briefs', 'research_packs', 'goals', 'reports', 'quality_gates'])
@@ -1784,7 +1821,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
             .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
             .join('\n\n')
           const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-          const aiResult = await callPythonChat(prompt, 60000)
+          const aiResult = await cachedForgeChat(prompt, 60000)
           aiText = aiResult?.response || aiResult?.reply || ''
         } catch { /* degraded plan-only run */ }
       }
@@ -1897,7 +1934,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
           const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
           const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
           const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-          const aiResult = await callPythonChat(prompt, 60000)
+          const aiResult = await cachedForgeChat(prompt, 60000)
           aiText = aiResult?.response || aiResult?.reply || ''
           if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
         } catch { /* degraded plan-only */ }
@@ -4358,6 +4395,11 @@ Respond with ONLY valid JSON (no markdown fences):
       failures: { tests: failedTests, actions: actionErrors },
       summary: `${failedTests.length} failed test group(s), ${actionErrors.length} failed/blocked action(s).`,
     })
+  })
+
+  // GET /usage — Forge LLM token-budget status + prompt-cache stats (read scope).
+  router.get('/usage', requireScope('read'), (_req, res) => {
+    res.json({ ok: true, budget: getTokenBudget().summary(), cache: getPromptCache().stats() })
   })
 
   // ── Code understanding (WS4): index a project + retrieve architecture/context ──

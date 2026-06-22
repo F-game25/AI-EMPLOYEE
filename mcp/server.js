@@ -262,6 +262,14 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_usage',
+    description:
+      'Get Forge LLM token-budget status + prompt-cache stats (read-only). Check this before ' +
+      'orchestrating to plan cost-aware: prefer cache hits and stay within the daily token budget.',
+    inputSchema: EMPTY,
+    handler: async () => toolResult(await api('GET', '/api/forge/usage'), '/api/forge/usage'),
+  },
+  {
     name: 'get_run_failures',
     description:
       'Get COMPRESSED failure context for a run (failed tests + failed/blocked actions, messages only — ' +

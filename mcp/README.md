@@ -21,6 +21,7 @@ in the dashboard, the server-side dispatcher runs it through the agent engine.
 | `get_context_pack` | `GET /api/forge/context-pack` | read | compressed project context for cheap planning (no whole-repo read) |
 | `orchestrate` | `POST /api/forge/orchestrate` | task-emit | **plan/decompose**: emit a task graph as proposals for your approval |
 | `get_run_failures` | `GET /api/forge/runs/:id/failures` | read | compressed failure context (messages only) to review/fix cheaply |
+| `get_usage` | `GET /api/forge/usage` | read | LLM token-budget status + prompt-cache stats (plan cost-aware) |
 
 ## Install
 
