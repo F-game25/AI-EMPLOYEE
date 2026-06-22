@@ -596,6 +596,9 @@ app.use('/api/agents', agentsMonitorRouter);
 // precedence while old submit/approve/reject/task/code-ai aliases remain live.
 app.use('/api/forge', require('./routes/forge')(requireAuth, { rlRuns: _rl_forge, requireScope }));
 app.use('/api/compute', require('./routes/compute')(requireAuth));
+// Remote compute worker protocol (Phase 7) — registry/heartbeat/trust/assign,
+// scope-gated; remote dispatch only when COMPUTE_FABRIC_LIVE=1 (else local).
+app.use('/api/remote-compute', require('./routes/remote-compute')(requireAuth, { requireScope }));
 
 // Workflows — template library + CRUD
 app.use('/api/workflows', require('./routes/workflows')(requireAuth));
