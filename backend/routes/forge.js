@@ -35,6 +35,7 @@ const { getPromptCache, PromptCacheManager } = require('../services/prompt_cache
 const { getTokenBudget, estimateTokens } = require('../services/token_budget_manager')
 const swarmCoordinator = require('../services/swarm_coordinator')
 const promptGuard = require('../services/prompt_guard')
+const resultVerifier = require('../services/result_verifier')
 
 // Lightweight logger shim — several swarm/execute paths reference `logger.*`.
 // Maps to console so those paths log instead of throwing "logger is not defined".
@@ -4543,6 +4544,25 @@ Respond with ONLY valid JSON (no markdown fences):
   // GET /usage — Forge LLM token-budget status + prompt-cache stats (read scope).
   router.get('/usage', requireScope('read'), (_req, res) => {
     res.json({ ok: true, budget: getTokenBudget().summary(), cache: getPromptCache().stats() })
+  })
+
+  // POST /research-summary — deepened research skill (C2): produce a SOURCED summary,
+  // injection-guarded (web content is untrusted), cache/budget-aware, and quality-SCORED
+  // by the result verifier (requires inline sources). Pairs with /api/research/discover:
+  // pass the discovered sources in `sources[]`. Honest: no sources / no LLM → passed:false.
+  router.post('/research-summary', requireScope('read'), async (req, res) => {
+    const query = String(req.body?.query || req.body?.topic || '').trim()
+    if (!query) return res.status(400).json({ ok: false, error: 'query required' })
+    const sources = (Array.isArray(req.body?.sources) ? req.body.sources : []).slice(0, 8)
+    const srcBlock = sources
+      .map((s, i) => `[${i + 1}] ${s.title || s.url || 'source'} (${s.url || 'no-url'})\n${String(s.snippet || s.text || s.content || '').slice(0, 600)}`)
+      .join('\n\n')
+    const prompt = `You are a research analyst. Write a concise, factual summary of the topic using ONLY the sources provided. Cite sources inline as [1], [2] and include their URLs. If the sources are insufficient, say so explicitly.\n\nTopic: ${query}\n\nSources:\n${promptGuard.wrapUntrusted(srcBlock || '(no sources provided)', 'web_sources')}`
+    let summary = ''
+    try { const r = await cachedForgeChat(prompt, 60000); summary = r?.response || r?.reply || '' } catch { /* degraded */ }
+    const verdict = resultVerifier.verifyText(summary, { topic: query, requireSources: sources.length > 0, minLen: 150 })
+    appendAudit('forge_research_summary', { query: query.slice(0, 120), sources: sources.length, passed: verdict.passed, score: verdict.score })
+    res.json({ ok: true, query, summary, sources, verdict, passed: verdict.passed })
   })
 
   // ── Code understanding (WS4): index a project + retrieve architecture/context ──

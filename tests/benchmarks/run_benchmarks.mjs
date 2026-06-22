@@ -83,6 +83,16 @@ async function runResearch(task) {
   return { status: v.passed ? 'PASS' : 'FAIL', score: v.score, detail: v.checks.map(c => `${c.name}:${c.pass ? '✓' : '✗'}`).join(' '), verdict: v }
 }
 
+async function runResearchSkill(task) {
+  const disc = await jpost('/api/research/discover', { query: task.query, limit: 5 })
+  if (disc.status >= 400) return { status: 'SKIP', detail: `discover ${disc.status}` }
+  const sources = (disc.json?.sources || disc.json?.results || disc.json?.items || []).slice(0, 5)
+  const r = await jpost('/api/forge/research-summary', { query: task.query, sources })
+  if (r.status >= 400) return { status: 'SKIP', detail: `research-summary ${r.status}` }
+  const v = r.json?.verdict
+  return { status: r.json?.passed ? 'PASS' : 'FAIL', score: v?.score, detail: (v?.checks || []).map(c => `${c.name}:${c.pass ? '✓' : '✗'}`).join(' ') }
+}
+
 async function runForgeRun(task) {
   // create a throwaway scratch project, run the goal, inspect lifecycle gate, clean up
   const proj = await jpost('/api/forge/projects', { name: `bench-${Date.now().toString(36)}`, target_type: 'code' })
@@ -119,7 +129,10 @@ async function main() {
   for (const t of tasks) {
     let r
     try {
-      r = t.type === 'research' ? await runResearch(t) : t.type === 'forge_run' ? await runForgeRun(t) : { status: 'SKIP', detail: `unknown type ${t.type}` }
+      r = t.type === 'research' ? await runResearch(t)
+        : t.type === 'research_skill' ? await runResearchSkill(t)
+        : t.type === 'forge_run' ? await runForgeRun(t)
+        : { status: 'SKIP', detail: `unknown type ${t.type}` }
     } catch (e) { r = { status: 'SKIP', detail: `error: ${e.message}` } }
     results.push({ id: t.id, title: t.title, ...r })
   }

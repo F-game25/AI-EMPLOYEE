@@ -10,6 +10,13 @@
       "weight": 1
     },
     {
+      "id": "research_summary_skill",
+      "title": "Deepened research skill returns a sourced, scored summary",
+      "type": "research_skill",
+      "query": "advantages of retrieval-augmented generation",
+      "weight": 1
+    },
+    {
       "id": "lifecycle_blocks_vague",
       "title": "Forge lifecycle gate blocks a vague goal",
       "type": "forge_run",
