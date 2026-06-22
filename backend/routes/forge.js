@@ -699,7 +699,7 @@ function runGit(root, args, timeoutMs) { return forgeWorkspace.runGit(root, args
 function gitWorkspaceSource(project) { return forgeWorkspace.gitWorkspaceSource(project) }
 function createGitWorktreeWorkspace(project, workspaceRoot) { return forgeWorkspace.createGitWorktreeWorkspace(project, workspaceRoot) }
 function ensureRunWorkspace(run, project) { return forgeWorkspace.ensureRunWorkspace(run, project) }
-function resolveInsideWorkspace(workspaceRoot, rel) { return forgeWorkspace.resolveInsideWorkspace(workspaceRoot, rel) }
+function resolveInsideWorkspace(workspaceRoot, rel) { return forgePath.resolveInsideWorkspace(workspaceRoot, rel) }
 function readWorkspaceMetadata(workspaceRoot) { return forgeWorkspace.readWorkspaceMetadata(workspaceRoot) }
 function removeRunWorkspace(runId) { return forgeWorkspace.removeRunWorkspace(runId) }
 
@@ -2202,11 +2202,79 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       for (const action of nextActions) broadcastForge('forge:action_updated', { run_id: runIdOf(run), action })
       broadcastForge('forge:run_updated', { run: updated, action: 'approve' })
       emitForgeRuntimeSnapshot('run_approved', { project_id: project.id, run_id: runIdOf(run) })
-      res.status(failures.length ? 409 : 200).json({ ok: failures.length === 0, state: failures.length ? 'degraded' : 'live', run: updated, staged, failures })
+
+      // B1 auto-verify: exercise the gate automatically after staging so "done" is
+      // proven, not assumed. Apply still requires all_passed. Opt out: FORGE_AUTO_VERIFY=0.
+      let finalRun = updated
+      let verification = null
+      if (status === 'staged' && staged.length && String(process.env.FORGE_AUTO_VERIFY || '1') !== '0') {
+        try {
+          const vr = await performRunVerification(updated, project, undefined, req.user?.email || 'auto-verify')
+          if (vr.ok) { finalRun = vr.updated; verification = { all_passed: vr.all_passed, test_result: vr.testResult } }
+          else appendAudit('forge_auto_verify_skipped', { run_id: run.id, reason: vr.error })
+        } catch (e) {
+          appendAudit('forge_auto_verify_error', { run_id: run.id, error: e.message })
+        }
+      }
+      res.status(failures.length ? 409 : 200).json({ ok: failures.length === 0, state: failures.length ? 'degraded' : 'live', run: finalRun, staged, failures, verification })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
     }
   })
+
+  // Shared verification: runs the project's allowlisted verification commands in the
+  // run's sandboxed workspace and records the verdict on the run. Used by the manual
+  // /verify route AND auto-verify-on-approve so the gate is exercised automatically.
+  // Returns { ok, all_passed, updated, testResult } or { ok:false, code, error }.
+  async function performRunVerification(run, project, requestedCommands, by) {
+    const workspace = runWorkspaceRoot(run.id)
+    if (!fs.existsSync(workspace)) return { ok: false, code: 409, error: 'run workspace missing; approve/stage a patch first' }
+    const cmds = _normalizeVerifyCommands(
+      requestedCommands,
+      run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project),
+      isVerifyAllowed,
+    )
+    if (!cmds.length) return { ok: false, code: 400, error: 'no allowed verification commands' }
+    broadcastForge('forge:validation_started', { run_id: runIdOf(run), project_id: project.id, commands: cmds })
+    const verify = await runVerifyCommands(project, cmds, workspace)
+    const workspaceMeta = readWorkspaceMetadata(workspace)
+    const testResult = {
+      id: `verify-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      all_passed: verify.all_passed,
+      results: verify.results,
+      workspace,
+      workspace_meta: workspaceMeta,
+      commands: cmds,
+      verified_at: nowIso(),
+      verified_by: by || 'operator',
+    }
+    const nextActions = (run.actions || []).map(action => {
+      if (!RUN_WRITE_ACTIONS.has(action.type) || !['staged', 'verified'].includes(action.status)) return action
+      return { ...action, status: verify.all_passed ? 'verified' : 'verify_failed', updated_at: nowIso() }
+    })
+    const nextPatches = (run.patches || []).map(patch => {
+      if (!['staged', 'verified'].includes(patch.status)) return patch
+      return { ...patch, status: verify.all_passed ? 'verified' : 'verify_failed' }
+    })
+    const updated = updateRun(run.id, {
+      status: verify.all_passed ? 'verified' : 'verify_failed',
+      actions: nextActions,
+      patches: nextPatches,
+      test_results: [...(run.test_results || []), testResult],
+      review: {
+        ...(run.review || {}),
+        status: verify.all_passed ? 'verification_passed' : 'verification_failed',
+        summary: verify.all_passed
+          ? 'All staged verification commands passed.'
+          : 'One or more staged verification commands failed.',
+      },
+    })
+    appendAudit('forge_run_verified', { run_id: run.id, all_passed: verify.all_passed, commands: cmds.length })
+    broadcastForge('forge:validation_completed', { run_id: runIdOf(run), project_id: project.id, test_result: testResult, all_passed: verify.all_passed })
+    broadcastForge('forge:run_updated', { run: updated, action: 'verify' })
+    emitForgeRuntimeSnapshot('run_verified', { project_id: project.id, run_id: runIdOf(run) })
+    return { ok: true, all_passed: verify.all_passed, updated, testResult }
+  }
 
   router.post('/runs/:id/verify', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_run_verify')) return
@@ -2215,53 +2283,9 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
       const project = findProject(run.project_id)
       if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-      const workspace = runWorkspaceRoot(run.id)
-      if (!fs.existsSync(workspace)) return res.status(409).json({ ok: false, error: 'run workspace missing; approve/stage a patch first' })
-      const cmds = _normalizeVerifyCommands(
-        req.body?.commands,
-        run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project),
-        isVerifyAllowed,
-      )
-      if (!cmds.length) return res.status(400).json({ ok: false, error: 'no allowed verification commands' })
-      broadcastForge('forge:validation_started', { run_id: runIdOf(run), project_id: project.id, commands: cmds })
-      const verify = await runVerifyCommands(project, cmds, workspace)
-      const workspaceMeta = readWorkspaceMetadata(workspace)
-      const testResult = {
-        id: `verify-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
-        all_passed: verify.all_passed,
-        results: verify.results,
-        workspace,
-        workspace_meta: workspaceMeta,
-        commands: cmds,
-        verified_at: nowIso(),
-        verified_by: req.user?.email || req.body?.approved_by || 'operator',
-      }
-      const nextActions = (run.actions || []).map(action => {
-        if (!RUN_WRITE_ACTIONS.has(action.type) || !['staged', 'verified'].includes(action.status)) return action
-        return { ...action, status: verify.all_passed ? 'verified' : 'verify_failed', updated_at: nowIso() }
-      })
-      const nextPatches = (run.patches || []).map(patch => {
-        if (!['staged', 'verified'].includes(patch.status)) return patch
-        return { ...patch, status: verify.all_passed ? 'verified' : 'verify_failed' }
-      })
-      const updated = updateRun(run.id, {
-        status: verify.all_passed ? 'verified' : 'verify_failed',
-        actions: nextActions,
-        patches: nextPatches,
-        test_results: [...(run.test_results || []), testResult],
-        review: {
-          ...(run.review || {}),
-          status: verify.all_passed ? 'verification_passed' : 'verification_failed',
-          summary: verify.all_passed
-            ? 'All staged verification commands passed.'
-            : 'One or more staged verification commands failed.',
-        },
-      })
-      appendAudit('forge_run_verified', { run_id: run.id, all_passed: verify.all_passed, commands: cmds.length })
-      broadcastForge('forge:validation_completed', { run_id: runIdOf(run), project_id: project.id, test_result: testResult, all_passed: verify.all_passed })
-      broadcastForge('forge:run_updated', { run: updated, action: 'verify' })
-      emitForgeRuntimeSnapshot('run_verified', { project_id: project.id, run_id: runIdOf(run) })
-      res.status(verify.all_passed ? 200 : 409).json({ ok: verify.all_passed, state: verify.all_passed ? 'live' : 'degraded', run: updated, test_result: testResult })
+      const r = await performRunVerification(run, project, req.body?.commands, req.user?.email || req.body?.approved_by)
+      if (!r.ok) return res.status(r.code || 500).json({ ok: false, error: r.error })
+      res.status(r.all_passed ? 200 : 409).json({ ok: r.all_passed, state: r.all_passed ? 'live' : 'degraded', run: r.updated, test_result: r.testResult })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
     }
@@ -2278,6 +2302,16 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       const latestTest = (run.test_results || []).slice(-1)[0]
       if (!latestTest?.all_passed && req.body?.force !== true) {
         return res.status(409).json({ ok: false, error: 'verification must pass before apply' })
+      }
+      // Owner override: apply despite failing/absent verification. Keep it possible,
+      // but never silent — record a high-signal audit event so the bypass is visible.
+      if (!latestTest?.all_passed && req.body?.force === true) {
+        appendAudit('forge_apply_forced_unverified', {
+          run_id: run.id, project_id: project.id,
+          by: req.user?.email || req.body?.approved_by || 'operator',
+          had_verification: !!latestTest, risk: 'high',
+        })
+        broadcastForge('forge:diagnostic', { level: 'warning', event: 'apply_forced_unverified', run_id: runIdOf(run), message: 'Run applied WITHOUT passing verification (force=true).' })
       }
       const blocked = (run.patches || []).filter(patch => patch.policy?.allowed === false || patch.status === 'blocked')
       if (blocked.length) return res.status(409).json({ ok: false, error: 'blocked patches cannot be applied', blocked })
