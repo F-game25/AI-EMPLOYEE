@@ -18,6 +18,9 @@ const _zStrMax = (n) => _zStr.max(n);
 
 const SCHEMAS = {
   authToken:           z.object({ secret: _zStr.min(1) }),
+  // Scoped service token for non-browser/brain (MCP) access — deny-by-default.
+  // scope: 'read' (read-only routes) | 'task-emit' (may queue work for approval).
+  serviceToken:        z.object({ secret: _zStr.min(1), scope: z.enum(['read', 'task-emit']), ttl: z.enum(['1h', '8h', '24h', '7d']).optional() }).strict(),
   identityFinalize:    z.object({ user_chosen: _zStrMax(200).optional(), instance_name: _zStrMax(100).optional(), voice_preset: _zStrMax(50).optional(), color_palette: z.record(z.any()).optional() }),
   securityOfflineSync: z.object({ online: z.boolean().optional() }),
   securityGatewayStrict: z.object({ enabled: z.boolean().optional() }),
@@ -105,6 +108,7 @@ module.exports = function createAuthIdentityRouter(deps) {
     errorRecovery,
     _readiness,
     _auditLog,
+    recordAuditEvent,
     collectExpressRoutes,
   } = deps;
 
@@ -127,6 +131,34 @@ module.exports = function createAuthIdentityRouter(deps) {
     }
     const token = jwt.sign({ sub: 'admin', type: 'access', role: 'admin', iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({ ok: true, token, expires_in: JWT_EXPIRES_IN });
+  });
+
+  // ── POST /api/auth/service-token ──────────────────────────────────────────
+  // Mint a least-privilege scoped token for non-browser/brain (MCP) access.
+  // Body: { secret: "<JWT_SECRET_KEY>", scope: "read"|"task-emit", ttl?: "1h"|"8h"|"24h"|"7d" }
+  // Deny-by-default: unknown scopes/fields rejected (strict schema); 'read' cannot
+  // reach write routes (enforced by requireScope on the routes themselves).
+  router.post('/api/auth/service-token', _rl_auth_token, (req, res) => {
+    const body = validate(SCHEMAS.serviceToken, req, res);
+    if (!body) return;
+    if (body.secret !== JWT_SECRET) {
+      // Never echo the supplied secret; audit the failed mint attempt.
+      if (typeof recordAuditEvent === 'function') {
+        recordAuditEvent({ actor: 'service', action: 'service_token_mint_denied', outputData: { reason: 'invalid_secret' }, riskScore: 0.6 });
+      }
+      return res.status(401).json({ ok: false, error: 'Invalid secret' });
+    }
+    const ttl = body.ttl || '24h';
+    const token = jwt.sign(
+      { sub: 'service', type: 'access', role: 'service', scope: body.scope, iss: 'ai-employee', tenant_id: 'default', org_name: 'Local' },
+      JWT_SECRET,
+      { expiresIn: ttl },
+    );
+    // Audit the mint — record scope + ttl only, never the token or secret.
+    if (typeof recordAuditEvent === 'function') {
+      recordAuditEvent({ actor: 'service', action: 'service_token_minted', outputData: { scope: body.scope, ttl }, riskScore: body.scope === 'task-emit' ? 0.4 : 0.2 });
+    }
+    res.json({ ok: true, token, scope: body.scope, expires_in: ttl });
   });
 
   // ── GET /api/auth/auto-token ──────────────────────────────────────────────

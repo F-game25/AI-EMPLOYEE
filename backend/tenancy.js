@@ -25,6 +25,7 @@ function tenantMiddleware(secret = jwtSecret) {
     '/api/health',
     '/api/runtime/identity',
     '/api/auth/token',
+    '/api/auth/service-token',
     '/auth/register',
     '/auth/login',
     '/auth/refresh',

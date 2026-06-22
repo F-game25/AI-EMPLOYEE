@@ -1590,6 +1590,9 @@ function _safeV5Path(subdir, id) {
 
 module.exports = function createForgeRouter(requireAuth, opts = {}) {
   const rlRuns = opts.rlRuns || ((_req, _res, next) => next())
+  // Scope gate for write routes. Falls back to plain requireAuth when not wired
+  // (standalone use), so the module never weakens to no-auth.
+  const requireScope = typeof opts.requireScope === 'function' ? opts.requireScope : (() => requireAuth)
   const router = express.Router()
   const engine = getAscendForgeEngine()
 
@@ -4164,7 +4167,7 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'live', items: pending, total: pending.length })
   })
 
-  router.post('/submit', requireAuth, (req, res) => {
+  router.post('/submit', requireScope('task-emit'), (req, res) => {
     const goal = String(req.body?.goal || req.body?.description || req.body?.title || '').trim()
     if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
     const projectId = req.body?.project_id || null
@@ -4189,7 +4192,7 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'queued', item: action })
   })
 
-  router.post('/approve/:id', requireAuth, (req, res) => {
+  router.post('/approve/:id', requireScope('task-emit'), (req, res) => {
     const action = findAction(req.params.id)
     if (!action) return res.status(404).json({ ok: false, error: 'queue item not found' })
     const updated = updateAction(action.id, {
@@ -4205,7 +4208,7 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'approved', item: updated, action: updated })
   })
 
-  router.post('/reject/:id', requireAuth, (req, res) => {
+  router.post('/reject/:id', requireScope('task-emit'), (req, res) => {
     const action = findAction(req.params.id)
     if (!action) return res.status(404).json({ ok: false, error: 'queue item not found' })
     const updated = updateAction(action.id, {
@@ -6481,4 +6484,18 @@ Return JSON:
   })
 
   return router
+}
+
+// Action-store API surfaced for the out-of-band dispatcher
+// (backend/forge/dispatcher.js), which drains approved `forge_queue_item`
+// actions into the agent engine. Read/write go through the same helpers the
+// routes use, so there is a single source of truth for the queue state.
+module.exports.store = {
+  loadActions,
+  updateAction,
+  findAction,
+  appendAudit,
+  broadcastForge,
+  emitForgeRuntimeSnapshot,
+  nowIso,
 }
