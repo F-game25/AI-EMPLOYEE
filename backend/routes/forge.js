@@ -1089,6 +1089,33 @@ function runForgePython(payload, timeoutMs = 90000) {
   })
 }
 
+// Run the deterministic forge lifecycle gate (spec→plan→review→test→ship) before
+// codegen. Planning/quality-gating only — it never writes files. Env-gated
+// (FORGE_LIFECYCLE_RUNS=0 disables) and fully graceful: any failure degrades to
+// the codegen-only path so runs never break.
+async function runLifecycleGate(goal, project, body = {}) {
+  if (String(process.env.FORGE_LIFECYCLE_RUNS || '1') === '0') {
+    return { status: 'disabled' }
+  }
+  const context = { task_type: body?.task_type || project?.target_type || 'code' }
+  if (body?.test_target) context.test_target = String(body.test_target)
+  const r = await runForgePython({ operation: 'lifecycle', goal, context }, 60000)
+  if (!r || r.ok === false) {
+    return { status: 'unavailable', reason: r?.error || 'lifecycle unavailable' }
+  }
+  return {
+    status: r.status || 'unknown',
+    reason: r.reason || null,
+    open_questions: (r.spec && r.spec.open_questions) || [],
+    spec_status: r.spec?.status || null,
+    plan_status: r.plan?.status || null,
+    slices: Array.isArray(r.plan?.slices) ? r.plan.slices.length : 0,
+    review_findings: (r.stage_results?.review?.findings || []).length,
+    ship_ready: !!(r.ship && r.ship.ship_ready),
+    detail: r,
+  }
+}
+
 async function executeAction(action, project) {
   if (!project && action.project_id) {
     const err = new Error('project not found')
@@ -1739,21 +1766,28 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       })
       const preflightActions = actionsForPlan(plan, project, {})
 
+      // Lifecycle gate: a vague spec / P0 review / failed tests blocks the run
+      // BEFORE codegen — demand clarity instead of burning LLM tokens on guesswork.
+      const lifecycle = await runLifecycleGate(goal, project, req.body)
+      const lifecycleBlocked = lifecycle.status === 'blocked'
+
       let aiText = ''
-      try {
-        const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
-        const historySnippet = contextPack.recent_sessions
-          .flatMap(session => session.recent || [])
-          .slice(-6)
-          .map(item => `${item.role}: ${String(item.content || '').slice(0, 300)}`)
-          .join('\n')
-        const codeContext = contextPack.relevant_files
-          .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
-          .join('\n\n')
-        const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-        const aiResult = await callPythonChat(prompt, 60000)
-        aiText = aiResult?.response || aiResult?.reply || ''
-      } catch { /* degraded plan-only run */ }
+      if (!lifecycleBlocked) {
+        try {
+          const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
+          const historySnippet = contextPack.recent_sessions
+            .flatMap(session => session.recent || [])
+            .slice(-6)
+            .map(item => `${item.role}: ${String(item.content || '').slice(0, 300)}`)
+            .join('\n')
+          const codeContext = contextPack.relevant_files
+            .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
+            .join('\n\n')
+          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
+          const aiResult = await callPythonChat(prompt, 60000)
+          aiText = aiResult?.response || aiResult?.reply || ''
+        } catch { /* degraded plan-only run */ }
+      }
 
       const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
       for (const action of codeActions) {
@@ -1790,7 +1824,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         run_id: runId,
         project_id: project.id,
         goal,
-        status: patches.some(patch => patch.policy?.allowed === false) ? 'blocked' : 'awaiting_approval',
+        status: lifecycleBlocked ? 'blocked' : (patches.some(patch => patch.policy?.allowed === false) ? 'blocked' : 'awaiting_approval'),
         mode: req.body?.mode || 'supervised',
         provider: req.body?.provider || 'local-first',
         max_iterations: Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3)),
@@ -1800,10 +1834,15 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         patches,
         approvals: [],
         test_results: [],
+        lifecycle,
         review: {
-          status: patches.length ? 'policy_checked' : 'plan_only',
-          summary: patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated; run is ready for planning review.',
+          status: lifecycleBlocked ? 'spec_blocked' : (patches.length ? 'policy_checked' : 'plan_only'),
+          summary: lifecycleBlocked
+            ? `Lifecycle gate blocked this run (${lifecycle.reason}). Clarify the goal and resubmit.`
+            : (patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated; run is ready for planning review.'),
           blocked: patches.filter(patch => patch.policy?.allowed === false).length,
+          lifecycle_reason: lifecycle.reason || null,
+          open_questions: lifecycle.open_questions || [],
         },
         final_report: null,
         audit_ids: [],
@@ -1812,7 +1851,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         updated_at: nowIso(),
       }
       upsertRun(run)
-      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length, lifecycle_status: lifecycle.status, lifecycle_reason: lifecycle.reason || null })
       broadcastForge('forge:run_created', { run })
       broadcastForge('forge:run_updated', { run })
       if (pendingApprovalsForRun(run).length) broadcastForge('forge:approval_required', { run_id: runId, pending_approvals: pendingApprovalsForRun(run) })
@@ -1844,18 +1883,25 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       const targetFiles = contextPack.relevant_files.map(item => item.path).filter(Boolean).slice(0, 8)
       const plan = createPlan(engine, project, { goal, provider: req.body?.provider, target_files: targetFiles, target_type: project.target_type })
       const preflightActions = actionsForPlan(plan, project, {})
-      send('progress', { stage: 'llm', message: 'Calling AI model…' })
+
+      send('progress', { stage: 'lifecycle', message: 'Running spec → plan → review → test gates…' })
+      const lifecycle = await runLifecycleGate(goal, project, req.body)
+      const lifecycleBlocked = lifecycle.status === 'blocked'
+      if (lifecycleBlocked) send('progress', { stage: 'blocked', message: `Lifecycle gate blocked: ${lifecycle.reason} — clarify the goal.` })
 
       let aiText = ''
-      try {
-        const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
-        const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
-        const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
-        const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-        const aiResult = await callPythonChat(prompt, 60000)
-        aiText = aiResult?.response || aiResult?.reply || ''
-        if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
-      } catch { /* degraded plan-only */ }
+      if (!lifecycleBlocked) {
+        send('progress', { stage: 'llm', message: 'Calling AI model…' })
+        try {
+          const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
+          const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
+          const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
+          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
+          const aiResult = await callPythonChat(prompt, 60000)
+          aiText = aiResult?.response || aiResult?.reply || ''
+          if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
+        } catch { /* degraded plan-only */ }
+      }
 
       const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
       for (const action of codeActions) {
@@ -1879,15 +1925,20 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         status: action.status || 'pending_approval',
       }))
       const run = {
-        id: runId, run_id: runId, project_id: project.id, goal, status: patches.some(p => p.policy?.allowed === false) ? 'blocked' : 'awaiting_approval',
+        id: runId, run_id: runId, project_id: project.id, goal, status: lifecycleBlocked ? 'blocked' : (patches.some(p => p.policy?.allowed === false) ? 'blocked' : 'awaiting_approval'),
         mode: req.body?.mode || 'supervised', provider: req.body?.provider || 'local-first',
         max_iterations: Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3)),
-        context_pack: contextPack, plan, actions, patches, approvals: [], test_results: [],
-        review: { status: patches.length ? 'policy_checked' : 'plan_only', summary: patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated.', blocked: patches.filter(p => p.policy?.allowed === false).length },
+        context_pack: contextPack, plan, actions, patches, approvals: [], test_results: [], lifecycle,
+        review: {
+          status: lifecycleBlocked ? 'spec_blocked' : (patches.length ? 'policy_checked' : 'plan_only'),
+          summary: lifecycleBlocked ? `Lifecycle gate blocked this run (${lifecycle.reason}). Clarify the goal and resubmit.` : (patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated.'),
+          blocked: patches.filter(p => p.policy?.allowed === false).length,
+          lifecycle_reason: lifecycle.reason || null, open_questions: lifecycle.open_questions || [],
+        },
         final_report: null, audit_ids: [], workspace_path: runWorkspaceRoot(runId), created_at: nowIso(), updated_at: nowIso(),
       }
       upsertRun(run)
-      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length, lifecycle_status: lifecycle.status, lifecycle_reason: lifecycle.reason || null })
       broadcastForge('forge:run_created', { run })
       broadcastForge('forge:run_updated', { run })
       const pending = pendingApprovalsForRun(run)
