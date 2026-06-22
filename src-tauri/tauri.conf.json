@@ -1,32 +1,33 @@
 {
-  "productName": "AI Employee",
+  "productName": "Nexus OS",
   "version": "0.1.0",
-  "identifier": "com.f-game25.ai-employee",
+  "identifier": "com.aethernus.nexus-os",
   "build": {
     "frontendDist": "../frontend/dist",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "cd ../frontend && npm run dev",
     "beforeBuildCommand": "cd ../frontend && npm run build"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
-        "title": "AI Employee",
-        "width": 1400,
-        "height": 900,
+        "title": "Nexus OS",
+        "url": "splash.html",
+        "width": 1280,
+        "height": 832,
         "minWidth": 900,
         "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
         "center": true,
         "decorations": true,
-        "url": "http://localhost:8787",
-        "userAgent": "AI-Employee-Desktop/0.1"
+        "visible": true,
+        "backgroundColor": "#06070D",
+        "userAgent": "Nexus-OS-Desktop/0.1"
       }
     ],
     "trayIcon": {
-      "iconPath": "icons/icon.png",
+      "iconPath": "icons/128x128.png",
       "iconAsTemplate": true,
       "menuOnLeftClick": false
     },
@@ -55,10 +56,7 @@
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
         "headerImage": "icons/128x128.png",
-        "displayLanguageSelector": false,
-        "shortcutName": "AI Employee",
-        "createDesktopShortcut": true,
-        "createStartMenuShortcut": true
+        "displayLanguageSelector": false
       }
     },
     "macOS": {
@@ -67,7 +65,6 @@
       "exceptionDomain": "localhost"
     },
     "linux": {
-      "category": "Office",
       "deb": {
         "depends": ["libwebkit2gtk-4.1-0", "libappindicator3-1"]
       },
