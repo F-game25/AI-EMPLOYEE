@@ -251,6 +251,18 @@ class LLMClient:
                     )
                 except Exception:
                     pass
+                # C3: log a redacted model->quality signal (no prompt/response text
+                # stored — only a goal hash + heuristic output score). Never fatal.
+                try:
+                    from core.routing_quality import score_and_record
+                    score_and_record(
+                        prompt, response.get("output", ""), _model_name,
+                        task_type=getattr(req_tier, "tier", None),
+                        tenant_id=tenant_id,
+                        context_len=int(getattr(req_tier, "estimated_tokens", 0) or 0),
+                    )
+                except Exception:
+                    pass
                 return response
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
