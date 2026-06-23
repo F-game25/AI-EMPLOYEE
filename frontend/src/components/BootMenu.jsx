@@ -37,13 +37,19 @@ export default function BootMenu({ onBoot }) {
   const refreshStatus = useCallback(async () => {
     const token = await ensureOperatorToken()
     const auth = token ? { Authorization: `Bearer ${token}` } : {}
-    // health (public)
+    // health (public) — /api/readiness reports accurate node + python status;
+    // /health only returns {status,timestamp,uptime} (no python field), which is
+    // why AI CORE used to read perpetually "down". Fall back to /health for node.
     try {
-      const h = await fetch('/health', { signal: AbortSignal.timeout(4000) }).then(r => r.ok ? r.json() : null)
-      setHealth({
-        node: !!h,
-        python: !!(h?.python_backend || h?.python_ok || h?.ai_backend),
-      })
+      const rd = await fetch('/api/readiness', { signal: AbortSignal.timeout(4000) })
+        .then(r => r.ok ? r.json() : null)
+      if (rd) {
+        setHealth({ node: rd.nodeReady !== false, python: !!rd.pythonReady })
+      } else {
+        const h = await fetch('/health', { signal: AbortSignal.timeout(4000) })
+          .then(r => r.ok ? r.json() : null)
+        setHealth({ node: !!h, python: !!(h?.python_backend || h?.python_ok || h?.ai_backend) })
+      }
     } catch { setHealth({ node: false, python: false }) }
     // update status (auth)
     try {
