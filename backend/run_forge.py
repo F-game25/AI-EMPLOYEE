@@ -54,6 +54,7 @@ def main() -> None:
         "security_scan": _op_security_scan,
         "governance_digest": _op_governance_digest,
         "llm_status": _op_llm_status,
+        "lifecycle": _op_lifecycle,
     }
     handler = dispatch.get(operation)
     if handler is None:
@@ -291,6 +292,36 @@ def _op_governance_digest(payload: dict) -> None:
         "operation": "governance_digest",
         "digest": digest or "LLM unavailable — cannot generate digest.",
     })
+
+
+def _op_lifecycle(payload: dict) -> None:
+    """Run the deterministic forge lifecycle gate (spec→plan→review→test→ship).
+
+    Planning/quality-gating only — this engine NEVER writes product files (actual
+    code generation + writes stay in the Forge codegen + approval-gated apply path).
+    """
+    goal = str(payload.get("goal", "")).strip()
+    if not goal:
+        _fail("lifecycle: goal is required")
+        return
+
+    try:
+        from forge.lifecycle.lifecycle import run_lifecycle
+    except Exception as exc:
+        _fail(f"import_lifecycle: {exc}")
+        return
+
+    ctx = payload.get("context")
+    if not isinstance(ctx, dict):
+        ctx = {}
+
+    try:
+        result = run_lifecycle(goal, context=ctx)
+    except Exception as exc:
+        _fail(f"lifecycle_failed: {exc}")
+        return
+
+    _out({"ok": True, "operation": "lifecycle", **result})
 
 
 def _op_llm_status(payload: dict) -> None:

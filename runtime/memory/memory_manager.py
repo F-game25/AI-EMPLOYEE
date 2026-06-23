@@ -709,12 +709,14 @@ class MemoryManager:
         # Infer type from prefix
         mtype = memory_id.split(":")[0] if ":" in memory_id else None
         deleted = False
+        canonical_failed = False
 
         if self._unified is not None:
             try:
                 deleted = self._unified.delete(memory_id) or deleted
-            except Exception:
-                pass
+            except Exception as exc:
+                canonical_failed = True
+                logger.warning("canonical memory delete failed for %s: %s", memory_id, exc)
 
         if mtype in self._VECTOR_TYPES and self._vs:
             try:
@@ -743,6 +745,10 @@ class MemoryManager:
             except Exception:
                 pass
 
+        # Canonical store is the source of truth: never report success if its delete
+        # errored, even when a secondary delete succeeded (the record stays retrievable).
+        if canonical_failed:
+            return False
         return deleted
 
     def clear_type(self, memory_type: str) -> int:

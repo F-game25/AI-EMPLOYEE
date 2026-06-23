@@ -11,6 +11,7 @@ runtime/companion/execution_broker.py. Deterministic + fast:
 """
 import sys
 from pathlib import Path
+import json
 
 _RUNTIME = Path(__file__).resolve().parents[1] / "runtime"
 if str(_RUNTIME) not in sys.path:
@@ -18,6 +19,8 @@ if str(_RUNTIME) not in sys.path:
 
 import pytest  # noqa: E402
 
+import companion.execution_broker as eb  # noqa: E402
+import companion.teammate_state as ts  # noqa: E402
 from companion.execution_broker import ExecutionBroker, get_execution_broker  # noqa: E402
 
 
@@ -41,6 +44,103 @@ def test_logs_search_no_query_is_honest():
     out = ExecutionBroker._exec_system_logs_search(None, {})
     assert out["lines"] == []
     assert "note" in out
+
+
+# ── briefing.morning ───────────────────────────────────────────────────────────
+
+def test_morning_briefing_uses_real_local_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(eb, "_state_dir", lambda: tmp_path)
+    (tmp_path / "tasks.json").write_text(json.dumps({
+        "tasks": {
+            "t1": {"title": "Follow up proposals", "status": "running"},
+            "t2": {"title": "Done task", "status": "completed"},
+        }
+    }), encoding="utf-8")
+    (tmp_path / "leads-crm.json").write_text(json.dumps({
+        "leads": [
+            {"stage": "negotiation", "value": 1200},
+            {"stage": "new_lead", "value": 300},
+        ]
+    }), encoding="utf-8")
+    (tmp_path / "invoices.json").write_text(json.dumps({
+        "invoices": [
+            {"status": "paid", "total": 500},
+            {"status": "overdue", "total": 250},
+        ]
+    }), encoding="utf-8")
+    (tmp_path / "guardrails.jsonl").write_text(
+        json.dumps({"status": "pending"}) + "\n",
+        encoding="utf-8",
+    )
+
+    out = ExecutionBroker._exec_morning_briefing(None, {})
+    assert out["status"] == "ok"
+    assert out["read_only"] is True
+    assert out["metrics"]["active_tasks"] == 1
+    assert out["metrics"]["active_pipeline_leads"] == 2
+    assert out["metrics"]["pipeline_value"] == 1500
+    assert out["metrics"]["revenue_paid"] == 500
+    assert out["metrics"]["invoices_overdue"] == 1
+    assert out["metrics"]["guardrail_flags"] == 1
+    assert out["focus"]
+    assert out["spoken_summary"].startswith("Morning brief:")
+
+
+def test_morning_briefing_missing_state_is_honest(tmp_path, monkeypatch):
+    monkeypatch.setattr(eb, "_state_dir", lambda: tmp_path)
+    out = ExecutionBroker._exec_morning_briefing(None, {})
+    assert out["status"] == "ok"
+    assert out["metrics"]["active_tasks"] == 0
+    assert out["missing_sources"]
+    assert "No revenue, guardrail, or execution risks" in out["risks"][0]
+
+
+# ── teammate.* ───────────────────────────────────────────────────────────────
+
+def test_teammate_routine_configure_persists_local_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(ts, "canonical_state_dir", lambda: tmp_path)
+    out = ExecutionBroker._exec_teammate_routine_configure(
+        None, {"text": "brief me every morning at 8:30", "tenant_id": "default"})
+    assert out["status"] == "stored"
+    assert out["stored"] is True
+    assert out["config"]["enabled"] is True
+    assert out["config"]["time"] == "08:30"
+
+    status = ExecutionBroker._exec_teammate_routine_status(
+        None, {"tenant_id": "default"})
+    assert status["routines"]["morning_brief"]["enabled"] is True
+
+
+def test_teammate_briefing_create_task_writes_local_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(eb, "_state_dir", lambda: tmp_path)
+    briefing = {
+        "date": "2026-06-21",
+        "focus": ["Collect overdue invoice.", "Follow up proposal."],
+        "risks": ["1 overdue invoice."],
+    }
+    out = ExecutionBroker._exec_teammate_briefing_create_task(
+        None,
+        {
+            "text": "turn first focus into a task",
+            "recent_tool_results": [{"cap": "briefing.morning", "data": briefing}],
+        },
+    )
+    assert out["status"] == "created"
+    assert out["stored"] is True
+    assert out["task"]["status"] == "pending"
+    assert out["task"]["priority"] == "high"
+
+    saved = json.loads((tmp_path / "tasks.json").read_text(encoding="utf-8"))
+    tasks = saved["tasks"]
+    assert out["task"]["id"] in tasks
+    assert tasks[out["task"]["id"]]["source"] == "voice_morning_brief"
+
+
+def test_teammate_briefing_create_task_requires_recent_brief():
+    out = ExecutionBroker._exec_teammate_briefing_create_task(
+        None, {"text": "turn that into a task"})
+    assert out["status"] == "needs_briefing"
+    assert out["stored"] is False
 
 
 # ── security.score_action ───────────────────────────────────────────────────────
@@ -191,6 +291,10 @@ def test_memory_write_structured_persists(monkeypatch):
 @pytest.mark.parametrize("fn_name", [
     "_exec_system_tasks_active",
     "_exec_system_logs_search",
+    "_exec_morning_briefing",
+    "_exec_teammate_routine_status",
+    "_exec_teammate_routine_configure",
+    "_exec_teammate_briefing_create_task",
     "_exec_security_score_action",
     "_exec_forge_search_code",
     "_exec_money_analyze_idea",
@@ -200,11 +304,13 @@ def test_memory_write_structured_persists(monkeypatch):
     "_exec_memory_write_structured",
 ])
 @pytest.mark.parametrize("bad_ctx", [None, {}, {"text": 123}, {"query": None}])
-def test_adapters_never_raise_on_bad_input(fn_name, bad_ctx, monkeypatch):
+def test_adapters_never_raise_on_bad_input(fn_name, bad_ctx, monkeypatch, tmp_path):
     # Stop research from actually launching a thread.
     monkeypatch.setattr("companion.execution_broker.threading.Thread",
                         type("_T", (), {"__init__": lambda s, *a, **k: None,
                                         "start": lambda s: None}))
+    monkeypatch.setattr(ts, "canonical_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(eb, "_state_dir", lambda: tmp_path)
     fn = getattr(ExecutionBroker, fn_name)
     try:
         out = fn(None, dict(bad_ctx) if isinstance(bad_ctx, dict) else (bad_ctx or {}))
@@ -219,6 +325,8 @@ def test_broker_dispatch_has_all_p6_adapters():
     broker = get_execution_broker()
     for cap_id in (
         "system.tasks.active", "system.logs.search", "memory.write_structured",
+        "briefing.morning", "teammate.routine.status",
+        "teammate.routine.configure", "teammate.briefing.create_task",
         "research.deep.start", "money.analyze_idea", "forge.search_code",
         "forge.plan_change", "forge.run_tests", "security.score_action",
     ):

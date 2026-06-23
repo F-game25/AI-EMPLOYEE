@@ -40,6 +40,16 @@ _PROMOTION_THRESHOLD = {
 
 
 def _default_tenant() -> str:
+    # Prefer the request-scoped tenant set by TenantMiddleware (a ContextVar) so concurrent
+    # multi-tenant requests don't all collapse onto one process-wide env value. Fall back to
+    # env, then "default" for non-request contexts (CLI, background jobs, tests).
+    try:
+        from core.tenancy import get_tenant_manager
+        ctx = get_tenant_manager().get_current_tenant()
+        if ctx is not None and getattr(ctx, "tenant_id", None):
+            return ctx.tenant_id
+    except Exception:
+        pass
     return os.environ.get("TENANT_ID") or os.environ.get("AI_EMPLOYEE_TENANT_ID") or "default"
 
 
@@ -122,13 +132,22 @@ class MemoryService:
             current = record if isinstance(record, MemoryRecord) else MemoryRecord.from_dict(record)
             stored = self._store.upsert(current)
 
+            # Canonical commit (above) is the source of truth. Cache/vector/graph are
+            # best-effort fan-out: isolate their failures so a downstream backend hiccup
+            # can't fail the whole write after the canonical record is already persisted.
             cache_payload = {"text": stored.text, "metadata": stored.vector_metadata(), "record": stored.to_dict()}
-            self._cache.set(stored.id, cache_payload, ttl=_ttl_for(stored.memory_type))
+            try:
+                self._cache.set(stored.id, cache_payload, ttl=_ttl_for(stored.memory_type))
+            except Exception as exc:
+                logger.warning("memory cache write skipped: %s", exc)
 
             vector_stored = False
             if stored.memory_type != "outcome" and stored.importance >= _threshold_for(stored.memory_type):
-                self._vs.store(stored.id, stored.text, metadata=stored.vector_metadata(), importance=stored.importance)
-                vector_stored = True
+                try:
+                    self._vs.store(stored.id, stored.text, metadata=stored.vector_metadata(), importance=stored.importance)
+                    vector_stored = True
+                except Exception as exc:
+                    logger.warning("memory vector write skipped: %s", exc)
 
             graph_stored = False
             if vector_stored and self._graph is not None:
@@ -169,8 +188,27 @@ class MemoryService:
         tags: list[str] | None = None,
         top_k: int = 5,
     ) -> list[dict[str, Any]]:
+        # Default retrieval to the current tenant — without this, an unscoped call returned
+        # every tenant's memories (cross-tenant read). Callers wanting cross-tenant reads
+        # must pass an explicit tenant_id (none of the production call sites do).
+        tenant_id = tenant_id or _default_tenant()
         query_tokens = {t for t in str(query or "").lower().split() if len(t) > 2}
         seen: set[str] = set()
+        # Mirror the canonical store's scope/agent/tags filters on cache + vector
+        # candidates so a query scoped to one tenant/agent/scope/tag-set can't surface
+        # out-of-scope rows from those secondary sources.
+        wanted_tags = {str(t).lower() for t in (tags or [])}
+
+        def _scope_ok(metadata: dict[str, Any]) -> bool:
+            if scope and metadata.get("scope") != scope:
+                return False
+            if agent and metadata.get("agent") != agent:
+                return False
+            if wanted_tags and not wanted_tags.intersection(
+                {str(t).lower() for t in (metadata.get("tags") or [])}
+            ):
+                return False
+            return True
         results: list[dict[str, Any]] = []
 
         with _LOCK:
@@ -185,6 +223,8 @@ class MemoryService:
                 if project_id and metadata.get("project_id") != project_id:
                     continue
                 if session_id and metadata.get("session_id") != session_id:
+                    continue
+                if not _scope_ok(metadata):
                     continue
                 text = str(entry.get("text") or "")
                 low = text.lower()
@@ -239,6 +279,8 @@ class MemoryService:
                 if project_id and metadata.get("project_id") != project_id:
                     continue
                 if session_id and metadata.get("session_id") != session_id:
+                    continue
+                if not _scope_ok(metadata):
                     continue
                 results.append({**row, "id": key, "_source": "vector", "_reason": "vector similarity"})
                 seen.add(key)

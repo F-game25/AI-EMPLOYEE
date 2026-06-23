@@ -130,6 +130,8 @@ def _is_value_question(intent: dict) -> bool:
     """A short operational/value question → one-line answer."""
     mode = str(intent.get("mode", "")).lower()
     task = str(intent.get("task_type", "")).lower()
+    if task.startswith("briefing"):
+        return False
     if mode == "monitoring":
         return True
     if any(h in task for h in _VALUE_TASK_HINTS):
@@ -156,6 +158,7 @@ def policy_for(intent: Optional[dict], *,
                               allow_options=False, allow_tutorial=False)
 
     mode = str(intent.get("mode", "")).lower()
+    task = str(intent.get("task_type", "")).lower()
     is_command = bool(intent.get("is_command"))
 
     # Direct action → confirm + execute + summarize (no manual tutorial).
@@ -163,6 +166,12 @@ def policy_for(intent: Optional[dict], *,
         return ResponsePolicy(STYLE_CONFIRM_ACT, max_sentences=3,
                               allow_options=False,
                               allow_tutorial=user_requested_detail)
+
+    # A morning brief is a compact structured conversation starter, not a single
+    # scalar status value.
+    if task.startswith("briefing"):
+        return ResponsePolicy(STYLE_STRUCTURED, max_sentences=_UNBOUNDED,
+                              allow_options=False, allow_tutorial=False)
 
     # Simple operational/value question → one short answer.
     if _is_value_question(intent):
