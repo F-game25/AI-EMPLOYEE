@@ -116,3 +116,6 @@ resources/voice-core/samples/*.wav
 resources/voice-core/licenses/
 !resources/voice-core/README.md
 !resources/voice-core/manifest.json
+
+# Benchmark run output (generated)
+tests/benchmarks/results.json

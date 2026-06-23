@@ -24,9 +24,12 @@ error is captured as ``{status: 'error', ...}`` — the broker never crashes.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import threading
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -61,6 +64,13 @@ _SYSTEM_INFO_TOOLS: dict[str, str] = {
     "system_info.local_time": "system_local_time",
     "system_info.hardware": "system_hardware",
     "system_info.cwd": "system_cwd",
+}
+
+_EXACT_TASK_CAPS: dict[str, str] = {
+    "briefing.morning": "briefing.morning",
+    "teammate.routine.status": "teammate.routine.status",
+    "teammate.routine.configure": "teammate.routine.configure",
+    "teammate.briefing.create_task": "teammate.briefing.create_task",
 }
 
 # ── Adapter bounds (keep every executor cheap, read-only, non-destructive) ────
@@ -113,6 +123,10 @@ class ExecutionBroker:
             "system.health.read": self._exec_system_health,
             "system.tasks.active": self._exec_system_tasks_active,
             "system.logs.search": self._exec_system_logs_search,
+            "briefing.morning": self._exec_morning_briefing,
+            "teammate.routine.status": self._exec_teammate_routine_status,
+            "teammate.routine.configure": self._exec_teammate_routine_configure,
+            "teammate.briefing.create_task": self._exec_teammate_briefing_create_task,
             "memory.search": self._exec_memory_search,
             "memory.write_structured": self._exec_memory_write_structured,
             "research.deep.start": self._exec_research_deep_start,
@@ -209,6 +223,15 @@ class ExecutionBroker:
                                   or ctx.get("text", ""))) if s
         ).strip()
         candidates = self._registry.find_for_intent(routing_text, task_type)
+        exact_cap_id = _EXACT_TASK_CAPS.get(str(task_type))
+        if exact_cap_id:
+            exact = self._registry.get(exact_cap_id)
+            candidates = [exact] if exact is not None else []
+        else:
+            # These companion actions are intentionally opt-in. Generic
+            # monitoring/questions should not accidentally produce a briefing or
+            # mutate teammate/task state just because token overlap is high.
+            candidates = [c for c in candidates if c.id not in set(_EXACT_TASK_CAPS.values())]
         if only_subsystems is not None:
             candidates = [c for c in candidates if c.subsystem in only_subsystems]
         candidates = candidates[:_MAX_CANDIDATES]
@@ -423,6 +446,322 @@ class ExecutionBroker:
                     "log": str(log_path)}
         return {"lines": matches[-limit:], "matched": len(matches),
                 "log": str(log_path)}
+
+    # ── briefing.morning ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_morning_briefing(cap: Capability, ctx: dict) -> dict:
+        """Build a conversational morning brief from real local state.
+
+        Read-only by design: this does not call the CEO briefing generator because
+        that path may append a cached briefing record. Missing files are reported
+        honestly as absent sources; no metrics are fabricated.
+        """
+        from datetime import datetime
+
+        sd = _state_dir()
+        sources: list[str] = []
+        missing: list[str] = []
+
+        def _json_file(name: str, default: Any) -> Any:
+            path = sd / name
+            if not path.exists():
+                missing.append(name)
+                return default
+            sources.append(str(path))
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001
+                return {"_read_error": str(exc)}
+
+        def _jsonl_file(name: str, limit: int = 300) -> list[dict]:
+            path = sd / name
+            if not path.exists():
+                missing.append(name)
+                return []
+            sources.append(str(path))
+            rows: list[dict] = []
+            try:
+                for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except Exception:
+                        continue
+                    if isinstance(item, dict):
+                        rows.append(item)
+            except Exception:
+                return []
+            return rows[-limit:]
+
+        today = datetime.now().date().isoformat()
+
+        tasks_info = ExecutionBroker._exec_system_tasks_active(cap, ctx)
+        active_tasks = tasks_info.get("tasks") if isinstance(tasks_info, dict) else []
+        active_tasks = active_tasks if isinstance(active_tasks, list) else []
+
+        crm = _json_file("leads-crm.json", {})
+        leads = crm.get("leads", []) if isinstance(crm, dict) else []
+        if not isinstance(leads, list):
+            leads = []
+        leads_by_stage: dict[str, int] = {}
+        pipeline_value = 0.0
+        for lead in leads:
+            if not isinstance(lead, dict):
+                continue
+            stage = str(lead.get("stage") or "new_lead")
+            leads_by_stage[stage] = leads_by_stage.get(stage, 0) + 1
+            try:
+                pipeline_value += float(lead.get("value", 0) or 0)
+            except Exception:
+                pass
+
+        invoices_data = _json_file("invoices.json", {})
+        invoices = invoices_data.get("invoices", []) if isinstance(invoices_data, dict) else []
+        if not isinstance(invoices, list):
+            invoices = []
+        revenue_paid = 0.0
+        invoices_overdue = 0
+        invoices_pending = 0
+        for inv in invoices:
+            if not isinstance(inv, dict):
+                continue
+            status = str(inv.get("status") or "").lower()
+            try:
+                total = float(inv.get("total", inv.get("amount", 0)) or 0)
+            except Exception:
+                total = 0.0
+            if status == "paid":
+                revenue_paid += total
+            elif status == "overdue":
+                invoices_overdue += 1
+            elif status in ("sent", "draft", "pending"):
+                invoices_pending += 1
+
+        social = _json_file("social-schedule.json", {})
+        posts = social.get("posts", []) if isinstance(social, dict) else []
+        if not isinstance(posts, list):
+            posts = []
+        social_posts_today = sum(
+            1 for post in posts
+            if isinstance(post, dict)
+            and str(post.get("published_at") or post.get("scheduled_at") or "").startswith(today)
+        )
+
+        guardrails = _jsonl_file("guardrails.jsonl")
+        guardrail_flags = sum(
+            1 for row in guardrails
+            if str(row.get("status") or "").lower() in ("pending", "blocked", "needs_approval")
+        )
+
+        chat_rows = _jsonl_file("chatlog.jsonl", 500)
+        chat_messages_today = sum(
+            1 for row in chat_rows
+            if str(row.get("timestamp") or row.get("ts") or "").startswith(today)
+        )
+
+        runtime_state = _json_file("runtime_state.json", {})
+        activity = runtime_state.get("activityFeed", []) if isinstance(runtime_state, dict) else []
+        execution_logs = runtime_state.get("executionLogs", []) if isinstance(runtime_state, dict) else []
+        recent_activity = [
+            str((item or {}).get("message") or (item or {}).get("title") or (item or {}).get("event") or "")[:140]
+            for item in (activity if isinstance(activity, list) else [])[:5]
+            if isinstance(item, dict)
+        ]
+        recent_failures = [
+            str((item or {}).get("message") or (item or {}).get("error") or "")[:160]
+            for item in (execution_logs if isinstance(execution_logs, list) else [])[:8]
+            if isinstance(item, dict) and str(item.get("status") or "").lower() == "failed"
+        ]
+
+        active_pipeline = sum(
+            count for stage, count in leads_by_stage.items()
+            if stage not in {"closed_won", "closed_lost"}
+        )
+        metrics = {
+            "active_tasks": len(active_tasks),
+            "known_tasks": tasks_info.get("total_known", len(active_tasks)) if isinstance(tasks_info, dict) else len(active_tasks),
+            "chat_messages_today": chat_messages_today,
+            "leads_total": len(leads),
+            "active_pipeline_leads": active_pipeline,
+            "leads_by_stage": leads_by_stage,
+            "pipeline_value": round(pipeline_value, 2),
+            "revenue_paid": round(revenue_paid, 2),
+            "invoices_overdue": invoices_overdue,
+            "invoices_pending": invoices_pending,
+            "social_posts_today": social_posts_today,
+            "guardrail_flags": guardrail_flags,
+            "recent_failures": len(recent_failures),
+        }
+
+        focus: list[str] = []
+        if invoices_overdue:
+            focus.append(f"Collect or resolve {invoices_overdue} overdue invoice{'s' if invoices_overdue != 1 else ''}.")
+        if guardrail_flags:
+            focus.append(f"Clear {guardrail_flags} pending guardrail or approval item{'s' if guardrail_flags != 1 else ''}.")
+        negotiation = leads_by_stage.get("negotiation", 0) + leads_by_stage.get("proposal", 0)
+        if negotiation:
+            focus.append(f"Follow up on {negotiation} late-stage lead{'s' if negotiation != 1 else ''}.")
+        if active_tasks:
+            first = active_tasks[0]
+            label = first.get("title") or first.get("task") or first.get("id") or "the active task"
+            focus.append(f"Check progress on {label}.")
+        if not focus:
+            focus.append("Use the first work block for one revenue-moving task; no urgent local blockers were found.")
+
+        risks: list[str] = []
+        if invoices_overdue:
+            risks.append(f"{invoices_overdue} overdue invoice{'s' if invoices_overdue != 1 else ''}.")
+        if recent_failures:
+            risks.append(f"{len(recent_failures)} recent failed execution log entr{'ies' if len(recent_failures) != 1 else 'y'}.")
+        if guardrail_flags:
+            risks.append(f"{guardrail_flags} pending guardrail item{'s' if guardrail_flags != 1 else ''}.")
+        if not risks:
+            risks.append("No revenue, guardrail, or execution risks found in local state.")
+
+        headline = f"Morning brief for {today}"
+        summary = (
+            f"{len(active_tasks)} active task{'s' if len(active_tasks) != 1 else ''}, "
+            f"{active_pipeline} active pipeline lead{'s' if active_pipeline != 1 else ''}, "
+            f"${pipeline_value:,.0f} pipeline value, "
+            f"${revenue_paid:,.0f} collected revenue."
+        )
+        spoken_summary = (
+            f"Morning brief: {summary} First focus: {focus[0]} "
+            f"Main risk: {risks[0]} Ask me what to tackle first if you want to work through it."
+        )
+
+        return {
+            "status": "ok",
+            "kind": "morning_briefing",
+            "date": today,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "headline": headline,
+            "summary": summary,
+            "spoken_summary": spoken_summary,
+            "focus": focus[:5],
+            "risks": risks[:5],
+            "metrics": metrics,
+            "recent_activity": recent_activity,
+            "recent_failures": recent_failures[:5],
+            "sources": sources,
+            "missing_sources": missing,
+            "read_only": True,
+            "follow_up_prompt": "Ask me which item to prioritize, why it matters, or to turn one item into a plan.",
+        }
+
+    # ── teammate.* ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_teammate_routine_status(cap: Capability, ctx: dict) -> dict:
+        """Read local teammate preferences/routines."""
+        from companion.teammate_state import load_teammate_state
+
+        tenant_id = str((ctx or {}).get("tenant_id") or "default")
+        state = load_teammate_state(tenant_id)
+        return {
+            "status": "ok",
+            "preferences": state.get("preferences", {}),
+            "routines": state.get("routines", {}),
+            "source": str(_state_dir() / "teammate_state.json"),
+            "read_only": True,
+        }
+
+    @staticmethod
+    def _exec_teammate_routine_configure(cap: Capability, ctx: dict) -> dict:
+        """Persist a local teammate routine preference. No scheduler is started."""
+        from companion.teammate_state import configure_morning_brief, normalize_time
+
+        ctx = ctx or {}
+        text = str(ctx.get("text") or "").lower()
+        tenant_id = str(ctx.get("tenant_id") or "default")
+        disabled = any(phrase in text for phrase in (
+            "disable", "turn off", "cancel", "stop briefing", "stop the brief",
+        ))
+        briefing_time = normalize_time(str(ctx.get("time") or ctx.get("text") or ""))
+        channel = str(ctx.get("channel") or ("chat" if "chat" in text else "voice"))
+        routine = configure_morning_brief(
+            enabled=not disabled,
+            briefing_time=briefing_time,
+            channel=channel,
+            tenant_id=tenant_id,
+        )
+        return {
+            "status": "stored",
+            "routine": "morning_brief",
+            "config": routine,
+            "stored": True,
+            "external_side_effects": False,
+            "note": (
+                "Saved the local teammate routine preference. A background "
+                "scheduler must read this state before automatic delivery runs."
+            ),
+        }
+
+    @staticmethod
+    def _exec_teammate_briefing_create_task(cap: Capability, ctx: dict) -> dict:
+        """Turn a recent morning-brief focus item into a local pending task."""
+        ctx = ctx or {}
+        briefing = _recent_briefing_data(ctx)
+        if not briefing:
+            return {
+                "status": "needs_briefing",
+                "stored": False,
+                "note": "No recent morning brief found in this session. Ask for a morning brief first.",
+            }
+        focus = briefing.get("focus") if isinstance(briefing.get("focus"), list) else []
+        if not focus:
+            return {
+                "status": "no_focus",
+                "stored": False,
+                "note": "The recent morning brief did not contain focus items.",
+            }
+
+        idx = _focus_index_from_text(str(ctx.get("text") or ""))
+        idx = max(0, min(idx, len(focus) - 1))
+        title = str(ctx.get("title") or focus[idx]).strip()
+        if title.endswith("."):
+            title = title[:-1]
+
+        now = datetime.now().isoformat(timespec="seconds")
+        task_id = f"voice-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8]}"
+        task = {
+            "id": task_id,
+            "title": title[:180],
+            "status": "pending",
+            "priority": "high" if _briefing_has_risk(briefing, title) else "normal",
+            "source": "voice_morning_brief",
+            "created_at": now,
+            "context": {
+                "briefing_date": briefing.get("date"),
+                "focus_index": idx + 1,
+                "source_capability": "briefing.morning",
+            },
+        }
+
+        tasks_path = _state_dir() / "tasks.json"
+        try:
+            from core.file_lock import read_json_safe, write_json_safe
+
+            data = read_json_safe(tasks_path, default={})
+            updated = _append_task(data, task)
+            stored = write_json_safe(tasks_path, updated)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "status": "error",
+                "stored": False,
+                "error": str(exc),
+                "task": task,
+            }
+        return {
+            "status": "created" if stored else "error",
+            "stored": bool(stored),
+            "task": task,
+            "source_focus": focus[idx],
+            "external_side_effects": False,
+            "source": str(tasks_path),
+        }
 
     # ── research.deep.start ───────────────────────────────────────────────────────
 
@@ -1126,6 +1465,71 @@ def _safe_mtime(p: Path) -> float:
         return p.stat().st_mtime
     except Exception:
         return 0.0
+
+
+def _recent_briefing_data(ctx: dict) -> dict[str, Any] | None:
+    tool_results = (ctx or {}).get("recent_tool_results") or []
+    if not isinstance(tool_results, list):
+        return None
+    for item in reversed(tool_results):
+        if not isinstance(item, dict) or item.get("cap") != "briefing.morning":
+            continue
+        data = item.get("data")
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _focus_index_from_text(text: str) -> int:
+    low = str(text or "").lower()
+    ordinals = {
+        "first": 0,
+        "1st": 0,
+        "second": 1,
+        "2nd": 1,
+        "third": 2,
+        "3rd": 2,
+        "fourth": 3,
+        "4th": 3,
+        "fifth": 4,
+        "5th": 4,
+    }
+    for token, idx in ordinals.items():
+        if token in low:
+            return idx
+    m = re.search(r"\b([1-5])\b", low)
+    return int(m.group(1)) - 1 if m else 0
+
+
+def _briefing_has_risk(briefing: dict, title: str) -> bool:
+    risk_text = " ".join(str(item).lower() for item in briefing.get("risks", []) or [])
+    title_text = str(title or "").lower()
+    return any(word in risk_text or word in title_text for word in (
+        "overdue", "failed", "pending guardrail", "approval", "risk",
+    ))
+
+
+def _append_task(data: Any, task: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(data, dict) and "tasks" in data:
+        out = dict(data)
+        tasks = out.get("tasks")
+    elif isinstance(data, dict):
+        out = {"tasks": dict(data)}
+        tasks = out["tasks"]
+    elif isinstance(data, list):
+        out = {"tasks": list(data)}
+        tasks = out["tasks"]
+    else:
+        out = {"tasks": {}}
+        tasks = out["tasks"]
+
+    if isinstance(tasks, dict):
+        tasks[task["id"]] = task
+    elif isinstance(tasks, list):
+        tasks.append(task)
+    else:
+        out["tasks"] = {task["id"]: task}
+    return out
 
 
 def _parse_pytest_summary(output: str) -> tuple[Optional[int], Optional[int]]:
