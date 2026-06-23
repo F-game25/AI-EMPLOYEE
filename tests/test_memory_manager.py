@@ -61,6 +61,30 @@ def test_store_with_metadata():
     assert isinstance(mid, str)
 
 
+def test_store_writes_unified_memory(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    monkeypatch.setenv("STATE_DIR", str(state))
+    mm = MemoryManager(state_dir=state)
+
+    mid = mm.store(
+        memory_type="preference",
+        content="Dashboard panels should stay compact and readable",
+        metadata={"source": "pytest", "project_id": "dashboard", "tags": ["ui"]},
+    )
+
+    from memory.unified_store import UnifiedMemoryStore
+
+    store = UnifiedMemoryStore(path=state / "memory" / "unified_memory.json")
+    record = store.get(mid)
+    assert record is not None
+    assert record.memory_type == "preference"
+    assert record.project_id == "dashboard"
+
+    results = mm.retrieve(memory_type="preference", query="compact readable dashboard")
+    assert any(r.get("id") == mid and r.get("_source") == "unified_memory" for r in results)
+    assert mm.stats()["canonical_total"] >= 1
+
+
 # ── retrieve() ────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("memory_type", ["session", "long_term", "research"])

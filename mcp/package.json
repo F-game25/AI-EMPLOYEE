@@ -1,0 +1,21 @@
+{
+  "name": "nexus-ascendforge-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP brain-connector for AscendForge — exposes read state + gated task submission to Claude as MCP tools.",
+  "main": "server.js",
+  "bin": {
+    "nexus-ascendforge-mcp": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "smoke": "node server.js --smoke"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

@@ -27,11 +27,15 @@ _EXPECTED_READONLY = {
     "system.health.read",
     "system.tasks.active",
     "system.logs.search",
+    "briefing.morning",
+    "teammate.routine.status",
     "memory.search",
     "forge.search_code",
     "security.score_action",
 }
 _EXPECTED_ALL = _EXPECTED_READONLY | {
+    "teammate.routine.configure",
+    "teammate.briefing.create_task",
     "memory.write_structured",
     "research.deep.start",
     "money.analyze_idea",
@@ -62,6 +66,16 @@ def test_readonly_caps_are_l0_no_approval():
         assert cap is not None, cap_id
         assert cap.risk_level == L0, f"{cap_id} -> {cap.risk_level}"
         assert cap.requires_approval is False, cap_id
+
+
+def test_teammate_write_caps_are_l1_local_only():
+    reg = get_capability_registry()
+    for cap_id in ("teammate.routine.configure", "teammate.briefing.create_task"):
+        cap = reg.get(cap_id)
+        assert cap is not None
+        assert cap.risk_level == L1
+        assert cap.requires_approval is False
+        assert cap.side_effects
 
 
 def test_by_subsystem_and_find_for_intent():

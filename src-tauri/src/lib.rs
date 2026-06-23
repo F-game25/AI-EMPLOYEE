@@ -17,6 +17,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -1134,7 +1135,23 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+// Single-flight guard so auto-check and tray/manual runs can't race on the same
+// *.new temp file / AppImage rename (CodeRabbit: concurrent replacement).
+static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
 async fn check_for_update(app: AppHandle, manual: bool) {
+    if UPDATE_IN_PROGRESS.swap(true, Ordering::AcqRel) {
+        if manual {
+            emit_update(&app, "error", json!({ "reason": "Update already in progress" }));
+        }
+        return;
+    }
+    struct ResetGuard;
+    impl Drop for ResetGuard {
+        fn drop(&mut self) { UPDATE_IN_PROGRESS.store(false, Ordering::Release); }
+    }
+    let _reset = ResetGuard;
+
     let url = update_manifest_url();
     if manual {
         show_update_window(&app);

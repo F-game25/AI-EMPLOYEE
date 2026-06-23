@@ -157,6 +157,8 @@ class MemoryManager:
         self._vs = None          # VectorStore
         self._cache = None       # ShortTermCache
         self._ss = None          # StrategyStore
+        self._unified = None     # UnifiedMemoryStore
+        self._service = None     # MemoryService
         self._json_stores: dict[str, _JsonStore] = {}
 
         self._init_stores()
@@ -180,6 +182,21 @@ class MemoryManager:
         except Exception as e:
             logger.warning("StrategyStore unavailable: %s", e)
 
+        try:
+            from memory.service import MemoryService
+            from memory.unified_store import UnifiedMemoryStore
+            self._unified = UnifiedMemoryStore(
+                path=self._state_dir / "memory" / "unified_memory.json"
+            )
+            self._service = MemoryService(
+                store=self._unified,
+                vector_store=self._vs,
+                cache=self._cache,
+                strategy_store=self._ss,
+            )
+        except Exception as e:
+            logger.warning("Unified memory service unavailable: %s", e)
+
         for mtype in self._JSON_TYPES:
             self._json_stores[mtype] = _JsonStore(
                 self._state_dir / f"memory_{mtype}.json"
@@ -189,6 +206,35 @@ class MemoryManager:
 
     def _make_id(self, memory_type: str) -> str:
         return f"{memory_type}:{uuid.uuid4().hex[:12]}"
+
+    def _store_unified(self, mid: str, content: str, memory_type: str, metadata: dict) -> None:
+        if self._service is None:
+            return
+        base_importance = 0.6 if memory_type in self._VECTOR_TYPES else 0.3
+        importance = metadata.get("importance", base_importance)
+        extra = {
+            **metadata,
+            "manager_memory_type": memory_type,
+            "manager_id": mid,
+        }
+        self._service.remember(
+            content,
+            key=mid,
+            memory_type=memory_type,
+            source=metadata.get("source", "memory_manager"),
+            importance=importance,
+            agent=metadata.get("agent", "memory_manager"),
+            project_id=metadata.get("project_id"),
+            session_id=metadata.get("session_id"),
+            task_id=metadata.get("task_id"),
+            tags=metadata.get("tags"),
+            topic=metadata.get("topic"),
+            summary=metadata.get("summary"),
+            verified=bool(metadata.get("verified", False)),
+            sensitive=bool(metadata.get("sensitive", False)),
+            visibility=metadata.get("visibility", "private"),
+            extra=extra,
+        )
 
     def _store_vector(self, mid: str, content: str, memory_type: str, metadata: dict) -> None:
         if self._vs is None:
@@ -262,6 +308,8 @@ class MemoryManager:
         mid = self._make_id(memory_type)
 
         try:
+            self._store_unified(mid, content, memory_type, metadata)
+
             if memory_type == "session":
                 self._store_session(mid, content, metadata)
 
@@ -313,30 +361,98 @@ class MemoryManager:
 
     def _retrieve_type(self, query: str, memory_type: str, top_k: int) -> list[dict]:
         if memory_type == "session":
-            return self._search_session(query, top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k) + self._search_session(query, top_k),
+                top_k,
+            )
 
         if memory_type in self._VECTOR_TYPES:
-            return self._search_vector(query, memory_type, top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k) + self._search_vector(query, memory_type, top_k),
+                top_k,
+            )
 
         if memory_type in self._STRATEGY_TYPES:
-            return self._search_strategy(query, self._STRATEGY_TYPES[memory_type], top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k)
+                + self._search_strategy(query, self._STRATEGY_TYPES[memory_type], top_k),
+                top_k,
+            )
 
         if memory_type in self._JSON_TYPES:
-            return self._json_stores[memory_type].search(query, top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k) + self._json_stores[memory_type].search(query, top_k),
+                top_k,
+            )
 
         if memory_type == "project":
-            return self._search_project(query, top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k) + self._search_project(query, top_k),
+                top_k,
+            )
 
         if memory_type == "knowledge_graph":
-            return self._search_knowledge_graph(query, top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k) + self._search_knowledge_graph(query, top_k),
+                top_k,
+            )
 
         if memory_type == "event_timeline":
-            return self._search_event_timeline(query, top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k) + self._search_event_timeline(query, top_k),
+                top_k,
+            )
 
         if memory_type == "structured_db":
-            return self._search_structured_db(query, top_k)
+            return self._dedupe_results(
+                self._search_unified(query, memory_type, top_k) + self._search_structured_db(query, top_k),
+                top_k,
+            )
 
         return []
+
+    def _search_unified(self, query: str, memory_type: str, top_k: int) -> list[dict]:
+        if self._service is None:
+            return []
+        hits = self._service.retrieve(query, memory_type=memory_type, top_k=top_k)
+        results = []
+        for h in hits:
+            metadata = h.get("metadata", {})
+            mid = h.get("id") or h.get("key") or metadata.get("manager_id", "")
+            results.append({
+                "id": mid,
+                "content": h.get("text", ""),
+                "metadata": metadata,
+                "record": h.get("record"),
+                "_score": h.get("_score", 0.0),
+                "_source": "unified_memory",
+            })
+        return results
+
+    @staticmethod
+    def _dedupe_results(results: list[dict], top_k: int) -> list[dict]:
+        by_id: dict[str, dict] = {}
+        anonymous: list[dict] = []
+        for row in results:
+            mid = row.get("id") or row.get("key")
+            if not mid:
+                anonymous.append(row)
+                continue
+            existing = by_id.get(mid)
+            if existing is None:
+                by_id[mid] = row
+                continue
+            current_score = float(row.get("_score", 0.0))
+            existing_score = float(existing.get("_score", 0.0))
+            if row.get("_source") == "unified_memory":
+                row["_score"] = max(current_score, existing_score)
+                by_id[mid] = row
+            elif existing.get("_source") != "unified_memory" and current_score > existing_score:
+                by_id[mid] = row
+
+        merged = list(by_id.values()) + anonymous
+        merged.sort(key=lambda x: float(x.get("_score", 0.0)), reverse=True)
+        return merged[:top_k]
 
     def _search_session(self, query: str, top_k: int) -> list[dict]:
         if self._cache is None:
@@ -566,10 +682,25 @@ class MemoryManager:
         except Exception:
             counts["event_timeline"] = 0
 
+        canonical_counts: dict[str, int] = {}
+        if self._unified is not None:
+            for mtype in self.TYPES:
+                try:
+                    canonical_counts[mtype] = self._unified.count(memory_type=mtype)
+                    counts[mtype] = max(counts.get(mtype, 0), canonical_counts[mtype])
+                except Exception:
+                    canonical_counts[mtype] = 0
+
         vector_indexed = sum(counts.get(t, 0) for t in self._VECTOR_TYPES)
         total = sum(counts.values())
 
-        return {"types": counts, "total": total, "vector_indexed": vector_indexed, "ts": _ts()}
+        return {
+            "types": counts,
+            "total": total,
+            "vector_indexed": vector_indexed,
+            "canonical_total": sum(canonical_counts.values()),
+            "ts": _ts(),
+        }
 
     # ── Delete / clear ────────────────────────────────────────────────────────
 
@@ -578,6 +709,14 @@ class MemoryManager:
         # Infer type from prefix
         mtype = memory_id.split(":")[0] if ":" in memory_id else None
         deleted = False
+        canonical_failed = False
+
+        if self._unified is not None:
+            try:
+                deleted = self._unified.delete(memory_id) or deleted
+            except Exception as exc:
+                canonical_failed = True
+                logger.warning("canonical memory delete failed for %s: %s", memory_id, exc)
 
         if mtype in self._VECTOR_TYPES and self._vs:
             try:
@@ -606,6 +745,10 @@ class MemoryManager:
             except Exception:
                 pass
 
+        # Canonical store is the source of truth: never report success if its delete
+        # errored, even when a secondary delete succeeded (the record stays retrievable).
+        if canonical_failed:
+            return False
         return deleted
 
     def clear_type(self, memory_type: str) -> int:
