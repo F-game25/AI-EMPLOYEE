@@ -313,6 +313,7 @@ class SwarmController:
 
         # Assess VRAM needs and try cluster worker first if local is tight
         vram_needed = 0
+        plan = None
         try:
             from engine.compute.compute_planner import assess_compute_needs
             plan = assess_compute_needs(subtask["task"], context_len=len(subtask["task"]))
@@ -347,7 +348,26 @@ class SwarmController:
         task_str = subtask["task"]
         if context.get("context_packet"):
             task_str = f"{context['context_packet']}\n\nTask: {task_str}"
-        result = react.run(task_str, context={k: v for k, v in context.items() if k != "context_packet"})
+        # Resolve the gated route for this subtask (deny-by-default egress). For local routes
+        # ReActAgent's per-step model selection still wins; only a gated OpenRouter overflow
+        # overrides every step. rent_gpu can't trigger here (subtask context is tiny).
+        from core.run_model_context import preferred_model_scope
+        _sub_route = None
+        if plan is not None:
+            try:
+                from core.model_escalation import apply_compute_plan
+                # Same gated ladder as the executor: local → free OpenRouter overflow → rent_gpu
+                # (HITL). The executed route is surfaced in the swarm event stream.
+                _sub_route = apply_compute_plan(
+                    plan, broadcast_fn=lambda ev, payload: self._emit(run_id, {"type": ev, **payload}))
+            except Exception:
+                _sub_route = None
+        if _sub_route is not None and _sub_route.external:
+            _scope_model, _scope_provider = _sub_route.model, _sub_route.provider
+        else:
+            _scope_model, _scope_provider = (plan.model if plan is not None else None), None
+        with preferred_model_scope(_scope_model, _scope_provider):
+            result = react.run(task_str, context={k: v for k, v in context.items() if k != "context_packet"})
         return {
             "output": result.output,
             "status": result.status,
