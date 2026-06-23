@@ -82,6 +82,16 @@ def test_batch7_library_is_ready_and_count_preserved():
     assert len(BATCH7_SKILL_IDS) == 40
 
 
+def test_batch8_library_is_ready_and_count_preserved():
+    from skills.batch1_readiness import BATCH8_SKILL_IDS, validate_batch8_library
+
+    report = validate_batch8_library()
+    assert report["ok"], report
+    assert report["batch_size"] == 40
+    assert report["total"] == 570
+    assert len(BATCH8_SKILL_IDS) == 40
+
+
 def test_batch1_replaced_ids_resolve_as_aliases():
     from core.skill_registry import SkillRegistry
 
@@ -145,6 +155,15 @@ def test_batch7_replaced_ids_resolve_as_aliases():
     assert registry.skill("agent_memory")["id"] == "agent_memory_health_checker"
 
 
+def test_batch8_replaced_ids_resolve_as_aliases():
+    from core.skill_registry import SkillRegistry
+
+    registry = SkillRegistry()
+    assert registry.skill("accessibility_audit")["id"] == "accessibility_audit_checker"
+    assert registry.skill("deliverability_optimization")["id"] == "email_deliverability_optimization_checker"
+    assert registry.skill("comment_automation")["id"] == "comment_automation_safety_reviewer"
+
+
 def test_skill_selector_uses_production_metadata():
     from forge.lifecycle.skill_selector import select_skills
 
@@ -190,6 +209,12 @@ def test_skill_selector_uses_production_metadata():
 
     picks = select_skills("build legal review checklist for this contract", "legal", max_skills=3)
     assert any(p["id"] == "legal_review_checklist_builder" for p in picks)
+
+    picks = select_skills("check accessibility audit and dark mode contrast issues", "ui", max_skills=3)
+    assert any(p["id"] == "accessibility_audit_checker" for p in picks)
+
+    picks = select_skills("check email deliverability optimization and DNS records", "email", max_skills=3)
+    assert any(p["id"] == "email_deliverability_optimization_checker" for p in picks)
 
 
 def test_dispatch_explicit_batch_skill_uses_metadata():

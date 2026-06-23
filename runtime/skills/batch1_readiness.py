@@ -307,6 +307,49 @@ BATCH7_SKILL_IDS: tuple[str, ...] = (
     "daily_profit_alert_reviewer",
 )
 
+BATCH8_SKILL_IDS: tuple[str, ...] = (
+    "email_ab_test_analyzer",
+    "growth_ab_test_plan_reviewer",
+    "accessibility_audit_checker",
+    "trading_alert_format_reviewer",
+    "customer_audit_trail_reviewer",
+    "brand_positioning_reviewer",
+    "marketing_budget_allocation_reviewer",
+    "campaign_idea_brief_builder",
+    "campaign_schedule_planner",
+    "candidate_outreach_message_reviewer",
+    "color_palette_system_reviewer",
+    "comment_automation_safety_reviewer",
+    "compensation_benchmark_brief_builder",
+    "competitive_brand_analysis_reviewer",
+    "component_spec_writer",
+    "content_curation_planner",
+    "social_content_generation_reviewer",
+    "conversion_optimization_planner",
+    "conversion_tracking_checker",
+    "operating_cost_tracking_reviewer",
+    "crypto_community_growth_planner",
+    "dark_mode_accessibility_reviewer",
+    "data_analysis_plan_reviewer",
+    "email_deliverability_optimization_checker",
+    "developer_handoff_package_reviewer",
+    "dns_verification_checklist_builder",
+    "document_generation_reviewer",
+    "drip_sequence_planner",
+    "earnings_quality_reviewer",
+    "email_composition_reviewer",
+    "email_sequence_planner",
+    "engagement_tracking_reporter",
+    "follow_up_automation_planner",
+    "follow_up_message_writer",
+    "follow_up_sequence_reviewer",
+    "image_prompt_brief_builder",
+    "image_prompt_safety_reviewer",
+    "improvement_proposal_prioritizer",
+    "interview_schedule_planner",
+    "keyword_search_plan_builder",
+)
+
 
 PRODUCTION_FIELDS: tuple[str, ...] = (
     "subcategory",
@@ -441,3 +484,8 @@ def validate_batch6_library(path: Path | None = None) -> dict[str, Any]:
 def validate_batch7_library(path: Path | None = None) -> dict[str, Any]:
     """Return a structured readiness report for the seventh 40 skills."""
     return _validate_skill_batch(BATCH7_SKILL_IDS, path, "batch_7")
+
+
+def validate_batch8_library(path: Path | None = None) -> dict[str, Any]:
+    """Return a structured readiness report for the eighth 40 skills."""
+    return _validate_skill_batch(BATCH8_SKILL_IDS, path, "batch_8")

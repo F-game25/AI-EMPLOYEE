@@ -74,7 +74,8 @@ function invokeRoute(router, method, target) {
   assert(res.body.batch5_count >= 40, `expected batch5 skills, got ${res.body.batch5_count}`);
   assert(res.body.batch6_count >= 40, `expected batch6 skills, got ${res.body.batch6_count}`);
   assert(res.body.batch7_count >= 40, `expected batch7 skills, got ${res.body.batch7_count}`);
-  assert(res.body.production_batch_count >= 280, `expected production batch skills, got ${res.body.production_batch_count}`);
+  assert(res.body.batch8_count >= 40, `expected batch8 skills, got ${res.body.batch8_count}`);
+  assert(res.body.production_batch_count >= 320, `expected production batch skills, got ${res.body.production_batch_count}`);
   const batch1Skill = res.body.skills.find((item) => item.id === 'skill_registry_validator');
   assert(batch1Skill, 'skill_registry_validator missing');
   assert.equal(batch1Skill.skill_id, 'skill_registry_validator');
@@ -109,4 +110,9 @@ function invokeRoute(router, method, target) {
   assert.equal(batch7Skill.skill_id, 'shell_command_execution_reviewer');
   assert.equal(batch7Skill.ui_metadata.wired, true);
   assert.equal(batch7Skill.ui_metadata.batch, 'batch_7');
+  const batch8Skill = res.body.skills.find((item) => item.id === 'accessibility_audit_checker');
+  assert(batch8Skill, 'accessibility_audit_checker missing');
+  assert.equal(batch8Skill.skill_id, 'accessibility_audit_checker');
+  assert.equal(batch8Skill.ui_metadata.wired, true);
+  assert.equal(batch8Skill.ui_metadata.batch, 'batch_8');
 })();

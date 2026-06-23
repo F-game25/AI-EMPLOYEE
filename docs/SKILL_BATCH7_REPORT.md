@@ -86,7 +86,7 @@ npm --prefix frontend run test -- src/__tests__/ForgeSkillsLibraryPane.test.jsx
 npm --prefix frontend run build
 ```
 
-## Remaining Work
+## Follow-On
 
-Do not plan Batch 8 until the first 280 production skills are confirmed green in
-CI and manually visible in the Forge dashboard against a live backend.
+Batch 8 was started after Batch 7 passed local readiness, route, frontend, and
+build verification and was pushed as its own GitHub checkpoint.

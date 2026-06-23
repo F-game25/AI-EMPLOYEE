@@ -454,7 +454,11 @@ def _seed(reg: CapabilityRegistry) -> None:
                          "generation planning, AI/ML implementation review, chat dispatch, chatbot flows, context "
                          "injection safety, shell command review, prompt-injection scans, memory writeback review, "
                          "task routing policy, defensive OSINT, source synthesis, legal/contract review, investor "
-                         "updates, valuation, tax/payment validation, invoices, PnL, and profit alerts."),
+                         "updates, valuation, tax/payment validation, invoices, PnL, profit alerts, email A/B "
+                         "tests, accessibility audits, brand positioning, campaign planning, candidate outreach, "
+                         "comment automation safety, component specs, content curation, conversion tracking, "
+                         "email deliverability, DNS verification, follow-up sequencing, image prompt review, "
+                         "keyword search planning, and improvement proposal prioritization."),
             input_schema={"goal": "str", "skill_id": "str?", "context": "str?"},
             output_schema={"skill_id": "str", "skill_name": "str", "output": "str", "match_score": "float"},
             risk_level=L1,
@@ -467,7 +471,8 @@ def _seed(reg: CapabilityRegistry) -> None:
                       "test this api integration contract", "review the rollback plan",
                       "review this cold email draft", "verify these claims",
                       "audit workflow management", "review auto reorder policy",
-                      "review this shell command", "build a legal review checklist"],
+                      "review this shell command", "build a legal review checklist",
+                      "check accessibility audit", "check email deliverability optimization"],
         ),
         Capability(
             id="content.produce",
