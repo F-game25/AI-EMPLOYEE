@@ -4968,6 +4968,7 @@ Output a JSON array:
       batch4_count: skills.filter(s => s.ui_metadata?.batch === 'batch_4').length,
       batch5_count: skills.filter(s => s.ui_metadata?.batch === 'batch_5').length,
       batch6_count: skills.filter(s => s.ui_metadata?.batch === 'batch_6').length,
+      batch7_count: skills.filter(s => s.ui_metadata?.batch === 'batch_7').length,
       production_batch_count: skills.filter(s => Boolean(s.ui_metadata?.batch)).length,
       skills,
     })

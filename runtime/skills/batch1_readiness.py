@@ -264,6 +264,49 @@ BATCH6_SKILL_IDS: tuple[str, ...] = (
     "niche_targeting_reviewer",
 )
 
+BATCH7_SKILL_IDS: tuple[str, ...] = (
+    "agent_memory_health_checker",
+    "skill_generation_planner",
+    "ai_ml_implementation_reviewer",
+    "ai_scan_plan_builder",
+    "chat_task_dispatch_reviewer",
+    "chatbot_flow_reviewer",
+    "context_injection_safety_reviewer",
+    "conversation_flow_designer",
+    "infrastructure_cost_optimizer",
+    "coverage_gap_analyzer",
+    "devops_infrastructure_reviewer",
+    "python_implementation_planner",
+    "security_audit_planner",
+    "security_test_plan_builder",
+    "shell_command_execution_reviewer",
+    "prompt_injection_scan_planner",
+    "long_term_memory_policy_reviewer",
+    "memory_writeback_reviewer",
+    "multi_stage_reasoning_planner",
+    "task_routing_policy_reviewer",
+    "custom_agent_spec_builder",
+    "skill_search_relevance_checker",
+    "skill_gap_prioritizer",
+    "defensive_osint_brief_builder",
+    "source_synthesis_reviewer",
+    "synthesis_quality_reviewer",
+    "sec_filing_analysis_brief_builder",
+    "legal_review_checklist_builder",
+    "contract_draft_reviewer",
+    "fundraising_readiness_reviewer",
+    "investor_update_writer",
+    "valuation_methodology_reviewer",
+    "tax_calculation_reviewer",
+    "payment_tracking_reconciler",
+    "payment_validation_reviewer",
+    "invoice_workflow_checker",
+    "pnl_statement_reviewer",
+    "profit_loss_draft_builder",
+    "profit_loss_projection_reviewer",
+    "daily_profit_alert_reviewer",
+)
+
 
 PRODUCTION_FIELDS: tuple[str, ...] = (
     "subcategory",
@@ -393,3 +436,8 @@ def validate_batch5_library(path: Path | None = None) -> dict[str, Any]:
 def validate_batch6_library(path: Path | None = None) -> dict[str, Any]:
     """Return a structured readiness report for the sixth 40 skills."""
     return _validate_skill_batch(BATCH6_SKILL_IDS, path, "batch_6")
+
+
+def validate_batch7_library(path: Path | None = None) -> dict[str, Any]:
+    """Return a structured readiness report for the seventh 40 skills."""
+    return _validate_skill_batch(BATCH7_SKILL_IDS, path, "batch_7")

@@ -89,5 +89,6 @@ npm --prefix frontend run build
 
 ## Remaining Work
 
-Do not plan Batch 7 until the first 240 production skills are confirmed green in
-CI and manually visible in the Forge dashboard against a live backend.
+Batch 7 now follows this same replacement-or-upgrade pattern. Future batches
+should wait until the first 280 production skills are confirmed green in CI and
+manually visible in the Forge dashboard against a live backend.
