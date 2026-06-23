@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
+from core.file_lock import FileLock
 from core.state_paths import canonical_state_dir
 from memory.schema import MemoryRecord, SCHEMA_VERSION, utc_now
 
 
 _LOCK = threading.RLock()
+logger = logging.getLogger(__name__)
 
 
 def _default_path() -> Path:
@@ -48,11 +52,22 @@ class UnifiedMemoryStore:
 
     def _load(self) -> None:
         with _LOCK:
+            if not self._path.exists():
+                self._records = {}
+                return
             try:
                 raw = json.loads(self._path.read_text(encoding="utf-8"))
             except Exception:
+                # An EXISTING file that won't parse means corruption/truncation, not a
+                # fresh store. Quarantine it (preserve for recovery) instead of
+                # overwriting with an empty dataset — that would erase recoverable data.
+                try:
+                    backup = self._path.with_name(f"{self._path.name}.corrupt-{int(time.time())}")
+                    self._path.replace(backup)
+                    logger.error("unified memory unreadable; quarantined corrupt file to %s", backup)
+                except Exception:
+                    logger.error("unified memory unreadable and could not be quarantined: %s", self._path)
                 self._records = {}
-                self._save()
                 return
 
             if isinstance(raw, list):
@@ -77,11 +92,17 @@ class UnifiedMemoryStore:
             "count": len(self._records),
             "records": [r.to_dict() for r in self._records.values()],
         }
+        data = json.dumps(payload, indent=2)
         # Ensure the parent exists at write time, not only at __init__: the process-wide
         # store can outlive the directory it was bound to (e.g. a test tmp state dir torn
         # down after the singleton cached its path), so re-create defensively before writing.
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        # Cross-process lock (sidecar .lock) + atomic replace so concurrent workers can't
+        # lose updates or leave a torn unified_memory.json (CLAUDE.md: cross-process locking).
+        with FileLock(self._path):
+            tmp = self._path.with_name(f"{self._path.name}.tmp")
+            tmp.write_text(data, encoding="utf-8")
+            os.replace(tmp, self._path)
 
     def upsert(self, record: MemoryRecord | dict[str, Any]) -> MemoryRecord:
         with _LOCK:
