@@ -635,21 +635,29 @@ const _STRATEGY_LABEL = {
   rent_gpu:        { label: 'Remote GPU',      color: '#F87171' },
 }
 
-function ComputePlanBadge({ plan }) {
-  if (!plan) return null
-  const meta = _STRATEGY_LABEL[plan.strategy] || { label: plan.strategy, color: '#94a3b8' }
+function ComputePlanBadge({ plan, executed }) {
+  if (!plan && !executed) return null
+  const meta = plan ? (_STRATEGY_LABEL[plan.strategy] || { label: plan.strategy, color: '#94a3b8' }) : null
+  const egress = !!executed?.egress
+  const ranVia = executed ? (executed.provider || 'local') : null
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', marginBottom: 8, flexShrink: 0 }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.color, flexShrink: 0 }}/>
-      <span style={{ font: '600 10px var(--af2-mono)', color: meta.color }}>{meta.label}</span>
-      <span style={{ font: '500 10px var(--af2-mono)', color: 'var(--af2-muted)' }}>·</span>
-      <span style={{ font: '500 10px var(--af2-mono)', color: 'var(--af2-text)', opacity: 0.8 }}>{plan.model}</span>
-      <span style={{ font: '500 9px var(--af2-mono)', color: 'var(--af2-muted)', marginLeft: 'auto' }}>{plan.rationale}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+      {plan && <>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.color, flexShrink: 0 }}/>
+        <span style={{ font: '600 10px var(--af2-mono)', color: meta.color }}>{meta.label}</span>
+        <span style={{ font: '500 10px var(--af2-mono)', color: 'var(--af2-muted)' }}>·</span>
+        <span style={{ font: '500 10px var(--af2-mono)', color: 'var(--af2-text)', opacity: 0.8 }}>{plan.model}</span>
+      </>}
+      {executed && <span style={{ font: '600 9px var(--af2-mono)', color: egress ? '#f87171' : '#34d399', marginLeft: plan ? 8 : 0 }}>
+        {'▶'} ran {executed.model} · {ranVia}{egress ? ' · EGRESS' : ' · local'}
+      </span>}
+      {executed?.approval_request_id && <span style={{ font: '600 9px var(--af2-mono)', color: '#fbbf24' }}>· rent approval pending</span>}
+      <span style={{ font: '500 9px var(--af2-mono)', color: 'var(--af2-muted)', marginLeft: 'auto' }}>{executed?.rationale || plan?.rationale}</span>
     </div>
   )
 }
 
-function ActivityView({ messages, termLines, sending, agents, computePlan }) {
+function ActivityView({ messages, termLines, sending, agents, computePlan, executedRoute }) {
   const activitySpark = stableSpark({ len: 28, base: Math.max(10, messages.length + termLines.length), amp: Math.max(4, agents.length * 8), seed: messages.length })
   const logRef = useRef(null)
   useEffect(() => {
@@ -659,7 +667,7 @@ function ActivityView({ messages, termLines, sending, agents, computePlan }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 14, height: '100%', minHeight: 0 }}>
       <Panel title="Live activity" icon="activity" sub={`${messages.length} events`} flush>
-        <div style={{ padding: '8px 12px 0' }}><ComputePlanBadge plan={computePlan}/></div>
+        <div style={{ padding: '8px 12px 0' }}><ComputePlanBadge plan={computePlan} executed={executedRoute}/></div>
         <div ref={logRef} className="af2-log" style={{ flex: 1, overflow: 'auto' }}>
           {messages.map((m, i) => (
             <div key={i} className={`af2-log-line${m.role === 'assistant' ? ' af2-log-line--ai' : ''}`}>
@@ -1833,6 +1841,7 @@ export default function AscendForgePage() {
   const [busyActions, setBusyActions] = useState({})
   const [termLines, setTermLines] = useState([])
   const [computePlan, setComputePlan] = useState(null)
+  const [executedRoute, setExecutedRoute] = useState(null)
   const [activeRun, setActiveRun] = useState(null)
   const [runBusy, setRunBusy]     = useState(false)
   const [provider, setProvider]   = useState('anthropic')
@@ -1903,6 +1912,7 @@ export default function AscendForgePage() {
     const handler = e => {
       const { type, data } = e.detail || {}
       if (type === 'task:compute_plan') setComputePlan(data)
+      if (type === 'task:compute_plan_executed') setExecutedRoute(data)
     }
     window.addEventListener('ws:event', handler)
     return () => window.removeEventListener('ws:event', handler)
@@ -2178,7 +2188,7 @@ export default function AscendForgePage() {
 	          {view === 'projects'  && <ProjectsView onSelect={handleSelectProject} onNew={() => setShowNewProj(true)}/>}
 	          {view === 'compose'   && <ComposeView project={project} onSubmit={(goal, opts) => sendGoal(goal, opts)} onAutoRun={(goal, opts) => sendAutoRun(goal, opts)} onSwitchProject={() => setView('projects')}/>}
 	          {view === 'queue'     && <ForgeQueueView project={project}/>}
-	          {view === 'activity'  && <ActivityView messages={messages} termLines={termLines} sending={sending} agents={agents} computePlan={computePlan}/>}
+	          {view === 'activity'  && <ActivityView messages={messages} termLines={termLines} sending={sending} agents={agents} computePlan={computePlan} executedRoute={executedRoute}/>}
           {view === 'review'    && <ReviewView actions={actions} onApprove={handleApprove} onReject={handleReject}/>}
           {view === 'approvals' && <ApprovalsView actions={actions} onApprove={handleApprove} onReject={handleReject}/>}
           {view === 'pipeline'  && <PipelineView activeRun={activeRun}/>}
