@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 MemoryType = Literal["episodic", "semantic", "procedural", "outcome", "interactions"]
-SourceStore = Literal["chroma", "mem0", "graph"]
+SourceStore = Literal["chroma", "mem0", "graph", "unified"]
 
 
 class MemoryItem(BaseModel):

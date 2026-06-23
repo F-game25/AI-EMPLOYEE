@@ -33,7 +33,17 @@ class KnowledgeStore:
         self._path = path or self._default_path()
         self._lock = threading.RLock()
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._unified = self._init_unified_store(path)
         self._state = self._load()
+
+    def _init_unified_store(self, path: Path | None) -> Any:
+        try:
+            from memory.unified_store import UnifiedMemoryStore
+            if path is not None:
+                return UnifiedMemoryStore(path=path.parent / "memory" / "unified_memory.json")
+            return UnifiedMemoryStore()
+        except Exception:
+            return None
 
     @staticmethod
     def _default_path() -> Path:
@@ -83,11 +93,57 @@ class KnowledgeStore:
                 "content": content,
                 "stored_at": self._ts(),
             })
+            record_id = f"ks:topic:{topic_key}:{len(topic_items)}"
             self._state.setdefault("insights", []).append(
-                {"topic": topic_key, "content": content, "stored_at": self._ts()}
+                {"id": record_id, "topic": topic_key, "content": content, "stored_at": self._ts()}
             )
             self._write(self._state)
+            self._store_unified_record(
+                record_id,
+                title=topic_key,
+                content=content,
+                source="knowledge_store",
+                tags=[topic_key],
+                memory_type="knowledge_graph",
+                metadata={"topic": topic_key, "origin_store": "knowledge_store"},
+            )
             return {"topic": topic_key, "entries": len(topic_items)}
+
+    def _store_unified_record(
+        self,
+        record_id: str,
+        *,
+        title: str,
+        content: Any,
+        source: str,
+        tags: list[str] | None = None,
+        memory_type: str = "knowledge_graph",
+        importance: float = 0.5,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self._unified is None:
+            return
+        try:
+            from memory.schema import MemoryRecord
+            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
+            if title:
+                text = f"{title}\n\n{text}".strip()
+            record = MemoryRecord.create(
+                text,
+                id=record_id,
+                memory_type=memory_type,
+                source=source,
+                topic=title or None,
+                tags=tags or [],
+                importance=importance,
+                metadata={
+                    **(metadata or {}),
+                    "origin_store": (metadata or {}).get("origin_store", "knowledge_store"),
+                },
+            )
+            self._unified.upsert(record)
+        except Exception:
+            return
 
     def search_knowledge(self, query: str) -> list[dict[str, Any]]:
         q = (query or "").strip().lower()
@@ -104,7 +160,28 @@ class KnowledgeStore:
                 blob = json.dumps(item, ensure_ascii=False).lower()
                 if q in blob:
                     hits.append(item)
+            hits.extend(self._search_unified_knowledge(q))
             return hits[:20]
+
+    def _search_unified_knowledge(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        if self._unified is None:
+            return []
+        try:
+            records = self._unified.search(query=query, memory_type="knowledge_graph", limit=limit)
+        except Exception:
+            return []
+        hits: list[dict[str, Any]] = []
+        for record in records:
+            hits.append({
+                "id": record.id,
+                "topic": record.topic or record.metadata.get("topic", ""),
+                "content": record.text,
+                "source": record.source or record.metadata.get("source", "knowledge_store"),
+                "tags": record.tags,
+                "stored_at": record.created_at,
+                "_source": "unified_memory",
+            })
+        return hits
 
     def get_relevant_context(self, task: str) -> str:
         task_text = (task or "").strip().lower()
@@ -120,6 +197,10 @@ class KnowledgeStore:
                 blob = json.dumps(item, ensure_ascii=False).lower()
                 if any(token in blob for token in task_text.split()[:8]):
                     relevant.append(str(item.get("content", "")))
+            for item in self._search_unified_knowledge(task_text, limit=5):
+                content = str(item.get("content", ""))
+                if content and content not in relevant:
+                    relevant.append(content)
             return "\n".join(relevant[:8])
 
     def update_user_profile(
@@ -276,6 +357,20 @@ class KnowledgeStore:
                     },
                     importance=e.get("importance", 0.5),
                     overwrite=False,
+                )
+                self._store_unified_record(
+                    key,
+                    title=title,
+                    content=content,
+                    source=e.get("source", "knowledge_store"),
+                    tags=e.get("tags", []),
+                    memory_type="knowledge_graph",
+                    importance=e.get("importance", 0.5),
+                    metadata={
+                        "entry_id": eid,
+                        "created_at": e.get("created_at", ""),
+                        "origin_store": "knowledge_store.entries",
+                    },
                 )
                 embedded += 1
             except Exception:
