@@ -158,6 +158,36 @@ class TestEmbedEntriesToVectorStore:
         assert entry is not None
         assert "Test Topic" in entry["text"]
 
+    def test_entries_written_to_unified_memory(self, knowledge_store_path, isolate_stores):
+        from core.knowledge_store import get_knowledge_store
+        from memory.unified_store import UnifiedMemoryStore
+
+        ks = get_knowledge_store(knowledge_store_path)
+        ks.embed_entries_to_vector_store()
+
+        unified = UnifiedMemoryStore(path=isolate_stores / "memory" / "unified_memory.json")
+        record = unified.get("ks:test1")
+        assert record is not None
+        assert record.memory_type == "knowledge_graph"
+        assert record.topic == "Test Topic"
+        assert record.source == "knowledge_store"
+
+    def test_add_knowledge_writes_unified_memory(self, isolate_stores):
+        from core.knowledge_store import get_knowledge_store
+        from memory.unified_store import UnifiedMemoryStore
+
+        ks_path = isolate_stores / "knowledge_store.json"
+        ks = get_knowledge_store(ks_path)
+        ks.add_knowledge("pricing", {"insight": "annual plans convert better"})
+
+        results = ks.search_knowledge("annual plans")
+        assert any(row.get("_source") == "unified_memory" for row in results)
+
+        unified = UnifiedMemoryStore(path=isolate_stores / "memory" / "unified_memory.json")
+        records = unified.search(query="annual plans", memory_type="knowledge_graph")
+        assert records
+        assert records[0].metadata["topic"] == "pricing"
+
     def test_new_entry_added_after_first_embed(self, knowledge_store_path, isolate_stores):
         """Adding a new entry after initial embed should embed only the new one."""
         from core.knowledge_store import get_knowledge_store
