@@ -75,6 +75,11 @@ class RemoteWorkerRegistry {
     if (!nonce || !exp || !sig) return { ok: false, error: 'malformed pairing token' }
     if (sig !== this._sign(nonce, Number(exp))) return { ok: false, error: 'invalid pairing signature' }
     if (Date.now() > Number(exp)) return { ok: false, error: 'pairing token expired' }
+    // Guard prototype-polluting keys before indexing the store with the token-derived
+    // nonce (defense-in-depth; legit nonces are random hex from createPairingToken).
+    if (nonce === '__proto__' || nonce === 'constructor' || nonce === 'prototype') {
+      return { ok: false, error: 'invalid pairing token' }
+    }
     const store = this._read(this.pairingPath, {})
     const a = store[nonce]
     if (!a) return { ok: false, error: 'unknown pairing token' }
