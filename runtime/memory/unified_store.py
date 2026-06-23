@@ -77,6 +77,10 @@ class UnifiedMemoryStore:
             "count": len(self._records),
             "records": [r.to_dict() for r in self._records.values()],
         }
+        # Ensure the parent exists at write time, not only at __init__: the process-wide
+        # store can outlive the directory it was bound to (e.g. a test tmp state dir torn
+        # down after the singleton cached its path), so re-create defensively before writing.
+        self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def upsert(self, record: MemoryRecord | dict[str, Any]) -> MemoryRecord:
