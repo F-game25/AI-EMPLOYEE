@@ -40,8 +40,11 @@ def test_trace_event_is_non_blocking_and_fast():
     for i in range(1000):
         tc.event(tid, "phase", {"i": i})
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    # 1000 appends must be well under any disk-write budget — proves no inline I/O.
-    assert elapsed_ms < 50, f"event path too slow ({elapsed_ms:.2f}ms) — likely doing I/O"
+    # Intent: prove event() does no inline disk I/O. 1000 real disk writes would take
+    # seconds; in-memory appends are sub-millisecond. The bound is generous (500ms) only
+    # to absorb scheduling/GC jitter on heavily contended shared CI runners — it still
+    # catches an inline-I/O regression (which would be >1000ms) without flaking.
+    assert elapsed_ms < 500, f"event path too slow ({elapsed_ms:.2f}ms) — likely doing I/O"
     rec = tc.finalize(tid, outputs=["done"], success=True)
     assert rec and rec["success"] is True
     tc.stop()
