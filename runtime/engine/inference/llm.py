@@ -41,8 +41,17 @@ class RouteDecision:
     chosen_model: str
 
 
+def _preferred_model() -> str | None:
+    """Per-run model chosen by the cost-first planner, if any (never raises)."""
+    try:
+        from core.run_model_context import get_preferred_model
+        return get_preferred_model()
+    except Exception:  # noqa: BLE001 — routing must never crash on this hint
+        return None
+
+
 def _route_model(prompt: str, context: str | None, requested_model: str | None) -> RouteDecision:
-    default_model = requested_model or DEFAULT_MODEL
+    default_model = requested_model or _preferred_model() or DEFAULT_MODEL
     route = select_model_route(prompt=prompt, context=context, requested_route=None, default_route="auto")
     is_long = route.tier == "long" and route.model_route == "wavefield"
     return RouteDecision(
@@ -527,6 +536,23 @@ def generate(
     Returns:
         Generated text as a plain string.
     """
+    # Gated external overflow: when the cost-first escalation chose OpenRouter (deny-by-default,
+    # already gated in core.model_escalation), this local path has no OpenRouter backend — delegate
+    # to the LLMClient OpenRouter path. On any failure, fall back to the local default model.
+    try:
+        from core.run_model_context import get_preferred_provider
+        if get_preferred_provider() == "openrouter":
+            from core.orchestrator import get_llm_client
+            try:
+                out = get_llm_client().complete(prompt=prompt, system=system).get("output", "")
+                if out:
+                    return out
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("openrouter overflow failed (%s) — local fallback %s", exc, DEFAULT_MODEL)
+            model = DEFAULT_MODEL  # force a real local model; the OpenRouter tag isn't an Ollama model
+    except Exception:  # noqa: BLE001
+        pass
+
     full_prompt = f"{context}\n\n{prompt}" if context else prompt
     decision = _route_model(prompt=prompt, context=context, requested_model=model)
     chosen_model = decision.chosen_model
