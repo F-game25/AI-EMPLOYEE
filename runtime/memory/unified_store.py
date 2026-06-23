@@ -64,9 +64,11 @@ class UnifiedMemoryStore:
                 try:
                     backup = self._path.with_name(f"{self._path.name}.corrupt-{int(time.time())}")
                     self._path.replace(backup)
-                    logger.error("unified memory unreadable; quarantined corrupt file to %s", backup)
+                    # Don't log the absolute path (tenant/home leak — CLAUDE.md). The
+                    # quarantined copy sits next to the store as *.corrupt-<ts>.
+                    logger.error("unified memory file unreadable; corrupt copy quarantined for recovery")
                 except Exception:
-                    logger.error("unified memory unreadable and could not be quarantined: %s", self._path)
+                    logger.error("unified memory file unreadable and could not be quarantined")
                 self._records = {}
                 return
 
