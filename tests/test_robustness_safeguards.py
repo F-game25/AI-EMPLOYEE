@@ -140,10 +140,8 @@ class TestCircuitBreakerRecovery:
         return CircuitBreaker(
             "recovery-test",
             failure_threshold=1,
-            # 0.3s (not 0.05s): on a contended CI runner the gap between opening the
-            # breaker and the immediate `state == OPEN` assertion could itself exceed a
-            # 50ms timeout, flipping it to HALF_OPEN early and flaking. Sleeps below are
-            # 0.6s (> timeout) so the HALF_OPEN assertions stay reliable.
+            # 0.3s timeout with 0.6s sleeps below: wide margins so contended-CI jitter
+            # can't flip the immediate `state == OPEN` check to HALF_OPEN early.
             recovery_timeout=0.3,
             success_threshold=2,
             window_seconds=300.0,
