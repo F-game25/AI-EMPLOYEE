@@ -28,6 +28,7 @@
     "test:settings:all": "npm run test:settings && npm run test:settings:frontend && npm run test:settings:integration",
     "test:security:node": "node tests/test_security_node.js",
     "test:voice-runtime": "node tests/test_voice_runtime_manager.js",
+    "test:boot-contract": "node tests/test_boot_contract_routes.js",
     "verify:settings": "bash scripts/verify-settings.sh",
     "open": "~/.ai-employee/bin/ai-employee-launcher",
     "tauri:install": "cp src-tauri/target/release/nexus-os ~/.ai-employee/bin/nexus-os-launcher && chmod +x ~/.ai-employee/bin/nexus-os-launcher",

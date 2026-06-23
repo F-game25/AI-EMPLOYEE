@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import { reportBootPhase } from './bootPhase'
 
 // Same-origin API calls are protected by the local JWT tenant middleware.
 // Many dashboard widgets use raw fetch(), so attach the local operator token
@@ -78,11 +79,11 @@ try {
   }
 } catch { /* sandboxed contexts may not allow URLSearchParams */ }
 
-// Earliest possible "I'm alive" signal to the Electron launcher.
-// Fires synchronously after createRoot — before any lazy chunk resolves.
-// The launcher uses this to advance from "html-loaded" to "react-rendered"
-// and to show the dashboard window without waiting for the full <Dashboard>
-// component tree to mount (which is gated behind <Suspense>).
+// Earliest possible "I'm alive" signal to the shell (Electron launcher OR Tauri).
+// Fires synchronously after createRoot — before any lazy chunk resolves — so the shell
+// can advance from "html-loaded" to "react-rendered" and show the dashboard without
+// waiting for the full <Dashboard> tree (gated behind <Suspense>). reportBootPhase routes
+// it via the Electron bridge AND POST /api/boot/phase, so it also works under Tauri.
 try {
-  window.ai?.notifyUiBootPhase?.('react-rendered')
-} catch { /* not in Electron */ }
+  reportBootPhase('react-rendered')
+} catch { /* best-effort */ }
