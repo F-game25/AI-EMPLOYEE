@@ -228,3 +228,14 @@ def get_unified_memory_store() -> UnifiedMemoryStore:
         if _instance is None:
             _instance = UnifiedMemoryStore()
     return _instance
+
+
+def reset_unified_memory_store() -> None:
+    """Drop the process-wide store so the next access rebinds to the current STATE_DIR.
+
+    Production never changes STATE_DIR mid-process; tests do (fresh tmp dir per case), so
+    without this the singleton leaks a prior test's path and records into later tests.
+    """
+    global _instance
+    with _instance_lock:
+        _instance = None

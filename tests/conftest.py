@@ -165,6 +165,14 @@ def isolated_ai_home(tmp_path, monkeypatch):
                     except AttributeError:
                         pass
 
+    # Reset the process-wide unified memory store so each test rebinds it to this test's
+    # fresh STATE_DIR instead of inheriting a prior test's records/path (test isolation).
+    try:
+        from memory.unified_store import reset_unified_memory_store
+        reset_unified_memory_store()
+    except Exception:
+        pass
+
     return fake_home
 
 
