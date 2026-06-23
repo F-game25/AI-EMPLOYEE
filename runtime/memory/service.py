@@ -40,6 +40,16 @@ _PROMOTION_THRESHOLD = {
 
 
 def _default_tenant() -> str:
+    # Prefer the request-scoped tenant set by TenantMiddleware (a ContextVar) so concurrent
+    # multi-tenant requests don't all collapse onto one process-wide env value. Fall back to
+    # env, then "default" for non-request contexts (CLI, background jobs, tests).
+    try:
+        from core.tenancy import get_tenant_manager
+        ctx = get_tenant_manager().get_current_tenant()
+        if ctx is not None and getattr(ctx, "tenant_id", None):
+            return ctx.tenant_id
+    except Exception:
+        pass
     return os.environ.get("TENANT_ID") or os.environ.get("AI_EMPLOYEE_TENANT_ID") or "default"
 
 
@@ -178,6 +188,10 @@ class MemoryService:
         tags: list[str] | None = None,
         top_k: int = 5,
     ) -> list[dict[str, Any]]:
+        # Default retrieval to the current tenant — without this, an unscoped call returned
+        # every tenant's memories (cross-tenant read). Callers wanting cross-tenant reads
+        # must pass an explicit tenant_id (none of the production call sites do).
+        tenant_id = tenant_id or _default_tenant()
         query_tokens = {t for t in str(query or "").lower().split() if len(t) > 2}
         seen: set[str] = set()
         # Mirror the canonical store's scope/agent/tags filters on cache + vector
