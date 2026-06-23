@@ -136,6 +136,21 @@ class LLMClient:
         self.log_path = self.state_dir / "llm_calls.jsonl"
 
     def complete(self, *, prompt: str, system: str = "You are a helpful AI assistant.", tenant_id: str = "default", model: str | None = None) -> dict[str, Any]:
+        # Per-run routing hints from the cost-first planner. ``preferred_provider`` is only
+        # ever set to a remote provider by ``core.model_escalation`` AFTER its deny-by-default
+        # egress gate passes (flag + privacy mode + online + key present), so honoring it here
+        # cannot cause silent egress. ``preferred_model`` is a default only — never overrides
+        # an explicit model on the local path.
+        _provider_override: str | None = None
+        try:
+            from core.run_model_context import get_preferred_model, get_preferred_provider
+            if get_preferred_provider() == "openrouter":
+                _provider_override = "openrouter"
+                model = get_preferred_model() or model
+            elif model is None:
+                model = get_preferred_model()
+        except Exception:  # noqa: BLE001
+            pass
         attempts = 3
         delay_s = 1.0
         last_error = ""
@@ -186,7 +201,9 @@ class LLMClient:
         for attempt in range(1, attempts + 1):
             started = time.time()
             try:
-                if self.backend == "ollama" or self.backend == "remote_compute":
+                if _provider_override == "openrouter":
+                    response = self._call_openrouter(prompt=prompt, system=system, model=model or "")
+                elif self.backend == "ollama" or self.backend == "remote_compute":
                     response = self._call_ollama(prompt=prompt, system=system, model=model)
                 elif self.backend == "openrouter":
                     response = self._call_openrouter(prompt=prompt, system=system)

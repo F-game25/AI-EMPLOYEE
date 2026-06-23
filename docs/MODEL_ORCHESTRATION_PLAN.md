@@ -221,6 +221,46 @@ Show: installed models, VRAM each uses, which is loaded now, RAM/VRAM gauges, on
 
 ---
 
+## Implementation status (2026-06-21) — cost-first ladder is LIVE
+
+The `ComputePlan` now **drives execution** (it was decorative — computed then dropped). PR #302.
+
+| Capability | Status |
+|---|---|
+| Phase 1/2 (per-task selection, CPU/RAM offload, quant lanes) | ✅ shipped earlier |
+| Phase 3 (ContextPacket handoff) | ✅ in `swarm_controller` |
+| Phase 5 (on-demand warming, eviction) | ✅ `ensure_model_ready` |
+| Phase 6 (Models ORCHESTRATION tab) | ✅ + executed-route badge in AscendForge |
+| **Cost-first loop closed** — cheapest *installed* model actually runs | ✅ `compute_planner` → `model_role_resolver` (inventory-aware) → per-run hint → executor/ReAct/swarm |
+| **Phase 4 free OpenRouter overflow** | ✅ gated (`model_escalation.apply_compute_plan`), deny-by-default |
+| **rent_gpu request** (HITL approval card → compute_fabric) | ✅ non-blocking, never auto-spends |
+| **rent_gpu execution** (provision a box + route inference there) | ⛔ BLOCKED on owner infra decision — see below |
+
+### Routing decision (what runs)
+`compute_planner.assess_compute_needs()` classifies goal → tier, resolves the concrete **installed**
+model@quant via `model_role_resolver.resolve_role` (the only inventory-aware resolver), and picks the
+rung. Escalation is **VRAM-pressure-aware** (heavy CPU offload), not just context length. The chosen
+route flows to inference via a request-scoped hint (`core.run_model_context`), honored by
+`orchestrator.LLMClient`, `engine.inference.llm`, and the swarm — never overriding an explicit model.
+
+### Env levers (all default-off; nothing leaves the machine or spends by default)
+- `MODEL_ALLOW_OPENROUTER_OVERFLOW=1` + `OPENROUTER_API_KEY` + privacy HYBRID/CONNECTED → free OpenRouter overflow when local is saturated. Fails closed (offline/privacy/missing-key → local fallback).
+- `COMPUTE_OFFLOAD_OPENROUTER_LAYERS` (default 8) — offload layers that trigger the overflow *option*.
+- `COMPUTE_OFFLOAD_RENT_LAYERS` (default 0 = off) — set >0 to make heavy-offload tasks request a rented GPU.
+- `OPENROUTER_FREE_MODEL` (default `meta-llama/llama-3.1-8b-instruct:free`).
+- Real GPU rental: `COMPUTE_FABRIC_LIVE=1` + owner approval token + `COMPUTE_DAILY/TOTAL_CAP_USD`.
+
+### Remaining: rent_gpu *execution* (owner decision required)
+`backend/compute_fabric` is a complete safety-first stub: estimate → search-offers → approve → start-job
+are wired, but **no provider adapter is implemented** (`purchase` refuses unless a real adapter +
+credentials + `COMPUTE_FABRIC_LIVE` are present — a charge is physically impossible today). To make
+"actually use a rented GPU" work end-to-end, the owner must: (1) choose a provider (RunPod/Vast.ai/
+Lambda), (2) add credentials, (3) implement+enable that provider's adapter, (4) set `COMPUTE_FABRIC_LIVE=1`.
+Inference then routes to the rented box via `LLMClient`'s `remote_compute` backend + `hot_swap_backend(endpoint)`.
+This is deliberately gated (cost/supply-chain/data-egress) and is not built speculatively.
+
+---
+
 ## Phase 7 — Conversation Runtime Layer (real teammate behavior)  ★ added 2026-06-17
 
 This is an **architecture problem, not a prompt bug.** The chat currently behaves like a generic chatbot: it forgets that "optie 2" refers to its own previous answer, it *explains how to check the time manually* instead of fetching it, and it sends a tutorial when one short sentence was asked for. Three failures: **context retention**, **intent detection**, **answer discipline**.
