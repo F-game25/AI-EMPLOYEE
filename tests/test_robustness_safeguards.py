@@ -140,7 +140,9 @@ class TestCircuitBreakerRecovery:
         return CircuitBreaker(
             "recovery-test",
             failure_threshold=1,
-            recovery_timeout=0.05,
+            # 0.3s timeout with 0.6s sleeps below: wide margins so contended-CI jitter
+            # can't flip the immediate `state == OPEN` check to HALF_OPEN early.
+            recovery_timeout=0.3,
             success_threshold=2,
             window_seconds=300.0,
         )
@@ -153,14 +155,14 @@ class TestCircuitBreakerRecovery:
         cb = self._cb_fast()
         self._fail(cb)
         assert cb.state == CBState.OPEN
-        time.sleep(0.1)
+        time.sleep(0.6)
         # Accessing state triggers _maybe_transition
         assert cb.state == CBState.HALF_OPEN
 
     def test_half_open_to_closed_after_successes(self):
         cb = self._cb_fast()
         self._fail(cb)
-        time.sleep(0.1)
+        time.sleep(0.6)
         assert cb.state == CBState.HALF_OPEN
         cb.call(lambda: None)  # 1st success
         cb.call(lambda: None)  # 2nd success → CLOSED
@@ -169,7 +171,7 @@ class TestCircuitBreakerRecovery:
     def test_half_open_back_to_open_on_failure(self):
         cb = self._cb_fast()
         self._fail(cb)
-        time.sleep(0.1)
+        time.sleep(0.6)
         assert cb.state == CBState.HALF_OPEN
         self._fail(cb)
         assert cb.state == CBState.OPEN
