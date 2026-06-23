@@ -6,10 +6,11 @@
  * Used for API catalog, documentation, and onboarding.
  *
  * Auth legend:
- *   true        = requireAuth (JWT Bearer token)
- *   'localhost' = requireLocalhost (raw socket == 127.0.0.1)
- *   false       = public / no auth
- *   'optional'  = token accepted but not required (e.g. /version)
+ *   true            = requireAuth (JWT Bearer token)
+ *   'localhost'     = requireLocalhost (raw socket == 127.0.0.1)
+ *   'localhost|jwt' = localhostOrAuth — tokenless from loopback, JWT for remote callers
+ *   false           = public / no auth
+ *   'optional'      = token accepted but not required (e.g. /version)
  */
 
 const ROUTE_REGISTRY = [
@@ -18,8 +19,10 @@ const ROUTE_REGISTRY = [
   { method: 'GET',    path: '/health',                              auth: false,       file: 'server.js' },
   { method: 'GET',    path: '/health/full',                         auth: true,        file: 'server.js' },
   { method: 'GET',    path: '/api/health',                          auth: true,        file: 'server.js' },
-  { method: 'GET',    path: '/api/readiness',                       auth: false,       file: 'server.js' },
-  { method: 'GET',    path: '/api/runtime/identity',                auth: true,        file: 'server.js' },
+  { method: 'GET',    path: '/api/readiness',                       auth: false,            file: 'server.js' },
+  { method: 'GET',    path: '/api/runtime/identity',                auth: 'localhost|jwt',  file: 'routes/auth-identity.js' },
+  { method: 'POST',   path: '/api/boot/phase',                      auth: 'localhost|jwt',  file: 'routes/health.js' },
+  { method: 'GET',    path: '/api/boot/phase',                      auth: 'localhost|jwt',  file: 'routes/health.js' },
   { method: 'GET',    path: '/metrics',                             auth: 'optional',  file: 'server.js' },
   { method: 'GET',    path: '/version',                             auth: 'optional',  file: 'server.js' },
   { method: 'GET',    path: '/status',                              auth: true,        file: 'server.js' },

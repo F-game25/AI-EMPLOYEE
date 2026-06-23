@@ -83,6 +83,7 @@ const _rl_auto_token = makeRateLimit(10);  // /api/auth/auto-token — 10/min pe
 module.exports = function createAuthIdentityRouter(deps) {
   const {
     requireAuth,
+    localhostOrAuth,
     JWT_SECRET,
     JWT_EXPIRES_IN,
     AI_HOME,
@@ -274,7 +275,10 @@ module.exports = function createAuthIdentityRouter(deps) {
   });
 
   // ── GET /api/runtime/identity ─────────────────────────────────────────────
-  router.get('/api/runtime/identity', requireAuth, (req, res) => {
+  // F1: the desktop supervisor probes this tokenless from loopback to verify it is
+  // talking to the right runtime (nonce match) before any operator token exists. Remote
+  // callers still need a JWT. Payload carries runtime metadata + port-lock nonce — no secrets.
+  router.get('/api/runtime/identity', localhostOrAuth, (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({
       ok: true,

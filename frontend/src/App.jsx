@@ -12,6 +12,7 @@ import SearchOmnibar from './components/ui/SearchOmnibar'
 import LoginPage from './components/LoginPage'
 import { PerformanceModeProvider } from './context/PerformanceModeContext'
 import { ensureOperatorToken, getStoredToken } from './api/auth'
+import { reportBootPhase } from './bootPhase'
 
 const Dashboard = lazy(() => import('./components/Dashboard'))
 import ContextCheckModal from './components/dashboard/ContextCheckModal'
@@ -19,18 +20,9 @@ const READINESS_POLL_MS = 1500
 const READINESS_DEGRADED_AFTER_MS = 12000
 const BOOT_MIN_MS = 2800
 
+// CustomEvent + Electron bridge + POST /api/boot/phase (works under Tauri). See bootPhase.js.
 function notifyBootPhase(phase, message, extra = {}) {
-  const payload = { phase, message, ...extra, ts: Date.now() }
-  try {
-    window.dispatchEvent(new CustomEvent('nx:boot-phase', { detail: payload }))
-  } catch {
-    // Browser event dispatch is best-effort during early boot.
-  }
-  try {
-    window.ai?.notifyUiBootPhase?.(payload)
-  } catch {
-    // Electron IPC is unavailable in normal browser mode.
-  }
+  return reportBootPhase(phase, message, extra)
 }
 
 function ensureLocalOperatorToken() {

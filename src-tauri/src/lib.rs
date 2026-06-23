@@ -23,6 +23,7 @@ use serde_json::json;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
+use std::net::ToSocketAddrs;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
@@ -64,6 +65,12 @@ fn resolve_repo_dir() -> PathBuf {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(p) = exe.parent() {
+            // M5: packaged layout — Tauri Linux puts bundled resources under
+            // <prefix>/lib/<bin>/ while the binary lives in <prefix>/bin/. Probe those
+            // (and the staged "repo" payload dir) before the dev-tree walk below.
+            for rel in ["../lib/nexus-os", "../lib/Nexus OS", "resources", "repo", "../lib/nexus-os/repo"] {
+                roots.push(p.join(rel));
+            }
             roots.push(p.to_path_buf());
         }
     }
@@ -484,10 +491,266 @@ fn open_main(app: &AppHandle, origin: &str) {
         let _ = w.show();
         let _ = w.set_focus();
         let _ = app.emit("boot://ready", ());
+        // M4: opportunistic self-update check once the dashboard is live (OFF by default).
+        if auto_update_enabled() {
+            let h = app.clone();
+            tauri::async_runtime::spawn(async move { check_for_update(h, false).await; });
+        }
     } else {
         let state = app.state::<SharedState>().inner().clone();
         emit_fail(app, &state, "dashboard", "Main window is missing");
     }
+}
+
+// ── M3: first-run Python environment provisioning (offline, from wheelhouse) ──
+// A bundled / clean machine has no project Python deps. On first run we create a venv
+// under app data and install the core deps from the bundled wheelhouse with --no-index
+// (no network). The backend then runs on that venv. Reuses the same offline-install
+// pattern as scripts/build_python_core_bundle.py. Ollama stays managed separately.
+
+fn venv_dir(app_home: &Path) -> PathBuf {
+    app_home.join("venv")
+}
+
+fn venv_python(venv: &Path) -> PathBuf {
+    if cfg!(windows) {
+        venv.join("Scripts").join("python.exe")
+    } else {
+        venv.join("bin").join("python")
+    }
+}
+
+fn venv_ready(app_home: &Path) -> bool {
+    venv_python(&venv_dir(app_home)).exists()
+}
+
+/// Does this directory directly contain at least one wheel? `pip --find-links` does NOT recurse,
+/// so the path we hand it must be the directory that actually holds the .whl files.
+fn dir_has_wheel(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .any(|e| e.path().extension().map(|x| x == "whl").unwrap_or(false))
+        })
+        .unwrap_or(false)
+}
+
+/// Offline package set produced by `npm run build:python-core`. The build writes wheels into a
+/// platform-tagged subdir (runtime/wheelhouse/<os>-<arch>-py<ver>/, and the README also documents a
+/// two-level <platform>/<pyver>/ layout) — NOT the root. Since pip --find-links can't recurse, we
+/// resolve the real wheel-bearing directory here. A shipped bundle carries exactly one platform's
+/// wheels; on a multi-platform dev box we prefer the dir matching this OS+arch, else the first
+/// found (sorted, deterministic).
+fn find_wheelhouse(repo_dir: &Path) -> Option<PathBuf> {
+    for c in ["runtime/wheelhouse", "repo/runtime/wheelhouse"] {
+        let root = repo_dir.join(c);
+        if !root.is_dir() {
+            continue;
+        }
+        if dir_has_wheel(&root) {
+            return Some(root);
+        }
+        // Collect wheel-bearing dirs up to two levels down (<tag>/ or <platform>/<pyver>/).
+        let mut found: Vec<PathBuf> = Vec::new();
+        if let Ok(lvl1) = std::fs::read_dir(&root) {
+            for d1 in lvl1.flatten().map(|e| e.path()).filter(|p| p.is_dir()) {
+                if dir_has_wheel(&d1) {
+                    found.push(d1);
+                    continue;
+                }
+                if let Ok(lvl2) = std::fs::read_dir(&d1) {
+                    for d2 in lvl2.flatten().map(|e| e.path()).filter(|p| p.is_dir()) {
+                        if dir_has_wheel(&d2) {
+                            found.push(d2);
+                        }
+                    }
+                }
+            }
+        }
+        if found.is_empty() {
+            continue;
+        }
+        found.sort();
+        let os_tok = match std::env::consts::OS {
+            "macos" => "darwin",
+            other => other,
+        };
+        let arch = std::env::consts::ARCH; // x86_64 / aarch64
+        let preferred = found.iter().find(|p| {
+            let s = p.to_string_lossy().to_lowercase();
+            s.contains(os_tok) && s.contains(arch)
+        });
+        return Some(preferred.cloned().unwrap_or_else(|| found[0].clone()));
+    }
+    None
+}
+
+/// Resolve the Python interpreter: env override → provisioned venv → system python3.
+fn resolve_python(state: &SharedState) -> Option<String> {
+    if let Ok(p) = std::env::var("AI_EMPLOYEE_PYTHON") {
+        if !p.is_empty() && Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    let vp = venv_python(&venv_dir(&state.app_home));
+    if vp.exists() {
+        return Some(vp.to_string_lossy().into_owned());
+    }
+    which_runtime(&["python3", "python"])
+}
+
+/// First-run: create the venv + offline-install core deps from the wheelhouse.
+/// Ok(true) = provisioned now, Ok(false) = already ready, Err = actionable reason.
+fn provision_python_env(app: &AppHandle, state: &SharedState) -> Result<bool, String> {
+    if venv_ready(&state.app_home) {
+        return Ok(false);
+    }
+    let base = which_runtime(&["python3", "python"])
+        .ok_or("Python 3 is required for the AI backend. Install Python 3 and reopen Nexus OS.")?;
+    let wheelhouse = find_wheelhouse(&state.repo_dir)
+        .ok_or("Offline package set (wheelhouse) not found — rebuild with `npm run build:python-core`.")?;
+    let venv = venv_dir(&state.app_home);
+
+    emit_phase(app, state, "setup-venv", "Creating Python environment");
+    emit_log(app, state, "setup", "Creating virtual environment…", "info");
+    let out = std::process::Command::new(&base)
+        .args(["-m", "venv", &venv.to_string_lossy()])
+        .output()
+        .map_err(|e| format!("venv create failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("venv create failed: {}", strip_ansi(&String::from_utf8_lossy(&out.stderr))));
+    }
+
+    let vpy = venv_python(&venv);
+    emit_log(app, state, "setup", "Installing core dependencies (offline)…", "info");
+    let mut args: Vec<String> = vec![
+        "-m".into(), "pip".into(), "install".into(),
+        "--no-index".into(),
+        "--find-links".into(), wheelhouse.to_string_lossy().into_owned(),
+    ];
+    let req = state.repo_dir.join("runtime/requirements-core.txt");
+    if req.exists() {
+        args.push("-r".into());
+        args.push(req.to_string_lossy().into_owned());
+    } else if let Ok(entries) = std::fs::read_dir(&wheelhouse) {
+        // No pinned core file: install every wheel present in the offline set.
+        for e in entries.flatten() {
+            if e.file_name().to_string_lossy().ends_with(".whl") {
+                args.push(e.path().to_string_lossy().into_owned());
+            }
+        }
+    }
+    let out = std::process::Command::new(&vpy)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("pip install failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("dependency install failed: {}", strip_ansi(&String::from_utf8_lossy(&out.stderr))));
+    }
+    emit_phase(app, state, "setup-venv", "Python environment ready");
+    Ok(true)
+}
+
+/// M3: detect Ollama (managed separately, not bundled) and inform the user. Never installs
+/// or pulls without consent — only an explicit NEXUS_SETUP_PULL_MODEL triggers a one-time pull.
+async fn check_ollama(app: AppHandle, state: SharedState) {
+    let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".into());
+    let url = format!("{}/api/tags", host.trim_end_matches('/'));
+    let running = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() {
+        Ok(c) => c.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false),
+        Err(_) => false,
+    };
+    if running {
+        emit_log(&app, &state, "setup", "Ollama detected — on-device models available.", "info");
+        // Opt-in (consented) one-time model pull — no silent downloads.
+        if let Ok(model) = std::env::var("NEXUS_SETUP_PULL_MODEL") {
+            if !model.is_empty() {
+                if let Some(ollama) = which_runtime(&["ollama"]) {
+                    emit_log(&app, &state, "setup", &format!("Pulling model {model} (consented)…"), "info");
+                    let _ = std::process::Command::new(ollama).args(["pull", &model]).output();
+                }
+            }
+        }
+    } else {
+        emit_log(&app, &state, "setup",
+            "Ollama not detected — on-device models are optional. Install from https://ollama.com and reopen to enable them.",
+            "warn");
+    }
+}
+
+/// Fast, synchronous Ollama liveness probe for the setup screen (no async runtime needed).
+fn ollama_present() -> bool {
+    let hostport = std::env::var("OLLAMA_HOST")
+        .ok()
+        .and_then(|h| {
+            let h = h.trim_end_matches('/').replace("http://", "").replace("https://", "");
+            if h.contains(':') { Some(h) } else { None }
+        })
+        .unwrap_or_else(|| "127.0.0.1:11434".to_string());
+    hostport
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .map(|addr| std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok())
+        .unwrap_or(false)
+}
+
+/// Show (or focus) the dedicated first-run setup window. Mirrors the update window: the splash
+/// stays behind it; on completion run_setup() closes it and resumes boot.
+fn show_setup_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("setup") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let _ = tauri::WebviewWindowBuilder::new(app, "setup", tauri::WebviewUrl::App("setup.html".into()))
+        .title("Nexus OS — First-run setup")
+        .inner_size(580.0, 560.0)
+        .resizable(false)
+        .center()
+        .build();
+}
+
+/// M3 setup screen: report detected components without mutating anything.
+#[tauri::command]
+fn setup_status(app: AppHandle) -> serde_json::Value {
+    let state = app.state::<SharedState>().inner().clone();
+    json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "python_found": which_runtime(&["python3", "python"]).is_some(),
+        "wheelhouse_found": find_wheelhouse(&state.repo_dir).is_some(),
+        "venv_ready": venv_ready(&state.app_home),
+        "ollama_running": ollama_present(),
+    })
+}
+
+/// M3 setup screen: provision the venv (offline) with the user's consent, optionally pull a model
+/// if Ollama is present, then close the setup window and resume boot. Progress streams via the
+/// existing boot://log + boot://phase events the screen listens to. Errors propagate to the UI.
+#[tauri::command]
+async fn run_setup(app: AppHandle, pull_model: Option<String>) -> Result<(), String> {
+    let state = app.state::<SharedState>().inner().clone();
+    let ah = app.clone();
+    let st = state.clone();
+    tauri::async_runtime::spawn_blocking(move || provision_python_env(&ah, &st))
+        .await
+        .map_err(|e| format!("setup task error: {e}"))??;
+
+    if let Some(model) = pull_model {
+        if !model.trim().is_empty() {
+            // Consented, one-time pull — surfaced inside check_ollama (no silent downloads).
+            std::env::set_var("NEXUS_SETUP_PULL_MODEL", model.trim());
+        }
+    }
+    check_ollama(app.clone(), state.clone()).await;
+
+    let _ = app.emit("setup://done", json!({}));
+    if let Some(w) = app.get_webview_window("setup") {
+        let _ = w.close();
+    }
+    // venv now exists → re-entering boot proceeds straight to spawning services + dashboard.
+    tauri::async_runtime::spawn(boot(app));
+    Ok(())
 }
 
 // ── Boot sequence ────────────────────────────────────────────────────────────
@@ -558,12 +821,38 @@ async fn boot(app: AppHandle) {
 
     // ── No reusable runtime → spawn our own ──
     let node = which_runtime(&["node"]);
-    let python = which_runtime(&["python3", "python"]);
     if node.is_none() {
         emit_fail(&app, &state, "preflight", "Node.js not found on PATH");
         *state.booting.lock().unwrap() = false;
         return;
     }
+
+    // ── M3: first-run setup ───────────────────────────────────────────────────
+    // Interactive by default: open the guided setup window and let the user consent +
+    // watch progress; run_setup() provisions the venv (offline) then re-enters boot.
+    // Headless/CI auto-provisions inline with NEXUS_SETUP_AUTO=1 (no window / unattended).
+    if !venv_ready(&state.app_home) {
+        let auto = std::env::var("NEXUS_SETUP_AUTO").map(|v| v == "1" || v == "true").unwrap_or(false);
+        if !auto {
+            emit_status(&app, "First-run setup required");
+            emit_log(&app, &state, "setup", "First run detected — opening guided setup…", "info");
+            show_setup_window(&app);
+            *state.booting.lock().unwrap() = false; // run_setup() re-enters boot once provisioned
+            return;
+        }
+        let ah = app.clone();
+        let st = state.clone();
+        match tauri::async_runtime::spawn_blocking(move || provision_python_env(&ah, &st)).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(reason)) => emit_log(&app, &state, "setup", &format!("Setup skipped: {reason}"), "warn"),
+            Err(e) => emit_log(&app, &state, "setup", &format!("Setup task error: {e}"), "warn"),
+        }
+    }
+
+    // M3: detect/inform Ollama (managed separately; consent-gated). Bounded 2s probe.
+    check_ollama(app.clone(), state.clone()).await;
+
+    let python = resolve_python(&state);
 
     // Optional debug hold so the boot splash can be observed (default off, env-gated).
     if let Ok(ms) = std::env::var("NEXUS_BOOT_DELAY_MS") {
@@ -757,6 +1046,205 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+// ── M4: Self-update (unsigned v1 — HTTPS + sha256 integrity) ──────────────────
+// Fetches a `latest.json` manifest from GitHub Releases, compares versions, and on a
+// newer release downloads the AppImage, verifies its sha256, replaces the running
+// $APPIMAGE, and relaunches. Unsigned per the v1 decision: trust = GitHub + TLS + sha256.
+// Signed (minisign) updates are the M8 hardening follow-up. Auto-check is OFF unless
+// NEXUS_AUTO_UPDATE is set; a tray item + JS command trigger a manual check.
+
+#[derive(serde::Deserialize)]
+struct UpdateManifest {
+    version: String,
+    url: String,
+    sha256: String,
+    #[serde(default)]
+    notes: String,
+}
+
+fn current_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+fn update_manifest_url() -> String {
+    std::env::var("NEXUS_UPDATE_MANIFEST_URL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            "https://github.com/F-game25/AI-EMPLOYEE/releases/latest/download/latest.json".into()
+        })
+}
+
+fn auto_update_enabled() -> bool {
+    matches!(
+        std::env::var("NEXUS_AUTO_UPDATE")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// True if `candidate` is a strictly newer dotted-int version than `current`.
+fn version_gt(candidate: &str, current: &str) -> bool {
+    fn parts(v: &str) -> Vec<u64> {
+        v.trim()
+            .trim_start_matches('v')
+            .split(['.', '-', '+'])
+            .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
+            .map(|s| s.parse::<u64>().unwrap_or(0))
+            .collect()
+    }
+    let (a, b) = (parts(candidate), parts(current));
+    for i in 0..a.len().max(b.len()) {
+        let x = a.get(i).copied().unwrap_or(0);
+        let y = b.get(i).copied().unwrap_or(0);
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+fn emit_update(app: &AppHandle, event: &str, payload: serde_json::Value) {
+    let _ = app.emit(&format!("update://{}", event), payload);
+}
+
+/// Show (or create) the dedicated update window. The main window has navigated to the
+/// dashboard by update-time, so the update UI gets its own self-contained webview.
+fn show_update_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("update") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let _ = tauri::WebviewWindowBuilder::new(app, "update", tauri::WebviewUrl::App("update.html".into()))
+        .title("Nexus OS — Update")
+        .inner_size(560.0, 440.0)
+        .resizable(false)
+        .center()
+        .build();
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+async fn check_for_update(app: AppHandle, manual: bool) {
+    let url = update_manifest_url();
+    if manual {
+        show_update_window(&app);
+    }
+    emit_update(&app, "checking", json!({ "manual": manual }));
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            emit_update(&app, "error", json!({ "reason": format!("client: {e}") }));
+            return;
+        }
+    };
+
+    // 1. Fetch + parse the manifest.
+    let manifest: UpdateManifest = match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+        Ok(resp) => match resp.json().await {
+            Ok(m) => m,
+            Err(e) => {
+                if manual {
+                    emit_update(&app, "error", json!({ "reason": format!("bad manifest: {e}") }));
+                }
+                return;
+            }
+        },
+        Err(e) => {
+            if manual {
+                emit_update(&app, "error", json!({ "reason": format!("no manifest: {e}") }));
+            }
+            return;
+        }
+    };
+
+    // 2. Compare versions — bail if not newer.
+    if !version_gt(&manifest.version, current_version()) {
+        emit_update(&app, "none", json!({ "current": current_version(), "latest": manifest.version }));
+        return;
+    }
+    show_update_window(&app);
+    emit_update(&app, "available", json!({ "version": manifest.version, "notes": manifest.notes }));
+
+    // 3. Only a packaged AppImage can self-replace; a source checkout gets a clear message.
+    let target = match std::env::var("APPIMAGE") {
+        Ok(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => {
+            emit_update(&app, "manual_required", json!({
+                "version": manifest.version,
+                "reason": "Self-update applies to the packaged AppImage. For a source checkout run: git pull && npm run tauri:build."
+            }));
+            return;
+        }
+    };
+
+    // 4. Download the new AppImage.
+    emit_update(&app, "downloading", json!({ "version": manifest.version }));
+    let bytes = match client.get(&manifest.url).send().await.and_then(|r| r.error_for_status()) {
+        Ok(resp) => match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                emit_update(&app, "error", json!({ "reason": format!("download: {e}") }));
+                return;
+            }
+        },
+        Err(e) => {
+            emit_update(&app, "error", json!({ "reason": format!("download: {e}") }));
+            return;
+        }
+    };
+
+    // 5. Verify sha256 integrity (no signature in v1 — fail closed on mismatch).
+    emit_update(&app, "verifying", json!({}));
+    let got = sha256_hex(&bytes);
+    if !got.eq_ignore_ascii_case(manifest.sha256.trim()) {
+        emit_update(&app, "error", json!({
+            "reason": "checksum mismatch — refusing to apply", "expected": manifest.sha256, "got": got
+        }));
+        return;
+    }
+
+    // 6. Apply: stage beside the current AppImage, chmod +x, atomically rename over it.
+    emit_update(&app, "applying", json!({}));
+    let tmp = target.with_extension("new");
+    if let Err(e) = std::fs::write(&tmp, &bytes) {
+        emit_update(&app, "error", json!({ "reason": format!("write: {e}") }));
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+    }
+    if let Err(e) = std::fs::rename(&tmp, &target) {
+        let _ = std::fs::remove_file(&tmp);
+        emit_update(&app, "error", json!({ "reason": format!("replace: {e}") }));
+        return;
+    }
+
+    // 7. Relaunch into the new version (diverges).
+    emit_update(&app, "relaunching", json!({ "version": manifest.version }));
+    app.restart();
+}
+
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) {
+    check_for_update(app, true).await;
+}
+
 // ── Tray ─────────────────────────────────────────────────────────────────────
 
 fn focus_any(app: &AppHandle) {
@@ -769,7 +1257,8 @@ fn focus_any(app: &AppHandle) {
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit Nexus OS", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Dashboard", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let updates = MenuItem::with_id(app, "check_updates", "Check for Updates…", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &updates, &quit])?;
     TrayIconBuilder::new()
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -778,6 +1267,11 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 app.exit(0);
             }
             "show" => focus_any(app),
+            "check_updates" => {
+                focus_any(app);
+                let h = app.clone();
+                tauri::async_runtime::spawn(async move { check_for_update(h, true).await; });
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -836,7 +1330,10 @@ pub fn run() {
             retry_boot,
             open_logs_folder,
             get_boot_state,
-            quit_app
+            quit_app,
+            check_for_updates,
+            setup_status,
+            run_setup
         ])
         .build(tauri::generate_context!())
         .expect("error while building Nexus OS")
@@ -850,4 +1347,65 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_wheelhouse;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn unique_tmp(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut p = std::env::temp_dir();
+        p.push(format!("nexus_wh_{tag}_{nanos}_{}", std::process::id()));
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn touch_wheel(dir: &Path, name: &str) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join(name), b"").unwrap();
+    }
+
+    #[test]
+    fn resolves_tagged_subdir_not_root() {
+        // Real build layout: wheels under runtime/wheelhouse/<tag>/, not the root.
+        // pip --find-links can't recurse, so the resolved path must be the subdir.
+        let root = unique_tmp("tagged");
+        let sub = root.join("runtime/wheelhouse/linux-x86_64-py312");
+        touch_wheel(&sub, "anthropic-0.1.0-py3-none-any.whl");
+        assert_eq!(find_wheelhouse(&root), Some(sub));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolves_two_level_layout() {
+        // README-documented <platform>/<pyver>/ layout.
+        let root = unique_tmp("twolevel");
+        let sub = root.join("runtime/wheelhouse/linux-x86_64/py312");
+        touch_wheel(&sub, "foo-1.0-py3-none-any.whl");
+        assert_eq!(find_wheelhouse(&root), Some(sub));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolves_flat_root() {
+        let root = unique_tmp("flat");
+        let wh = root.join("runtime/wheelhouse");
+        touch_wheel(&wh, "bar-1.0-py3-none-any.whl");
+        assert_eq!(find_wheelhouse(&root), Some(wh));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn none_when_no_wheels_present() {
+        let root = unique_tmp("empty");
+        fs::create_dir_all(root.join("runtime/wheelhouse/linux-x86_64-py312")).unwrap();
+        assert_eq!(find_wheelhouse(&root), None);
+        let _ = fs::remove_dir_all(&root);
+    }
 }
