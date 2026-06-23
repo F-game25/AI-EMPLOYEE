@@ -7,15 +7,18 @@ these tests assert that degradation path works.
 """
 import sys
 from pathlib import Path
+import json
 
 _RUNTIME = Path(__file__).resolve().parents[1] / "runtime"
 if str(_RUNTIME) not in sys.path:
     sys.path.insert(0, str(_RUNTIME))
 
 import companion.conversation_runtime as cr  # noqa: E402
+import companion.execution_broker as eb  # noqa: E402
 from companion.conversation_runtime import (  # noqa: E402
     handle_message, get_conversation_runtime, ConversationRuntime,
 )
+from companion.session_state import get_session_store  # noqa: E402
 from companion.schemas import CompanionRequest  # noqa: E402
 from companion.avatar_state_engine import (  # noqa: E402
     get_avatar_state_engine, AvatarStateEngine,
@@ -176,6 +179,65 @@ def test_voice_channel_populates_voice_summary(monkeypatch):
     # Short reply → spoken summary equals the reply (no needless truncation).
     if len(r["reply"]) <= 280:
         assert vs == r["reply"].strip() or vs in r["reply"]
+
+
+def test_voice_morning_brief_is_structured_and_remembered(tmp_path, monkeypatch):
+    monkeypatch.setattr(eb, "_state_dir", lambda: tmp_path)
+    (tmp_path / "leads-crm.json").write_text(json.dumps({
+        "leads": [{"stage": "negotiation", "value": 900}]
+    }), encoding="utf-8")
+    (tmp_path / "invoices.json").write_text(json.dumps({
+        "invoices": [{"status": "overdue", "total": 200}]
+    }), encoding="utf-8")
+
+    sid = "voice-morning-brief"
+    r = handle_message({"text": "give me my morning brief",
+                        "session_id": sid, "channel": "voice"})
+    assert r["ok"] is True
+    assert r["mode"] == "monitoring"
+    assert any(a.get("cap") == "briefing.morning" for a in r["actions"])
+    assert "Focus:" in r["reply"]
+    assert r["meta"]["voice_summary"].startswith("Morning brief:")
+
+    st = get_session_store().load(sid, "default")
+    assert any(item.get("cap") == "briefing.morning" for item in st.recent_tool_results)
+
+
+def test_voice_followup_turns_morning_brief_focus_into_local_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(eb, "_state_dir", lambda: tmp_path)
+    (tmp_path / "invoices.json").write_text(json.dumps({
+        "invoices": [{"status": "overdue", "total": 200}]
+    }), encoding="utf-8")
+
+    sid = "voice-brief-to-task"
+    brief = handle_message({"text": "give me my morning brief",
+                            "session_id": sid, "channel": "voice"})
+    assert brief["ok"] is True
+    assert any(a.get("cap") == "briefing.morning" for a in brief["actions"])
+
+    follow = handle_message({"text": "turn first focus into a task",
+                             "session_id": sid, "channel": "voice"})
+    assert follow["ok"] is True
+    assert follow["mode"] == "execution"
+    action = next(a for a in follow["actions"]
+                  if a.get("cap") == "teammate.briefing.create_task")
+    assert action["data"]["stored"] is True
+    assert action["data"]["task"]["status"] == "pending"
+
+    saved = json.loads((tmp_path / "tasks.json").read_text(encoding="utf-8"))
+    assert saved["tasks"]
+
+
+def test_session_context_prompt_includes_recent_tool_results():
+    ctx = {
+        "last_assistant_message": "Morning brief: focus on invoices.",
+        "recent_tool_results": [
+            {"cap": "briefing.morning", "data": {"focus": ["Collect overdue invoice."]}}
+        ],
+    }
+    prompt = ConversationRuntime._session_context_prompt(ctx)
+    assert "Recent real tool results" in prompt
+    assert "Collect overdue invoice" in prompt
 
 
 def test_non_voice_channel_has_no_voice_summary(monkeypatch):

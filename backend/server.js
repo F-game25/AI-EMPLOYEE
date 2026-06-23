@@ -327,6 +327,31 @@ function requireAuth(req, res, next) {
   }
 }
 
+// Scope ladder for service tokens (least → most privilege). Higher levels
+// satisfy lower-level route requirements (task-emit can also read).
+const _SCOPE_LEVEL = { read: 1, 'task-emit': 2 };
+
+// requireScope(...allowed) — deny-by-default scope gate, composed on top of
+// requireAuth. Tokens WITHOUT a `scope` claim (admin/operator dashboard logins
+// minted by /api/auth/token, /api/auth/auto-token) are full-access and always
+// pass — so existing behavior is unchanged. Service tokens (with a `scope`
+// claim) must meet the route's minimum required scope.
+function requireScope(...allowed) {
+  const minLevel = Math.min(...allowed.map((s) => _SCOPE_LEVEL[s] ?? Infinity));
+  return (req, res, next) => {
+    requireAuth(req, res, () => {
+      const scope = req.jwtPayload?.scope;
+      if (!scope) return next(); // full-access token (no scope claim)
+      const level = _SCOPE_LEVEL[scope] ?? 0;
+      if (level >= minLevel) return next();
+      try {
+        recordAuditEvent({ actor: req.jwtPayload?.sub || 'service', action: 'scope_denied', outputData: { have: scope, need: allowed, path: req.path }, riskScore: 0.5 });
+      } catch (_) { /* audit is best-effort; denial still enforced below */ }
+      return res.status(403).json({ ok: false, error: `Insufficient scope: requires ${allowed.join(' or ')}` });
+    });
+  };
+}
+
 function requireLocalhost(req, res, next) {
   // Use raw socket address — req.ip is X-Forwarded-For-aware (trust proxy: 1)
   // and is therefore spoofable by external callers sending a forged header.
@@ -575,8 +600,11 @@ app.use('/api/agents', agentsMonitorRouter);
 // Keep this mount before the legacy inline /api/forge handlers below. Express
 // is first-match wins, so overlapping canonical routes intentionally take
 // precedence while old submit/approve/reject/task/code-ai aliases remain live.
-app.use('/api/forge', require('./routes/forge')(requireAuth, { rlRuns: _rl_forge }));
+app.use('/api/forge', require('./routes/forge')(requireAuth, { rlRuns: _rl_forge, requireScope }));
 app.use('/api/compute', require('./routes/compute')(requireAuth));
+// Remote compute worker protocol (Phase 7) — registry/heartbeat/trust/assign,
+// scope-gated; remote dispatch only when COMPUTE_FABRIC_LIVE=1 (else local).
+app.use('/api/remote-compute', require('./routes/remote-compute')(requireAuth, { requireScope }));
 
 // Workflows — template library + CRUD
 app.use('/api/workflows', require('./routes/workflows')(requireAuth));
@@ -830,8 +858,10 @@ function _updateSystemReady(patch) {
     PORT, PYTHON_BACKEND_HOST, PYTHON_BACKEND_PORT,
     REPO_ROOT, AI_HOME, STATE_DIR, LOG_DIR, RUN_DIR, statePath,
     ARTIFACTS_DIR, WORKSPACE_DIR,
-    GIT_COMMIT, SERVER_START_TIMESTAMP, JWT_SECRET,
+    GIT_COMMIT, SERVER_START_TIMESTAMP, JWT_SECRET, JWT_EXPIRES_IN,
     HAS_FRONTEND_DIST,
+    // Metrics inputs consumed by GET /metrics (health router) — module-scope refs
+    startTime, taskMetrics,
     // Mutable scalars — wrapped as getter/setter to preserve reactivity
     getApiCallCounter: () => apiCallCounter,
     getSystemHalted: () => systemHalted,
@@ -4085,6 +4115,24 @@ server.listen(PORT, LISTEN_HOST, () => {
     restartFn: _restartBackends,
   });
   console.log('[AutoUpdate] Watchdog + auto-update service initialized');
+
+  // ── Forge → AgentController dispatcher ─────────────────────────────────────
+  // Drains human-approved forge_queue_item actions into the real engine
+  // (POST /api/tasks/run → run_goal) and writes results/proof back. Honors the
+  // reliabilityState circuit breaker; disable with FORGE_DISPATCH_ENABLED=0.
+  try {
+    const { createForgeDispatcher } = require('./forge/dispatcher');
+    const forgeDispatcher = createForgeDispatcher({
+      store: require('./routes/forge').store,
+      requestPythonJSON,
+      reliabilityState,
+      recordAuditEvent,
+    });
+    forgeDispatcher.start();
+    console.log('[ForgeDispatch] Dispatcher initialized —', JSON.stringify(forgeDispatcher.config));
+  } catch (e) {
+    console.error('[ForgeDispatch] init error:', e.message);
+  }
 
   // FIX-2 cont: 2026-05-12 — Invalidate frontend cache on SIGHUP (hot reload)
   process.on('SIGHUP', () => {

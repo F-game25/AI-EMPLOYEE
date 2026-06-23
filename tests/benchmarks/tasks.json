@@ -1,0 +1,36 @@
+{
+  "description": "AscendForge quality benchmarks. Run with: npm run bench (backend must be up).",
+  "tasks": [
+    {
+      "id": "research_summary",
+      "title": "Research summary is sourced and on-topic",
+      "type": "research",
+      "query": "benefits and risks of local-first AI systems",
+      "verify": { "type": "text", "minLen": 200, "requireSources": true, "threshold": 0.75 },
+      "weight": 1
+    },
+    {
+      "id": "research_summary_skill",
+      "title": "Deepened research skill returns a sourced, scored summary",
+      "type": "research_skill",
+      "query": "advantages of retrieval-augmented generation",
+      "weight": 1
+    },
+    {
+      "id": "lifecycle_blocks_vague",
+      "title": "Forge lifecycle gate blocks a vague goal",
+      "type": "forge_run",
+      "goal": "make it better",
+      "expect_status": "blocked",
+      "weight": 1
+    },
+    {
+      "id": "lifecycle_allows_clear",
+      "title": "Forge lifecycle gate allows a clear goal",
+      "type": "forge_run",
+      "goal": "Add a function add(a, b) that returns the sum with a docstring",
+      "expect_status": "not_blocked",
+      "weight": 1
+    }
+  ]
+}

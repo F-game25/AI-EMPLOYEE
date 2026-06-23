@@ -85,6 +85,34 @@ _SYS_CWD = (
     "print working directory", "welke map", "huidige map", "in welke map",
 )
 
+# Daily/morning briefing: read-only executive status, then keep the session
+# conversational for follow-up questions.
+_BRIEFING = (
+    "morning brief", "morning briefing", "daily brief", "daily briefing",
+    "brief me", "give me a brief", "give me my brief", "today's brief",
+    "todays brief", "today's briefing", "todays briefing", "ceo briefing",
+    "executive briefing", "start my day", "what should i focus on today",
+    "what needs attention today", "daily update", "morning update",
+)
+
+_BRIEFING_ROUTINE_CONFIG = (
+    "set up morning brief", "setup morning brief", "schedule morning brief",
+    "configure morning brief", "enable morning brief", "disable morning brief",
+    "turn on morning brief", "turn off morning brief", "brief me every morning",
+    "give me a morning brief every day", "daily morning brief",
+)
+_BRIEFING_ROUTINE_STATUS = (
+    "morning brief settings", "morning briefing settings", "briefing routine",
+    "morning brief routine", "daily brief routine",
+)
+_BRIEFING_TASK_FOLLOWUP = (
+    "turn that into a task", "make that a task", "create a task from that",
+    "turn this into a task", "make this a task", "turn first focus into a task",
+    "turn the first focus into a task", "make the first item a task",
+    "make first item a task", "create task from the first item",
+    "add that as a task", "add this as a task",
+)
+
 # ── Debugging (root-cause / why-failed) ────────────────────────────────────────
 _DEBUG = (
     "why did", "why does", "why is", "why won't", "why wont", "why can't",
@@ -227,6 +255,18 @@ class IntentClassifier:
         if _hit(t, _SYS_CWD):
             return self._result(MODE_MONITORING, "system_info.cwd", 0.9,
                                  False, "system-info: cwd")
+        if (r := _hit(t, _BRIEFING_ROUTINE_CONFIG)):
+            return self._result(MODE_EXECUTION, "teammate.routine.configure",
+                                 0.92, True, f"teammate routine cue: '{r}'")
+        if (s := _hit(t, _BRIEFING_ROUTINE_STATUS)):
+            return self._result(MODE_MONITORING, "teammate.routine.status",
+                                 0.9, False, f"teammate routine status cue: '{s}'")
+        if (f := _hit(t, _BRIEFING_TASK_FOLLOWUP)):
+            return self._result(MODE_EXECUTION, "teammate.briefing.create_task",
+                                 0.9, True, f"briefing follow-up cue: '{f}'")
+        if (b := _hit(t, _BRIEFING)):
+            return self._result(MODE_MONITORING, "briefing.morning", 0.93,
+                                 False, f"briefing cue: '{b}'")
 
         # 2) Monitoring — status questions.
         if (m := _hit(t, _MONITOR)):

@@ -31,6 +31,11 @@ const forgeMemoryGraph = require('../services/forge_memory_graph')
 const forgeContextEngine = require('../services/forge_context_engine')
 const broadcaster = require('../events/broadcaster')
 const { createRouteRateLimit } = require('../middleware/route-rate-limit')
+const { getPromptCache, PromptCacheManager } = require('../services/prompt_cache_manager')
+const { getTokenBudget, estimateTokens } = require('../services/token_budget_manager')
+const swarmCoordinator = require('../services/swarm_coordinator')
+const promptGuard = require('../services/prompt_guard')
+const resultVerifier = require('../services/result_verifier')
 
 // Lightweight logger shim — several swarm/execute paths reference `logger.*`.
 // Maps to console so those paths log instead of throwing "logger is not defined".
@@ -696,7 +701,7 @@ function runGit(root, args, timeoutMs) { return forgeWorkspace.runGit(root, args
 function gitWorkspaceSource(project) { return forgeWorkspace.gitWorkspaceSource(project) }
 function createGitWorktreeWorkspace(project, workspaceRoot) { return forgeWorkspace.createGitWorktreeWorkspace(project, workspaceRoot) }
 function ensureRunWorkspace(run, project) { return forgeWorkspace.ensureRunWorkspace(run, project) }
-function resolveInsideWorkspace(workspaceRoot, rel) { return forgeWorkspace.resolveInsideWorkspace(workspaceRoot, rel) }
+function resolveInsideWorkspace(workspaceRoot, rel) { return forgePath.resolveInsideWorkspace(workspaceRoot, rel) }
 function readWorkspaceMetadata(workspaceRoot) { return forgeWorkspace.readWorkspaceMetadata(workspaceRoot) }
 function removeRunWorkspace(runId) { return forgeWorkspace.removeRunWorkspace(runId) }
 
@@ -1087,6 +1092,33 @@ function runForgePython(payload, timeoutMs = 90000) {
     })
     child.on('error', err => resolve({ ok: false, error: err.message }))
   })
+}
+
+// Run the deterministic forge lifecycle gate (spec→plan→review→test→ship) before
+// codegen. Planning/quality-gating only — it never writes files. Env-gated
+// (FORGE_LIFECYCLE_RUNS=0 disables) and fully graceful: any failure degrades to
+// the codegen-only path so runs never break.
+async function runLifecycleGate(goal, project, body = {}) {
+  if (String(process.env.FORGE_LIFECYCLE_RUNS || '1') === '0') {
+    return { status: 'disabled' }
+  }
+  const context = { task_type: body?.task_type || project?.target_type || 'code' }
+  if (body?.test_target) context.test_target = String(body.test_target)
+  const r = await runForgePython({ operation: 'lifecycle', goal, context }, 60000)
+  if (!r || r.ok === false) {
+    return { status: 'unavailable', reason: r?.error || 'lifecycle unavailable' }
+  }
+  return {
+    status: r.status || 'unknown',
+    reason: r.reason || null,
+    open_questions: (r.spec && r.spec.open_questions) || [],
+    spec_status: r.spec?.status || null,
+    plan_status: r.plan?.status || null,
+    slices: Array.isArray(r.plan?.slices) ? r.plan.slices.length : 0,
+    review_findings: (r.stage_results?.review?.findings || []).length,
+    ship_ready: !!(r.ship && r.ship.ship_ready),
+    detail: r,
+  }
 }
 
 async function executeAction(action, project) {
@@ -1561,6 +1593,75 @@ async function callPythonChat(message, timeoutMs = 30000) {
   return { ok: false, error: 'No LLM available. Start Ollama (ollama serve) or set ANTHROPIC_API_KEY in ~/.ai-employee/.env for cloud fallback.' }
 }
 
+// Cache- and budget-aware wrapper around callPythonChat for Forge codegen.
+//  - Identical prompts return the cached response (0 tokens) — the prompt embeds
+//    the project context, so a hit is only ever byte-identical (no staleness).
+//  - Over the daily token budget (FORGE_LLM_DAILY_TOKEN_BUDGET, 0 = unlimited)
+//    the call is skipped so codegen degrades to plan-only instead of spending.
+// Token counts are estimates (~4 chars/token); the budget is a coarse guard, not
+// billing. The authoritative USD ledger remains runtime/core/cost_ledger.py.
+async function cachedForgeChat(prompt, timeoutMs = 60000) {
+  const cache = getPromptCache()
+  const budget = getTokenBudget()
+  const key = PromptCacheManager.key('forge-chat', '', prompt)
+
+  const hit = cache.get(key)
+  if (hit != null) {
+    budget.recordCacheHit()
+    return { ok: true, response: hit, _cache: 'hit', _tokens: 0 }
+  }
+
+  const estIn = estimateTokens(prompt)
+  const gate = budget.check(estIn)
+  if (!gate.allowed) {
+    return { ok: false, error: 'forge_llm_budget_exceeded', _budget: gate.reason, _cache: 'skip', _tokens: 0 }
+  }
+
+  const result = await callPythonChat(prompt, timeoutMs)
+  const text = result?.response || result?.reply || ''
+  if (text) {
+    const used = estIn + estimateTokens(text)
+    budget.record(used, { provider: 'forge-chat' })
+    cache.set(key, text, { len: text.length })
+    return { ...result, _cache: 'miss', _tokens: used }
+  }
+  return { ...result, _cache: 'miss', _tokens: 0 }
+}
+
+// Forge codegen entry: route a goal to the parallel swarm or a single agent
+// (Phase 8). The swarm coordinator decides based on the swarm enable flag, the
+// token budget, explicit opt-in/out (body.use_swarm), and a heavy-goal heuristic.
+// Single source of truth used by both /runs and /runs/stream. Always degrades
+// gracefully (swarm failure → single-agent cached chat) so a run never breaks.
+async function forgeCodegen(prompt, goal, body = {}) {
+  const decision = swarmCoordinator.decide({
+    goal,
+    useSwarm: body?.use_swarm,
+    swarmEnabled: isSwarmEnabled(),
+    taskType: 'code',
+    agentCount: swarmAgents('code'),
+    budgetOk: getTokenBudget().check(estimateTokens(prompt)).allowed,
+  })
+
+  if (decision.mode === 'swarm') {
+    try {
+      const sw = await callSwarm(prompt, decision.task_type || 'code', { n_agents: decision.n_agents })
+      const text = sw?.answer || ''
+      if (text) {
+        try { getTokenBudget().record(estimateTokens(prompt) + estimateTokens(text), { provider: 'swarm', n_agents: decision.n_agents }) } catch { /* best-effort */ }
+      }
+      return { text, mode: 'swarm', n_agents: decision.n_agents, confidence: sw?.confidence ?? null, reason: decision.reason }
+    } catch (err) {
+      // Swarm path failed — fall back to single-agent cached chat, never break the run.
+      const r = await cachedForgeChat(prompt, 60000)
+      return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: `swarm failed (${err.message || 'error'}) — single-agent fallback`, fallback: true }
+    }
+  }
+
+  const r = await cachedForgeChat(prompt, 60000)
+  return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: decision.reason }
+}
+
 const rateLimit = createRouteRateLimit({ keyPrefix: 'forge-fs', max: 30, windowMs: 60_000 })
 const _SAFE_ID_RE = /^[A-Za-z0-9._-]{1,120}$/
 const _V5_JSON_SUBDIRS = new Set(['briefs', 'research_packs', 'goals', 'reports', 'quality_gates'])
@@ -1590,6 +1691,9 @@ function _safeV5Path(subdir, id) {
 
 module.exports = function createForgeRouter(requireAuth, opts = {}) {
   const rlRuns = opts.rlRuns || ((_req, _res, next) => next())
+  // Scope gate for write routes. Falls back to plain requireAuth when not wired
+  // (standalone use), so the module never weakens to no-auth.
+  const requireScope = typeof opts.requireScope === 'function' ? opts.requireScope : (() => requireAuth)
   const router = express.Router()
   const engine = getAscendForgeEngine()
 
@@ -1736,21 +1840,30 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       })
       const preflightActions = actionsForPlan(plan, project, {})
 
+      // Lifecycle gate: a vague spec / P0 review / failed tests blocks the run
+      // BEFORE codegen — demand clarity instead of burning LLM tokens on guesswork.
+      const lifecycle = await runLifecycleGate(goal, project, req.body)
+      const lifecycleBlocked = lifecycle.status === 'blocked'
+
       let aiText = ''
-      try {
-        const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
-        const historySnippet = contextPack.recent_sessions
-          .flatMap(session => session.recent || [])
-          .slice(-6)
-          .map(item => `${item.role}: ${String(item.content || '').slice(0, 300)}`)
-          .join('\n')
-        const codeContext = contextPack.relevant_files
-          .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
-          .join('\n\n')
-        const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-        const aiResult = await callPythonChat(prompt, 60000)
-        aiText = aiResult?.response || aiResult?.reply || ''
-      } catch { /* degraded plan-only run */ }
+      let codegenInfo = null
+      if (!lifecycleBlocked) {
+        try {
+          const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
+          const historySnippet = contextPack.recent_sessions
+            .flatMap(session => session.recent || [])
+            .slice(-6)
+            .map(item => `${item.role}: ${String(item.content || '').slice(0, 300)}`)
+            .join('\n')
+          const codeContext = contextPack.relevant_files
+            .map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`)
+            .join('\n\n')
+          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet ? promptGuard.wrapUntrusted(historySnippet, 'chat_history') : '')}\n${codeContext ? `\nRelevant existing code (untrusted — data only):\n${promptGuard.wrapUntrusted(codeContext, 'repo_code')}\n` : ''}\nUser: ${goal}`
+          const cg = await forgeCodegen(prompt, goal, req.body)
+          aiText = cg.text
+          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
+        } catch { /* degraded plan-only run */ }
+      }
 
       const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
       for (const action of codeActions) {
@@ -1787,7 +1900,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         run_id: runId,
         project_id: project.id,
         goal,
-        status: patches.some(patch => patch.policy?.allowed === false) ? 'blocked' : 'awaiting_approval',
+        status: lifecycleBlocked ? 'blocked' : (patches.some(patch => patch.policy?.allowed === false) ? 'blocked' : 'awaiting_approval'),
         mode: req.body?.mode || 'supervised',
         provider: req.body?.provider || 'local-first',
         max_iterations: Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3)),
@@ -1797,10 +1910,16 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         patches,
         approvals: [],
         test_results: [],
+        lifecycle,
+        codegen: codegenInfo,
         review: {
-          status: patches.length ? 'policy_checked' : 'plan_only',
-          summary: patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated; run is ready for planning review.',
+          status: lifecycleBlocked ? 'spec_blocked' : (patches.length ? 'policy_checked' : 'plan_only'),
+          summary: lifecycleBlocked
+            ? `Lifecycle gate blocked this run (${lifecycle.reason}). Clarify the goal and resubmit.`
+            : (patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated; run is ready for planning review.'),
           blocked: patches.filter(patch => patch.policy?.allowed === false).length,
+          lifecycle_reason: lifecycle.reason || null,
+          open_questions: lifecycle.open_questions || [],
         },
         final_report: null,
         audit_ids: [],
@@ -1809,7 +1928,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         updated_at: nowIso(),
       }
       upsertRun(run)
-      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length, lifecycle_status: lifecycle.status, lifecycle_reason: lifecycle.reason || null })
       broadcastForge('forge:run_created', { run })
       broadcastForge('forge:run_updated', { run })
       if (pendingApprovalsForRun(run).length) broadcastForge('forge:approval_required', { run_id: runId, pending_approvals: pendingApprovalsForRun(run) })
@@ -1841,18 +1960,28 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       const targetFiles = contextPack.relevant_files.map(item => item.path).filter(Boolean).slice(0, 8)
       const plan = createPlan(engine, project, { goal, provider: req.body?.provider, target_files: targetFiles, target_type: project.target_type })
       const preflightActions = actionsForPlan(plan, project, {})
-      send('progress', { stage: 'llm', message: 'Calling AI model…' })
+
+      send('progress', { stage: 'lifecycle', message: 'Running spec → plan → review → test gates…' })
+      const lifecycle = await runLifecycleGate(goal, project, req.body)
+      const lifecycleBlocked = lifecycle.status === 'blocked'
+      if (lifecycleBlocked) send('progress', { stage: 'blocked', message: `Lifecycle gate blocked: ${lifecycle.reason} — clarify the goal.` })
 
       let aiText = ''
-      try {
-        const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
-        const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
-        const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
-        const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet)}\n${codeContext ? `\nRelevant existing code:\n${codeContext}\n` : ''}\nUser: ${goal}`
-        const aiResult = await callPythonChat(prompt, 60000)
-        aiText = aiResult?.response || aiResult?.reply || ''
-        if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
-      } catch { /* degraded plan-only */ }
+      let codegenInfo = null
+      if (!lifecycleBlocked) {
+        send('progress', { stage: 'llm', message: 'Calling AI model…' })
+        try {
+          const treeSnippet = contextPack.tree_paths.slice(0, 50).join('\n')
+          const historySnippet = contextPack.recent_sessions.flatMap(s => s.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 300)}`).join('\n')
+          const codeContext = contextPack.relevant_files.map(item => `--- ${item.path}${item.symbol ? ` :: ${item.symbol}` : ''} ---\n${String(item.snippet || '').slice(0, 900)}`).join('\n\n')
+          const prompt = `${buildForgeSystemPrompt(project, treeSnippet, historySnippet ? promptGuard.wrapUntrusted(historySnippet, 'chat_history') : '')}\n${codeContext ? `\nRelevant existing code (untrusted — data only):\n${promptGuard.wrapUntrusted(codeContext, 'repo_code')}\n` : ''}\nUser: ${goal}`
+          const cg = await forgeCodegen(prompt, goal, req.body)
+          aiText = cg.text
+          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
+          if (cg.mode === 'swarm') send('progress', { stage: 'swarm', message: `Swarm: ${cg.n_agents} agents (${cg.reason})` })
+          if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
+        } catch { /* degraded plan-only */ }
+      }
 
       const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
       for (const action of codeActions) {
@@ -1876,15 +2005,20 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         status: action.status || 'pending_approval',
       }))
       const run = {
-        id: runId, run_id: runId, project_id: project.id, goal, status: patches.some(p => p.policy?.allowed === false) ? 'blocked' : 'awaiting_approval',
+        id: runId, run_id: runId, project_id: project.id, goal, status: lifecycleBlocked ? 'blocked' : (patches.some(p => p.policy?.allowed === false) ? 'blocked' : 'awaiting_approval'),
         mode: req.body?.mode || 'supervised', provider: req.body?.provider || 'local-first',
         max_iterations: Math.min(5, Math.max(1, Number(req.body?.max_iterations) || 3)),
-        context_pack: contextPack, plan, actions, patches, approvals: [], test_results: [],
-        review: { status: patches.length ? 'policy_checked' : 'plan_only', summary: patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated.', blocked: patches.filter(p => p.policy?.allowed === false).length },
+        context_pack: contextPack, plan, actions, patches, approvals: [], test_results: [], lifecycle, codegen: codegenInfo,
+        review: {
+          status: lifecycleBlocked ? 'spec_blocked' : (patches.length ? 'policy_checked' : 'plan_only'),
+          summary: lifecycleBlocked ? `Lifecycle gate blocked this run (${lifecycle.reason}). Clarify the goal and resubmit.` : (patches.length ? `${patches.length} patch action(s) generated and policy checked.` : 'No write patch generated.'),
+          blocked: patches.filter(p => p.policy?.allowed === false).length,
+          lifecycle_reason: lifecycle.reason || null, open_questions: lifecycle.open_questions || [],
+        },
         final_report: null, audit_ids: [], workspace_path: runWorkspaceRoot(runId), created_at: nowIso(), updated_at: nowIso(),
       }
       upsertRun(run)
-      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length })
+      appendAudit('forge_run_created', { run_id: runId, project_id: project.id, goal: goal.slice(0, 160), actions: actions.length, patches: patches.length, lifecycle_status: lifecycle.status, lifecycle_reason: lifecycle.reason || null })
       broadcastForge('forge:run_created', { run })
       broadcastForge('forge:run_updated', { run })
       const pending = pendingApprovalsForRun(run)
@@ -2070,11 +2204,79 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       for (const action of nextActions) broadcastForge('forge:action_updated', { run_id: runIdOf(run), action })
       broadcastForge('forge:run_updated', { run: updated, action: 'approve' })
       emitForgeRuntimeSnapshot('run_approved', { project_id: project.id, run_id: runIdOf(run) })
-      res.status(failures.length ? 409 : 200).json({ ok: failures.length === 0, state: failures.length ? 'degraded' : 'live', run: updated, staged, failures })
+
+      // B1 auto-verify: exercise the gate automatically after staging so "done" is
+      // proven, not assumed. Apply still requires all_passed. Opt out: FORGE_AUTO_VERIFY=0.
+      let finalRun = updated
+      let verification = null
+      if (status === 'staged' && staged.length && String(process.env.FORGE_AUTO_VERIFY || '1') !== '0') {
+        try {
+          const vr = await performRunVerification(updated, project, undefined, req.user?.email || 'auto-verify')
+          if (vr.ok) { finalRun = vr.updated; verification = { all_passed: vr.all_passed, test_result: vr.testResult } }
+          else appendAudit('forge_auto_verify_skipped', { run_id: run.id, reason: vr.error })
+        } catch (e) {
+          appendAudit('forge_auto_verify_error', { run_id: run.id, error: e.message })
+        }
+      }
+      res.status(failures.length ? 409 : 200).json({ ok: failures.length === 0, state: failures.length ? 'degraded' : 'live', run: finalRun, staged, failures, verification })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
     }
   })
+
+  // Shared verification: runs the project's allowlisted verification commands in the
+  // run's sandboxed workspace and records the verdict on the run. Used by the manual
+  // /verify route AND auto-verify-on-approve so the gate is exercised automatically.
+  // Returns { ok, all_passed, updated, testResult } or { ok:false, code, error }.
+  async function performRunVerification(run, project, requestedCommands, by) {
+    const workspace = runWorkspaceRoot(run.id)
+    if (!fs.existsSync(workspace)) return { ok: false, code: 409, error: 'run workspace missing; approve/stage a patch first' }
+    const cmds = _normalizeVerifyCommands(
+      requestedCommands,
+      run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project),
+      isVerifyAllowed,
+    )
+    if (!cmds.length) return { ok: false, code: 400, error: 'no allowed verification commands' }
+    broadcastForge('forge:validation_started', { run_id: runIdOf(run), project_id: project.id, commands: cmds })
+    const verify = await runVerifyCommands(project, cmds, workspace)
+    const workspaceMeta = readWorkspaceMetadata(workspace)
+    const testResult = {
+      id: `verify-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      all_passed: verify.all_passed,
+      results: verify.results,
+      workspace,
+      workspace_meta: workspaceMeta,
+      commands: cmds,
+      verified_at: nowIso(),
+      verified_by: by || 'operator',
+    }
+    const nextActions = (run.actions || []).map(action => {
+      if (!RUN_WRITE_ACTIONS.has(action.type) || !['staged', 'verified'].includes(action.status)) return action
+      return { ...action, status: verify.all_passed ? 'verified' : 'verify_failed', updated_at: nowIso() }
+    })
+    const nextPatches = (run.patches || []).map(patch => {
+      if (!['staged', 'verified'].includes(patch.status)) return patch
+      return { ...patch, status: verify.all_passed ? 'verified' : 'verify_failed' }
+    })
+    const updated = updateRun(run.id, {
+      status: verify.all_passed ? 'verified' : 'verify_failed',
+      actions: nextActions,
+      patches: nextPatches,
+      test_results: [...(run.test_results || []), testResult],
+      review: {
+        ...(run.review || {}),
+        status: verify.all_passed ? 'verification_passed' : 'verification_failed',
+        summary: verify.all_passed
+          ? 'All staged verification commands passed.'
+          : 'One or more staged verification commands failed.',
+      },
+    })
+    appendAudit('forge_run_verified', { run_id: run.id, all_passed: verify.all_passed, commands: cmds.length })
+    broadcastForge('forge:validation_completed', { run_id: runIdOf(run), project_id: project.id, test_result: testResult, all_passed: verify.all_passed })
+    broadcastForge('forge:run_updated', { run: updated, action: 'verify' })
+    emitForgeRuntimeSnapshot('run_verified', { project_id: project.id, run_id: runIdOf(run) })
+    return { ok: true, all_passed: verify.all_passed, updated, testResult }
+  }
 
   router.post('/runs/:id/verify', requireAuth, async (req, res) => {
     if (!requireOwnerApproval(req, res, 'forge_run_verify')) return
@@ -2083,53 +2285,76 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
       const project = findProject(run.project_id)
       if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-      const workspace = runWorkspaceRoot(run.id)
-      if (!fs.existsSync(workspace)) return res.status(409).json({ ok: false, error: 'run workspace missing; approve/stage a patch first' })
-      const cmds = _normalizeVerifyCommands(
-        req.body?.commands,
-        run.context_pack?.verification_commands || project.verification_commands || defaultVerificationCommands(project),
-        isVerifyAllowed,
-      )
-      if (!cmds.length) return res.status(400).json({ ok: false, error: 'no allowed verification commands' })
-      broadcastForge('forge:validation_started', { run_id: runIdOf(run), project_id: project.id, commands: cmds })
-      const verify = await runVerifyCommands(project, cmds, workspace)
-      const workspaceMeta = readWorkspaceMetadata(workspace)
-      const testResult = {
-        id: `verify-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
-        all_passed: verify.all_passed,
-        results: verify.results,
-        workspace,
-        workspace_meta: workspaceMeta,
-        commands: cmds,
-        verified_at: nowIso(),
-        verified_by: req.user?.email || req.body?.approved_by || 'operator',
+      const r = await performRunVerification(run, project, req.body?.commands, req.user?.email || req.body?.approved_by)
+      if (!r.ok) return res.status(r.code || 500).json({ ok: false, error: r.error })
+      res.status(r.all_passed ? 200 : 409).json({ ok: r.all_passed, state: r.all_passed ? 'live' : 'degraded', run: r.updated, test_result: r.testResult })
+    } catch (err) {
+      res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
+    }
+  })
+
+  // B2 auto-debug loop: on a verify_failed run, compress the failure → re-codegen a
+  // fix → re-stage → re-verify, bounded by FORGE_DEBUG_MAX_ITERS. NEVER applies —
+  // "iterate then stop at approval" (the human/owner still approves the apply).
+  async function performAutoDebug(run, project, opts = {}) {
+    const maxIters = Math.max(1, Math.min(5, parseInt(process.env.FORGE_DEBUG_MAX_ITERS, 10) || opts.maxIters || 2))
+    const iterations = []
+    let current = run
+    for (let i = 1; i <= maxIters; i++) {
+      const latest = (current.test_results || []).slice(-1)[0]
+      if (latest?.all_passed) break
+      const failSummary = (latest?.results || []).filter(r => !r.pass)
+        .map(r => `[FAIL] ${r.command}\n${String(r.output || '').slice(0, 500)}`).join('\n\n') || 'verification failed'
+      broadcastForge('forge:diagnostic', { level: 'info', event: 'auto_debug_iter', run_id: runIdOf(current), iter: i, max: maxIters })
+
+      const writeActions = (current.actions || []).filter(a => RUN_WRITE_ACTIONS.has(a.type))
+      const codeCtx = writeActions.map(a => {
+        const p = a.file_path || (a.files && a.files[0] && a.files[0].path) || 'file'
+        const body = a.proposed_content || a.content || (a.files && a.files[0] && a.files[0].content) || ''
+        return `--- ${p} ---\n${String(body).slice(0, 1500)}`
+      }).join('\n\n')
+      const fixPrompt = `${buildForgeSystemPrompt(project, '', '')}\nThe previous implementation FAILED verification. Return corrected file(s) only.\n\nGoal: ${current.goal}\n\nFailing verification:\n${promptGuard.wrapUntrusted(failSummary, 'verify_output')}\n\nCurrent code:\n${promptGuard.wrapUntrusted(codeCtx, 'repo_code')}`
+
+      // eslint-disable-next-line no-await-in-loop
+      const cg = await forgeCodegen(fixPrompt, current.goal, opts.body || {})
+      const newActions = cg.text ? extractCodeActions(cg.text, project).slice(0, 12) : []
+      if (!newActions.length) { iterations.push({ iter: i, status: 'no_codegen' }); break }
+
+      let staged = 0
+      for (const a of newActions) {
+        a.run_id = runIdOf(current); a.plan_id = current.plan?.id || null; a.approval_required = true
+        a.created_at = nowIso(); a.updated_at = nowIso()
+        const pol = validateRunActionPolicy(a, project)
+        a.policy_decision = pol; a.risk = pol.risk_level; a.status = pol.allowed ? 'staged' : 'blocked'
+        if (pol.allowed) { const sr = stageRunAction(current, project, a); if (sr.ok) staged++ }
       }
-      const nextActions = (run.actions || []).map(action => {
-        if (!RUN_WRITE_ACTIONS.has(action.type) || !['staged', 'verified'].includes(action.status)) return action
-        return { ...action, status: verify.all_passed ? 'verified' : 'verify_failed', updated_at: nowIso() }
-      })
-      const nextPatches = (run.patches || []).map(patch => {
-        if (!['staged', 'verified'].includes(patch.status)) return patch
-        return { ...patch, status: verify.all_passed ? 'verified' : 'verify_failed' }
-      })
-      const updated = updateRun(run.id, {
-        status: verify.all_passed ? 'verified' : 'verify_failed',
-        actions: nextActions,
-        patches: nextPatches,
-        test_results: [...(run.test_results || []), testResult],
-        review: {
-          ...(run.review || {}),
-          status: verify.all_passed ? 'verification_passed' : 'verification_failed',
-          summary: verify.all_passed
-            ? 'All staged verification commands passed.'
-            : 'One or more staged verification commands failed.',
-        },
-      })
-      appendAudit('forge_run_verified', { run_id: run.id, all_passed: verify.all_passed, commands: cmds.length })
-      broadcastForge('forge:validation_completed', { run_id: runIdOf(run), project_id: project.id, test_result: testResult, all_passed: verify.all_passed })
-      broadcastForge('forge:run_updated', { run: updated, action: 'verify' })
-      emitForgeRuntimeSnapshot('run_verified', { project_id: project.id, run_id: runIdOf(run) })
-      res.status(verify.all_passed ? 200 : 409).json({ ok: verify.all_passed, state: verify.all_passed ? 'live' : 'degraded', run: updated, test_result: testResult })
+      saveActions([...newActions, ...loadActions()])
+      current = updateRun(runIdOf(current), { actions: [...(current.actions || []), ...newActions], status: 'staged' })
+
+      // eslint-disable-next-line no-await-in-loop
+      const vr = await performRunVerification(current, project, opts.commands, 'auto-debug')
+      if (vr.ok) current = vr.updated
+      const passed = vr.ok ? vr.all_passed : null
+      iterations.push({ iter: i, codegen_mode: cg.mode, staged, all_passed: passed })
+      appendAudit('forge_auto_debug_iter', { run_id: runIdOf(current), iter: i, staged, all_passed: passed })
+      if (passed) break
+    }
+    const fixed = (current.test_results || []).slice(-1)[0]?.all_passed === true
+    const final = updateRun(runIdOf(current), { debug_iterations: iterations })
+    broadcastForge('forge:run_updated', { run: final, action: 'auto_debug' })
+    appendAudit('forge_auto_debug_done', { run_id: runIdOf(final), iters: iterations.length, fixed })
+    return { run: final, iterations, fixed }
+  }
+
+  router.post('/runs/:id/auto-debug', requireAuth, async (req, res) => {
+    if (!requireOwnerApproval(req, res, 'forge_run_auto_debug')) return
+    try {
+      const run = findRun(req.params.id)
+      if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+      const project = findProject(run.project_id)
+      if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+      const dbg = await performAutoDebug(run, project, { body: req.body || {}, commands: req.body?.commands })
+      res.json({ ok: true, state: 'live', fixed: dbg.fixed, iterations: dbg.iterations, run: dbg.run })
     } catch (err) {
       res.status(err.status || 500).json({ ok: false, state: 'degraded', error: err.message })
     }
@@ -2146,6 +2371,16 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
       const latestTest = (run.test_results || []).slice(-1)[0]
       if (!latestTest?.all_passed && req.body?.force !== true) {
         return res.status(409).json({ ok: false, error: 'verification must pass before apply' })
+      }
+      // Owner override: apply despite failing/absent verification. Keep it possible,
+      // but never silent — record a high-signal audit event so the bypass is visible.
+      if (!latestTest?.all_passed && req.body?.force === true) {
+        appendAudit('forge_apply_forced_unverified', {
+          run_id: run.id, project_id: project.id,
+          by: req.user?.email || req.body?.approved_by || 'operator',
+          had_verification: !!latestTest, risk: 'high',
+        })
+        broadcastForge('forge:diagnostic', { level: 'warning', event: 'apply_forced_unverified', run_id: runIdOf(run), message: 'Run applied WITHOUT passing verification (force=true).' })
       }
       const blocked = (run.patches || []).filter(patch => patch.policy?.allowed === false || patch.status === 'blocked')
       if (blocked.length) return res.status(409).json({ ok: false, error: 'blocked patches cannot be applied', blocked })
@@ -4164,7 +4399,7 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'live', items: pending, total: pending.length })
   })
 
-  router.post('/submit', requireAuth, (req, res) => {
+  router.post('/submit', requireScope('task-emit'), (req, res) => {
     const goal = String(req.body?.goal || req.body?.description || req.body?.title || '').trim()
     if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
     const projectId = req.body?.project_id || null
@@ -4189,7 +4424,7 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'queued', item: action })
   })
 
-  router.post('/approve/:id', requireAuth, (req, res) => {
+  router.post('/approve/:id', requireScope('task-emit'), (req, res) => {
     const action = findAction(req.params.id)
     if (!action) return res.status(404).json({ ok: false, error: 'queue item not found' })
     const updated = updateAction(action.id, {
@@ -4205,7 +4440,7 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'approved', item: updated, action: updated })
   })
 
-  router.post('/reject/:id', requireAuth, (req, res) => {
+  router.post('/reject/:id', requireScope('task-emit'), (req, res) => {
     const action = findAction(req.params.id)
     if (!action) return res.status(404).json({ ok: false, error: 'queue item not found' })
     const updated = updateAction(action.id, {
@@ -4219,6 +4454,115 @@ Respond with ONLY valid JSON (no markdown fences):
     broadcastForge('forge:action_updated', { action: updated, project_id: action.project_id })
     emitForgeRuntimeSnapshot('queue_item_rejected', { project_id: action.project_id })
     res.json({ ok: true, state: 'rejected', item: updated, action: updated })
+  })
+
+  // ── Orchestrator bridge (Phase 4) ─────────────────────────────────────────────
+  // Lets an external brain (Claude/OpenAI via MCP) plan → decompose → review over
+  // the scoped-token surface. The brain NEVER executes: decomposed tasks land as
+  // `proposed` forge_queue_items that flow through the existing approval →
+  // dispatcher → run_goal loop. Reads are compressed so the API plans cheaply.
+
+  // GET /context-pack — compressed project context for planning (no whole-repo read).
+  router.get('/context-pack', requireScope('read'), async (req, res) => {
+    const project = findProject(String(req.query.project_id || '').trim())
+    if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
+    const goal = String(req.query.goal || '').trim()
+    try {
+      const context_pack = await buildContextPack(project, goal, {})
+      res.json({ ok: true, project_id: project.id, goal, context_pack })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
+  // POST /orchestrate — emit a decomposed task graph (task-emit scope). Each task
+  // becomes a proposed forge_queue_item; nothing executes until owner approval.
+  const ORCHESTRATE_MAX_TASKS = Math.max(1, parseInt(process.env.FORGE_ORCHESTRATE_MAX_TASKS, 10) || 25)
+  router.post('/orchestrate', requireScope('task-emit'), (req, res) => {
+    const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : []
+    if (!tasks.length) return res.status(400).json({ ok: false, error: 'tasks[] required' })
+    if (tasks.length > ORCHESTRATE_MAX_TASKS) return res.status(400).json({ ok: false, error: `too many tasks (max ${ORCHESTRATE_MAX_TASKS})` })
+    const projectId = req.body?.project_id || null
+    const project = projectId ? findProject(projectId) : null
+    if (projectId && !project) return res.status(404).json({ ok: false, error: 'project not found' })
+
+    const orchestrationId = `orc-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+    const overallGoal = String(req.body?.goal || '').slice(0, 280)
+    const created = []
+    for (let i = 0; i < tasks.length; i++) {
+      const t = tasks[i] || {}
+      const goal = String(t.goal || t.description || t.title || '').trim()
+      if (!goal) return res.status(400).json({ ok: false, error: `task[${i}] missing goal` })
+      const action = makeAction('forge_queue_item', {
+        project_id: project?.id || null,
+        label: String(t.title || goal).slice(0, 140),
+        description: goal,
+        risk: t.risk || 'review',
+        expected_result: 'Queue item reviewed before conversion into a Forge run or approved work item.',
+        approval_reason: 'Orchestrated task requires owner review before execution.',
+        rollback_plan: 'No code changes are made by queue submission.',
+      })
+      action.priority = String(t.priority || 'normal')
+      action.mode = t.mode || 'builder'
+      action.queue_kind = 'forge_queue'
+      action.submitted_by = req.user?.email || 'orchestrator'
+      action.orchestration_id = orchestrationId
+      action.task_index = i
+      action.overall_goal = overallGoal || null
+      action.affected_files = Array.isArray(t.affected_files) ? t.affected_files.slice(0, 50).map(String) : []
+      action.verification_command = t.verification_command ? String(t.verification_command).slice(0, 300) : null
+      created.push(action)
+    }
+    persistActions(created)
+    appendAudit('forge_orchestrate_submitted', { orchestration_id: orchestrationId, project_id: project?.id || null, count: created.length, goal: overallGoal })
+    broadcastForge('forge:queue_update', { items: loadActions().filter(a => ['proposed', 'pending', 'approved'].includes(a.status)) })
+    emitForgeRuntimeSnapshot('orchestrate_submitted', { project_id: project?.id || null })
+    res.json({ ok: true, state: 'queued', orchestration_id: orchestrationId, goal: overallGoal, count: created.length, tasks: created })
+  })
+
+  // GET /runs/:id/failures — compressed failure context for review (read scope).
+  // Returns only failure messages, never full logs, to keep the API review cheap.
+  router.get('/runs/:id/failures', requireScope('read'), (req, res) => {
+    const run = findRun(req.params.id)
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
+    const tests = Array.isArray(run.test_results) ? run.test_results : []
+    const failedTests = tests
+      .filter(t => t && t.all_passed === false)
+      .map(t => ({ all_passed: false, summary: String(t.summary || t.output || '').slice(0, 600) }))
+    const actionErrors = collectRunActions(run)
+      .filter(a => a && (a.error || a.status === 'failed' || a.status === 'blocked'))
+      .map(a => ({ id: a.id, type: a.type, status: a.status, error: String(a.error || a.policy_decision?.reason || '').slice(0, 400) }))
+    res.json({
+      ok: true,
+      run_id: run.run_id || run.id,
+      status: run.status,
+      failures: { tests: failedTests, actions: actionErrors },
+      summary: `${failedTests.length} failed test group(s), ${actionErrors.length} failed/blocked action(s).`,
+    })
+  })
+
+  // GET /usage — Forge LLM token-budget status + prompt-cache stats (read scope).
+  router.get('/usage', requireScope('read'), (_req, res) => {
+    res.json({ ok: true, budget: getTokenBudget().summary(), cache: getPromptCache().stats() })
+  })
+
+  // POST /research-summary — deepened research skill (C2): produce a SOURCED summary,
+  // injection-guarded (web content is untrusted), cache/budget-aware, and quality-SCORED
+  // by the result verifier (requires inline sources). Pairs with /api/research/discover:
+  // pass the discovered sources in `sources[]`. Honest: no sources / no LLM → passed:false.
+  router.post('/research-summary', rateLimit, requireScope('read'), async (req, res) => {
+    const query = String(req.body?.query || req.body?.topic || '').trim()
+    if (!query) return res.status(400).json({ ok: false, error: 'query required' })
+    const sources = (Array.isArray(req.body?.sources) ? req.body.sources : []).slice(0, 8)
+    const srcBlock = sources
+      .map((s, i) => `[${i + 1}] ${s.title || s.url || 'source'} (${s.url || 'no-url'})\n${String(s.snippet || s.text || s.content || '').slice(0, 600)}`)
+      .join('\n\n')
+    const prompt = `You are a research analyst. Write a concise, factual summary of the topic using ONLY the sources provided. Cite sources inline as [1], [2] and include their URLs. If the sources are insufficient, say so explicitly.\n\nTopic: ${query}\n\nSources:\n${promptGuard.wrapUntrusted(srcBlock || '(no sources provided)', 'web_sources')}`
+    let summary = ''
+    try { const r = await cachedForgeChat(prompt, 60000); summary = r?.response || r?.reply || '' } catch { /* degraded */ }
+    const verdict = resultVerifier.verifyText(summary, { topic: query, requireSources: sources.length > 0, minLen: 150 })
+    appendAudit('forge_research_summary', { query: query.slice(0, 120), sources: sources.length, passed: verdict.passed, score: verdict.score })
+    res.json({ ok: true, query, summary, sources, verdict, passed: verdict.passed })
   })
 
   // ── Code understanding (WS4): index a project + retrieve architecture/context ──
@@ -6481,4 +6825,18 @@ Return JSON:
   })
 
   return router
+}
+
+// Action-store API surfaced for the out-of-band dispatcher
+// (backend/forge/dispatcher.js), which drains approved `forge_queue_item`
+// actions into the agent engine. Read/write go through the same helpers the
+// routes use, so there is a single source of truth for the queue state.
+module.exports.store = {
+  loadActions,
+  updateAction,
+  findAction,
+  appendAudit,
+  broadcastForge,
+  emitForgeRuntimeSnapshot,
+  nowIso,
 }
