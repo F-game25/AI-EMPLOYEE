@@ -114,7 +114,17 @@ class MemoryIndex:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or _state_path()
         self._memories: list[dict[str, Any]] = []
+        self._unified = self._init_unified_store(path)
         self._memories = self._load()
+
+    def _init_unified_store(self, path: Path | None) -> Any:
+        try:
+            from memory.unified_store import UnifiedMemoryStore
+            if path is not None:
+                return UnifiedMemoryStore(path=path.parent / "memory" / "unified_memory.json")
+            return UnifiedMemoryStore()
+        except Exception:
+            return None
 
     def _load(self) -> list[dict[str, Any]]:
         memories: list[dict[str, Any]] = []
@@ -159,7 +169,29 @@ class MemoryIndex:
             }
             self._memories.append(item)
             self._save()
+            self._store_unified(item)
             return dict(item)
+
+    def _store_unified(self, item: dict[str, Any]) -> None:
+        if self._unified is None:
+            return
+        try:
+            from memory.schema import MemoryRecord
+            record = MemoryRecord.create(
+                item.get("text", ""),
+                id=item.get("id"),
+                memory_type="long_term",
+                source="memory_index",
+                importance=item.get("importance", 0.5),
+                metadata={
+                    "origin_store": "memory_index",
+                    "usage_count": item.get("usage_count", 0),
+                    "last_used": item.get("last_used"),
+                },
+            )
+            self._unified.upsert(record)
+        except Exception:
+            return
 
     @staticmethod
     def rank_memory(memory: dict[str, Any], query_embedding: list[float]) -> float:
@@ -185,7 +217,42 @@ class MemoryIndex:
                     mem["last_used"] = now
                 if ranked:
                     self._save()
-            return [dict(m) for m in ranked]
+            return self._merge_unified_results(query, [dict(m) for m in ranked], top_k=max(top_k, 1), touch=touch)
+
+    def _merge_unified_results(
+        self,
+        query: str,
+        ranked: list[dict[str, Any]],
+        *,
+        top_k: int,
+        touch: bool,
+    ) -> list[dict[str, Any]]:
+        if self._unified is None:
+            return ranked[:top_k]
+        merged: dict[str, dict[str, Any]] = {str(m.get("id")): m for m in ranked if m.get("id")}
+        try:
+            records = self._unified.search(query=query, limit=top_k, touch=touch)
+        except Exception:
+            return ranked[:top_k]
+        for record in records:
+            if record.id in merged:
+                continue
+            metadata = record.metadata or {}
+            item = {
+                "id": record.id,
+                "text": record.text,
+                "embedding": embed_text(record.text),
+                "importance": record.importance,
+                "usage_count": int(metadata.get("usage_count") or record.access_count or 0),
+                "last_used": metadata.get("last_used") or record.last_accessed or record.updated_at,
+                "_source": "unified_memory",
+            }
+            merged[record.id] = item
+
+        query_embedding = embed_text(query)
+        values = list(merged.values())
+        values.sort(key=lambda m: self.rank_memory(m, query_embedding), reverse=True)
+        return [dict(m) for m in values[:top_k]]
 
     def apply_feedback(self, memories: list[dict[str, Any]], reward: float) -> None:
         if not memories:
@@ -197,6 +264,11 @@ class MemoryIndex:
             for mem in self._memories:
                 if mem.get("id") in memory_ids:
                     mem["importance"] = clamp(float(mem.get("importance", 0.0)) + (float(reward) * 0.1))
+                    if self._unified is not None:
+                        try:
+                            self._unified.apply_feedback(str(mem.get("id")), reward)
+                        except Exception:
+                            pass
             self._save()
 
     def apply_decay(self) -> None:
