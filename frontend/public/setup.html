@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexus OS — First-run setup</title>
+  <style>
+    :root { --bg:#06070D; --panel:#0d1018; --line:rgba(255,255,255,.08); --txt:#e7ecf5; --muted:#8a93a6; --accent:#c9a84c; --blue:#5b8cff; --ok:#27c93f; --warn:#ffbd2e; --err:#ff5f56; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; height:100%; background:radial-gradient(120% 80% at 50% -10%, #12131d 0%, var(--bg) 60%); color:var(--txt);
+      font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .wrap { height:100%; display:flex; flex-direction:column; padding:22px 24px; gap:14px; }
+    h1 { font-size:15px; font-weight:700; margin:0; letter-spacing:.05em; }
+    .tag { color:var(--muted); font-size:11px; margin:2px 0 0; }
+    .checks { display:flex; flex-direction:column; gap:8px; }
+    .chk { display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--line);
+      border-radius:8px; background:var(--panel); }
+    .chk .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); flex:none; }
+    .chk.ok .dot { background:var(--ok); } .chk.bad .dot { background:var(--err); } .chk.opt .dot { background:var(--warn); }
+    .chk .lbl { flex:1; } .chk .val { color:var(--muted); font-size:11px; }
+    .ollama { padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); display:none; }
+    .ollama.show { display:block; }
+    .ollama label { display:flex; align-items:center; gap:8px; cursor:pointer; }
+    .ollama input[type=text] { width:100%; margin-top:8px; padding:6px 8px; background:#0a0c13; border:1px solid var(--line);
+      border-radius:6px; color:var(--txt); font:inherit; }
+    .phases { display:flex; gap:8px; }
+    .ph { flex:1; text-align:center; padding:6px 4px; border:1px solid var(--line); border-radius:7px;
+      background:var(--panel); opacity:.45; font-size:11px; }
+    .ph.run { opacity:1; border-color:var(--blue); } .ph.ok { opacity:1; border-color:var(--ok); }
+    .log { flex:1; min-height:80px; overflow:auto; background:#04050a; border:1px solid var(--line); border-radius:8px;
+      padding:8px 10px; font-size:11px; color:var(--muted); white-space:pre-wrap; }
+    .msg { padding:10px 12px; border-radius:8px; background:var(--panel); border:1px solid var(--line); color:var(--muted); }
+    .msg.err { color:var(--err); border-color:rgba(255,95,86,.4); } .msg.ok { color:var(--ok); }
+    .msg.warn { color:var(--warn); border-color:rgba(255,189,46,.4); }
+    .actions { display:flex; gap:10px; }
+    .btn { font:inherit; padding:9px 16px; border-radius:8px; border:1px solid var(--accent);
+      background:linear-gradient(180deg,#1a1c12,#141118); color:var(--txt); cursor:pointer; flex:1; }
+    .btn:hover { box-shadow:0 0 12px rgba(201,168,76,.25); }
+    .btn:disabled { opacity:.4; cursor:not-allowed; box-shadow:none; }
+    .btn.ghost { background:transparent; border-color:var(--line); color:var(--muted); flex:none; }
+    .hide { display:none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div>
+      <h1>NEXUS OS · FIRST-RUN SETUP</h1>
+      <p class="tag">One-time, offline. Creates a local Python environment from the bundled packages — no downloads.</p>
+    </div>
+
+    <div class="checks" id="checks">
+      <div class="chk" id="c-python"><span class="dot"></span><span class="lbl">Python 3 runtime</span><span class="val" id="v-python">checking…</span></div>
+      <div class="chk" id="c-wheel"><span class="dot"></span><span class="lbl">Offline package set</span><span class="val" id="v-wheel">checking…</span></div>
+      <div class="chk" id="c-ollama"><span class="dot"></span><span class="lbl">Ollama (on-device models)</span><span class="val" id="v-ollama">checking…</span></div>
+    </div>
+
+    <div class="ollama" id="ollamaBox">
+      <label><input type="checkbox" id="pullChk" /> Pull a starter model now (optional)</label>
+      <input type="text" id="pullModel" placeholder="model tag, e.g. gemma3:4b-it-qat — leave blank to skip" />
+    </div>
+
+    <div class="phases">
+      <div class="ph ok" id="p-detect">Detect</div>
+      <div class="ph" id="p-venv">Environment</div>
+      <div class="ph" id="p-deps">Dependencies</div>
+      <div class="ph" id="p-ready">Ready</div>
+    </div>
+
+    <div class="log hide" id="log"></div>
+    <div class="msg" id="msg">Checking your machine…</div>
+
+    <div class="actions">
+      <button class="btn" id="setupBtn" disabled>Set up Nexus OS</button>
+      <button class="btn ghost" id="quitBtn">Quit</button>
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const msg = $('msg');
+    const setMsg = (t,k) => { msg.textContent = t; msg.className = 'msg'+(k?(' '+k):''); };
+    const setChk = (id, state, val) => { const e=$('c-'+id); e.className='chk '+state; $('v-'+id).textContent=val; };
+    const phase = (id, cls) => { const e=$(id); if(e){ e.classList.remove('run','ok'); if(cls) e.classList.add(cls); } };
+    let canSetup = false;
+
+    function appendLog(line){ const l=$('log'); l.classList.remove('hide'); l.textContent += (line+'\n'); l.scrollTop = l.scrollHeight; }
+
+    function wire(){
+      const T = window.__TAURI__;
+      if (!T || !T.event || !T.core) return setTimeout(wire, 120);
+      const { listen } = T.event;
+      const invoke = T.core.invoke;
+
+      // Live progress streams over the same channels the splash uses.
+      listen('boot://log', e => { const p=e.payload||{}; if (p.line) appendLog(p.line);
+        if (/virtual environment/i.test(p.line)) { phase('p-venv','run'); }
+        if (/core dependencies/i.test(p.line)) { phase('p-venv','ok'); phase('p-deps','run'); } });
+      listen('setup://done', () => { phase('p-deps','ok'); phase('p-ready','ok'); setMsg('Setup complete — starting Nexus OS…','ok'); });
+
+      invoke('setup_status').then(s => {
+        s = s || {};
+        setChk('python', s.python_found ? 'ok':'bad', s.python_found ? 'found':'NOT FOUND');
+        setChk('wheel',  s.wheelhouse_found ? 'ok':'bad', s.wheelhouse_found ? 'ready':'MISSING');
+        setChk('ollama', s.ollama_running ? 'ok':'opt', s.ollama_running ? 'detected':'optional — not running');
+        if (s.ollama_running) $('ollamaBox').classList.add('show');
+        if (s.venv_ready) { setMsg('Already set up — starting…','ok'); invoke('run_setup',{}).catch(()=>{}); return; }
+        canSetup = !!(s.python_found && s.wheelhouse_found);
+        $('setupBtn').disabled = !canSetup;
+        if (!s.python_found) setMsg('Python 3 is required. Install Python 3, then reopen Nexus OS.','err');
+        else if (!s.wheelhouse_found) setMsg('Offline package set missing. Rebuild it with: npm run build:python-core','err');
+        else setMsg('Ready to set up. This installs core dependencies offline (no network).');
+      }).catch(err => setMsg('Could not read setup status: '+err,'err'));
+
+      $('setupBtn').onclick = () => {
+        if (!canSetup) return;
+        $('setupBtn').disabled = true; $('quitBtn').disabled = true;
+        phase('p-detect','ok'); setMsg('Setting up… this can take a minute on first run.');
+        const wantPull = $('pullChk').checked && $('ollamaBox').classList.contains('show');
+        const model = wantPull ? ($('pullModel').value || '').trim() : '';
+        invoke('run_setup', { pullModel: model || null })
+          .catch(err => { setMsg('Setup failed: '+err, 'err'); $('setupBtn').disabled=false; $('quitBtn').disabled=false; });
+      };
+      $('quitBtn').onclick = () => invoke('quit_app').catch(()=>{});
+    }
+    wire();
+  </script>
+</body>
+</html>
