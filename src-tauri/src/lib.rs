@@ -524,13 +524,63 @@ fn venv_ready(app_home: &Path) -> bool {
     venv_python(&venv_dir(app_home)).exists()
 }
 
-/// Offline package set produced by `npm run build:python-core` (or bundled under repo/).
+/// Does this directory directly contain at least one wheel? `pip --find-links` does NOT recurse,
+/// so the path we hand it must be the directory that actually holds the .whl files.
+fn dir_has_wheel(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .any(|e| e.path().extension().map(|x| x == "whl").unwrap_or(false))
+        })
+        .unwrap_or(false)
+}
+
+/// Offline package set produced by `npm run build:python-core`. The build writes wheels into a
+/// platform-tagged subdir (runtime/wheelhouse/<os>-<arch>-py<ver>/, and the README also documents a
+/// two-level <platform>/<pyver>/ layout) — NOT the root. Since pip --find-links can't recurse, we
+/// resolve the real wheel-bearing directory here. A shipped bundle carries exactly one platform's
+/// wheels; on a multi-platform dev box we prefer the dir matching this OS+arch, else the first
+/// found (sorted, deterministic).
 fn find_wheelhouse(repo_dir: &Path) -> Option<PathBuf> {
     for c in ["runtime/wheelhouse", "repo/runtime/wheelhouse"] {
-        let p = repo_dir.join(c);
-        if p.is_dir() {
-            return Some(p);
+        let root = repo_dir.join(c);
+        if !root.is_dir() {
+            continue;
         }
+        if dir_has_wheel(&root) {
+            return Some(root);
+        }
+        // Collect wheel-bearing dirs up to two levels down (<tag>/ or <platform>/<pyver>/).
+        let mut found: Vec<PathBuf> = Vec::new();
+        if let Ok(lvl1) = std::fs::read_dir(&root) {
+            for d1 in lvl1.flatten().map(|e| e.path()).filter(|p| p.is_dir()) {
+                if dir_has_wheel(&d1) {
+                    found.push(d1);
+                    continue;
+                }
+                if let Ok(lvl2) = std::fs::read_dir(&d1) {
+                    for d2 in lvl2.flatten().map(|e| e.path()).filter(|p| p.is_dir()) {
+                        if dir_has_wheel(&d2) {
+                            found.push(d2);
+                        }
+                    }
+                }
+            }
+        }
+        if found.is_empty() {
+            continue;
+        }
+        found.sort();
+        let os_tok = match std::env::consts::OS {
+            "macos" => "darwin",
+            other => other,
+        };
+        let arch = std::env::consts::ARCH; // x86_64 / aarch64
+        let preferred = found.iter().find(|p| {
+            let s = p.to_string_lossy().to_lowercase();
+            s.contains(os_tok) && s.contains(arch)
+        });
+        return Some(preferred.cloned().unwrap_or_else(|| found[0].clone()));
     }
     None
 }
@@ -1297,4 +1347,65 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_wheelhouse;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn unique_tmp(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut p = std::env::temp_dir();
+        p.push(format!("nexus_wh_{tag}_{nanos}_{}", std::process::id()));
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn touch_wheel(dir: &Path, name: &str) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join(name), b"").unwrap();
+    }
+
+    #[test]
+    fn resolves_tagged_subdir_not_root() {
+        // Real build layout: wheels under runtime/wheelhouse/<tag>/, not the root.
+        // pip --find-links can't recurse, so the resolved path must be the subdir.
+        let root = unique_tmp("tagged");
+        let sub = root.join("runtime/wheelhouse/linux-x86_64-py312");
+        touch_wheel(&sub, "anthropic-0.1.0-py3-none-any.whl");
+        assert_eq!(find_wheelhouse(&root), Some(sub));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolves_two_level_layout() {
+        // README-documented <platform>/<pyver>/ layout.
+        let root = unique_tmp("twolevel");
+        let sub = root.join("runtime/wheelhouse/linux-x86_64/py312");
+        touch_wheel(&sub, "foo-1.0-py3-none-any.whl");
+        assert_eq!(find_wheelhouse(&root), Some(sub));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolves_flat_root() {
+        let root = unique_tmp("flat");
+        let wh = root.join("runtime/wheelhouse");
+        touch_wheel(&wh, "bar-1.0-py3-none-any.whl");
+        assert_eq!(find_wheelhouse(&root), Some(wh));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn none_when_no_wheels_present() {
+        let root = unique_tmp("empty");
+        fs::create_dir_all(root.join("runtime/wheelhouse/linux-x86_64-py312")).unwrap();
+        assert_eq!(find_wheelhouse(&root), None);
+        let _ = fs::remove_dir_all(&root);
+    }
 }
