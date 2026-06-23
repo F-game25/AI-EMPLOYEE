@@ -424,19 +424,45 @@ def _seed(reg: CapabilityRegistry) -> None:
         Capability(
             id="skills.run",
             subsystem="skills",
-            name="Run a business/content/research skill",
-            description=("Run a business, marketing, content, writing, copy, blog, email, social, "
-                         "sales, outreach, research, analytics, finance, or operations skill from "
-                         "the skill library to produce a deliverable: draft, plan, copy, post, "
-                         "description, analysis, or report."),
+            name="Run a production skill",
+            description=("Run a production skill from the shared skill library. Handles business, "
+                         "marketing, content, writing, sales, research, analytics, finance, operations, "
+                         "coding, codebase reading, architecture mapping, debugging, error trace analysis, "
+                         "refactor planning, security review, test generation, UI/UX audit, API inspection, "
+                         "database schema analysis, agent task planning, local file planning, browser research, "
+                         "source credibility checks, documentation, prompt/context engineering, memory linking, "
+                         "model routing evaluation, LLM output judging, failure forensics, regression detection, "
+                         "sandbox test planning, command safety classification, HITL approval planning, remote "
+                         "compute planning, resource optimization, startup diagnostics, frontend/backend/Python "
+                         "health checks, Ollama checks, skill registry validation, dashboard skill sync checks, "
+                         "end-to-end task execution planning, growth strategy, SEO, paid ads planning, "
+                         "conversion funnel analysis, reporting, finance review, invoice/payment planning, "
+                         "budget guardrails, hiring and people ops, project communications, message routing, "
+                         "web monitoring, threat-intelligence briefing, tool policy review, token budgeting, "
+                         "API and commerce integration checks, data extraction/export validation, batch and "
+                         "cron planning, backup/archive readiness, release rollout and rollback review, "
+                         "diagnostic reporting, anomaly alert planning, provider fallback, session persistence, "
+                         "vault retrieval quality, trigger auditing, multi-agent orchestration review, customer "
+                         "support workflows, FAQ and ticket handling, refund review, lead generation and "
+                         "enrichment, cold outreach safety, email deliverability and campaign approval, content "
+                         "and copy review, design quality checks, market monitoring, trading/portfolio review, "
+                         "web search planning, web fetch safety, fact-checking workflows, action item tracking, "
+                         "meeting note structuring, project timelines, task scheduling, goal health, workflow "
+                         "audits, company operating systems, org hierarchy, workload balance, ecommerce research, "
+                         "supplier sync review, inventory alerts, order routing, shipment updates, pricing rules, "
+                         "stock monitoring, product ranking, and customer segmentation."),
             input_schema={"goal": "str", "skill_id": "str?", "context": "str?"},
             output_schema={"skill_id": "str", "skill_name": "str", "output": "str", "match_score": "float"},
             risk_level=L1,
             requires_approval=False,
             side_effects=[],
-            examples=["write a blog post about pricing", "draft a cold email sequence",
-                      "create a press release for our launch", "write product descriptions",
-                      "research the market for AI note-takers", "write a linkedin post about hiring"],
+            examples=["map the repository architecture", "analyze this stack trace",
+                      "generate tests for this route", "check if this command is safe",
+                      "validate the skill registry", "review this invoice draft",
+                      "audit seo opportunities", "write a stakeholder update",
+                      "test this api integration contract", "review the rollback plan",
+                      "review this cold email draft", "verify these claims",
+                      "audit workflow management", "review auto reorder policy"],
         ),
         Capability(
             id="content.produce",

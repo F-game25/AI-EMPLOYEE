@@ -1605,6 +1605,7 @@ export function SkillsLibraryPane({ project }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [expanded, setExpanded] = useState(null)
+  const skillId = (s) => s.id || s.skill_id
 
   const refresh = useCallback(() => {
     setLoading(true); setError(null)
@@ -1632,28 +1633,54 @@ export function SkillsLibraryPane({ project }) {
           <button className="af-btn af-btn--sm af-btn--ghost" onClick={refresh}>Refresh</button>
         </div>
       </div>
-      {skills.length === 0 && <EmptyState title="No skills loaded" body="Skills are loaded from runtime/skills/forge/*.json. Click Reload Skills to scan for new definitions." />}
+      {skills.length === 0 && <EmptyState title="No skills loaded" body="Skills are loaded from the global skills library, with Forge-local definitions used only as supplemental compatibility entries." />}
       <div className="af-skills-lib__list">
         {skills.map(s => (
-          <div key={s.skill_id} className={`af-skills-lib__card ${expanded === s.skill_id ? 'af-skills-lib__card--open' : ''}`}>
-            <div className="af-skills-lib__card-head" onClick={() => setExpanded(expanded === s.skill_id ? null : s.skill_id)}>
+          <div key={skillId(s)} className={`af-skills-lib__card ${expanded === skillId(s) ? 'af-skills-lib__card--open' : ''}`}>
+            <div className="af-skills-lib__card-head" onClick={() => setExpanded(expanded === skillId(s) ? null : skillId(s))}>
               <div className="af-skills-lib__card-name">{s.name}</div>
-              <div className="af-skills-lib__card-id">{s.skill_id}</div>
-              <span className="af-iconbtn">{expanded === s.skill_id ? '▲' : '▼'}</span>
+              <div className="af-skills-lib__card-id">{skillId(s)}</div>
+              <span className="af-iconbtn">{expanded === skillId(s) ? '▲' : '▼'}</span>
             </div>
-            {expanded === s.skill_id && (
+            {expanded === skillId(s) && (
               <div className="af-skills-lib__card-body">
                 <p className="af-skills-lib__desc">{s.description}</p>
+                <div className="af-skills-lib__tag-list">
+                  <span className="af-skills-lib__tag">{s.ui_metadata?.wired === true || s.wired ? 'WIRED' : 'MOCK/UNWIRED'}</span>
+                  {s.maturity_level && <span className="af-skills-lib__tag">{s.maturity_level}</span>}
+                  {s.safety_level && <span className="af-skills-lib__tag">safety: {s.safety_level}</span>}
+                  {s.execution_mode && <span className="af-skills-lib__tag">{s.execution_mode}</span>}
+                  <span className="af-skills-lib__tag">{s.requires_human_approval ? 'approval required' : 'no approval required'}</span>
+                  {s.test_cases?.length > 0 && <span className="af-skills-lib__tag">{s.test_cases.length} tests</span>}
+                </div>
                 {s.triggers?.length > 0 && (
                   <div className="af-skills-lib__triggers">
                     <SectionLabel>TRIGGERS</SectionLabel>
                     <div className="af-skills-lib__tag-list">{s.triggers.map(t => <span key={t} className="af-skills-lib__tag">{t}</span>)}</div>
                   </div>
                 )}
+                {s.when_to_use?.length > 0 && (
+                  <div className="af-skills-lib__triggers">
+                    <SectionLabel>WHEN TO USE</SectionLabel>
+                    <div className="af-skills-lib__tag-list">{s.when_to_use.slice(0, 8).map(t => <span key={t} className="af-skills-lib__tag">{t}</span>)}</div>
+                  </div>
+                )}
+                {s.tools_allowed?.length > 0 && (
+                  <div className="af-skills-lib__triggers">
+                    <SectionLabel>TOOLS ALLOWED</SectionLabel>
+                    <div className="af-skills-lib__tag-list">{s.tools_allowed.map(t => <span key={t} className="af-skills-lib__tag">{t}</span>)}</div>
+                  </div>
+                )}
                 {s.checklist?.length > 0 && (
                   <div className="af-skills-lib__checklist">
                     <SectionLabel>CHECKLIST</SectionLabel>
                     {s.checklist.map((c, i) => <div key={i} className="af-skills-lib__check-item">☐ {c}</div>)}
+                  </div>
+                )}
+                {s.success_criteria?.length > 0 && (
+                  <div className="af-skills-lib__checklist">
+                    <SectionLabel>SUCCESS CRITERIA</SectionLabel>
+                    {s.success_criteria.map((c, i) => <div key={i} className="af-skills-lib__check-item">- {c}</div>)}
                   </div>
                 )}
                 {s.verification_commands?.length > 0 && (

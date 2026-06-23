@@ -39,11 +39,13 @@ class AgentDispatchSkill(SkillBase):
         description: str,
         version: str = "1.0",
         capability_tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self.name = skill_name
         self.description = description
         self.version = version
         self.capability_tags = capability_tags if capability_tags is not None else []
+        self.metadata = dict(metadata or {})
         self.input_schema = {
             "type": "object",
             "properties": {"goal": {"type": "string"}},
@@ -83,6 +85,7 @@ class SkillCatalog:
     """In-memory catalog of declared domain skills."""
 
     def __init__(self) -> None:
+        self._aliases: dict[str, str] = {}
         self._skills = self._build_default_skills()
 
     def _build_default_skills(self) -> dict[str, SkillBase]:
@@ -138,20 +141,29 @@ class SkillCatalog:
                 description=str(item.get("description") or item.get("name") or "Configured skill."),
                 version=str(item.get("version") or "1.0"),
                 capability_tags=capability_tags,
+                metadata=item,
             )
+            for alias in item.get("aliases") or []:
+                alias_id = str(alias).strip()
+                if alias_id and alias_id not in existing:
+                    self._aliases[alias_id] = skill_id
         return loaded
 
     def get(self, name: str) -> SkillBase | None:
-        return self._skills.get(name)
+        return self._skills.get(name) or self._skills.get(self._aliases.get(name, ""))
 
     def has(self, name: str) -> bool:
-        return name in self._skills
+        return name in self._skills or name in self._aliases
 
     def all(self) -> dict[str, SkillBase]:
         return dict(self._skills)
 
     def list_skills(self) -> list[str]:
         return sorted(self._skills)
+
+    def canonical_skill_id(self, name: str) -> str:
+        """Return the canonical skill id for an id or alias."""
+        return self._aliases.get(name, name)
 
 
 _instance: SkillCatalog | None = None
@@ -239,6 +251,8 @@ class ExecutableSkillCatalog(SkillCatalog):
         # 1) Tool-composing executable skill — explicit id or best description match.
         wanted = str(ctx.get("skill_id") or "").strip()
         name = wanted if (wanted and self.get_skill(wanted)) else None
+        if wanted and name is None:
+            return self._run_library_skill(goal, ctx)
         if name is None:
             matches = self.find_for_goal(goal)
             name = matches[0]["name"] if matches else None
@@ -268,7 +282,13 @@ class ExecutableSkillCatalog(SkillCatalog):
         skill = None
         wanted = str(ctx.get("skill_id") or "").strip()
         if wanted:
-            skill = next((s for s in _load_skills() if s.get("id") == wanted), None)
+            skill = next(
+                (
+                    s for s in _load_skills()
+                    if s.get("id") == wanted or wanted in (s.get("aliases") or [])
+                ),
+                None,
+            )
         if skill is None:
             picks = select_skills(goal, str(ctx.get("task_type") or "chat"), max_skills=1)
             skill = picks[0] if picks else None
@@ -277,9 +297,20 @@ class ExecutableSkillCatalog(SkillCatalog):
         system = str(skill.get("system_prompt") or
                      f"You are the '{skill.get('name', 'specialist')}' capability. "
                      "Complete the user's goal concretely and concisely.")
+        developer = str(skill.get("developer_prompt") or "").strip()
+        if developer:
+            system += "\n\nDeveloper guidance:\n" + developer
         steps = skill.get("execution_steps")
         if isinstance(steps, list) and steps:
             system += "\n\nFollow these steps:\n" + "\n".join(f"- {s}" for s in steps[:8])
+        context_requirements = skill.get("context_requirements")
+        if isinstance(context_requirements, list) and context_requirements:
+            system += "\n\nContext requirements:\n" + "\n".join(f"- {s}" for s in context_requirements[:5])
+        quality = skill.get("quality_checklist")
+        if isinstance(quality, list) and quality:
+            system += "\n\nQuality checklist:\n" + "\n".join(f"- {s}" for s in quality[:8])
+        if skill.get("requires_human_approval"):
+            system += "\n\nHuman approval is required before any side effect or external action."
         try:
             from engine.api import generate
         except Exception as exc:  # noqa: BLE001
@@ -293,7 +324,10 @@ class ExecutableSkillCatalog(SkillCatalog):
                         "error": "skill produced no output"}
             return {"status": "ok", "skill_id": skill.get("id"), "via": "skill_library_llm",
                     "skill_name": skill.get("name"), "output": text,
-                    "match_score": skill.get("match_score")}
+                    "match_score": skill.get("match_score"),
+                    "safety_level": skill.get("safety_level"),
+                    "requires_human_approval": bool(skill.get("requires_human_approval")),
+                    "fallback_strategy": skill.get("fallback_strategy")}
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
 
