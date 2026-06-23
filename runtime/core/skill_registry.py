@@ -526,6 +526,12 @@ def _build_manifest(
     skills_by_id: dict[str, dict] = {
         s["id"]: s for s in skills_lib.get("skills", [])
     }
+    alias_to_id: dict[str, str] = {}
+    for skill in skills_by_id.values():
+        for alias in skill.get("aliases") or []:
+            alias_id = str(alias).strip()
+            if alias_id:
+                alias_to_id[alias_id] = skill["id"]
 
     # 2. Agent capabilities
     caps_data = _load_json(caps_file, {"agents": {}})
@@ -584,7 +590,11 @@ def _build_manifest(
         all_skill_ids.update(agent.get("skills", []))
 
     library_skill_ids = set(skills_by_id.keys())
-    covered_skills = all_skill_ids & library_skill_ids
+    covered_skills = {
+        alias_to_id.get(skill_id, skill_id)
+        for skill_id in all_skill_ids
+        if skill_id in library_skill_ids or skill_id in alias_to_id
+    }
     gap_skills = library_skill_ids - all_skill_ids
 
     return {
@@ -607,6 +617,7 @@ def _build_manifest(
         },
         "agents": merged_agents,
         "skills": skills_by_id,
+        "skill_aliases": alias_to_id,
         "skill_categories": skills_lib.get("categories", []),
         "gap_skills": sorted(gap_skills),
     }
@@ -692,14 +703,20 @@ class SkillRegistry:
 
     def skill(self, skill_id: str) -> dict | None:
         """Return a single skill's metadata, or *None* if not found."""
-        return self.manifest.get("skills", {}).get(skill_id)
+        canonical = self.manifest.get("skill_aliases", {}).get(skill_id, skill_id)
+        return self.manifest.get("skills", {}).get(canonical)
 
     def agents_for_skill(self, skill_id: str) -> list[str]:
         """Return agent IDs that list *skill_id* in their skills."""
+        skill = self.skill(skill_id)
+        aliases = set(skill.get("aliases", []) if skill else [])
+        aliases.add(skill_id)
+        if skill:
+            aliases.add(skill.get("id", skill_id))
         return [
             aid
             for aid, ameta in self.manifest.get("agents", {}).items()
-            if skill_id in ameta.get("skills", [])
+            if aliases & set(ameta.get("skills", []))
         ]
 
     def skills_for_agent(self, agent_id: str) -> list[str]:
