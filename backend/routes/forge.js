@@ -4550,7 +4550,7 @@ Respond with ONLY valid JSON (no markdown fences):
   // injection-guarded (web content is untrusted), cache/budget-aware, and quality-SCORED
   // by the result verifier (requires inline sources). Pairs with /api/research/discover:
   // pass the discovered sources in `sources[]`. Honest: no sources / no LLM → passed:false.
-  router.post('/research-summary', requireScope('read'), rlRuns, async (req, res) => {
+  router.post('/research-summary', rateLimit, requireScope('read'), async (req, res) => {
     const query = String(req.body?.query || req.body?.topic || '').trim()
     if (!query) return res.status(400).json({ ok: false, error: 'query required' })
     const sources = (Array.isArray(req.body?.sources) ? req.body.sources : []).slice(0, 8)
