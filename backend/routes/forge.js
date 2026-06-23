@@ -4895,13 +4895,58 @@ Output a JSON array:
   // ═══════════════════════════════════════════════════════════════════════════
 
   let _forgeSkillsCache = null
-  function _loadForgeSkills() {
-    if (_forgeSkillsCache) return _forgeSkillsCache
+  function _normalizeForgeSkill(skill, source = 'skills_library') {
+    const id = skill.id || skill.skill_id
+    return {
+      ...skill,
+      id,
+      skill_id: id,
+      source,
+      wired: skill.ui_metadata?.wired === true || source === 'forge_local',
+    }
+  }
+
+  function _isForgeRelevantSkill(skill) {
+    const text = [
+      skill.id,
+      skill.name,
+      skill.category,
+      skill.subcategory,
+      skill.description,
+      skill.source_pack,
+      ...(skill.tags || []),
+      ...(skill.compatible_agents || []),
+      ...(skill.aliases || []),
+    ].filter(Boolean).join(' ').toLowerCase()
+    return (
+      Boolean(skill.ui_metadata?.batch) ||
+      skill.compatible_agents?.includes('ascend-forge') ||
+      Boolean(skill.source_pack) ||
+      /\b(agent|forge|code|build|workflow|test|security|debug|architecture|api|database|frontend|backend|python|ollama|skill|dashboard|approval|compute|memory|context)\b/.test(text)
+    )
+  }
+
+  function _loadLocalForgeSkills() {
     const dir = path.join(__dirname, '../../runtime/skills/forge')
     if (!fs.existsSync(dir)) return []
     try {
-      const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'))
-      _forgeSkillsCache = files.map(f => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { return null } }).filter(Boolean)
+      return fs.readdirSync(dir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { return null } })
+        .filter(Boolean)
+        .map(s => _normalizeForgeSkill(s, 'forge_local'))
+    } catch { return [] }
+  }
+
+  function _loadForgeSkills() {
+    if (_forgeSkillsCache) return _forgeSkillsCache
+    try {
+      const globalSkills = (engine.listSkills({}).skills || [])
+        .filter(_isForgeRelevantSkill)
+        .map(s => _normalizeForgeSkill(s, 'skills_library'))
+      const seen = new Set(globalSkills.map(s => s.id))
+      const local = _loadLocalForgeSkills().filter(s => !seen.has(s.id))
+      _forgeSkillsCache = [...globalSkills, ...local]
       return _forgeSkillsCache
     } catch { return [] }
   }
@@ -4912,11 +4957,26 @@ Output a JSON array:
   }
 
   router.get('/skills', rateLimit, requireAuth, (_req, res) => {
-    res.json({ ok: true, skills: _loadForgeSkills() })
+    const skills = _loadForgeSkills()
+    res.json({
+      ok: true,
+      source: 'skills_library',
+      count: skills.length,
+      batch1_count: skills.filter(s => s.ui_metadata?.batch === 'batch_1').length,
+      batch2_count: skills.filter(s => s.ui_metadata?.batch === 'batch_2').length,
+      batch3_count: skills.filter(s => s.ui_metadata?.batch === 'batch_3').length,
+      batch4_count: skills.filter(s => s.ui_metadata?.batch === 'batch_4').length,
+      batch5_count: skills.filter(s => s.ui_metadata?.batch === 'batch_5').length,
+      batch6_count: skills.filter(s => s.ui_metadata?.batch === 'batch_6').length,
+      batch7_count: skills.filter(s => s.ui_metadata?.batch === 'batch_7').length,
+      batch8_count: skills.filter(s => s.ui_metadata?.batch === 'batch_8').length,
+      production_batch_count: skills.filter(s => Boolean(s.ui_metadata?.batch)).length,
+      skills,
+    })
   })
 
   router.get('/skills/:skillId', rateLimit, requireAuth, (req, res) => {
-    const skill = _loadForgeSkills().find(s => s.skill_id === req.params.skillId)
+    const skill = _loadForgeSkills().find(s => s.id === req.params.skillId || s.skill_id === req.params.skillId || (s.aliases || []).includes(req.params.skillId))
     if (!skill) return res.status(404).json({ ok: false, error: 'skill not found' })
     res.json({ ok: true, skill })
   })
@@ -4924,7 +4984,12 @@ Output a JSON array:
   router.post('/skills/reload', rateLimit, requireAuth, (_req, res) => {
     _forgeSkillsCache = null
     const skills = _loadForgeSkills()
-    res.json({ ok: true, count: skills.length, skills: skills.map(s => s.skill_id) })
+    res.json({
+      ok: true,
+      source: 'skills_library_plus_forge_local',
+      count: skills.length,
+      skills: skills.map(s => s.id || s.skill_id),
+    })
   })
 
   router.post('/runs/:id/apply-skill', rateLimit, requireAuth, (req, res) => {
@@ -4932,10 +4997,11 @@ Output a JSON array:
     if (!run) return res.status(404).json({ ok: false, error: 'run not found' })
     const { skill_id } = req.body || {}
     if (!skill_id) return res.status(400).json({ ok: false, error: 'skill_id required' })
-    const skill = _loadForgeSkills().find(s => s.skill_id === skill_id)
+    const skill = _loadForgeSkills().find(s => s.id === skill_id || s.skill_id === skill_id || (s.aliases || []).includes(skill_id))
     if (!skill) return res.status(404).json({ ok: false, error: 'skill not found' })
-    updateRun(run.id, { applied_skill: skill_id, skill_checklist: skill.checklist || [] })
-    res.json({ ok: true, run_id: run.id, skill_applied: skill_id, checklist: skill.checklist || [] })
+    const checklist = skill.checklist || skill.quality_checklist || skill.success_criteria || []
+    updateRun(run.id, { applied_skill: skill.id || skill.skill_id, skill_checklist: checklist })
+    res.json({ ok: true, run_id: run.id, skill_applied: skill.id || skill.skill_id, checklist })
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
