@@ -92,6 +92,26 @@ def test_batch8_library_is_ready_and_count_preserved():
     assert len(BATCH8_SKILL_IDS) == 40
 
 
+def test_batch9_library_is_ready_and_count_preserved():
+    from skills.batch1_readiness import BATCH9_SKILL_IDS, validate_batch9_library
+
+    report = validate_batch9_library()
+    assert report["ok"], report
+    assert report["batch_size"] == 40
+    assert report["total"] == 570
+    assert len(BATCH9_SKILL_IDS) == 40
+
+
+def test_batch10_library_is_ready_and_count_preserved():
+    from skills.batch1_readiness import BATCH10_SKILL_IDS, validate_batch10_library
+
+    report = validate_batch10_library()
+    assert report["ok"], report
+    assert report["batch_size"] == 11
+    assert report["total"] == 570
+    assert len(BATCH10_SKILL_IDS) == 11
+
+
 def test_batch1_replaced_ids_resolve_as_aliases():
     from core.skill_registry import SkillRegistry
 
@@ -162,6 +182,24 @@ def test_batch8_replaced_ids_resolve_as_aliases():
     assert registry.skill("accessibility_audit")["id"] == "accessibility_audit_checker"
     assert registry.skill("deliverability_optimization")["id"] == "email_deliverability_optimization_checker"
     assert registry.skill("comment_automation")["id"] == "comment_automation_safety_reviewer"
+
+
+def test_batch9_replaced_ids_resolve_as_aliases():
+    from core.skill_registry import SkillRegistry
+
+    registry = SkillRegistry()
+    assert registry.skill("outreach_sequencing")["id"] == "outreach_sequence_reviewer"
+    assert registry.skill("trading_bot_coding")["id"] == "trading_bot_code_reviewer"
+    assert registry.skill("smart_contract_parameters")["id"] == "smart_contract_parameter_reviewer"
+
+
+def test_batch10_replaced_ids_resolve_as_aliases():
+    from core.skill_registry import SkillRegistry
+
+    registry = SkillRegistry()
+    assert registry.skill("whatsapp_notifications")["id"] == "whatsapp_notification_reviewer"
+    assert registry.skill("website_audit")["id"] == "website_audit_checker"
+    assert registry.skill("viral_content_creation")["id"] == "viral_content_reviewer"
 
 
 def test_skill_selector_uses_production_metadata():
@@ -400,6 +438,60 @@ def test_dispatch_explicit_batch7_skill_uses_metadata():
 
     assert out["status"] == "ok"
     assert out["skill_id"] == "shell_command_execution_reviewer"
+    assert out["requires_human_approval"] is True
+    assert out["safety_level"] == "high"
+    assert "Developer guidance" in captured["system"]
+    assert "Human approval is required" in captured["system"]
+
+
+def test_dispatch_explicit_batch9_skill_uses_metadata():
+    from skills.catalog import ExecutableSkillCatalog
+
+    engine = ModuleType("engine.api")
+    captured = {}
+
+    def fake_generate(prompt, system=None, context=None):
+        captured["system"] = system
+        return "outreach sequence metadata-aware output"
+
+    engine.generate = fake_generate
+    catalog = ExecutableSkillCatalog()
+
+    with patch.dict(sys.modules, {"engine.api": engine}):
+        out = catalog.dispatch_for_goal(
+            "review this outreach sequence before sending",
+            {"skill_id": "outreach_sequence_reviewer"},
+        )
+
+    assert out["status"] == "ok"
+    assert out["skill_id"] == "outreach_sequence_reviewer"
+    assert out["requires_human_approval"] is True
+    assert out["safety_level"] == "high"
+    assert "Developer guidance" in captured["system"]
+    assert "Human approval is required" in captured["system"]
+
+
+def test_dispatch_explicit_batch10_skill_uses_metadata():
+    from skills.catalog import ExecutableSkillCatalog
+
+    engine = ModuleType("engine.api")
+    captured = {}
+
+    def fake_generate(prompt, system=None, context=None):
+        captured["system"] = system
+        return "whatsapp notification metadata-aware output"
+
+    engine.generate = fake_generate
+    catalog = ExecutableSkillCatalog()
+
+    with patch.dict(sys.modules, {"engine.api": engine}):
+        out = catalog.dispatch_for_goal(
+            "review this whatsapp notification before delivery",
+            {"skill_id": "whatsapp_notification_reviewer"},
+        )
+
+    assert out["status"] == "ok"
+    assert out["skill_id"] == "whatsapp_notification_reviewer"
     assert out["requires_human_approval"] is True
     assert out["safety_level"] == "high"
     assert "Developer guidance" in captured["system"]

@@ -458,7 +458,16 @@ def _seed(reg: CapabilityRegistry) -> None:
                          "tests, accessibility audits, brand positioning, campaign planning, candidate outreach, "
                          "comment automation safety, component specs, content curation, conversion tracking, "
                          "email deliverability, DNS verification, follow-up sequencing, image prompt review, "
-                         "keyword search planning, and improvement proposal prioritization."),
+                         "keyword search planning, improvement proposal prioritization, lesson and script "
+                         "writing, list segmentation, market entry and positioning, messaging frameworks, "
+                         "meta/PPC ad strategy review, risk mitigation planning, notification and WhatsApp "
+                         "dispatch review, order aggregation, outreach sequencing, performance diagnosis and "
+                         "prediction, buyer personas, PLG and viral strategy, prediction/price market briefs, "
+                         "profit margin and prospect research, report generation review, RSS and trend scans, "
+                         "schema markup and SEO/website audits, self-improvement and swarm simulation review, "
+                         "smart contract and trading-bot code review, brand storytelling, strategic analysis, "
+                         "subscriber management, thought leadership, TikTok scripting, touchpoint mapping, "
+                         "typography/UX/visual-identity review, and email warmup planning."),
             input_schema={"goal": "str", "skill_id": "str?", "context": "str?"},
             output_schema={"skill_id": "str", "skill_name": "str", "output": "str", "match_score": "float"},
             risk_level=L1,
@@ -472,7 +481,9 @@ def _seed(reg: CapabilityRegistry) -> None:
                       "review this cold email draft", "verify these claims",
                       "audit workflow management", "review auto reorder policy",
                       "review this shell command", "build a legal review checklist",
-                      "check accessibility audit", "check email deliverability optimization"],
+                      "check accessibility audit", "check email deliverability optimization",
+                      "review this outreach sequence", "review trading bot code",
+                      "build a strategic analysis brief", "check the website audit"],
         ),
         Capability(
             id="content.produce",
