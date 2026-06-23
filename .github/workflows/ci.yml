@@ -126,6 +126,9 @@ jobs:
       - name: Run agent real-completion tests
         run: node tests/test_agent_real_completion.js
 
+      - name: Run desktop boot-contract tests (F1 + F2)
+        run: node tests/test_boot_contract_routes.js
+
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
   # ─────────────────────────────────────────────────────────────────

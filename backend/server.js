@@ -59,6 +59,7 @@ const { createAnomalyResponder } = require('./security/anomaly_response');
 const blacklightTools = require('./security/blacklight_tools');
 const { tenantMiddleware, requireTenant } = require('./tenancy');
 const { enforceRegion } = require('./middleware/region');
+const { makeLocalhostOrAuth } = require('./middleware/localhost-or-auth');
 const ConnectionManager = require('./websocket/connection-manager');
 const HeartbeatManager = require('./websocket/heartbeat');
 const { createUpgradeHandler } = require('./websocket/upgrade-handlers');
@@ -333,6 +334,11 @@ function requireLocalhost(req, res, next) {
   if (rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1') return next();
   return res.status(403).json({ ok: false, error: 'localhost only' });
 }
+
+// Tokenless from loopback (desktop supervisor / first-run webview probe runtime identity
+// and report UI boot phase before any operator token exists); JWT required for every
+// non-loopback caller. Raw-socket loopback check — not spoofable via X-Forwarded-For.
+const localhostOrAuth = makeLocalhostOrAuth(requireAuth);
 
 // Simple sliding-window rate limiter factory (no external deps).
 // windowMs: window length, max: max requests per window per IP.
@@ -787,7 +793,7 @@ setInterval(() => {
   }
 }, 15000).unref();
 
-const _readiness = { phase: 'BOOTING', pythonReady: false, subsystemsReady: false };
+const _readiness = { phase: 'BOOTING', pythonReady: false, subsystemsReady: false, uiBootPhase: null };
 const _systemReady = { python_ok: false, llm_ok: false, node_ok: true };
 function _updateSystemReady(patch) {
   Object.assign(_systemReady, patch);
@@ -817,6 +823,7 @@ function _updateSystemReady(patch) {
       if (addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1') return next();
       res.status(403).json({ ok: false, error: 'Localhost only' });
     },
+    localhostOrAuth,
     validate,
     SCHEMAS,
     // Core constants

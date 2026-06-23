@@ -1,5 +1,7 @@
 'use strict';
 
+const { validateBootPhase } = require('../lib/boot-phase');
+
 // Allowlist of valid event names for POST /internal/events.
 // Rejects arbitrary event names to prevent state spoofing via blacklight events.
 const _INTERNAL_EVENT_ALLOWLIST = new Set([
@@ -59,6 +61,7 @@ const _INTERNAL_EVENT_ALLOWLIST = new Set([
 module.exports = function createHealthRouter(deps) {
   const {
     requireAuth,
+    localhostOrAuth,
     PYTHON_BACKEND_PORT,
     PYTHON_BACKEND_HOST,
     JWT_SECRET,
@@ -568,10 +571,32 @@ module.exports = function createHealthRouter(deps) {
       subsystemsReady: _readiness.subsystemsReady,
       neuralBrainReady,
       graphReady,
+      uiBootPhase: _readiness.uiBootPhase,
       degraded: degradedReasons.length > 0,
       degradedReasons,
       timestamp: new Date().toISOString(),
     });
+  });
+
+  // ── Desktop boot handshake (F2) ────────────────────────────────────────────
+  // The frontend reports UI boot phases here so the shell knows the UI actually
+  // mounted — works under Tauri's remote-origin webview, which has no Electron
+  // preload bridge. Tokenless from loopback (phases fire before any operator token
+  // exists); JWT required for remote callers. Body is validated as hostile input.
+  const _localOrAuth = (typeof localhostOrAuth === 'function') ? localhostOrAuth : requireAuth;
+  router.post('/api/boot/phase', _localOrAuth, _express.json({ limit: '8kb' }), (req, res) => {
+    const result = validateBootPhase(req.body);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    _readiness.uiBootPhase = { ...result.value, ts: new Date().toISOString() };
+    try {
+      console.log(`[boot] ui phase: ${result.value.phase}${result.value.detail ? ' - ' + result.value.detail : ''}`);
+    } catch (_) { /* logging is best-effort */ }
+    res.json({ ok: true });
+  });
+
+  router.get('/api/boot/phase', _localOrAuth, (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, uiBootPhase: _readiness.uiBootPhase });
   });
 
   // GET /api/capabilities/status

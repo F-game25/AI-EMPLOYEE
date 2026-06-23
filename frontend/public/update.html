@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexus OS — Update</title>
+  <style>
+    :root { --bg:#06070D; --panel:#0d1018; --line:rgba(255,255,255,.08); --txt:#e7ecf5; --muted:#8a93a6; --accent:#5b8cff; --ok:#27c93f; --warn:#ffbd2e; --err:#ff5f56; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; height:100%; background:var(--bg); color:var(--txt);
+      font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .wrap { height:100%; display:flex; flex-direction:column; padding:22px 24px; gap:16px; }
+    h1 { font-size:15px; font-weight:700; margin:0; letter-spacing:.04em; }
+    .tag { color:var(--muted); font-size:11px; margin:2px 0 0; }
+    .phases { display:flex; flex-direction:column; gap:8px; flex:1; min-height:0; }
+    .ph { display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--line);
+      border-radius:8px; background:var(--panel); opacity:.45; transition:opacity .2s; }
+    .ph.run { opacity:1; border-color:var(--accent); }
+    .ph.ok  { opacity:1; }
+    .ph .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); flex:none; }
+    .ph.run .dot { background:var(--accent); animation:pulse 1s infinite; }
+    .ph.ok  .dot { background:var(--ok); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .ph .lbl { flex:1; }
+    .msg { padding:10px 12px; border-radius:8px; background:var(--panel); border:1px solid var(--line);
+      color:var(--muted); min-height:42px; }
+    .msg.err { color:var(--err); border-color:rgba(255,95,86,.4); }
+    .msg.warn { color:var(--warn); border-color:rgba(255,189,46,.4); }
+    .msg.ok { color:var(--ok); }
+    .actions { display:flex; gap:10px; }
+    .btn { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line);
+      background:#141925; color:var(--txt); cursor:pointer; }
+    .btn:hover { border-color:var(--accent); }
+    .btn.ghost { background:transparent; color:var(--muted); }
+    .hide { display:none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div>
+      <h1>NEXUS OS · SOFTWARE UPDATE</h1>
+      <p class="tag">Current <span id="cur">v0.1.0</span> · unsigned channel (HTTPS + sha256)</p>
+    </div>
+    <div class="phases" id="phases"></div>
+    <div class="msg" id="msg">Checking for updates…</div>
+    <div class="actions">
+      <button class="btn" id="checkBtn">↻ Check again</button>
+      <button class="btn ghost" id="closeBtn">Close</button>
+    </div>
+  </div>
+  <script>
+    const PHASES = [
+      ["checking","Checking"],
+      ["available","Update found"],
+      ["downloading","Downloading"],
+      ["verifying","Verifying (sha256)"],
+      ["applying","Applying"],
+      ["relaunching","Relaunching"],
+    ];
+    const order = PHASES.map(p => p[0]);
+    const host = document.getElementById('phases');
+    const els = {};
+    PHASES.forEach(([id,lbl]) => {
+      const d = document.createElement('div'); d.className = 'ph'; d.id = 'p-'+id;
+      d.innerHTML = '<span class="dot"></span><span class="lbl">'+lbl+'</span>';
+      host.appendChild(d); els[id] = d;
+    });
+    const msg = document.getElementById('msg');
+    function setMsg(text, kind){ msg.textContent = text; msg.className = 'msg'+(kind?(' '+kind):''); }
+    function mark(id){
+      const idx = order.indexOf(id); if (idx < 0) return;
+      order.forEach((p,i)=>{ els[p].classList.remove('run','ok'); if(i<idx)els[p].classList.add('ok'); });
+      els[id].classList.add('run');
+    }
+    function done(){ order.forEach(p=>{els[p].classList.remove('run');els[p].classList.add('ok');}); }
+
+    function wire(){
+      const T = window.__TAURI__;
+      if (!T || !T.event) return setTimeout(wire, 120);
+      const { listen } = T.event;
+      const invoke = T.core && T.core.invoke;
+
+      listen('update://checking', () => { mark('checking'); setMsg('Checking for updates…'); });
+      listen('update://available', e => { const p=e.payload||{}; mark('available');
+        setMsg('Update available: v'+(p.version||'?')+(p.notes?(' — '+p.notes):''), 'ok'); });
+      listen('update://none', e => { const p=e.payload||{}; done();
+        setMsg('You are up to date (v'+(p.current||'?')+').', 'ok'); });
+      listen('update://downloading', () => { mark('downloading'); setMsg('Downloading update…'); });
+      listen('update://verifying', () => { mark('verifying'); setMsg('Verifying integrity (sha256)…'); });
+      listen('update://applying', () => { mark('applying'); setMsg('Applying update…'); });
+      listen('update://relaunching', e => { const p=e.payload||{}; mark('relaunching');
+        setMsg('Installed v'+(p.version||'')+' — relaunching…', 'ok'); });
+      listen('update://manual_required', e => { const p=e.payload||{};
+        setMsg((p.reason||'Manual update required.'), 'warn'); });
+      listen('update://error', e => { const p=e.payload||{};
+        setMsg('Update failed: '+(p.reason||'unknown error'), 'err'); });
+
+      const on=(id,fn)=>{const el=document.getElementById(id);if(el)el.onclick=fn;};
+      on('checkBtn', () => { if(invoke) invoke('check_for_updates').catch(err=>setMsg('Error: '+err,'err')); });
+      on('closeBtn', () => { const w = T.window && T.window.getCurrentWindow && T.window.getCurrentWindow();
+        if (w && w.close) w.close(); });
+
+      if (invoke) invoke('get_boot_state').then(s => { if (s && s.version) document.getElementById('cur').textContent = 'v'+s.version; }).catch(()=>{});
+    }
+    wire();
+  </script>
+</body>
+</html>
