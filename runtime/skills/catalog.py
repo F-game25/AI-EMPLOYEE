@@ -112,6 +112,14 @@ class SkillCatalog:
         skills["context-research"] = ContextResearchSkill()
         skills["product-video"] = ProductVideoSkill()
         skills["document-qa"] = DocumentQASkill()
+        # Deepened top content skills: the prompt-only library entries upgraded to
+        # executable (validated output + artifact). Registered by their library id so
+        # they OVERRIDE the prompt-only version for dispatch.
+        try:
+            from skills.executable_content import build_executable_skills
+            skills.update(build_executable_skills())
+        except Exception as _exc:  # never break catalog load
+            pass
         skills.update(self._load_configured_skills(existing=set(skills)))
         return skills
 
