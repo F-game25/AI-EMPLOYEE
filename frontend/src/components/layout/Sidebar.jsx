@@ -108,6 +108,11 @@ const NAV_GROUPS = [
     icon: '▸',
     items: [
       {
+        id: 'ai-output',
+        label: 'AI Output',
+        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h7l3 3v9H3z"/><path d="M9 2v3h3M5.5 8.5h5M5.5 11h3"/></svg>,
+      },
+      {
         id: 'tasks',
         label: 'Tasks',
         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M2 6h12M5 10h6"/></svg>,
