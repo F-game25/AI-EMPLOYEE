@@ -131,20 +131,24 @@ class RemoteWorkerRegistry {
       if (!ev.ok) { this._audit('register_denied', { reason: ev.error }); return { ok: false, error: ev.error } }
       url = ev.url
     }
-    // Per-worker dispatch key: returned to the worker ONCE here, only its hash is
-    // persisted. Job tokens are HMAC-signed with this key, so a leaked server file
-    // alone cannot forge dispatch, and each worker is independently revocable.
-    const dispatchKey = crypto.randomBytes(32).toString('hex')
     // 'peer' = your own LAN machine (laptop/PC); 'rented' = cloud GPU. Unknown →
     // 'rented' (the stricter egress tier) so we never under-redact by default.
     const kind = kindIn === 'peer' ? 'peer' : 'rented'
+    const workerId = `wkr-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+    // Per-worker dispatch key is DERIVED from the server master secret + a stored
+    // per-worker salt: dispatch_key = HMAC(SERVER_SECRET, id:salt). Only the salt
+    // (non-secret) is persisted — a leaked workers.json cannot forge a job token
+    // without SERVER_SECRET. The derived key is returned to the worker exactly once
+    // and re-derived server-side on each dispatch. Rotating the salt revokes it.
+    const keySalt = crypto.randomBytes(16).toString('hex')
+    const dispatchKey = this._deriveSigningKey(workerId, keySalt)
     const worker = {
-      id: `wkr-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      id: workerId,
       name: String(name || 'worker').slice(0, 80),
       kind,
       capabilities: this._sanitizeCaps(capabilities),
       endpoint: url,
-      dispatch_key_hash: crypto.createHash('sha256').update(dispatchKey).digest('hex'),
+      key_salt: keySalt,
       trust: 'untrusted',
       status: 'online',
       registered_at: new Date().toISOString(),
@@ -152,12 +156,24 @@ class RemoteWorkerRegistry {
     }
     const ws = this._loadWorkers(); ws.unshift(worker); this._saveWorkers(ws)
     this._audit('worker_registered', { id: worker.id, name: worker.name, has_endpoint: !!url })
-    // The plaintext dispatch_key is returned exactly once and never stored/logged.
+    // The derived dispatch_key is returned exactly once and never stored/logged.
     return { ok: true, worker: this._publicWorker(this._withAge(worker)), dispatch_key: dispatchKey }
   }
 
-  // Strip server-only secrets (the key hash) from any worker returned to callers.
-  _publicWorker(w) { if (!w) return w; const { dispatch_key_hash, ...rest } = w; return rest }
+  // Derive a worker's job-token signing key from the server master secret + salt.
+  // Never stored; re-derived on demand so workers.json holds no signing material.
+  _deriveSigningKey(workerId, salt) {
+    return crypto.createHmac('sha256', SECRET).update(`${workerId}:${salt}`).digest('hex')
+  }
+
+  // The signing key for a known worker, or null. Internal — never exposed via a route.
+  signingKeyFor(workerId) {
+    const w = this._getInternal(workerId)
+    return w && w.key_salt ? this._deriveSigningKey(w.id, w.key_salt) : null
+  }
+
+  // Strip server-only material (the key salt) from any worker returned to callers.
+  _publicWorker(w) { if (!w) return w; const { key_salt, ...rest } = w; return rest }
 
   heartbeat(id, info = {}) {
     const ws = this._loadWorkers(); const w = ws.find(x => x.id === id)

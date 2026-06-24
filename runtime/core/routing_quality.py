@@ -36,6 +36,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from core.file_lock import FileLock
+except Exception:  # noqa: BLE001 — fall back to a no-op lock if unavailable
+    from contextlib import contextmanager
+
+    @contextmanager
+    def FileLock(_path, *_a, **_k):  # type: ignore
+        yield
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "routing_quality.json"
@@ -96,20 +105,28 @@ _DIFFICULTY_ORDER = ("low", "medium", "high", "critical")
 _LEDGER_LOCK = threading.Lock()
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base* so a partial nested override (e.g.
+    a single difficulty.signal_weights key) keeps the sibling defaults instead of
+    replacing the whole nested map."""
+    for key, val in override.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(val, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], val)
+        else:
+            base[key] = val
+    return base
+
+
 @functools.lru_cache(maxsize=1)
 def _config() -> dict[str, Any]:
-    """Load config merged over baked defaults (deep, one level). Never raises."""
+    """Load config recursively merged over baked defaults. Never raises."""
     cfg = json.loads(json.dumps(_DEFAULTS))  # deep copy of defaults
     try:
         with open(_CONFIG_PATH, "r", encoding="utf-8") as fh:
             loaded = json.load(fh)
-        for key, val in loaded.items():
-            if key.startswith("_"):
-                continue
-            if isinstance(val, dict) and isinstance(cfg.get(key), dict):
-                cfg[key] = {**cfg[key], **val}
-            else:
-                cfg[key] = val
+        _deep_merge(cfg, loaded if isinstance(loaded, dict) else {})
     except FileNotFoundError:
         pass
     except Exception as exc:  # noqa: BLE001 — config problems never break routing
@@ -336,11 +353,18 @@ def record_quality(
         "goal_hash": hashlib.sha1((goal or "").encode("utf-8", "ignore")).hexdigest()[:12] if goal else None,
     }
     try:
+        path = _ledger_path()
+        # Thread lock (intra-process) + fcntl FileLock (cross-process): append+trim
+        # of the shared JSONL must be atomic across workers or rows interleave/truncate.
         with _LEDGER_LOCK:
-            path = _ledger_path()
-            with open(path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(entry, ensure_ascii=True) + "\n")
-            _trim_ledger(path)
+            try:
+                with FileLock(path):
+                    with open(path, "a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(entry, ensure_ascii=True) + "\n")
+                    _trim_ledger(path)
+            except TimeoutError:
+                logger.debug("routing_quality: ledger lock timeout; skipping append")
+                return False
         return True
     except Exception as exc:  # noqa: BLE001 — telemetry must never break a run
         logger.debug("routing_quality: ledger append failed: %s", exc)

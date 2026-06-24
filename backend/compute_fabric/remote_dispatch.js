@@ -46,11 +46,11 @@ const LIVE = () => process.env.COMPUTE_FABRIC_LIVE === '1'
 const JOB_TTL_MS = (Number(process.env.REMOTE_JOB_TTL_S || 120)) * 1000
 const KIND_TIER = { peer: 'peer_trusted', rented: 'rented_trusted' }
 
-// In-process single-use job-id ledger (defence-in-depth against token replay
-// within this server's lifetime; the TTL bounds the window regardless).
-const _usedJobIds = new Set()
+// Replay protection is enforced WORKER-SIDE: the worker rejects any job_id it has
+// already seen, and the short token TTL bounds the window. The server issues a fresh
+// random job_id per dispatch, so there is no server-side replay surface to track.
 
-function _sign(keyHash, msg) { return crypto.createHmac('sha256', String(keyHash)).update(msg).digest('hex') }
+function _sign(key, msg) { return crypto.createHmac('sha256', String(key)).update(msg).digest('hex') }
 function _sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex') }
 
 /**
@@ -90,11 +90,14 @@ async function dispatchJob(job = {}, opts = {}) {
     // — a job can ask a worker to COMPUTE, never to act on a machine.
     const safePayload = egressGuard.containValue(eg.payload ?? {})
 
-    // AUTH — single-use, short-TTL HMAC job token keyed by the worker key hash.
+    // AUTH — single-use, short-TTL HMAC job token signed with the worker's key,
+    // re-derived from the server master secret (never read from the worker file).
+    const signingKey = reg.signingKeyFor(w.id)
+    if (!signingKey) return { ok: false, dispatched: false, target: 'local', reason: 'worker signing key unavailable' }
     const jobId = `job-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`
     const expires = Date.now() + JOB_TTL_MS
-    const payloadHash = _sha256(egressGuard.payloadBytes ? JSON.stringify(safePayload ?? null) : '')
-    const token = `${jobId}.${expires}.${_sign(w.dispatch_key_hash, `${jobId}:${expires}:${payloadHash}`)}`
+    const payloadHash = _sha256(JSON.stringify(safePayload ?? null))
+    const token = `${jobId}.${expires}.${_sign(signingKey, `${jobId}:${expires}:${payloadHash}`)}`
 
     const caps = egressGuard.loadPolicy().caps
     const controller = new AbortController()
@@ -118,11 +121,24 @@ async function dispatchJob(job = {}, opts = {}) {
       return { ok: false, dispatched: true, target: 'remote', worker_id: w.id, reason: `worker returned HTTP ${resp ? resp.status : 'none'}` }
     }
 
-    _usedJobIds.add(jobId)
-
-    // RESULT scan — the reply is untrusted: size-cap + secret-scan before use.
+    // RESULT scan — the reply is UNTRUSTED. Enforce the byte cap BEFORE buffering/
+    // parsing so a compromised/buggy worker can't exhaust memory with a huge body.
+    const maxResultBytes = Number(caps.max_result_bytes) || 8388608
+    const declaredLen = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'))
+    if (Number.isFinite(declaredLen) && declaredLen > maxResultBytes) {
+      reg._audit && reg._audit('dispatch_result_rejected', { worker_id: w.id, reason: 'content-length over cap' })
+      return { ok: false, dispatched: true, target: 'remote', worker_id: w.id, reason: `result too large (${declaredLen}B > ${maxResultBytes}B)` }
+    }
+    let text
+    try {
+      const buf = await resp.arrayBuffer()
+      if (buf.byteLength > maxResultBytes) {
+        return { ok: false, dispatched: true, target: 'remote', worker_id: w.id, reason: `result too large (${buf.byteLength}B > ${maxResultBytes}B)` }
+      }
+      text = Buffer.from(buf).toString('utf8')
+    } catch (_) { return { ok: false, dispatched: true, target: 'remote', worker_id: w.id, reason: 'failed reading worker response' } }
     let raw
-    try { raw = await resp.json() } catch (_) { return { ok: false, dispatched: true, target: 'remote', worker_id: w.id, reason: 'worker returned non-JSON' } }
+    try { raw = JSON.parse(text) } catch (_) { return { ok: false, dispatched: true, target: 'remote', worker_id: w.id, reason: 'worker returned non-JSON' } }
     const scan = egressGuard.scanResult(raw)
     if (!scan.ok) {
       reg._audit && reg._audit('dispatch_result_rejected', { worker_id: w.id, reason: scan.reason })

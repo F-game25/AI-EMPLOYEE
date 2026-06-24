@@ -96,14 +96,21 @@ const PUBLIC_PAYLOAD = { prompt: 'summarize the quarterly trend in 3 bullets' }
     return {
       assign: () => worker ? { target: 'remote', worker_id: worker.id, worker_name: worker.name } : { target: 'local', reason: 'no worker' },
       _getInternal: (id) => (worker && worker.id === id ? worker : null),
+      // Signing key is now derived server-side (never read from the worker file).
+      signingKeyFor: (id) => (worker && worker.id === id ? 'd'.repeat(64) : null),
       _audit: () => {},
     }
   }
   const TRUSTED = {
     id: 'wkr-1', name: 'rented-a100', kind: 'rented', trust: 'trusted',
-    endpoint: 'https://gpu.example.com', dispatch_key_hash: 'a'.repeat(64), capabilities: { gpu: true },
+    endpoint: 'https://gpu.example.com', key_salt: 'a'.repeat(32), capabilities: { gpu: true },
   }
-  const okFetch = (body) => async () => ({ ok: true, status: 200, json: async () => body })
+  // Response mock mirrors the fetch Response surface the adapter now uses:
+  // headers.get('content-length') + arrayBuffer() (read+cap before JSON.parse).
+  const okFetch = (body) => async () => {
+    const buf = Buffer.from(JSON.stringify(body), 'utf8')
+    return { ok: true, status: 200, headers: { get: () => String(buf.byteLength) }, arrayBuffer: async () => buf }
+  }
 
   await test('dispatch: refuses when not LIVE (runs local)', async () => {
     delete process.env.COMPUTE_FABRIC_LIVE

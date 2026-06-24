@@ -63,7 +63,11 @@ module.exports = function createRemoteComputeRouter(requireAuth, opts = {}) {
   // egress-gated + leak-scanned. Deny-by-default; refuses → caller runs local.
   router.post('/dispatch', requireScope('task-emit'), async (req, res) => {
     const out = await dispatchJob(req.body || {})
-    res.status(out.ok ? 200 : 200).json({ ok: true, dispatch: out })
+    // Reflect the real outcome: a refusal/egress-block/worker-error is not a success.
+    // 200 when the job ran on a remote worker; 502 when a contacted worker failed;
+    // 409 when we refused to dispatch (deny-by-default → caller runs local).
+    const status = out.ok ? 200 : (out.dispatched ? 502 : 409)
+    res.status(status).json({ ok: !!out.ok, dispatch: out })
   })
 
   router.get('/audit', requireScope('read'), (req, res) => {

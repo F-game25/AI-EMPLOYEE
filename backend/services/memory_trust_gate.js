@@ -36,6 +36,7 @@ const DEFAULTS = {
     trusted_source_credit: 0.8,
     unknown_source_credit: 0.25,
   },
+  injection_markers: [],
 }
 
 const CONFIG_PATH = path.join(__dirname, '..', '..', 'runtime', 'config', 'memory_trust.json')
@@ -53,14 +54,34 @@ function loadConfig() {
     confidence_rank: { ...DEFAULTS.confidence_rank, ...(fileCfg.confidence_rank || {}) },
     corroboration: { ...DEFAULTS.corroboration, ...(fileCfg.corroboration || {}) },
     provenance: { ...DEFAULTS.provenance, ...(fileCfg.provenance || {}) },
+    injection_markers: Array.isArray(fileCfg.injection_markers) ? fileCfg.injection_markers : DEFAULTS.injection_markers,
   }
+  _injRe = null // rebuild on next use against the new config
   return _cfg
 }
 
 // Test seam — drop the cached config so a changed file/env is re-read.
-function _resetConfig() { _cfg = null }
+function _resetConfig() { _cfg = null; _injRe = null }
 
 const clamp01 = (n) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0)
+
+// Config-driven injection markers, compiled once and OR'd with prompt_guard.detect.
+// A memory tripping either is treated as hostile (fail-closed).
+let _injRe = null
+function _injectionRe(cfg) {
+  if (_injRe !== null) return _injRe
+  const markers = (cfg && Array.isArray(cfg.injection_markers)) ? cfg.injection_markers : []
+  if (!markers.length) { _injRe = false; return _injRe }
+  try {
+    _injRe = new RegExp(markers.map(m => String(m).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i')
+  } catch (_) { _injRe = false }
+  return _injRe
+}
+function hasInjection(text, cfg) {
+  if (promptGuard.detect(text)) return true
+  const re = _injectionRe(cfg)
+  try { return re ? re.test(String(text || '')) : false } catch (_) { return true } // fail-closed
+}
 
 // Memories arrive as forge_memory_v3 rows: { fact, category, confidence:'low|medium|high'
 // (or numeric), usage_count, source_run_id, evidence, ... }. Be defensive about every field.
@@ -92,7 +113,7 @@ function provenanceScore(fact, cfg) {
 function scoreFact(fact, cfg = loadConfig()) {
   if (!fact || typeof fact !== 'object') return 0
   const text = `${fact.fact || ''} ${fact.evidence || ''}`
-  if (promptGuard.detect(text)) return 0
+  if (hasInjection(text, cfg)) return 0
   const w = cfg.weights
   const wSum = (Number(w.confidence) || 0) + (Number(w.corroboration) || 0) + (Number(w.provenance) || 0) || 1
   const raw =
@@ -117,14 +138,16 @@ function gateMemories(facts, opts = {}) {
     }
     const cfg = loadConfig()
     const list = Array.isArray(facts) ? facts : []
-    const minTrust = Number(opts.minTrust != null ? opts.minTrust : cfg.min_trust)
+    // Guard against NaN: an invalid minTrust must not silently let everything through.
+    let minTrust = Number(opts.minTrust != null ? opts.minTrust : cfg.min_trust)
+    if (!Number.isFinite(minTrust)) minTrust = Number.isFinite(Number(DEFAULTS.min_trust)) ? Number(DEFAULTS.min_trust) : 0.4
     const limit = Math.max(0, Number(opts.limit != null ? opts.limit : cfg.max_injected) || 0)
     let droppedInjection = 0
     let droppedLowTrust = 0
     const scored = []
     for (const f of list) {
       const text = `${(f && f.fact) || ''} ${(f && f.evidence) || ''}`
-      if (f && promptGuard.detect(text)) { droppedInjection++; continue }
+      if (f && hasInjection(text, cfg)) { droppedInjection++; continue }
       const t = scoreFact(f, cfg)
       if (t < minTrust) { droppedLowTrust++; continue }
       scored.push({ ...f, _trust: Number(t.toFixed(3)) })

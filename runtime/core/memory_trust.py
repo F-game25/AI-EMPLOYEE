@@ -115,7 +115,7 @@ def _has_injection(text: str) -> bool:
     try:
         return bool(_injection_re().search(str(text or "")))
     except Exception:  # noqa: BLE001
-        return False
+        return True  # fail-closed: if detection breaks, treat as injection
 
 
 def _meta(entry: dict) -> dict:
@@ -129,7 +129,9 @@ def _provenance_score(entry: dict, cfg: dict) -> float:
     if meta.get("verified") is True:
         return _clamp01(p.get("verified_credit", 1.0))
     src = str(meta.get("source") or entry.get("source") or entry.get("_source") or "").lower()
-    trusted = any(str(t).lower() in src for t in (p.get("trusted_sources") or []))
+    # Exact token match — substring matching would let "unverified" satisfy "verified".
+    src_tokens = set(re.split(r"[^a-z0-9_]+", src))
+    trusted = any(str(t).lower() in src_tokens for t in (p.get("trusted_sources") or []))
     return _clamp01(p.get("trusted_source_credit") if trusted else p.get("unknown_source_credit"))
 
 
@@ -163,8 +165,10 @@ def trust_score(entry: dict, cfg: dict | None = None) -> float:
     w = cfg["weights"]
     wc, wo, wp = float(w.get("confidence", 0)), float(w.get("corroboration", 0)), float(w.get("provenance", 0))
     wsum = (wc + wo + wp) or 1.0
-    conf = _clamp01(meta.get("confidence"), 0.5)
-    corro = _clamp01(meta.get("importance"), 0.5)
+    # Missing trust metadata must NOT earn default credit — an opaque legacy row
+    # should not pass the gate just because confidence/importance are absent.
+    conf = _clamp01(meta.get("confidence"), 0.0)
+    corro = _clamp01(meta.get("importance"), 0.0)
     prov = _provenance_score(entry, cfg)
     base = (wc * conf + wo * corro + wp * prov) / wsum
 

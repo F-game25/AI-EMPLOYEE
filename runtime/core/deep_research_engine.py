@@ -40,8 +40,18 @@ _SOURCE_TEXT_LIMIT = 8000  # chars per page
 # Resilience: a run reiterates on failure but is HARD-CAPPED so it can never loop
 # forever — after this many escalating attempts it stops and informs the user.
 _RESEARCH_ATTEMPTS_CEILING = 5
+
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an int env var, falling back to default on any malformed value."""
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 _MAX_RESEARCH_ATTEMPTS = max(1, min(_RESEARCH_ATTEMPTS_CEILING,
-                                    int(os.getenv("RESEARCH_MAX_ATTEMPTS", "3"))))
+                                    _env_int("RESEARCH_MAX_ATTEMPTS", 3)))
 
 
 # ── Data structures ──────────────────────────────────────────────────────────

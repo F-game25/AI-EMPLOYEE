@@ -49,8 +49,9 @@ _SECRET_PATTERNS = [
     re.compile(r"(?i)(?:api[_-]?key|secret|token|password|passwd|bearer)\s*[:=]\s*['\"]?[A-Za-z0-9+/=._\-]{12,}"),
 ]
 _PII_PATTERNS = [
-    re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
-    re.compile(r"\b(?:\d[ \-]*?){13,19}\b"),  # card-ish
+    re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),  # email
+    re.compile(r"\b(?:\+?\d[\d\s().\-]{7,}\d)\b"),                      # phone-ish (sync w/ JS mirror)
+    re.compile(r"\b(?:\d[ \-]*?){13,19}\b"),                           # card-ish
 ]
 _INTERNAL_PATTERNS = [
     re.compile(r"(?:^|[\s\"'`(=])/(?:home|root|etc|var|usr|opt|Users)/"),

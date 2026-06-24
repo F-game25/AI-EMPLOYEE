@@ -88,9 +88,34 @@ export default function DeepResearchInline({ reportId, topic, depth = 'deep' }) 
   const loadReport = (id) => {
     fetch(`${API}/${id}`, { headers: authHeaders() })
       .then(r => r.json())
-      .then(d => setReport(d.report || null))
+      .then(d => {
+        const rep = d.report || null
+        setReport(rep)
+        // Reconcile status from the persisted report so a missed/late WS 'done'
+        // can't leave the card stuck on 'running'.
+        if (rep && rep.status === 'done') setStatus(rep.partial ? 'partial' : 'done')
+        else if (rep && rep.status === 'failed') { setStatus('failed'); setError(rep.error || 'research failed') }
+      })
       .catch(() => {})
   }
+
+  // Fallback: the card normally advances on WS events, but if the socket attaches
+  // late or drops, poll the persisted report (same report_id) until it resolves so
+  // a completed run always reports back. Bounded; stops once terminal.
+  useEffect(() => {
+    if (!reportId) return
+    loadReport(reportId) // initial reconcile (run may already be finished)
+    let ticks = 0
+    const iv = setInterval(() => {
+      ticks += 1
+      if (status === 'done' || status === 'partial' || status === 'failed' || ticks > 240) {
+        clearInterval(iv); return
+      }
+      loadReport(reportId)
+    }, 5000)
+    return () => clearInterval(iv)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportId, status])
 
   const statusColor = { running: '#E5C76B', done: '#00FFB4', partial: '#E5A640', failed: '#F87171' }[status]
 
