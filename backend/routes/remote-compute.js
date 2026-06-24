@@ -12,6 +12,7 @@
  */
 const { Router } = require('express')
 const { getRemoteWorkerRegistry } = require('../services/remote_worker_registry')
+const { dispatchJob } = require('../compute_fabric/remote_dispatch')
 
 module.exports = function createRemoteComputeRouter(requireAuth, opts = {}) {
   // Falls back to plain requireAuth when requireScope isn't wired (never weakens to no-auth).
@@ -56,6 +57,13 @@ module.exports = function createRemoteComputeRouter(requireAuth, opts = {}) {
   // Match a job to a capable worker, or fall back to local.
   router.post('/assign', requireScope('task-emit'), (req, res) => {
     res.json({ ok: true, assignment: reg.assign(req.body || {}) })
+  })
+
+  // Live dispatch: actually send the job to a trusted worker (peer or rented),
+  // egress-gated + leak-scanned. Deny-by-default; refuses → caller runs local.
+  router.post('/dispatch', requireScope('task-emit'), async (req, res) => {
+    const out = await dispatchJob(req.body || {})
+    res.status(out.ok ? 200 : 200).json({ ok: true, dispatch: out })
   })
 
   router.get('/audit', requireScope('read'), (req, res) => {
