@@ -28,6 +28,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const crypto = require('crypto')
+const egressGuard = require('./egress_guard')
 
 function _stateDir() {
   const home = process.env.AI_HOME || path.join(os.homedir(), '.ai-employee')
@@ -111,22 +112,68 @@ class RemoteWorkerRegistry {
     return { ...w, heartbeat_age_s: age, status }
   }
 
-  register({ pairing_token, name, capabilities } = {}) {
+  // Validate a worker-reported endpoint against the egress policy allow-list
+  // (private LAN for paired machines, https for rented/cloud). Untrusted input.
+  _validateEndpoint(endpoint) {
+    const url = String(endpoint || '').slice(0, 300)
+    if (!url) return { ok: false, error: 'endpoint required for dispatchable worker' }
+    if (!egressGuard.isEndpointAllowed(url)) return { ok: false, error: 'endpoint not in allow-list (private-LAN or https only)' }
+    return { ok: true, url }
+  }
+
+  register({ pairing_token, name, capabilities, endpoint, kind: kindIn } = {}) {
     const pair = this._consumePairing(pairing_token)
     if (!pair.ok) { this._audit('register_denied', { reason: pair.error }); return { ok: false, error: pair.error } }
+    // Endpoint is optional at registration but REQUIRED before remote dispatch.
+    let url = null
+    if (endpoint != null && endpoint !== '') {
+      const ev = this._validateEndpoint(endpoint)
+      if (!ev.ok) { this._audit('register_denied', { reason: ev.error }); return { ok: false, error: ev.error } }
+      url = ev.url
+    }
+    // 'peer' = your own LAN machine (laptop/PC); 'rented' = cloud GPU. Unknown →
+    // 'rented' (the stricter egress tier) so we never under-redact by default.
+    const kind = kindIn === 'peer' ? 'peer' : 'rented'
+    const workerId = `wkr-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+    // Per-worker dispatch key is DERIVED from the server master secret + a stored
+    // per-worker salt: dispatch_key = HMAC(SERVER_SECRET, id:salt). Only the salt
+    // (non-secret) is persisted — a leaked workers.json cannot forge a job token
+    // without SERVER_SECRET. The derived key is returned to the worker exactly once
+    // and re-derived server-side on each dispatch. Rotating the salt revokes it.
+    const keySalt = crypto.randomBytes(16).toString('hex')
+    const dispatchKey = this._deriveSigningKey(workerId, keySalt)
     const worker = {
-      id: `wkr-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      id: workerId,
       name: String(name || 'worker').slice(0, 80),
+      kind,
       capabilities: this._sanitizeCaps(capabilities),
+      endpoint: url,
+      key_salt: keySalt,
       trust: 'untrusted',
       status: 'online',
       registered_at: new Date().toISOString(),
       last_heartbeat: new Date().toISOString(),
     }
     const ws = this._loadWorkers(); ws.unshift(worker); this._saveWorkers(ws)
-    this._audit('worker_registered', { id: worker.id, name: worker.name })
-    return { ok: true, worker: this._withAge(worker) }
+    this._audit('worker_registered', { id: worker.id, name: worker.name, has_endpoint: !!url })
+    // The derived dispatch_key is returned exactly once and never stored/logged.
+    return { ok: true, worker: this._publicWorker(this._withAge(worker)), dispatch_key: dispatchKey }
   }
+
+  // Derive a worker's job-token signing key from the server master secret + salt.
+  // Never stored; re-derived on demand so workers.json holds no signing material.
+  _deriveSigningKey(workerId, salt) {
+    return crypto.createHmac('sha256', SECRET).update(`${workerId}:${salt}`).digest('hex')
+  }
+
+  // The signing key for a known worker, or null. Internal — never exposed via a route.
+  signingKeyFor(workerId) {
+    const w = this._getInternal(workerId)
+    return w && w.key_salt ? this._deriveSigningKey(w.id, w.key_salt) : null
+  }
+
+  // Strip server-only material (the key salt) from any worker returned to callers.
+  _publicWorker(w) { if (!w) return w; const { key_salt, ...rest } = w; return rest }
 
   heartbeat(id, info = {}) {
     const ws = this._loadWorkers(); const w = ws.find(x => x.id === id)
@@ -134,8 +181,13 @@ class RemoteWorkerRegistry {
     w.last_heartbeat = new Date().toISOString()
     if (w.status === 'offline') w.status = 'online'
     if (info.capabilities) w.capabilities = this._sanitizeCaps({ ...w.capabilities, ...info.capabilities })
+    if (info.endpoint != null && info.endpoint !== '') {
+      const ev = this._validateEndpoint(info.endpoint)
+      if (!ev.ok) return { ok: false, error: ev.error }
+      w.endpoint = ev.url
+    }
     this._saveWorkers(ws)
-    return { ok: true, worker: this._withAge(w) }
+    return { ok: true, worker: this._publicWorker(this._withAge(w)) }
   }
 
   setTrust(id, trust) {
@@ -143,8 +195,12 @@ class RemoteWorkerRegistry {
     const ws = this._loadWorkers(); const w = ws.find(x => x.id === id)
     if (!w) return { ok: false, error: 'worker not found' }
     w.trust = trust; this._saveWorkers(ws); this._audit('worker_trust_set', { id, trust })
-    return { ok: true, worker: this._withAge(w) }
+    return { ok: true, worker: this._publicWorker(this._withAge(w)) }
   }
+
+  // Internal-only: full record incl. dispatch_key_hash, for the dispatch adapter.
+  // NEVER exposed through a route. Returns null if absent.
+  _getInternal(id) { return this._loadWorkers().find(x => x.id === id) || null }
 
   deregister(id) {
     const ws = this._loadWorkers(); const i = ws.findIndex(x => x.id === id)
@@ -153,8 +209,8 @@ class RemoteWorkerRegistry {
     return { ok: true }
   }
 
-  list() { return this._loadWorkers().map(w => this._withAge(w)) }
-  get(id) { const w = this._loadWorkers().find(x => x.id === id); return w ? this._withAge(w) : null }
+  list() { return this._loadWorkers().map(w => this._publicWorker(this._withAge(w))) }
+  get(id) { const w = this._loadWorkers().find(x => x.id === id); return w ? this._publicWorker(this._withAge(w)) : null }
 
   // ── Capability matching + assignment ────────────────────────────────────────
   selectWorker(req = {}) {
@@ -170,6 +226,7 @@ class RemoteWorkerRegistry {
         if (w.status !== 'online') return false
         if (w.trust === 'blocked') return false
         if (TRUST_RANK[w.trust] < minRank) return false
+        if (!w.endpoint) return false // no endpoint → cannot be dispatched to
         if (need.needs_gpu && !w.capabilities.gpu) return false
         if (need.vram_mb && w.capabilities.vram_mb < need.vram_mb) return false
         if (need.model && !(w.capabilities.models || []).includes(need.model)) return false

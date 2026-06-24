@@ -1,0 +1,38 @@
+{
+  "_doc": "Unified compute-fabric EGRESS POLICY — the single source of truth for 'what data may leave this machine, to where'. Enforced by backend/services/egress_guard.js (compute dispatch) and runtime/core/egress_guard.py (LLM provider routing). Deny-by-default + fail-closed: anything not explicitly allowed is BLOCKED. No secrets or hostnames live here — only rules. Both implementations fall back to baked-in defaults if this file is missing/partial so the gate never crashes open.",
+
+  "destination_tiers": {
+    "_doc": "Higher rank = more exposure = stricter rules. peer/rented are owned-or-rented infra you control; external_api is a third party (Anthropic/OpenAI/OpenRouter).",
+    "local": 0,
+    "peer_trusted": 1,
+    "rented_trusted": 2,
+    "external_api": 3
+  },
+
+  "classification_rank": { "public": 0, "internal": 1, "pii": 2, "secret": 3 },
+
+  "policy_matrix": {
+    "_doc": "For each destination tier: the action applied to each data classification. block = refuse egress; redact = strip the sensitive spans then send; allow = send as-is. A missing entry defaults to BLOCK (deny-by-default).",
+    "local":          { "secret": "allow",  "pii": "allow",  "internal": "allow", "public": "allow" },
+    "peer_trusted":   { "secret": "block",  "pii": "redact", "internal": "allow", "public": "allow" },
+    "rented_trusted": { "secret": "block",  "pii": "redact", "internal": "redact","public": "allow" },
+    "external_api":   { "secret": "block",  "pii": "redact", "internal": "redact","public": "allow" }
+  },
+
+  "caps": {
+    "max_payload_bytes": 2097152,
+    "dispatch_timeout_ms": 60000,
+    "max_result_bytes": 8388608
+  },
+
+  "endpoint_allow": {
+    "_doc": "A worker/provider endpoint URL must match one of these to be dispatchable. Private LAN ranges (paired laptop/PC) + https for rented/cloud. http to public IPs is rejected. Patterns are regex on the full URL.",
+    "url_patterns": [
+      "^https://",
+      "^http://(localhost|127\\.0\\.0\\.1)(:\\d+)?(/|$)",
+      "^http://10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(:\\d+)?(/|$)",
+      "^http://192\\.168\\.\\d{1,3}\\.\\d{1,3}(:\\d+)?(/|$)",
+      "^http://172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}(:\\d+)?(/|$)"
+    ]
+  }
+}

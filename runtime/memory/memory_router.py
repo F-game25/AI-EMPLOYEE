@@ -193,10 +193,29 @@ class MemoryRouter:
         Returns:
             List of memory dicts with ``key``, ``text``, ``metadata``, and ``_score``.
         """
+        # Clamp first: a negative/bogus top_k must not flow into the service or the
+        # gate (apply_trust_gate treats a negative cap as uncapped → bypasses the cap).
+        try:
+            top_k = max(0, int(top_k))
+        except (TypeError, ValueError):
+            top_k = 5
         with _LOCK:
             self._stats["cache_reads"] += 1
             self._stats["vector_reads"] += 1
-            return self._service.retrieve(query, memory_type=memory_type, top_k=top_k)
+            # Over-fetch so the trust gate can drop untrusted rows without starving top_k.
+            results = self._service.retrieve(query, memory_type=memory_type, top_k=top_k * 2)
+        # C4 provenance-trust gate: retrieved memories are untrusted data — drop
+        # low-trust / injection-bearing entries before they reach any prompt.
+        # Never fatal; on any error the gate fails closed (keeps nothing).
+        try:
+            from core.memory_trust import apply_trust_gate
+            kept, stats = apply_trust_gate(results, limit=top_k)
+            self._stats["trust_dropped"] = self._stats.get("trust_dropped", 0) + \
+                int(stats.get("dropped_low_trust", 0)) + int(stats.get("dropped_injection", 0))
+            return kept
+        except Exception as e:  # noqa: BLE001 — fail CLOSED: never leak ungated memory
+            logger.error("retrieve: trust gate unavailable, dropping all memories (%s)", e)
+            return []
 
     async def retrieve_qce(self, query: str, tenant_id: str = '', **kwargs) -> list:
         """QCE-powered retrieval via SearchOrchestrator. Falls back to retrieve() on error."""
@@ -206,8 +225,16 @@ class MemoryRouter:
             orch = SearchOrchestrator()
             req = SearchRequest(query=query, bangs=['memory'], tenant_id=tenant_id)
             results = await orch.search(req)
-            return [{'content': r.content, 'score': r.amplitude, 'source': r.engine, 'id': r.id}
-                    for r in results[:10]]
+            mapped = [{'content': r.content, 'text': r.content, 'score': r.amplitude,
+                       'source': r.engine, 'id': r.id} for r in results[:10]]
+            # Same provenance-trust gate as retrieve(): QCE memory results are untrusted
+            # too and must not reach a prompt ungated. Fail-closed on any error.
+            try:
+                from core.memory_trust import apply_trust_gate
+                kept, _stats = apply_trust_gate(mapped, limit=10)
+                return kept
+            except Exception:  # noqa: BLE001
+                return []
         except Exception:
             return []
 

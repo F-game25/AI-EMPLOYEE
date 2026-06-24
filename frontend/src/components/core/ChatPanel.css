@@ -576,6 +576,52 @@
   display: inline-block;
 }
 
+.chat-panel__research {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+
+  border: 1px solid rgba(0, 255, 180, 0.3);
+  border-radius: var(--mc-radius-md);
+  background: rgba(0, 255, 180, 0.08);
+  color: #00FFB4;
+
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--mc-duration-fast) var(--mc-easing-out);
+  outline: none;
+}
+
+.chat-panel__research:hover:not(:disabled) {
+  border-color: rgba(0, 255, 180, 0.6);
+  background: rgba(0, 255, 180, 0.16);
+  box-shadow: 0 0 12px rgba(0, 255, 180, 0.2);
+}
+
+.chat-panel__research:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-panel__research:focus-visible {
+  outline: 2px solid #00FFB4;
+  outline-offset: 2px;
+}
+
+.research-icon { display: inline-block; font-size: 12px; }
+
+@media (max-width: 420px) {
+  .research-label { display: none; }
+}
+
 /* ────────────────────────────────────────────────────────
    RESPONSIVE
    ──────────────────────────────────────────────────────── */

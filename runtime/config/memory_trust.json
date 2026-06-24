@@ -1,0 +1,33 @@
+{
+  "_doc": "C4 memory closed-loop trust gate. Shared by the Node forge codegen path (memory_trust_gate.js) and the Python RAG path (memory_trust.py). A retrieved memory is UNTRUSTED DATA; it may enter a prompt only if its trust score clears min_trust AND it passes injection-pattern detection. Both implementations fall back to these baked-in defaults if the file is missing/partial, so the gate never crashes on config problems. No secrets, model names, or prompt text live here.",
+  "min_trust": 0.40,
+  "max_injected": 6,
+  "weights": {
+    "confidence": 0.45,
+    "corroboration": 0.30,
+    "provenance": 0.25
+  },
+  "confidence_rank": { "low": 0.2, "medium": 0.6, "high": 1.0 },
+  "corroboration": {
+    "_doc": "usage_count saturates to full weight at this many reuses (log-scaled). 0 reuses = no corroboration credit.",
+    "saturation_uses": 8
+  },
+  "provenance": {
+    "_doc": "Credit for where the memory came from. A memory with a real source run is trusted more than one with unknown origin.",
+    "has_source_run": 1.0,
+    "trusted_sources": ["run", "verified", "test_pass", "memory_service", "lesson", "user"],
+    "trusted_source_credit": 0.8,
+    "unknown_source_credit": 0.25
+  },
+  "recency": {
+    "_doc": "Optional age decay for the Python RAG path (memories carry timestamps). half_life_days = age at which recency credit halves. Set enabled=false to ignore age.",
+    "enabled": true,
+    "weight": 0.0,
+    "half_life_days": 45
+  },
+  "injection_markers": [
+    "ignore previous", "ignore all previous", "disregard the above", "disregard previous",
+    "system prompt", "you are now", "new instructions", "override your", "forget your instructions",
+    "do not follow", "instead of", "act as", "jailbreak", "developer mode"
+  ]
+}

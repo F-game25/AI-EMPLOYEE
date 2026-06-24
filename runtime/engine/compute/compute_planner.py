@@ -37,6 +37,9 @@ class ComputePlan:
     quant: str | None = None # resolved quant for the local model (None = Ollama decides)
     offload_layers: int = 0  # CPU-offloaded transformer layers for the local model
     fits_local: bool = True  # whether the local model fits live VRAM without offload
+    difficulty: str = ""     # C3 estimated difficulty level (low/medium/high/critical)
+    difficulty_score: float = 0.0  # C3 difficulty score in [0,1]
+    guard_escalated: bool = False  # C3 guard raised the tier to meet the difficulty floor
 
 
 # Map each local strategy to a model_lanes tier (used for the rented-GPU target sizing).
@@ -45,6 +48,18 @@ _STRATEGY_TO_TIER: dict[str, str] = {
     "local_general":   "NORMAL",
     "local_reasoning": "HEAVY",
     "local_coder":     "CODE",
+}
+
+# Inverse of _STRATEGY_TO_TIER for the general size ladder — used by the C3
+# capability-vs-difficulty guard to map an escalated tier back to a local rung.
+# DEEP_THINKING has no separate local rung; local_reasoning is the strongest
+# local general lane, so it backs both HEAVY and DEEP.
+_TIER_TO_STRATEGY: dict[str, str] = {
+    "FAST":          "local_tiny",
+    "NORMAL":        "local_general",
+    "HEAVY":         "local_reasoning",
+    "DEEP_THINKING": "local_reasoning",
+    "CODE":          "local_coder",
 }
 
 # Map each local strategy to an installed-aware ROLE (model_roles.json). model_role_resolver
@@ -134,6 +149,28 @@ def assess_compute_needs(goal: str, context_len: int = 0) -> ComputePlan:
     model is always carried as the safe fallback for escalation rungs.
     """
     base_strategy = _classify_local_tier(goal, context_len)
+
+    # C3 capability-vs-difficulty guard: never let a hard task run below its
+    # capability floor. Only escalates the *local rung* (never downgrades, never
+    # auto-selects a paid/remote target — that stays gated downstream). Fully
+    # graceful: any problem leaves the base classification untouched.
+    difficulty_level, difficulty_score, guard_escalated = "", 0.0, False
+    try:
+        from core.routing_quality import guard_tier
+        guard = guard_tier(_STRATEGY_TO_TIER[base_strategy], goal, context_len)
+        diff = guard.get("difficulty") or {}
+        difficulty_level = diff.get("level", "")
+        difficulty_score = float(diff.get("score", 0.0) or 0.0)
+        if guard.get("escalated"):
+            new_strategy = _TIER_TO_STRATEGY.get(guard.get("tier", ""))
+            if new_strategy and new_strategy != base_strategy:
+                logger.info("compute_plan guard: %s → %s (%s)",
+                            base_strategy, new_strategy, guard.get("reason", ""))
+                base_strategy = new_strategy
+                guard_escalated = True
+    except Exception as exc:  # noqa: BLE001 — guard must never break planning
+        logger.debug("compute_planner: routing_quality guard unavailable: %s", exc)
+
     base_tier = _STRATEGY_TO_TIER[base_strategy]
     local = _resolve_local(base_strategy)
     model = local.get("model") or os.environ.get("OLLAMA_MODEL", "llama3.2")
@@ -169,8 +206,11 @@ def assess_compute_needs(goal: str, context_len: int = 0) -> ComputePlan:
         needs_approval = True
 
     rationale = _build_rationale(strategy, model, quant, vram_needed, offload_layers, context_len)
-    logger.info("compute_plan goal=%r strategy=%s model=%s@%s vram_needed=%dMB offload=%d",
-                goal[:60], strategy, model, quant or "default", vram_needed, offload_layers)
+    if guard_escalated:
+        rationale += f" [C3 guard: raised to {base_tier} for {difficulty_level} difficulty]"
+    logger.info("compute_plan goal=%r strategy=%s model=%s@%s vram_needed=%dMB offload=%d difficulty=%s%s",
+                goal[:60], strategy, model, quant or "default", vram_needed, offload_layers,
+                difficulty_level or "n/a", " guard-escalated" if guard_escalated else "")
 
     return ComputePlan(
         strategy=strategy,
@@ -184,6 +224,9 @@ def assess_compute_needs(goal: str, context_len: int = 0) -> ComputePlan:
         quant=quant,
         offload_layers=offload_layers,
         fits_local=fits_local,
+        difficulty=difficulty_level,
+        difficulty_score=difficulty_score,
+        guard_escalated=guard_escalated,
     )
 
 

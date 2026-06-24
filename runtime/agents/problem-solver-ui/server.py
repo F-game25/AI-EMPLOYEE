@@ -13797,7 +13797,9 @@ async def deep_research_start(req: dict, _auth: None = Depends(require_auth)):
                             break
 
                 drain_task = asyncio.create_task(_drain())
-                await engine.run(topic=topic, depth=depth)
+                # Reuse the pre-created report_id end-to-end so the client that was
+                # handed report_id can poll /deep/{id} and receive the final report.
+                await engine.run(topic=topic, depth=depth, report_id=report_id)
                 await q.put(None)
                 await drain_task
             except Exception as exc:

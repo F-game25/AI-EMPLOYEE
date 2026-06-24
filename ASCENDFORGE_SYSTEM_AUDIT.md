@@ -306,8 +306,20 @@ more features.
 >   + injection patterns neutralized, wired into all codegen/auto-debug prompts.
 > - **C2** `POST /forge/research-summary`: sourced + guarded + cached + verifier-scored research
 >   (first-target workflow). `npm run bench` now 4/4 PASS.
-> REMAINING: deepen the top-20 skills (C2 pattern applied broadly), C3 quality/regression scoring
-> in routing, C4 memory closed-loop, D1 live remote provider adapter.
+> REMAINING: deepen the top-20 skills (C2 pattern applied broadly), D1 live remote provider adapter.
+> **Progress 2026-06-24 (C3 + C4 SHIPPED):**
+> - **C3** `runtime/core/routing_quality.py` — difficulty estimation + capability-vs-difficulty
+>   floor guard (escalate-only) + output quality scoring + redacted model→quality ledger; wired
+>   into `compute_planner` + `orchestrator.LLMClient.complete`. Tests: 16 passed.
+> - **C4** memory closed-loop: provenance-trust gate on BOTH retrieval surfaces. Node
+>   `backend/services/memory_trust_gate.js` filters ranked memories (confidence + corroboration +
+>   provenance, injection hard-zeroed, fail-closed) and `buildContextPack` now injects the gated,
+>   prompt_guard-fenced memories into the supervised codegen prompts. Python
+>   `runtime/core/memory_trust.py` mirrors it and is wired into `MemoryRouter.retrieve()` (over-fetch
+>   → gate → top_k, fail-closed). Shared config `runtime/config/memory_trust.json`; kill-switches
+>   `FORGE_MEMORY_INJECTION` / `MEMORY_TRUST_GATE`. `vector_metadata()` now persists
+>   confidence/importance so the gate reads real signals. Tests: 9 (node) + 8 (py) passed;
+>   memory/routing regression green (52 passed).
 > **Earlier progress note (B1 core + C1):** `backend/services/result_verifier.js`
 > (code→sandbox via injected runner; research/text→quality criteria with hard gates on
 > non-empty + sources) and `tests/benchmarks/` + `npm run bench` (research-first). Live:
@@ -335,13 +347,48 @@ more features.
   eval test. Risk: med.
 - **C3 Quality/regression scoring in model routing.** Score outputs; prevent weak-model assignment
   on hard tasks; log model→quality. Files: `compute_planner.py`, `model_lanes.py`. Risk: med.
-- **C4 Memory closed-loop.** Inject ranked relevant memories/distillations into the codegen prompt;
-  add provenance-trust gate on retrieval. Files: `forge.js` (`buildContextPack`), `memory_router.py`.
+- **C4 Memory closed-loop.** ✅ SHIPPED 2026-06-24. Inject ranked relevant memories/distillations
+  into the codegen prompt; provenance-trust gate on retrieval (both Node forge + Python RAG
+  surfaces). Files: `forge.js` (`buildContextPack`), `memory_router.py`, new
+  `backend/services/memory_trust_gate.js`, `runtime/core/memory_trust.py`,
+  `runtime/config/memory_trust.json`, `schema.py` (vector_metadata). Tests: 9 node + 8 py.
 
 ### Phase D — Make it powerful
 - **D1 Live remote provider adapter** (owner-gated, `COMPUTE_FABRIC_LIVE=1` + creds) so the Phase-7
   registry can actually dispatch to a rented/owned worker. Files: `compute_fabric/index.js` (adapter),
   `remote_worker_registry.js`. Risk: HIGH (secrets/network) — keep deny-by-default.
+  > **Progress 2026-06-24 (D1 Phase 1 — secure dispatch foundation SHIPPED):**
+  > Unified compute fabric, "never-leak / compute-only" by construction.
+  > - **Egress guard** (the spine): `backend/services/egress_guard.js` + `runtime/core/egress_guard.py`,
+  >   shared `runtime/config/egress_policy.json`. Classifies every outbound payload
+  >   (public<internal<pii<secret) and enforces a tier matrix (local→peer_trusted→
+  >   rented_trusted→external_api) deny-by-default + fail-closed: **secrets never leave
+  >   the box**, PII/internal redacted, unknown/oversize blocked. Kill-switch `EGRESS_GUARD`.
+  > - **Live dispatch adapter**: `backend/compute_fabric/remote_dispatch.js` — turns
+  >   `registry.assign()→remote` into a real job sent to a paired peer (laptop/PC) or rented
+  >   worker. LIVE-gated + trusted-only + allow-listed endpoint + egress-gated payload +
+  >   single-use HMAC job token (per-worker key, only the HASH stored) + size/timeout caps.
+  > - **Compute-only isolation**: a worker shares COMPUTE ONLY — the module imports no `fs`/
+  >   `child_process` (cannot write/execute); outbound payload + inbound result are structurally
+  >   contained (prototype-pollution stripped, depth/size bounded, live objects dropped) so a
+  >   compromised/malware worker cannot contaminate or overwrite us. Inbound result is
+  >   secret+PII redacted and tagged `_untrusted`.
+  > - **Registry hardening**: validated private-LAN/https `endpoint`, per-worker dispatch key
+  >   (returned once, hash-only stored, never leaked via list/get), `kind` (peer|rented, default
+  >   stricter), remote selection requires an endpoint.
+  > - Wired: `POST /api/.../remote-compute/dispatch`. Tests: 17 node + 11 py (deny-by-default,
+  >   secret-block, anti-malware containment, compute-only no-fs/exec).
+  > **Progress 2026-06-24 (D1 Phase 2 — concurrent multi-provider LLM SHIPPED):**
+  > `llm_provider_router.py` rewired: providers run as a fallback chain OR all at once,
+  > independently, via `generate_concurrent()` (asyncio.gather; one provider failing/blocked
+  > never affects the others). New providers: **OpenAI** (`openai_client.py`) and **NVIDIA
+  > hosted NIM** (`nvidia_client.py`, integrate.api.nvidia.com — external extra power for
+  > deploying agents) — alongside Anthropic / OpenRouter / Ollama. EVERY external call passes
+  > the Python egress guard first (secrets blocked off-box, PII redacted, local Ollama
+  > untouched, fail-closed if the guard is unavailable). Tests: 8 py (concurrency isolation,
+  > secret-block-before-send, PII-redact, NVIDIA wired+guarded).
+  > **REMAINING D1:** live cloud GPU *purchase* adapter (money path — keep HMAC-approval +
+  >   dry-run); peer/rented worker-agent daemon (runs the job on the other machine).
 - **D2 Extend cache/budget to the Python engine LLM path** (`engine/api.generate`). 
 - **D3 Browser/computer-use tasks** behind sandbox+approval (if desired).
 

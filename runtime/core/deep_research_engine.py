@@ -37,6 +37,21 @@ _MAX_SUB_QUESTIONS = int(os.getenv("DEEP_RESEARCH_MAX_SUBQUESTIONS", "6"))
 _MAX_FOLLOW_UP_ROUNDS = 2
 _PAGE_FETCH_CONCURRENCY = 6
 _SOURCE_TEXT_LIMIT = 8000  # chars per page
+# Resilience: a run reiterates on failure but is HARD-CAPPED so it can never loop
+# forever — after this many escalating attempts it stops and informs the user.
+_RESEARCH_ATTEMPTS_CEILING = 5
+
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an int env var, falling back to default on any malformed value."""
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+_MAX_RESEARCH_ATTEMPTS = max(1, min(_RESEARCH_ATTEMPTS_CEILING,
+                                    _env_int("RESEARCH_MAX_ATTEMPTS", 3)))
 
 
 # ── Data structures ──────────────────────────────────────────────────────────
@@ -70,6 +85,7 @@ class DeepResearchReport:
     citations: list[dict] = field(default_factory=list)
     report_md: str = ""
     committed_to_memory: bool = False
+    partial: bool = False  # True = delivered with incomplete sources after retries
     error: str = ""
     duration_s: float = 0.0
 
@@ -229,69 +245,114 @@ class DeepResearchEngine:
 
     # ── Public entry point ────────────────────────────────────────────────
 
-    async def run(self, topic: str, depth: str = "deep") -> DeepResearchReport:
-        """Execute a full deep research run. Returns the completed report."""
+    async def run(self, topic: str, depth: str = "deep", report_id: Optional[str] = None) -> DeepResearchReport:
+        """Execute a deep research run that NEVER fails terminally.
+
+        Resilience contract (Lars: "research can never fail — reiterate and restart"):
+        the pipeline is attempted up to RESEARCH_MAX_ATTEMPTS times. Each retry is a
+        REITERATION with an escalated strategy (broader depth) and an emitted
+        'reiterate' event so the chat shows it adapting. If every attempt raises or
+        yields zero usable sources, we still deliver a best-effort PARTIAL report
+        (status='done', partial=True) from whatever was gathered — the terminal
+        state is always a report the user can act on, never a dead 'failed'.
+
+        *report_id* is used end-to-end so callers can poll/subscribe with the id
+        they were handed.
+        """
         report = DeepResearchReport(
-            id=uuid.uuid4().hex[:16],
+            id=report_id or uuid.uuid4().hex[:16],
             topic=topic,
             created_at=time.time(),
         )
         _save_report(report)
         t0 = time.time()
+        max_attempts = max(1, _MAX_RESEARCH_ATTEMPTS)
+        depths = ["shallow", "normal", "deep"]
+        last_error = ""
 
-        try:
-            await self._emit("started", {"id": report.id, "topic": topic, "depth": depth})
+        for attempt in range(1, max_attempts + 1):
+            # Escalate the strategy on each reiteration so a retry casts a wider net.
+            try:
+                base_idx = depths.index(depth)
+            except ValueError:
+                base_idx = len(depths) - 1
+            eff_depth = depths[min(len(depths) - 1, base_idx + (attempt - 1))]
 
-            # 1. Decompose topic into sub-questions
-            await self._emit("phase", {"phase": "decompose", "msg": "Breaking topic into research questions…"})
-            report.sub_questions = await self._decompose(topic, depth)
+            if attempt == 1:
+                await self._emit("started", {"id": report.id, "topic": topic, "depth": eff_depth})
+            else:
+                await self._emit("reiterate", {"id": report.id, "attempt": attempt,
+                                               "max_attempts": max_attempts, "depth": eff_depth,
+                                               "reason": last_error or "insufficient sources — broadening search"})
+            try:
+                await self._run_pipeline(report, topic, eff_depth)
+                if report.sources_fetched > 0 or (report.report_md or report.executive_summary):
+                    report.status = "done"
+                    report.duration_s = round(time.time() - t0, 1)
+                    _save_report(report)
+                    await self._emit("done", {"id": report.id, "duration_s": report.duration_s,
+                                               "sources": report.sources_fetched, "topic": topic,
+                                               "attempts": attempt})
+                    return report
+                last_error = "no usable sources found"
+            except Exception as exc:  # noqa: BLE001 — reiterate instead of dying
+                last_error = str(exc)
+                logger.warning("deep research attempt %d/%d failed: %s", attempt, max_attempts, exc)
+
+        # All attempts exhausted → deliver a best-effort PARTIAL report (never 'failed').
+        report.status = "done"
+        report.partial = True
+        report.error = last_error or "completed with partial results after retries"
+        report.duration_s = round(time.time() - t0, 1)
+        if not report.report_md and not report.executive_summary:
+            report.executive_summary = (
+                f"Partial result: research on “{topic}” could not gather full sources after "
+                f"{max_attempts} attempts ({report.error}). Findings are limited; consider refining the topic or retrying later."
+            )
+        _save_report(report)
+        await self._emit("done", {"id": report.id, "duration_s": report.duration_s,
+                                   "sources": report.sources_fetched, "topic": topic,
+                                   "attempts": max_attempts, "partial": True})
+        return report
+
+    async def _run_pipeline(self, report: "DeepResearchReport", topic: str, depth: str) -> None:
+        """One full research pass. Raises on hard failure (the caller reiterates)."""
+        # 1. Decompose topic into sub-questions
+        await self._emit("phase", {"phase": "decompose", "msg": "Breaking topic into research questions…"})
+        report.sub_questions = await self._decompose(topic, depth)
+        _save_report(report)
+        await self._emit("sub_questions", {"questions": report.sub_questions})
+
+        # 2. Discover sources for all sub-questions in parallel
+        await self._emit("phase", {"phase": "discover", "msg": f"Discovering sources for {len(report.sub_questions)} questions…"})
+        all_sources = await self._discover_all(topic, report.sub_questions)
+        report.sources_found = len(all_sources)
+        _save_report(report)
+        await self._emit("sources_found", {"count": len(all_sources)})
+
+        # 3. Fetch and extract page text
+        await self._emit("phase", {"phase": "fetch", "msg": f"Reading {len(all_sources)} sources…"})
+        fetched = await self._fetch_all(all_sources, report)
+        report.sources_fetched = sum(1 for s in fetched if s.fetched)
+        _save_report(report)
+        await self._emit("fetched", {"count": report.sources_fetched, "total": len(fetched)})
+
+        # 4. Summarize per sub-question
+        await self._emit("phase", {"phase": "synthesize", "msg": "Synthesizing findings per question…"})
+        syntheses = await self._synthesize_all(topic, report.sub_questions, fetched, report)
+
+        # 5. Detect gaps → follow-up rounds
+        await self._emit("phase", {"phase": "gaps", "msg": "Detecting knowledge gaps…"})
+        gap_sources = await self._fill_gaps(topic, syntheses, report)
+        if gap_sources:
+            fetched.extend(gap_sources)
+            report.sources_fetched += sum(1 for s in gap_sources if s.fetched)
             _save_report(report)
-            await self._emit("sub_questions", {"questions": report.sub_questions})
 
-            # 2. Discover sources for all sub-questions in parallel
-            await self._emit("phase", {"phase": "discover", "msg": f"Discovering sources for {len(report.sub_questions)} questions…"})
-            all_sources = await self._discover_all(topic, report.sub_questions)
-            report.sources_found = len(all_sources)
-            _save_report(report)
-            await self._emit("sources_found", {"count": len(all_sources)})
-
-            # 3. Fetch and extract page text
-            await self._emit("phase", {"phase": "fetch", "msg": f"Reading {len(all_sources)} sources…"})
-            fetched = await self._fetch_all(all_sources, report)
-            report.sources_fetched = sum(1 for s in fetched if s.fetched)
-            _save_report(report)
-            await self._emit("fetched", {"count": report.sources_fetched, "total": len(fetched)})
-
-            # 4. Summarize per sub-question
-            await self._emit("phase", {"phase": "synthesize", "msg": "Synthesizing findings per question…"})
-            syntheses = await self._synthesize_all(topic, report.sub_questions, fetched, report)
-
-            # 5. Detect gaps → follow-up rounds
-            await self._emit("phase", {"phase": "gaps", "msg": "Detecting knowledge gaps…"})
-            gap_sources = await self._fill_gaps(topic, syntheses, report)
-            if gap_sources:
-                fetched.extend(gap_sources)
-                report.sources_fetched += sum(1 for s in gap_sources if s.fetched)
-                _save_report(report)
-
-            # 6. Generate final report
-            await self._emit("phase", {"phase": "report", "msg": "Generating research report…"})
-            await self._generate_report(topic, report.sub_questions, fetched, syntheses, report)
-            _save_report(report)
-
-            report.status = "done"
-            report.duration_s = round(time.time() - t0, 1)
-            _save_report(report)
-            await self._emit("done", {"id": report.id, "duration_s": report.duration_s,
-                                       "sources": report.sources_fetched, "topic": topic})
-
-        except Exception as exc:
-            logger.exception("DeepResearchEngine failed: %s", exc)
-            report.status = "failed"
-            report.error = str(exc)
-            report.duration_s = round(time.time() - t0, 1)
-            _save_report(report)
-            await self._emit("failed", {"id": report.id, "error": str(exc)})
+        # 6. Generate final report
+        await self._emit("phase", {"phase": "report", "msg": "Generating research report…"})
+        await self._generate_report(topic, report.sub_questions, fetched, syntheses, report)
+        _save_report(report)
 
         return report
 
@@ -379,6 +440,9 @@ class DeepResearchEngine:
         async def _one(src: SourceResult) -> SourceResult:
             nonlocal fetched_count
             async with sem:
+                # Announce the site BEFORE fetching so the live view shows what is
+                # being visited in real time (not only completed reads).
+                await self._emit("source_visit", {"url": src.url, "title": (src.title or "")[:80]})
                 result = await _fetch_page(src.url)
                 src.text = result.get("text", "")
                 src.fetched = bool(src.text)
@@ -390,6 +454,8 @@ class DeepResearchEngine:
                         "url": src.url, "title": src.title[:80],
                         "chars": len(src.text), "count": fetched_count,
                     })
+                else:
+                    await self._emit("source_failed", {"url": src.url, "error": (src.error or "no content")[:120]})
                 return src
 
         return list(await asyncio.gather(*[_one(s) for s in sources]))

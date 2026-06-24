@@ -1,0 +1,36 @@
+{
+  "_doc": "C3 model-routing quality config: difficulty estimation, capability-vs-difficulty floor guard, output quality scoring, and the model->quality ledger. All thresholds are tunable here; routing_quality.py falls back to baked-in defaults if this file is missing or partial, so logic never crashes on config problems. No model names live here.",
+  "difficulty": {
+    "context_token_thresholds": { "medium": 2000, "high": 8000, "critical": 16000 },
+    "context_weight": 0.35,
+    "length_chars_full_weight": 600,
+    "length_weight": 0.15,
+    "signal_weights": {
+      "multi_step": 0.20,
+      "code": 0.18,
+      "architecture": 0.22,
+      "security": 0.25,
+      "financial": 0.18,
+      "reasoning": 0.15
+    },
+    "level_thresholds": { "medium": 0.25, "high": 0.50, "critical": 0.78 }
+  },
+  "capability_floor": {
+    "low": "FAST",
+    "medium": "NORMAL",
+    "high": "HEAVY",
+    "critical": "DEEP_THINKING"
+  },
+  "tier_rank": { "FAST": 1, "NORMAL": 2, "HEAVY": 3, "CODE": 3, "DEEP_THINKING": 4 },
+  "output_scoring": {
+    "min_chars": 40,
+    "good_chars": 200,
+    "min_score_pass": 0.5,
+    "failure_markers": [
+      "i cannot", "i can't", "i can not", "as an ai", "i'm unable", "i am unable",
+      "cannot assist", "unable to help", "i do not have the ability"
+    ],
+    "error_markers": ["traceback (most recent call last)", "internal server error"]
+  },
+  "ledger": { "filename": "model_quality.jsonl", "max_lines": 5000 }
+}
