@@ -24,6 +24,14 @@ const PHASE_LABELS = {
 }
 
 const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url } }
+// Research source URLs are UNTRUSTED external data (a malicious search result could be
+// a javascript:/data: URL → XSS / untrusted redirect). Only allow http(s) into an href.
+const safeHref = (url) => {
+  try {
+    const u = new URL(url, location.origin)
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : undefined
+  } catch { return undefined }
+}
 const fmtDuration = (s) => (!s ? '' : s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`)
 
 export default function DeepResearchInline({ reportId, topic, depth = 'deep' }) {
@@ -123,12 +131,17 @@ export default function DeepResearchInline({ reportId, topic, depth = 'deep' }) 
             <div className="dri__sources">
               <div className="dri__sources-label">Sites visited</div>
               <ul className="dri__source-list">
-                {sources.slice(-12).map((s, i) => (
-                  <li key={`${s.url}-${i}`} className={`dri__source ${s.read ? 'is-read' : s.failed ? 'is-failed' : 'is-visiting'}`}>
-                    <span className="dri__source-mark">{s.read ? '✓' : s.failed ? '✕' : '◌'}</span>
-                    <a href={s.url} target="_blank" rel="noreferrer noopener" title={s.title || s.url}>{s.host}</a>
-                  </li>
-                ))}
+                {sources.slice(-12).map((s, i) => {
+                  const href = safeHref(s.url)
+                  return (
+                    <li key={`${s.url}-${i}`} className={`dri__source ${s.read ? 'is-read' : s.failed ? 'is-failed' : 'is-visiting'}`}>
+                      <span className="dri__source-mark">{s.read ? '✓' : s.failed ? '✕' : '◌'}</span>
+                      {href
+                        ? <a href={href} target="_blank" rel="noreferrer noopener" title={s.title || s.host}>{s.host}</a>
+                        : <span title={s.title || ''}>{s.host}</span>}
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           )}
@@ -148,7 +161,7 @@ export default function DeepResearchInline({ reportId, topic, depth = 'deep' }) 
               )}
               <div className="dri__report-actions">
                 <span>{report.sources_fetched || counts.read} sources</span>
-                {report.id && <a href={`/research?report=${report.id}`} className="dri__open">Open full report →</a>}
+                {report.id && <a href={`/research?report=${encodeURIComponent(report.id)}`} className="dri__open">Open full report →</a>}
               </div>
             </div>
           )}
