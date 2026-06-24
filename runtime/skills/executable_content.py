@@ -68,8 +68,8 @@ class ExecutableContentSkill(SkillBase):
     """One executable skill, driven by a library prompt + a QualityGate."""
 
     def __init__(self, skill_id: str, gate: QualityGate, *, num_predict: int = 900,
-                 required: tuple[str, ...] = ("brief",)):
-        lib = _library().get(skill_id, {})
+                 required: tuple[str, ...] = ("brief",), lib_def: dict | None = None):
+        lib = lib_def if lib_def is not None else _library().get(skill_id, {})
         self.skill_id = skill_id
         self.name = lib.get("id", skill_id)
         self.description = (lib.get("description") or skill_id) + " [executable: validated output + artifact]"
@@ -172,7 +172,7 @@ TOP_SKILLS: dict[str, QualityGate] = {
 
 
 def build_executable_skills() -> dict[str, ExecutableContentSkill]:
-    """Instantiate every configured top skill whose id exists in the library."""
+    """Instantiate every configured TOP skill whose id exists in the library."""
     lib = _library()
     out: dict[str, ExecutableContentSkill] = {}
     for sid, gate in TOP_SKILLS.items():
@@ -181,4 +181,48 @@ def build_executable_skills() -> dict[str, ExecutableContentSkill]:
                 out[sid] = ExecutableContentSkill(sid, gate)
             except Exception:
                 continue
+    return out
+
+
+# ── Category-derived quality gates: every skill gets a sensible gate without 570
+# hand-written ones. Lenient by design (min length + no-refusal) so the long tail
+# isn't falsely flagged; the 15 TOP_SKILLS keep their stricter structural gates. ──
+_CATEGORY_GATE_RULES: list[tuple[tuple[str, ...], QualityGate]] = [
+    (("content", "writing", "social", "branding", "communication"), QualityGate(min_chars=150)),
+    (("lead", "sales", "support", "commerce", "money mode"), QualityGate(min_chars=120)),
+    (("research", "analysis", "data", "finance", "trading"), QualityGate(min_chars=150)),
+    (("development", "engineering", "technical", "integration", "runtime"), QualityGate(min_chars=100)),
+    (("project", "strategy", "automation", "productivity", "company"), QualityGate(min_chars=150)),
+    (("security", "governance", "autonomy"), QualityGate(min_chars=120)),
+    (("crypto", "wallet", "compute", "growth", "marketing", "seo"), QualityGate(min_chars=120)),
+]
+_DEFAULT_GATE = QualityGate(min_chars=100)
+
+
+def gate_for(skill_def: dict) -> QualityGate:
+    """The gold hand-tuned gate for a TOP skill, else a category-derived gate."""
+    sid = skill_def.get("id")
+    if sid in TOP_SKILLS:
+        return TOP_SKILLS[sid]
+    cat = str(skill_def.get("category") or "").lower()
+    for subs, gate in _CATEGORY_GATE_RULES:
+        if any(s in cat for s in subs):
+            return gate
+    return _DEFAULT_GATE
+
+
+def build_all_executable_skills(extra_library: dict[str, dict] | None = None) -> dict[str, ExecutableContentSkill]:
+    """Make EVERY library skill executable + validated (full-quality upgrade), each
+    with its category-derived (or gold) quality gate. Optionally include extra defs
+    (e.g. generated definitions for previously-undefined skills)."""
+    defs = dict(_library())
+    if extra_library:
+        for sid, sdef in extra_library.items():
+            defs.setdefault(sid, sdef)
+    out: dict[str, ExecutableContentSkill] = {}
+    for sid, sdef in defs.items():
+        try:
+            out[sid] = ExecutableContentSkill(sid, gate_for(sdef), lib_def=sdef)
+        except Exception:
+            continue
     return out

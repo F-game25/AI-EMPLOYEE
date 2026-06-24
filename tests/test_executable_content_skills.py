@@ -88,3 +88,37 @@ def test_deepened_skills_override_in_catalog():
     # the executable (v2.0) version won over the prompt-only library entry
     assert getattr(blog, "version", None) == "2.0"
     assert "executable" in getattr(blog, "capability_tags", [])
+
+
+# ── full-quality upgrade: ALL skills executable ──────────────────────────────
+def test_gate_for_uses_category_and_gold_overrides():
+    # TOP skill keeps its hand-tuned gold gate (has structural must_match)
+    assert ec.gate_for({"id": "blog_writing", "category": "Content & Writing"}).must_match
+    # a non-top sales skill gets the category gate (lenient, no structural must_match)
+    g = ec.gate_for({"id": "some_sales_thing", "category": "Lead Generation & Sales"})
+    assert g.min_chars == 120 and not g.must_match
+    # unknown category → default gate
+    assert ec.gate_for({"id": "x", "category": "???"}).min_chars == 100
+
+
+def test_all_library_skills_become_executable():
+    built = ec.build_all_executable_skills()
+    assert len(built) >= 560  # ~570 library skills, all executable
+    assert all(getattr(s, "version", None) == "2.0" for s in built.values())
+
+
+def test_generated_defs_are_executable_with_specific_prompts():
+    from skills.generated_defs import load_generated_defs
+    gen = load_generated_defs()
+    assert len(gen) >= 200  # previously-undefined skills now defined
+    built = ec.build_all_executable_skills(extra_library=gen)
+    sid = next(iter(gen))
+    assert sid in built
+    # specific, name-targeted system prompt (not empty/generic placeholder)
+    assert gen[sid]["system_prompt"] and "senior specialist" in gen[sid]["system_prompt"]
+
+
+def test_catalog_loads_all_as_executable():
+    cat = get_skill_catalog()
+    skills = cat._skills if hasattr(cat, "_skills") else {}
+    assert len(skills) >= 800  # library + generated + first-class, all dispatchable

@@ -112,13 +112,15 @@ class SkillCatalog:
         skills["context-research"] = ContextResearchSkill()
         skills["product-video"] = ProductVideoSkill()
         skills["document-qa"] = DocumentQASkill()
-        # Deepened top content skills: the prompt-only library entries upgraded to
-        # executable (validated output + artifact). Registered by their library id so
-        # they OVERRIDE the prompt-only version for dispatch.
+        # FULL-QUALITY upgrade: every library skill (+ generated definitions for the
+        # previously-undefined ones) is registered as EXECUTABLE — validated output +
+        # artifact via a category-derived quality gate — overriding the prompt-only
+        # version. The 15 top skills keep their hand-tuned gold gates.
         try:
-            from skills.executable_content import build_executable_skills
-            skills.update(build_executable_skills())
-        except Exception as _exc:  # never break catalog load
+            from skills.executable_content import build_all_executable_skills
+            from skills.generated_defs import load_generated_defs
+            skills.update(build_all_executable_skills(extra_library=load_generated_defs()))
+        except Exception:  # never break catalog load
             pass
         skills.update(self._load_configured_skills(existing=set(skills)))
         return skills
