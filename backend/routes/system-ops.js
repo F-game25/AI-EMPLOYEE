@@ -36,6 +36,7 @@ module.exports = function createSystemOpsRouter(deps) {
 
   const {
     requireAuth,
+    localhostOrAuth,
     validate,
     SCHEMAS,
     getMode,
@@ -61,6 +62,12 @@ module.exports = function createSystemOpsRouter(deps) {
     getPromptInspectorConfig, setPromptInspectorConfig, patchPromptInspectorConfig,
     WORKSPACE_DIR,
   } = deps;
+
+  // The desktop launcher / boot flow (BootMenu, useUpdateCheck) calls the update
+  // endpoints BEFORE an operator JWT exists, from loopback → must not 401. This
+  // gate lets loopback callers through tokenless and still requires JWT for remote
+  // callers. Falls back to requireAuth if not injected (never weakens to no-auth).
+  const _localOrAuth = (typeof localhostOrAuth === 'function') ? localhostOrAuth : requireAuth;
 
   // ── Mode ──────────────────────────────────────────────────────────────────────
 
@@ -336,7 +343,7 @@ module.exports = function createSystemOpsRouter(deps) {
 
   // ── Auto-Update System ────────────────────────────────────────────────────────
 
-  router.get('/api/system/update-status', requireAuth, (req, res) => {
+  router.get('/api/system/update-status', _localOrAuth, (req, res) => {
     const updaterPath = path.join(os.homedir(), '.ai-employee', 'state', 'updater.json');
     const versionPath = path.join(os.homedir(), '.ai-employee', 'state', 'version.json');
     try {
@@ -357,7 +364,7 @@ module.exports = function createSystemOpsRouter(deps) {
     }
   });
 
-  router.post('/api/system/check-updates', requireAuth, (req, res) => {
+  router.post('/api/system/check-updates', _localOrAuth, (req, res) => {
     const triggerPath = path.join(os.homedir(), '.ai-employee', 'run', 'updater.trigger');
     try {
       fs.mkdirSync(path.dirname(triggerPath), { recursive: true });
@@ -368,7 +375,7 @@ module.exports = function createSystemOpsRouter(deps) {
     }
   });
 
-  router.post('/api/system/apply-update', requireAuth, (req, res) => {
+  router.post('/api/system/apply-update', _localOrAuth, (req, res) => {
     const triggerPath = path.join(os.homedir(), '.ai-employee', 'run', 'updater.trigger');
     try {
       fs.mkdirSync(path.dirname(triggerPath), { recursive: true });
@@ -381,7 +388,7 @@ module.exports = function createSystemOpsRouter(deps) {
 
   // POST /api/system/run-update — live SSE update stream
   let _updateRunning = false;
-  router.post('/api/system/run-update', requireAuth, (req, res) => {
+  router.post('/api/system/run-update', _localOrAuth, (req, res) => {
     if (_updateRunning) return res.status(409).json({ ok: false, error: 'Update already in progress' });
     const updaterPaths = [
       path.join(REPO_ROOT, 'runtime', 'agents', 'auto-updater', 'auto_updater.py'),
@@ -456,7 +463,7 @@ module.exports = function createSystemOpsRouter(deps) {
     res.json({ ok: true, settings });
   });
 
-  router.post('/api/system/trigger-update', requireAuth, (_req, res) => {
+  router.post('/api/system/trigger-update', _localOrAuth, (_req, res) => {
     autoUpdateWatchdog.triggerManualUpdate();
     res.json({ ok: true, message: 'Update triggered' });
   });
