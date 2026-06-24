@@ -482,21 +482,46 @@ class ConversationRuntime:
 
     @staticmethod
     def _summarize_execution(out: dict, intent: dict) -> str:
-        ran = out.get("executed") or []
         appr = out.get("approvals_required") or []
+        results = out.get("results") or []
         parts: list[str] = []
-        if ran:
-            parts.append(f"Ran: {', '.join(ran)}.")
+
+        # Surface the ACTUAL deliverable, not just "Ran: X". The skill result is
+        # nested in result['data'] (the skills.run -> dispatch_for_goal payload).
+        for r in results:
+            if r.get("status") != "ok":
+                continue
+            data = r.get("data") if isinstance(r.get("data"), dict) else {}
+            skill_id = data.get("skill_id")
+            out_obj = data.get("output")
+            deliverable, artifact = None, data.get("artifact")
+            if isinstance(out_obj, dict):
+                deliverable = (out_obj.get("output") or out_obj.get("answer")
+                               or out_obj.get("summary") or out_obj.get("report_md"))
+                artifact = out_obj.get("artifact") or artifact
+            elif isinstance(out_obj, str):
+                deliverable = out_obj
+            if deliverable:
+                head = f"✅ Done — **{skill_id or r.get('cap')}**"
+                if artifact:
+                    head += f"  ·  saved: `{artifact}`"
+                body = str(deliverable).strip()
+                if len(body) > 2400:
+                    body = body[:2400] + "\n\n…(full deliverable saved as the artifact above)"
+                parts.append(f"{head}\n\n{body}")
+
         if appr:
             names = ", ".join(a.get("action", a.get("cap", "?")) for a in appr)
             parts.append(f"Awaiting your approval before running: {names}.")
-        not_impl = [r["cap"] for r in out.get("results", [])
-                    if r.get("status") == "not_implemented"]
+        not_impl = [r["cap"] for r in results if r.get("status") == "not_implemented"]
         if not_impl:
             parts.append(f"Not yet wired (no fabricated result): {', '.join(not_impl)}.")
+        # Only fall back to the bare "Ran:" line when nothing concrete surfaced.
         if not parts:
-            parts.append("No capability matched that request — nothing executed.")
-        return " ".join(parts)
+            ran = out.get("executed") or []
+            parts.append(f"Ran: {', '.join(ran)}." if ran
+                         else "No capability matched that request — nothing executed.")
+        return "\n\n".join(parts)
 
     @staticmethod
     def _summarize_monitoring(out: dict) -> str:

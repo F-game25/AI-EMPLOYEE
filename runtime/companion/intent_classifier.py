@@ -134,11 +134,19 @@ _EXEC_DEPLOY = (
     "start", "stop", "kill", "launch", "run", "execute", "trigger", "spin up",
     "scale", "provision",
 )
+# Business "do real work" verbs → dispatch to the skill catalog (skills.run).
+# Distinct from system-mutation verbs below so "write a blog post" reaches a skill,
+# not generic capability matching.
+_EXEC_SKILL = (
+    "write", "create", "make", "generate", "draft", "build", "design", "produce",
+    "compose", "find", "score", "audit", "calculate", "summarize", "summarise",
+    "research", "brainstorm", "outline", "rewrite", "pitch", "optimize", "optimise",
+    "plan a", "draft a", "write me", "create a", "generate a", "build me",
+)
 _EXEC_GENERIC = (
-    "create", "make", "add", "remove", "delete", "update", "change", "set up",
-    "setup", "configure", "enable", "disable", "send", "generate", "write",
-    "schedule", "install", "uninstall", "clean up", "cleanup", "optimize",
-    "optimise", "apply",
+    "add", "remove", "delete", "update", "change", "set up", "setup", "configure",
+    "enable", "disable", "send", "schedule", "install", "uninstall", "clean up",
+    "cleanup", "apply",
 )
 
 # ── Browser / computer-use (drive a web page like a human) ─────────────────────
@@ -287,15 +295,14 @@ class IntentClassifier:
             return self._result(MODE_EXECUTION, "browser", 0.85, True,
                                  f"browser cue: '{browser_cue or 'url'}'")
 
-        # 4) Execution — imperative leading verb ⇒ is_command.
+        # 4) Execution — imperative leading verb ⇒ is_command. Business "do" verbs
+        #    route to task_type 'skill' (→ skills.run → the 859-skill catalog).
         for verbs, ttype in ((_EXEC_CODE, "code"),
                              (_EXEC_DEPLOY, "monitoring"),
+                             (_EXEC_SKILL, "skill"),
                              (_EXEC_GENERIC, "chat")):
             if (v := _starts_with_verb(t, verbs)):
-                # code verbs imply a code task; deploy/run imply ops.
-                tt = "code" if verbs is _EXEC_CODE else (
-                    "monitoring" if verbs is _EXEC_DEPLOY else "chat")
-                return self._result(MODE_EXECUTION, tt, 0.85, True,
+                return self._result(MODE_EXECUTION, ttype, 0.85, True,
                                     f"imperative verb: '{v}'")
 
         # 5) Planning.
@@ -319,6 +326,9 @@ class IntentClassifier:
         if _hit(t, _EXEC_CODE) or _hit(t, _EXEC_DEPLOY):
             return self._result(MODE_EXECUTION, "code", 0.55, True,
                                 "imperative verb present")
+        if _hit(t, _EXEC_SKILL):
+            return self._result(MODE_EXECUTION, "skill", 0.55, True,
+                                "business skill verb present")
 
         # 9) Default — open conversation.
         return self._result(MODE_CONVERSATION, "chat", 0.4, False,

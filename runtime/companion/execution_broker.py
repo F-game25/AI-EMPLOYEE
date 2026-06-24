@@ -71,6 +71,10 @@ _EXACT_TASK_CAPS: dict[str, str] = {
     "teammate.routine.status": "teammate.routine.status",
     "teammate.routine.configure": "teammate.routine.configure",
     "teammate.briefing.create_task": "teammate.briefing.create_task",
+    # Business "do real work" intents go straight to the skill catalog (which
+    # selects the right one of the ~859 executable skills) — not coincidental
+    # token-overlap with a system capability.
+    "skill": "skills.run",
 }
 
 # ── Adapter bounds (keep every executor cheap, read-only, non-destructive) ────
