@@ -129,6 +129,12 @@ jobs:
       - name: Run desktop boot-contract tests (F1 + F2)
         run: node tests/test_boot_contract_routes.js
 
+      - name: Run memory trust-gate tests (C4)
+        run: node tests/test_memory_trust_gate.js
+
+      - name: Run compute dispatch + egress-guard tests (D1)
+        run: node tests/test_compute_dispatch.js
+
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
   # ─────────────────────────────────────────────────────────────────
