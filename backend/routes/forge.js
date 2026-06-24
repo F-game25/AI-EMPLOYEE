@@ -1507,11 +1507,22 @@ function _getAnthropic() {
   } catch { return null }
 }
 
+// Bounded generation options (defence-in-depth). The hardened qwythos Modelfile
+// already sets these server-side, but passing them per-request guarantees codegen
+// stays bounded/non-looping even if FORGE_OLLAMA_MODEL points at an un-hardened
+// model. Tunable via env without code changes.
+const _FORGE_GEN_OPTS = {
+  num_predict: parseInt(process.env.FORGE_NUM_PREDICT, 10) || 2048,
+  num_ctx: parseInt(process.env.FORGE_NUM_CTX, 10) || 8192,
+  repeat_penalty: Number(process.env.FORGE_REPEAT_PENALTY) || 1.15,
+  temperature: Number(process.env.FORGE_TEMPERATURE ?? 0.4),
+}
+
 async function _callOllama(prompt, timeoutMs) {
   if (process.env.FORCE_CLOUD === '1') return null
   const result = await _httpJson(
     `${_OLLAMA_HOST_FORGE}/api/generate`,
-    { model: _OLLAMA_CODE_MODEL, prompt, stream: false, options: { num_predict: 4096 } },
+    { model: _OLLAMA_CODE_MODEL, prompt, stream: false, options: { ..._FORGE_GEN_OPTS } },
     timeoutMs,
   )
   if (result && result.response && result.response.trim().length > 10) {
@@ -2888,7 +2899,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
         // Ollama streaming via /api/generate with stream:true
         await new Promise((resolve, reject) => {
           const http = require('http')
-          const body = JSON.stringify({ model: _OLLAMA_CODE_MODEL, prompt: fullPrompt, stream: true })
+          const body = JSON.stringify({ model: _OLLAMA_CODE_MODEL, prompt: fullPrompt, stream: true, options: { ..._FORGE_GEN_OPTS } })
           const req = http.request(`${_OLLAMA_HOST_FORGE}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
