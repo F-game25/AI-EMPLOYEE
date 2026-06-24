@@ -138,6 +138,9 @@ jobs:
       - name: Run system update endpoint auth regression test
         run: node tests/test_update_endpoint_auth.js
 
+      - name: Run Kokoro voice adapter test
+        run: node tests/test_kokoro_voice.js
+
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
   # ─────────────────────────────────────────────────────────────────
