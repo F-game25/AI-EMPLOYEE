@@ -232,6 +232,10 @@ class MemoryRecord:
             "memory_type": self.memory_type,
             "scope": self.scope,
             "source": self.source,
+            # Persisted so the C4 provenance-trust gate (core/memory_trust.py) can
+            # read real confidence/importance at retrieval time instead of defaults.
+            "confidence": self.confidence,
+            "importance": self.importance,
             "agent": self.agent or "",
             "project_id": self.project_id or "",
             "session_id": self.session_id or "",

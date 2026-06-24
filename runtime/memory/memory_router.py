@@ -196,7 +196,20 @@ class MemoryRouter:
         with _LOCK:
             self._stats["cache_reads"] += 1
             self._stats["vector_reads"] += 1
-            return self._service.retrieve(query, memory_type=memory_type, top_k=top_k)
+            # Over-fetch so the trust gate can drop untrusted rows without starving top_k.
+            results = self._service.retrieve(query, memory_type=memory_type, top_k=max(top_k * 2, top_k))
+        # C4 provenance-trust gate: retrieved memories are untrusted data — drop
+        # low-trust / injection-bearing entries before they reach any prompt.
+        # Never fatal; on any error the gate fails closed (keeps nothing).
+        try:
+            from core.memory_trust import apply_trust_gate
+            kept, stats = apply_trust_gate(results, limit=top_k)
+            self._stats["trust_dropped"] = self._stats.get("trust_dropped", 0) + \
+                int(stats.get("dropped_low_trust", 0)) + int(stats.get("dropped_injection", 0))
+            return kept
+        except Exception as e:  # noqa: BLE001 — fail CLOSED: never leak ungated memory
+            logger.error("retrieve: trust gate unavailable, dropping all memories (%s)", e)
+            return []
 
     async def retrieve_qce(self, query: str, tenant_id: str = '', **kwargs) -> list:
         """QCE-powered retrieval via SearchOrchestrator. Falls back to retrieve() on error."""
