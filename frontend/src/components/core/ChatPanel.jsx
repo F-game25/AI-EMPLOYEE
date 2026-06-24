@@ -22,6 +22,7 @@ export default function ChatPanel({ isOpen, onClose }) {
   const companionThinking = useCompanionStore(s => s.thinking)
   const companionMessages = useCompanionStore(s => s.messages)
   const sendCompanionMessage = useCompanionStore(s => s.sendMessage)
+  const lastActions = useCompanionStore(s => s.lastActions)
   const [input, setInput] = useState('')
   const [researchRuns, setResearchRuns] = useState([])
   const [startingResearch, setStartingResearch] = useState(false)
@@ -76,11 +77,11 @@ export default function ChatPanel({ isOpen, onClose }) {
   // Dedicated Deep Research trigger: uses the current input as the topic, launches
   // the multi-hop research engine, and renders a live inline card in the chat that
   // visualizes phases + sites visited + progress and reports back the final report.
-  const startDeepResearch = async (depth = 'deep') => {
-    const topic = input.trim()
+  const startDeepResearch = async (depth = 'deep', topicArg = null) => {
+    const topic = (topicArg || input.trim()).trim()
     if (!topic || startingResearch) return
     setStartingResearch(true)
-    addChatMessage?.({ role: 'user', content: `🔬 Deep research: ${topic}`, ts: Date.now() })
+    if (!topicArg) addChatMessage?.({ role: 'user', content: `🔬 Deep research: ${topic}`, ts: Date.now() })
     try {
       const r = await fetch('/api/research/deep/start', {
         method: 'POST',
@@ -90,7 +91,7 @@ export default function ChatPanel({ isOpen, onClose }) {
       const d = await r.json()
       if (d.ok && d.report_id) {
         setResearchRuns(prev => [...prev, { id: d.report_id, topic, depth, ts: Date.now() }])
-        setInput('')
+        if (!topicArg) setInput('')
       } else {
         addChatMessage?.({ role: 'assistant', content: '⚠ Could not start deep research. Try again.', ts: Date.now() })
       }
@@ -100,6 +101,23 @@ export default function ChatPanel({ isOpen, onClose }) {
       setStartingResearch(false)
     }
   }
+
+  // When the teammate emits a deep_research DIRECTIVE (you asked it in chat), start
+  // the real run + render the live card here — so chat deep research actually runs
+  // and shows progress + the report, instead of just confirming.
+  const handledDirectivesRef = useRef(new Set())
+  useEffect(() => {
+    for (const a of (lastActions || [])) {
+      const d = a?.data && typeof a.data === 'object' ? a.data : null
+      if (d?.directive === 'deep_research' && d.topic) {
+        const key = `${d.topic}|${d.depth || 'deep'}`
+        if (handledDirectivesRef.current.has(key)) continue
+        handledDirectivesRef.current.add(key)
+        startDeepResearch(d.depth || 'deep', d.topic)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastActions])
 
   const handleKey = e => {
     if (e.key === 'Enter' && !e.shiftKey) {

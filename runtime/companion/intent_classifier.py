@@ -173,6 +173,13 @@ _PLAN = (
     "architect", "approach for", "what's the plan", "lay out", "milestones",
 )
 
+# ── Deep research (the multi-hop DeepResearchEngine, not a quick research skill) ──
+_DEEP_RESEARCH = (
+    "deep research", "deep-research", "deep dive into", "deepdive", "in depth",
+    "in-depth research", "thorough research", "research report on", "deep dive on",
+    "comprehensive research", "exhaustive research", "research deeply", "research thoroughly",
+)
+
 # ── Analysis ───────────────────────────────────────────────────────────────────
 _ANALYSIS = (
     "analyze", "analyse", "summarize", "summarise", "compare", "evaluate",
@@ -294,6 +301,13 @@ class IntentClassifier:
         if browser_cue or (has_url and _starts_with_verb(t, _BROWSER_OPEN_VERBS)):
             return self._result(MODE_EXECUTION, "browser", 0.85, True,
                                  f"browser cue: '{browser_cue or 'url'}'")
+
+        # 3.7) Deep research — routes to the real multi-hop DeepResearchEngine
+        #      (research.deep.start), NOT a quick research skill. Checked before the
+        #      generic skill verbs so "research X in depth" isn't a shallow skill run.
+        if (dr := _hit(t, _DEEP_RESEARCH)):
+            return self._result(MODE_EXECUTION, "research.deep", 0.9, True,
+                                f"deep-research cue: '{dr}'")
 
         # 4) Execution — imperative leading verb ⇒ is_command. Business "do" verbs
         #    route to task_type 'skill' (→ skills.run → the 859-skill catalog).

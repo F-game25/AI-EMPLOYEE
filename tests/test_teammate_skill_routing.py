@@ -48,3 +48,22 @@ def test_qa_and_browser_requests_do_not_become_skills():
     ic = get_intent_classifier()
     assert ic.classify("what is a race condition", {})["mode"] == "analysis"
     assert ic.classify("open github.com and screenshot it", {})["task_type"] == "browser"
+
+
+def test_deep_research_routes_to_real_engine_not_skill():
+    ic = get_intent_classifier()
+    # "deep research" must hit the multi-hop engine, not a shallow research skill.
+    for text in ["do a deep research on the AI note-taking market",
+                 "deep dive into fintech lead generation",
+                 "research quantum computing in depth"]:
+        out = ic.classify(text, {})
+        assert out["task_type"] == "research.deep", f"{text!r} -> {out['task_type']}"
+    assert _EXACT_TASK_CAPS.get("research.deep") == "research.deep.start"
+
+
+def test_deep_research_executor_emits_directive_with_clean_topic():
+    from companion.execution_broker import ExecutionBroker
+    cap = type("C", (), {"subsystem": "research", "id": "research.deep.start"})()
+    out = ExecutionBroker._exec_research_deep_start(cap, {"text": "do a deep research on the AI note-taking market"})
+    assert out["directive"] == "deep_research"
+    assert out["topic"] == "the AI note-taking market"  # command framing stripped
