@@ -1,0 +1,40 @@
+# Hardened Ollama Modelfile for the Qwythos-9B default model.
+#
+# WHY: the `ollama pull hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q4_K_M`
+# import ships a passthrough `TEMPLATE {{ .Prompt }}` with NO chat renderer, NO
+# stop tokens, and NO anti-repetition — so on the forge `/api/generate` codegen
+# path the model rambles/loops to the token cap. This Modelfile applies the same
+# proven qwen3.5 renderer/parser the stock model uses, plus bounded sampling, so
+# generation stops cleanly and tool-calls parse natively.
+#
+# APPLY (no sudo needed — talks to the local ollama server):
+#   ollama pull hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q4_K_M
+#   ollama cp   hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q4_K_M qwythos:q4
+#   ollama create qwythos:q4 -f runtime/config/qwythos.Modelfile
+#
+# The system default is set in ~/.ai-employee/.env:
+#   OLLAMA_MODEL=qwythos:q4
+#   FORGE_OLLAMA_MODEL=qwythos:q4
+#
+# TUNING: num_ctx 8192 + the multimodal projector slightly exceed an 8GB GPU
+# (~78% GPU / 22% CPU at ~24 tok/s). For full-GPU speed drop num_ctx to 4096;
+# for more context on a bigger GPU raise it. Bounded gen opts are also passed
+# per-request by forge.js (_FORGE_GEN_OPTS) as defense-in-depth.
+
+FROM qwythos:q4
+
+# Ollama 0.30 native qwen3.5 chat renderer + tool-call parser (fixes rambling,
+# gives correct stop tokens + native tool_calls).
+RENDERER qwen3.5
+PARSER qwen3.5
+
+# Anti-repetition — the stock qwen3.5 default; stops the loop/ramble.
+PARAMETER presence_penalty 1.5
+# Stable, deterministic-leaning sampling for code + agentic/tool use.
+PARAMETER temperature 0.4
+PARAMETER top_k 20
+PARAMETER top_p 0.95
+# Bound the KV cache so weights + context fit an 8GB GPU.
+PARAMETER num_ctx 8192
+# Hard cap on output length (defense against runaway generation).
+PARAMETER num_predict 2048
