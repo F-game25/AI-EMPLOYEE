@@ -801,9 +801,12 @@ class ExecutionBroker:
                 import asyncio as _aio
                 try:
                     engine = DeepResearchEngine()
-                    # The engine.run() creates+saves its own report id; we ran a
-                    # placeholder row above so polling has something immediately.
-                    _aio.run(engine.run(topic=topic, depth=depth))
+                    # Pass the SAME report_id created above so the run saves under it
+                    # and the caller that received report_id can poll /deep/{id} and
+                    # actually get the finished report (fixes the never-reports-back id
+                    # mismatch). Live WS progress is delivered via the button path which
+                    # runs on the main loop; this thread guarantees completion + result.
+                    _aio.run(engine.run(topic=topic, depth=depth, report_id=report_id))
                 except Exception as exc:  # background failure must not crash broker
                     logger.warning("background deep research failed: %s", exc)
 

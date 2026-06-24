@@ -3,7 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import { useCompanionStore } from '../../store/companionStore'
 import { enableDevMode, disableDevMode, isDevModeActive } from '../../hooks/useDevMode'
+import DeepResearchInline from './DeepResearchInline'
 import './ChatPanel.css'
+
+const authHeaders = () => {
+  const t = sessionStorage.getItem('ai_jwt') || ''
+  return { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) }
+}
 
 const DEV_ON_PHRASE  = 'aethernus nexus dev mode'
 const DEV_OFF_PHRASE = 'aethernus nexus dev off'
@@ -17,6 +23,8 @@ export default function ChatPanel({ isOpen, onClose }) {
   const companionMessages = useCompanionStore(s => s.messages)
   const sendCompanionMessage = useCompanionStore(s => s.sendMessage)
   const [input, setInput] = useState('')
+  const [researchRuns, setResearchRuns] = useState([])
+  const [startingResearch, setStartingResearch] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const inputId = useId()
@@ -63,6 +71,34 @@ export default function ChatPanel({ isOpen, onClose }) {
       active_task: null,
     })
     setInput('')
+  }
+
+  // Dedicated Deep Research trigger: uses the current input as the topic, launches
+  // the multi-hop research engine, and renders a live inline card in the chat that
+  // visualizes phases + sites visited + progress and reports back the final report.
+  const startDeepResearch = async (depth = 'deep') => {
+    const topic = input.trim()
+    if (!topic || startingResearch) return
+    setStartingResearch(true)
+    addChatMessage?.({ role: 'user', content: `🔬 Deep research: ${topic}`, ts: Date.now() })
+    try {
+      const r = await fetch('/api/research/deep/start', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ topic, depth }),
+      })
+      const d = await r.json()
+      if (d.ok && d.report_id) {
+        setResearchRuns(prev => [...prev, { id: d.report_id, topic, depth, ts: Date.now() }])
+        setInput('')
+      } else {
+        addChatMessage?.({ role: 'assistant', content: '⚠ Could not start deep research. Try again.', ts: Date.now() })
+      }
+    } catch {
+      addChatMessage?.({ role: 'assistant', content: '⚠ Deep research is unavailable right now.', ts: Date.now() })
+    } finally {
+      setStartingResearch(false)
+    }
   }
 
   const handleKey = e => {
@@ -216,6 +252,10 @@ export default function ChatPanel({ isOpen, onClose }) {
           ))}
         </AnimatePresence>
 
+        {researchRuns.map(run => (
+          <DeepResearchInline key={run.id} reportId={run.id} topic={run.topic} depth={run.depth} />
+        ))}
+
         <AnimatePresence>
           {(isTyping || companionThinking) && (
             <motion.div
@@ -257,6 +297,16 @@ export default function ChatPanel({ isOpen, onClose }) {
           onKeyDown={handleKey}
           autoComplete="off"
         />
+        <button
+          className="chat-panel__research"
+          onClick={() => startDeepResearch('deep')}
+          disabled={!input.trim() || startingResearch}
+          aria-label="Start deep research on this topic"
+          title="Deep Research — multi-hop research with live progress in chat"
+        >
+          <span className="research-icon">🔬</span>
+          <span className="research-label">Deep Research</span>
+        </button>
         <button
           className="chat-panel__send"
           onClick={handleSend}
