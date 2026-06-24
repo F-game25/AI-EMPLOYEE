@@ -15,6 +15,8 @@ from typing import Any, Callable
 
 from skills.base import SkillBase
 from skills.context_research import ContextResearchSkill
+from skills.product_video import ProductVideoSkill
+from skills.document_qa import DocumentQASkill
 
 # Capability tags per skill name
 _SKILL_TAGS: dict[str, list[str]] = {
@@ -106,8 +108,10 @@ class SkillCatalog:
             )
             for skill_name, desc in configured
         }
-        # First-class skill: context research (executable directly, no dispatch indirection)
+        # First-class skills: executable directly (compose atomic tools), no dispatch indirection.
         skills["context-research"] = ContextResearchSkill()
+        skills["product-video"] = ProductVideoSkill()
+        skills["document-qa"] = DocumentQASkill()
         skills.update(self._load_configured_skills(existing=set(skills)))
         return skills
 
