@@ -30,8 +30,12 @@ class FakeClient:
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
-    for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "OLLAMA_ENDPOINT", "EGRESS_GUARD"):
+    # Hermetic: clear EVERY provider key (incl. NVIDIA) so local/CI env can't
+    # configure a real client, and disable graceful pipeline fallbacks.
+    for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+              "NVIDIA_API_KEY", "OLLAMA_ENDPOINT", "EGRESS_GUARD"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("STRICT_PIPELINE", "1")
     eg.reload()
     lpr.reset_router()
     yield

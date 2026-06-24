@@ -79,7 +79,7 @@ def test_kill_switch_passes_through_untouched(monkeypatch):
 
 
 def test_gate_never_raises_on_bad_input():
-    kept, stats = mt.apply_trust_gate(None)
+    kept, _stats = mt.apply_trust_gate(None)
     assert kept == []
     kept2, _ = mt.apply_trust_gate(["not-a-dict", 5, None])
     assert isinstance(kept2, list)

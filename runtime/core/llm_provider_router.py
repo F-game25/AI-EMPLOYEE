@@ -12,8 +12,42 @@ providers (Ollama) are untouched. See runtime/config/egress_policy.json.
 """
 
 import os
+import json
+import time
 import asyncio
+from pathlib import Path
 from typing import Optional, Dict, Any, AsyncIterator
+
+# Retry + redacted audit so external-provider calls preserve the orchestrator's
+# retry/JSONL-logging guarantees (CLAUDE.md #20: log which model/provider was used;
+# #23: never log prompt/response text). The router is the single audited surface in
+# front of the leaf provider adapters (openai/nvidia/...).
+_PROVIDER_MAX_ATTEMPTS = max(1, min(5, int(os.getenv('LLM_PROVIDER_MAX_ATTEMPTS', '2') or '2')))
+
+
+def _llm_log_path() -> Path:
+    base = os.getenv('STATE_DIR') or os.path.join(os.path.expanduser('~'), '.ai-employee', 'state')
+    p = Path(base)
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return p / 'llm_calls.jsonl'
+
+
+def _log_llm_call(event: dict) -> None:
+    """Append REDACTED call metadata (provider/model/status/latency/attempts) to the
+    shared llm_calls.jsonl. Never logs messages or responses. Best-effort: a logging
+    failure must never break a generation."""
+    try:
+        path = _llm_log_path()
+        if path.exists() and path.stat().st_size > 50 * 1024 * 1024:  # rotate at 50MB
+            path.rename(path.with_suffix('.' + time.strftime('%Y%m%d_%H%M%S') + '.jsonl'))
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(event, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+
 
 class LLMProviderRouter:
     def __init__(self):
@@ -78,15 +112,35 @@ class LLMProviderRouter:
             print(f"Failed to init NVIDIA client: {e}")
 
     async def _generate_one(self, provider: str, messages: list, temperature: float, max_tokens: int) -> str:
-        """Egress-guard then call a single provider. Raises on block/failure."""
+        """Egress-guard, retry, and audit-log a single provider call. Raises on
+        block / final failure. This is the audited chokepoint used by generate()
+        and generate_concurrent()."""
         client = self._get_client(provider)
         if not client:
             raise Exception(f"provider {provider} not configured")
+        model = getattr(client, 'model', None)
         ok, safe_messages, info = self._guard_messages(messages, provider)
         if not ok:
-            # Never send: secret/sensitive data may not leave the box to this provider.
+            _log_llm_call({'ts': time.time(), 'surface': 'provider_router', 'provider': provider,
+                           'model': model, 'ok': False, 'egress': 'block', 'reason': info.get('reason')})
             raise Exception(f"egress blocked for {provider}: {info.get('reason')}")
-        return await client.generate(messages=safe_messages, temperature=temperature, max_tokens=max_tokens)
+        last_err = None
+        for attempt in range(1, _PROVIDER_MAX_ATTEMPTS + 1):
+            t0 = time.time()
+            try:
+                text = await client.generate(messages=safe_messages, temperature=temperature, max_tokens=max_tokens)
+                _log_llm_call({'ts': time.time(), 'surface': 'provider_router', 'provider': provider,
+                               'model': model, 'ok': True, 'latency_ms': round((time.time() - t0) * 1000),
+                               'attempts': attempt, 'egress': info.get('action', 'allow')})
+                return text
+            except Exception as e:  # noqa: BLE001 — retry transient failures, then surface
+                last_err = e
+                _log_llm_call({'ts': time.time(), 'surface': 'provider_router', 'provider': provider,
+                               'model': model, 'ok': False, 'latency_ms': round((time.time() - t0) * 1000),
+                               'attempts': attempt, 'error': type(e).__name__})
+                if attempt < _PROVIDER_MAX_ATTEMPTS:
+                    await asyncio.sleep(min(2.0, 0.5 * attempt))
+        raise last_err if last_err else Exception(f"provider {provider} failed")
 
     async def generate(self, messages: list, temperature: float = 0.7, max_tokens: int = 2048) -> str:
         """Generate using the selected provider; fall back on failure. Egress-guarded."""
@@ -179,14 +233,24 @@ class LLMProviderRouter:
             if not client:
                 continue
             ok, safe_messages, info = self._guard_messages(messages, provider)
+            model = getattr(client, 'model', None)
             if not ok:
+                _log_llm_call({'ts': time.time(), 'surface': 'provider_router.stream', 'provider': provider,
+                               'model': model, 'ok': False, 'egress': 'block', 'reason': info.get('reason')})
                 print(f"Provider {provider} stream egress-blocked: {info.get('reason')}")
                 continue
+            t0 = time.time()
             try:
                 async for chunk in client.stream(messages=safe_messages, temperature=temperature, max_tokens=max_tokens):
                     yield chunk
+                _log_llm_call({'ts': time.time(), 'surface': 'provider_router.stream', 'provider': provider,
+                               'model': model, 'ok': True, 'latency_ms': round((time.time() - t0) * 1000),
+                               'egress': info.get('action', 'allow')})
                 return
             except Exception as e:
+                _log_llm_call({'ts': time.time(), 'surface': 'provider_router.stream', 'provider': provider,
+                               'model': model, 'ok': False, 'latency_ms': round((time.time() - t0) * 1000),
+                               'error': type(e).__name__})
                 print(f"Provider {provider} stream failed: {e}")
 
         raise Exception("No LLM provider available for streaming")
