@@ -64,6 +64,55 @@ _CRITIQUE_MODES = frozenset({"execution", "planning", "debugging"})
 _LOW_CONFIDENCE_THRESHOLD = 0.55
 
 
+def _int_env(name: str, default: int) -> int:
+    """Read a positive int env override, falling back to ``default`` on anything bad."""
+    try:
+        val = int(str(os.getenv(name, "")).strip() or default)
+        return val if val > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+# Multi-turn conversation depth. The running dialogue is rendered into the prompt so
+# the model reasons over the whole session, bounded by a turn count + total char budget
+# (and a per-line clip) so context can never grow unbounded. All env-tunable — no magic.
+def _dialogue_max_turns() -> int:
+    return _int_env("COMPANION_DIALOGUE_TURNS", 12)
+
+
+def _dialogue_line_clip() -> int:
+    return _int_env("COMPANION_DIALOGUE_LINE_CLIP", 400)
+
+
+def _dialogue_char_budget() -> int:
+    return _int_env("COMPANION_DIALOGUE_CHAR_BUDGET", 3000)
+
+
+def _render_dialogue(messages: Any) -> str:
+    """Render the rolling dialogue into ``User:/Assistant:`` lines for the prompt.
+
+    Bounded three ways so context stays flat as a session grows: keep at most the last
+    N turns, clip each line, then drop oldest lines until the total fits the char
+    budget. Returns ``""`` when there is nothing usable.
+    """
+    if not isinstance(messages, list) or not messages:
+        return ""
+    line_clip = _dialogue_line_clip()
+    lines: list[str] = []
+    for msg in messages[-_dialogue_max_turns():]:
+        if not isinstance(msg, dict):
+            continue
+        role = "User" if str(msg.get("role")) == "user" else "Assistant"
+        content = " ".join(str(msg.get("content") or "").split())
+        if not content:
+            continue
+        lines.append(f"{role}: {content[:line_clip]}")
+    budget = _dialogue_char_budget()
+    while len(lines) > 1 and sum(len(line) for line in lines) > budget:
+        lines.pop(0)
+    return "\n".join(lines)
+
+
 def _critique_enabled() -> bool:
     """Master critique switch (default ON; ``COMPANION_CRITIQUE=0`` disables)."""
     return os.getenv("COMPANION_CRITIQUE", "1").strip() != "0"
@@ -367,11 +416,25 @@ class ConversationRuntime:
 
     @staticmethod
     def _session_context_prompt(ctx: dict) -> str:
-        """Small factual context block for conversational follow-ups."""
+        """Factual context block giving the model real multi-turn depth.
+
+        Renders the running dialogue (bounded by turns + char budget) so follow-ups,
+        clarifications, and references resolve against the whole session — not just the
+        last exchange. Falls back to the single last reply when no dialogue is present.
+        """
         parts: list[str] = []
-        last_assistant = str(ctx.get("last_assistant_message") or "").strip()
-        if last_assistant:
-            parts.append(f"Previous assistant reply: {last_assistant[:900]}")
+        topic = str(ctx.get("current_topic") or "").strip()
+        if topic:
+            parts.append(f"Conversation topic so far: {topic[:300]}")
+
+        dialogue = _render_dialogue(ctx.get("recent_messages"))
+        if dialogue:
+            parts.append("Recent conversation (oldest first):\n" + dialogue)
+        else:
+            last_assistant = str(ctx.get("last_assistant_message") or "").strip()
+            if last_assistant:
+                parts.append(f"Previous assistant reply: {last_assistant[:900]}")
+
         tool_results = ctx.get("recent_tool_results") or []
         if isinstance(tool_results, list) and tool_results:
             try:
@@ -390,7 +453,11 @@ class ConversationRuntime:
     def _generate_plan(self, text: str, ctx: dict, model_info: dict) -> str:
         system = ("You are a planning assistant. Produce a short, numbered, "
                   "actionable plan. Do NOT execute anything. 3-7 steps max.")
-        return self._llm(text, system, model_info,
+        prompt = text
+        session_context = self._session_context_prompt(ctx)
+        if session_context:
+            prompt = f"{session_context}\n\nUser: {text}"
+        return self._llm(prompt, system, model_info,
                          fallback=("Plan (LLM offline — outline only):\n"
                                    "1. Clarify the goal and constraints.\n"
                                    "2. Identify the subsystems involved.\n"

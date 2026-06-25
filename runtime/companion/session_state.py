@@ -182,7 +182,13 @@ class SessionState:
     # ── Read helpers the runtime uses to build context ───────────────────────
 
     def as_context(self) -> dict[str, Any]:
-        """Compact dict the runtime folds into the model context/system prompt."""
+        """Compact dict the runtime folds into the model context/system prompt.
+
+        ``recent_messages`` carries the running multi-turn dialogue (prior turns —
+        the current user message is appended *after* this call), so the model reasons
+        over the whole session, not just the last exchange. The runtime bounds it to a
+        turn/char budget before prompting so context never grows unbounded.
+        """
         return {
             "current_topic": self.current_topic,
             "last_user_message": self.last_user_message,
@@ -191,6 +197,7 @@ class SessionState:
             "pending_decision": self.pending_decision,
             "active_task_state": self.active_task_state,
             "recent_tool_results": self.recent_tool_results,
+            "recent_messages": self.recent_messages,
         }
 
 
