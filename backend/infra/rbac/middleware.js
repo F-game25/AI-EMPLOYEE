@@ -56,7 +56,7 @@ function injectRole(req, res, next) {
       const secret = process.env.JWT_SECRET_KEY;
       if (secret) {
         try {
-          const payload = jwt.verify(authHeader.slice(7), secret);
+          const payload = jwt.verify(authHeader.slice(7), secret, { algorithms: ['HS256'] });
           req.user = {
             id:        payload.sub,
             role:      payload.role || ROLES.EMPLOYEE,

@@ -23,7 +23,7 @@ function authenticateWebSocketUpgrade(req, jwtSecret) {
       return null;
     }
 
-    const payload = jwt.verify(token, jwtSecret);
+    const payload = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
     return payload;
   } catch (err) {
     return null;

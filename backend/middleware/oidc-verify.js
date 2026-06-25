@@ -175,7 +175,7 @@ async function oidcOrBuiltin(req, res, next) {
   const JWT_SECRET = process.env.JWT_SECRET_KEY;
   if (JWT_SECRET) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
       req.jwtPayload = payload;
       req.user = payload;
       return next();

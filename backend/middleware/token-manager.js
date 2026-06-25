@@ -88,7 +88,7 @@ class TokenManager {
    */
   verifyAccessToken(token) {
     try {
-      const payload = jwt.verify(token, this.jwtSecret);
+      const payload = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] });
       if (payload.type !== 'access') {
         throw new Error('Token is not an access token');
       }
@@ -109,7 +109,7 @@ class TokenManager {
    */
   refreshAccessToken(refreshToken, claims = {}) {
     try {
-      const payload = jwt.verify(refreshToken, this.jwtSecret);
+      const payload = jwt.verify(refreshToken, this.jwtSecret, { algorithms: ['HS256'] });
       if (payload.type !== 'refresh') {
         throw new Error('Token is not a refresh token');
       }
@@ -163,7 +163,7 @@ class TokenManager {
    */
   verifyWSToken(token) {
     try {
-      const payload = jwt.verify(token, this.jwtSecret);
+      const payload = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] });
       if (payload.type !== 'ws') {
         throw new Error('Token is not a WebSocket token');
       }

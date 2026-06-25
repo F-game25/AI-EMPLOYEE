@@ -326,7 +326,7 @@ function requireAuth(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : req.query.token;
   if (!token) return res.status(401).json({ ok: false, error: 'Authentication required' });
   try {
-    req.jwtPayload = jwt.verify(token, JWT_SECRET);
+    req.jwtPayload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     next();
   } catch {
     return res.status(401).json({ ok: false, error: 'Invalid or expired token' });
@@ -430,7 +430,7 @@ function wsTokenValid(req) {
     const url = new URL(req.url, 'http://localhost');
     const token = url.searchParams.get('token');
     if (!token) return false;
-    jwt.verify(token, JWT_SECRET);
+    jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     return true;
   } catch {
     return false;

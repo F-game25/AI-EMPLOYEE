@@ -80,7 +80,7 @@ function tenantMiddleware(secret = jwtSecret) {
     const token = authHeader.slice(7); // Remove "Bearer " prefix
 
     try {
-      const payload = jwt.verify(token, secret);
+      const payload = jwt.verify(token, secret, { algorithms: ['HS256'] });
 
       const tenantId = payload.tenant_id;
       const orgName = payload.org_name || '';
