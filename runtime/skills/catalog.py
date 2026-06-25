@@ -17,6 +17,7 @@ from skills.base import SkillBase
 from skills.context_research import ContextResearchSkill
 from skills.product_video import ProductVideoSkill
 from skills.document_qa import DocumentQASkill
+from skills.last30days_skill import Last30DaysSkill
 
 # Capability tags per skill name
 _SKILL_TAGS: dict[str, list[str]] = {
@@ -122,6 +123,10 @@ class SkillCatalog:
             skills.update(build_all_executable_skills(extra_library=load_generated_defs()))
         except Exception:  # never break catalog load
             pass
+        # First-class executable adapter must win over the generic library executor
+        # auto-built above (it has a real `last30days` entry in skills_library.json
+        # for planner discovery, but execution must run the vendored research code).
+        skills["last30days"] = Last30DaysSkill()
         skills.update(self._load_configured_skills(existing=set(skills)))
         return skills
 
