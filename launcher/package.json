@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "AETERNUS NEXUS launcher — Electron front door for the AI Operating System.",
   "main": "main.js",
-  "author": "AI Employee Project",
+  "author": {
+    "name": "AI Employee Project",
+    "email": "larsfluks@gmail.com"
+  },
+  "homepage": "https://github.com/F-game25/AI-EMPLOYEE",
   "license": "UNLICENSED",
   "scripts": {
     "start": "node scripts/start.js",
