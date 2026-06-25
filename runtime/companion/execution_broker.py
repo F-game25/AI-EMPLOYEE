@@ -128,6 +128,7 @@ class ExecutionBroker:
         self._dispatch: dict[str, Callable[[Capability, dict], dict]] = {
             "system.health.read": self._exec_system_health,
             "system.tasks.active": self._exec_system_tasks_active,
+            "system.overview": self._exec_system_overview,
             "system.logs.search": self._exec_system_logs_search,
             "briefing.morning": self._exec_morning_briefing,
             "teammate.routine.status": self._exec_teammate_routine_status,
@@ -367,6 +368,55 @@ class ExecutionBroker:
         return {"stored": True, "key": key, "namespace": namespace}
 
     # ── system.tasks.active ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_system_overview(cap: Capability, ctx: dict) -> dict:
+        """Enterprise status report: aggregate REAL system state — active tasks,
+        agent count, system health, recent activity — read-only, always honest
+        (no fabricated numbers; missing sources degrade to 0/empty)."""
+        import json
+        sd = _state_dir()
+        ov: dict[str, Any] = {}
+        # Active tasks (reuse the tasks executor).
+        try:
+            tasks = ExecutionBroker._exec_system_tasks_active(cap, ctx).get("tasks") or []
+        except Exception:
+            tasks = []
+        ov["active_tasks"] = len(tasks)
+        ov["tasks"] = tasks[:10]
+        # Agent count from the catalog.
+        try:
+            from pathlib import Path as _P
+            ac = json.loads((_P(__file__).resolve().parents[1] / "config" / "agent_capabilities.json").read_text(encoding="utf-8"))
+            agents = ac.get("agents", ac) if isinstance(ac, dict) else ac
+            ov["agents_total"] = len(agents)
+        except Exception:
+            ov["agents_total"] = 0
+        # System health.
+        try:
+            h = ExecutionBroker._exec_system_health(cap, ctx)
+            ov["health"] = {k: h.get(k) for k in ("cpu_percent", "memory_percent", "gpu_percent", "status") if k in h} or h
+        except Exception:
+            ov["health"] = {}
+        # Recent activity (event-bus tail).
+        try:
+            bus = sd / "bus.jsonl"
+            lines = bus.read_text(encoding="utf-8").splitlines()[-8:] if bus.exists() else []
+            acts = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                    acts.append(obj.get("event") or obj.get("type") or str(obj)[:80])
+                except Exception:
+                    acts.append(line[:80])
+            ov["recent_activity"] = acts[-8:]
+        except Exception:
+            ov["recent_activity"] = []
+        summary = (f"{ov['active_tasks']} active task(s), {ov['agents_total']} agents available, "
+                   f"system {ov.get('health', {}).get('status', 'ok')}.")
+        return {"overview": ov, "summary": summary}
 
     @staticmethod
     def _exec_system_tasks_active(cap: Capability, ctx: dict) -> dict:

@@ -551,6 +551,8 @@ class ConversationRuntime:
                     parts.append("GPU " + ", ".join(names))
                 if parts:
                     return "This PC — " + "; ".join(parts) + "."
+            if cap == "system.overview" and isinstance(res, dict):
+                return ConversationRuntime._format_overview(res.get("overview") or res)
         ok = [r for r in results if r.get("status") == "ok"]
         if ok:
             ids = ", ".join(r["cap"] for r in ok)
@@ -560,6 +562,24 @@ class ConversationRuntime:
             return ("Monitoring adapters for these aren't wired yet (no fabricated "
                     f"data): {', '.join(stubs)}.")
         return "Nothing to report from the monitoring read."
+
+    @staticmethod
+    def _format_overview(ov: dict) -> str:
+        """Readable system status report from real aggregated state."""
+        lines = ["📊 **System status**", f"• Active tasks: {ov.get('active_tasks', 0)}"]
+        for t in (ov.get("tasks") or [])[:5]:
+            if isinstance(t, dict):
+                name = t.get("title") or t.get("goal") or t.get("name") or t.get("id") or "task"
+                lines.append(f"   – {str(name)[:80]} [{t.get('status', '?')}]")
+        lines.append(f"• Agents available: {ov.get('agents_total', 0)}")
+        h = ov.get("health") or {}
+        if h:
+            extra = f" · CPU {h.get('cpu_percent')}% · MEM {h.get('memory_percent')}%" if h.get("cpu_percent") is not None else ""
+            lines.append(f"• Health: {h.get('status', 'ok')}{extra}")
+        acts = ov.get("recent_activity") or []
+        if acts:
+            lines.append("• Recent: " + ", ".join(str(a)[:40] for a in acts[:5]))
+        return "\n".join(lines)
 
     @staticmethod
     def _format_morning_brief(data: dict) -> str:

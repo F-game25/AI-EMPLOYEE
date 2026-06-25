@@ -61,6 +61,27 @@ def test_deep_research_routes_to_real_engine_not_skill():
     assert _EXACT_TASK_CAPS.get("research.deep") == "research.deep.start"
 
 
+def test_status_questions_route_to_monitoring_and_match_overview():
+    from companion.capability_registry import get_capability_registry
+    ic = get_intent_classifier()
+    reg = get_capability_registry()
+    for text in ["what are you working on", "how many agents are active",
+                 "give me a status report", "what have you done today"]:
+        assert ic.classify(text, {})["mode"] == "monitoring", f"{text!r}"
+        top = [c.id for c in reg.find_for_intent("monitoring " + text, "monitoring")][:1]
+        assert top == ["system.overview"], f"{text!r} -> {top}"
+
+
+def test_system_overview_reports_real_state():
+    from companion.execution_broker import ExecutionBroker
+    cap = type("C", (), {"id": "system.overview", "subsystem": "system"})()
+    out = ExecutionBroker._exec_system_overview(cap, {})
+    ov = out["overview"]
+    assert set(["active_tasks", "agents_total", "health", "recent_activity"]).issubset(ov)
+    assert isinstance(ov["agents_total"], int) and ov["agents_total"] > 0  # real agent count
+    assert "agents" in out["summary"]
+
+
 def test_deep_research_executor_emits_directive_with_clean_topic():
     from companion.execution_broker import ExecutionBroker
     cap = type("C", (), {"subsystem": "research", "id": "research.deep.start"})()

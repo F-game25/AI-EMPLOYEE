@@ -114,6 +114,22 @@ def _seed(reg: CapabilityRegistry) -> None:
             examples=["what's running right now", "show active tasks"],
         ),
         Capability(
+            id="system.overview",
+            subsystem="system",
+            name="System overview status report",
+            description="Full status report: active tasks, completed today, agent count, "
+                        "system health, recent activity. what are you working on, status "
+                        "report, system overview, how many agents, what have you done, "
+                        "progress, where are we, what is pending.",
+            input_schema={},
+            output_schema={"overview": "dict"},
+            risk_level=L0,
+            requires_approval=False,
+            side_effects=[],
+            examples=["what are you working on", "give me a status report",
+                      "how many agents are active", "what have you done today"],
+        ),
+        Capability(
             id="system.logs.search",
             subsystem="system",
             name="Search logs",

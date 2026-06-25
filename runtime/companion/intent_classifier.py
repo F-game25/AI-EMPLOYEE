@@ -65,6 +65,12 @@ _MONITOR = (
     "is it done", "are we done", "current state", "show me the dashboard",
     "system status", "any errors", "what's happening", "whats happening",
     "live metrics", "active tasks", "running tasks", "what is active",
+    # task/system status + awareness (enterprise: report real state, not chat)
+    "working on", "what are you working on", "what tasks", "tasks are running",
+    "what have you done", "what did you do", "status report", "give me a status",
+    "system overview", "overview", "how many agents", "agents active", "agent count",
+    "what's the status", "whats the status", "what is the status", "progress on",
+    "how is it going", "where are we", "what's pending", "show me status",
 )
 
 # ── System-info probes (answer with a real OS value, never a tutorial) ─────────
