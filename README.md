@@ -5,7 +5,7 @@ Enterprise-grade AI operations platform for founders, agencies, and lean teams t
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Specialist Agents](https://img.shields.io/badge/Specialist%20Agents-113-blueviolet.svg)](runtime/config/agent_capabilities.json)
-[![Skills](https://img.shields.io/badge/Skills-570-orange.svg)](runtime/config/skills_library.json)
+[![Skills](https://img.shields.io/badge/Skills-571-orange.svg)](runtime/config/skills_library.json)
 [![Multi-tenant](https://img.shields.io/badge/Multi--tenant-yes-success.svg)](#platform-subsystems)
 
 ---
@@ -64,7 +64,7 @@ Key system endpoints include:
 Each run is logged to pipeline telemetry and returned with estimated ROI metrics.
 
 ### 4) Skills system
-- `runtime/config/skills_library.json` ships **570 skills**: 200 hand-curated (including a native fork-enrichment layer for engineering, finance, money, autonomy, wallet, and channel work) plus 370 generated to back **every** capability the agent catalog advertises — so no agent references a skill that doesn't exist.
+- `runtime/config/skills_library.json` ships **571 skills**: 200 hand-curated (including a native fork-enrichment layer for engineering, finance, money, autonomy, wallet, and channel work) plus 370 generated to back **every** capability the agent catalog advertises — so no agent references a skill that doesn't exist — and a vendored multi-source research skill (`last30days`) that the orchestrator can dispatch directly.
 - Every skill carries structured quality metadata (`input_format`, `output_format`, `quality_standards`, `error_handling`, `best_practices`, `execution_steps`) and a `system_prompt`, so it is dispatchable and runs the real LLM via the agent controller / companion `skills.run` path.
 - The library is regenerated from the agent catalog by `scripts/backfill_agent_skills.py` (idempotent), keeping skills and agent capabilities in sync.
 
@@ -95,7 +95,7 @@ Beyond the agent catalog, the platform ships several production subsystems:
 - **Multi-tenancy** — full tenant isolation with per-tenant state and config directories; JWT carries a `tenant_id` claim enforced by both Node and FastAPI middleware (`runtime/core/tenancy.py`).
 - **Unified pipeline** — all input flows through an enforced 10-phase pipeline (retrieve → context → classify → LLM → validate → execute → format → update graph → monitor → integrity check) in `runtime/core/unified_pipeline.py`.
 - **Autonomous research loop** — when a goal lacks context, a sufficiency score triggers `AutoResearchAgent` to run adaptive-depth web research and persist findings to the vector store, brain graph, and knowledge base (`runtime/core/auto_research_agent.py`).
-- **Companion / voice teammate** — one unified conversational runtime (`runtime/companion/`) with an intent classifier, capability registry, execution broker, and safety gate behind it.
+- **Companion / voice teammate** — one unified conversational runtime (`runtime/companion/`) with an intent classifier, capability registry, execution broker, and safety gate behind it. Full-session conversation depth (the whole running dialogue is fed to the model, bounded + tunable) and full-duplex voice: it **hears** (Nemotron-3.5-ASR streaming, CPU/ONNX — selectable `auto`/`nemotron`/`whisper`, falls back to whisper.cpp) and **speaks** (Kokoro 82M TTS).
 - **Self-evolution** — controlled patch generation, validation, and safe deployment gated by `EVOLUTION_MODE` (`runtime/core/self_evolution/`).
 - **Observability** — Prometheus-style `/metrics` endpoint, a 1-second metrics collector, a JSONL event stream, and an immutable audit log in `state/audit.db`.
 - **Local-first access** — on `localhost` the dashboard authenticates automatically via `/api/auth/auto-token` (no operator secret required); a secret is only requested for remote access.
@@ -130,6 +130,24 @@ curl -fsSL https://raw.githubusercontent.com/F-game25/AI-EMPLOYEE/main/quick-ins
 - Windows: use `quick-install-windows.bat` or `install-windows.ps1`
 
 Full guide: [INSTALL.md](INSTALL.md)
+
+### Desktop app (downloadable installers)
+
+The full system also ships as a native desktop app (**AETERNUS NEXUS**) that bundles
+the backend, runtime, and built dashboard. Cross-platform installers are produced by
+the release workflow ([.github/workflows/release-desktop.yml](.github/workflows/release-desktop.yml))
+on native runners — one per OS:
+
+| OS | Installers |
+|---|---|
+| Linux | `.AppImage`, `.deb` |
+| macOS | `.dmg`, `.zip` (x64 + arm64) |
+| Windows | NSIS installer, portable `.exe` (x64) |
+
+Push a `v*` tag (or run the workflow manually) to build all three and attach them to a
+**draft** GitHub Release for review. Builds are currently **unsigned** (add signing
+certs as repo secrets to remove OS security warnings); first run provisions the local
+Python core and optional local LLM.
 
 ---
 
