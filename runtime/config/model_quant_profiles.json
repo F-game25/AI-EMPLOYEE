@@ -9,7 +9,15 @@
       "measured_from": "source of the VRAM number for the recorded quant(s)"
     },
     "kv_arch_defaults": { "n_layers": 32, "n_kv_heads": 8, "head_dim": 128 },
-    "updated": "2026-06-17"
+    "updated": "2026-06-25"
+  },
+
+  "qwythos:q4": {
+    "quants": { "q4_K_M": 6800 },
+    "arch": { "n_layers": 40, "n_kv_heads": 8, "head_dim": 128 },
+    "default_ctx": 8192,
+    "measured": false,
+    "measured_from": "ollama list size 6.8GB (Qwythos-9B-Claude-Mythos Q4_K_M, the installed main model); arch is a 9B seed estimate — benchmark_models.py overwrites measured VRAM from /api/ps"
   },
 
   "llama3.2:latest": {
