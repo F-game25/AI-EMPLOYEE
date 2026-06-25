@@ -1,16 +1,22 @@
 'use strict';
 
-// ── Sentry initialization (must be first) ────────────────────────────────────
+// ── Sentry initialization (must be first; no-op unless SENTRY_DSN is set) ─────
+// v8+ API: integrations are functions (no `new`); request isolation is automatic;
+// the Express error handler is registered after routes (setupExpressErrorHandler).
 if (process.env.SENTRY_DSN) {
-  const Sentry = require('@sentry/node');
-  const { nodeProfilingIntegration } = require('@sentry/profiling-node');
-  Sentry.init({
-    dsn: process.env.SENTRY_DSN,
-    integrations: [new nodeProfilingIntegration()],
-    tracesSampleRate: 0.1,
-    profilesSampleRate: 0.1,
-    environment: process.env.ENVIRONMENT || 'production',
-  });
+  try {
+    const Sentry = require('@sentry/node');
+    const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      integrations: [nodeProfilingIntegration()],
+      tracesSampleRate: 0.1,
+      profilesSampleRate: 0.1,
+      environment: process.env.ENVIRONMENT || 'production',
+    });
+  } catch (err) {
+    console.warn('[sentry] init skipped:', err.message);
+  }
 }
 
 const http = require('http');
@@ -441,12 +447,8 @@ app.set('trust proxy', 1);
 const { ipBlockMiddleware: _sentinelIpBlock } = require('./security/sentinel_guard');
 app.use(_sentinelIpBlock);
 
-// Sentry error tracking middleware (if initialized)
-if (process.env.SENTRY_DSN) {
-  const Sentry = require('@sentry/node');
-  app.use(Sentry.Handlers.requestHandler());
-  app.use(Sentry.Handlers.errorHandler());
-}
+// Sentry request isolation is automatic in v8+ (no requestHandler middleware).
+// The Express error handler must run AFTER all routes — registered before listen.
 
 // Security headers — applied before all routes
 // Gzip all text responses >1KB. Serves hashed JS/CSS ~60-70% smaller.
@@ -4052,6 +4054,12 @@ server.on('error', (err) => {
   }
   process.exit(1);
 });
+
+// Sentry Express error handler — must be registered after all routes (v8+ API).
+if (process.env.SENTRY_DSN) {
+  try { require('@sentry/node').setupExpressErrorHandler(app); }
+  catch (err) { console.warn('[sentry] error handler skipped:', err.message); }
+}
 
 server.listen(PORT, LISTEN_HOST, () => {
   console.log(`[SERVER] ✅ AI Employee backend running on http://${LISTEN_HOST}:${PORT}`);
