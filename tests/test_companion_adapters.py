@@ -202,29 +202,16 @@ def test_money_analyze_idea_empty_is_structured():
 
 # ── research.deep.start ─────────────────────────────────────────────────────────
 
-def test_research_deep_start_does_not_block(monkeypatch):
-    """Must return started/queued immediately — never run a full research pass."""
-    import core.deep_research_engine as dre
-
-    started = {"thread": False}
-
-    class _FakeThread:
-        def __init__(self, *a, **k):
-            self._target = k.get("target")
-
-        def start(self):
-            started["thread"] = True  # do NOT call target — proves non-blocking
-
-    monkeypatch.setattr("companion.execution_broker.threading.Thread", _FakeThread)
-    # Keep persistence cheap/no-op.
-    monkeypatch.setattr(dre, "_save_report", lambda r: None)
-
+def test_research_deep_start_does_not_block():
+    """Must return immediately with a directive — never run a full research pass
+    inline. The broker emits a `deep_research` directive; the UI starts the real
+    multi-hop run via POST /api/research/deep/start with live progress + report."""
     out = ExecutionBroker._exec_research_deep_start(
         None, {"topic": "competitor landscape for AI ops"})
-    assert out["status"] in ("started", "queued")
-    if out["status"] == "started":
-        assert started["thread"] is True
-        assert out.get("report_id")
+    assert out["status"] == "directive"
+    assert out["directive"] == "deep_research"
+    assert out["topic"] and "competitor" in out["topic"].lower()
+    assert out["depth"] in ("shallow", "normal", "deep")
 
 
 def test_research_deep_start_no_topic_is_structured():

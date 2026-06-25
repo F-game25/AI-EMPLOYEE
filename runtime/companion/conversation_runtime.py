@@ -133,10 +133,10 @@ class ConversationRuntime:
         """Run a turn. Never raises — failures become ok=False responses."""
         t0 = time.time()
         try:
-            return self._handle_inner(request, t0)
+            response = self._handle_inner(request, t0)
         except Exception as exc:  # noqa: BLE001 — total failure → safe response
             logger.exception("conversation runtime failed: %s", exc)
-            return CompanionResponse(
+            response = CompanionResponse(
                 ok=False,
                 mode="conversation",
                 reply="I hit an internal error handling that. Nothing was executed.",
@@ -144,6 +144,13 @@ class ConversationRuntime:
                 meta={"error": str(exc),
                       "latency_ms": int((time.time() - t0) * 1000)},
             )
+        # Voice channel invariant: every spoken turn carries a voice_summary, even on
+        # response paths that don't set one explicitly. The full reply still goes to
+        # chat; TTS speaks this. Centralised here so no single path can forget it.
+        if (request.channel or "").lower() == "voice" and isinstance(response.meta, dict):
+            if not str(response.meta.get("voice_summary") or "").strip():
+                response.meta["voice_summary"] = self._voice_summary(response.reply)
+        return response
 
     # ── Pipeline ─────────────────────────────────────────────────────────────────
 
