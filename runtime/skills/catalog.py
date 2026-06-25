@@ -324,6 +324,13 @@ class ExecutableSkillCatalog(SkillCatalog):
             picked = self._match_executable_skillbase(goal)
             if picked is not None:
                 sb_id, sb = picked
+        # HITL contract: an explicitly requested approval-gated / high-risk skill runs
+        # through the library path so the model receives its developer guidance + an
+        # approval notice, and the result surfaces requires_human_approval/safety_level.
+        if wanted and sb is not None and (
+                getattr(sb, "requires_human_approval", False)
+                or str(getattr(sb, "risk_level", "")).lower() in ("dangerous", "high")):
+            return self._run_library_skill(goal, ctx)
         if sb is not None and hasattr(sb, "execute"):
             try:
                 res = sb.execute({"brief": goal, "query": goal, "topic": goal,
@@ -332,7 +339,9 @@ class ExecutableSkillCatalog(SkillCatalog):
                         "success", "planned", "partial", "low_quality"):
                     return {"status": "ok", "skill_id": sb_id, "via": "executable_skillbase",
                             "output": res, "quality": res.get("quality"),
-                            "artifact": res.get("artifact")}
+                            "artifact": res.get("artifact"),
+                            "requires_human_approval": getattr(sb, "requires_human_approval", False),
+                            "safety_level": getattr(sb, "safety_level", None)}
             except Exception:  # noqa: BLE001 — fall through to legacy paths
                 pass
 

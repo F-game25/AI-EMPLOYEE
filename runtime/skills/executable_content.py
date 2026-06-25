@@ -80,6 +80,11 @@ class ExecutableContentSkill(SkillBase):
         self._gate = gate
         self._num_predict = num_predict
         self._required = required
+        # Preserve approval/safety metadata so the dispatcher can honor the HITL
+        # contract for this skill (surface flags + route approval-gated skills).
+        self.requires_human_approval = bool(lib.get("requires_human_approval"))
+        self.safety_level = lib.get("safety_level")
+        self.risk_level = lib.get("risk_level")
         self.input_schema = {
             "type": "object",
             "properties": {"brief": {"type": "string"}, "constraints": {"type": "string"},
