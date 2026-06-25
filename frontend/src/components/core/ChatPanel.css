@@ -618,6 +618,22 @@
 
 .research-icon { display: inline-block; font-size: 12px; }
 
+.chat-panel__voice {
+  height: 32px; width: 34px; flex-shrink: 0;
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  border-radius: var(--mc-radius-md);
+  background: rgba(15, 22, 41, 0.6);
+  cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--mc-duration-fast) var(--mc-easing-out); outline: none;
+}
+.chat-panel__voice:hover { border-color: rgba(0, 255, 180, 0.5); }
+.chat-panel__voice.is-on {
+  border-color: rgba(0, 255, 180, 0.6);
+  background: rgba(0, 255, 180, 0.12);
+  box-shadow: 0 0 10px rgba(0, 255, 180, 0.2);
+}
+
 @media (max-width: 420px) {
   .research-label { display: none; }
 }

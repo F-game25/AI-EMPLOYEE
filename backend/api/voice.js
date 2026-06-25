@@ -820,6 +820,25 @@ router.post('/config', (req, res) => {
   }
 });
 
+// POST /api/voice/speak — synthesize text → raw WAV audio (for live chat playback,
+// no artifact saved). The browser plays the returned audio so the teammate "responds".
+router.post('/speak', async (req, res) => {
+  const text = String(req.body?.text || '').trim().slice(0, 4000);
+  if (!text) return res.status(400).json({ ok: false, error: 'text required' });
+  try {
+    const kokoro = require('../services/voice/kokoro');
+    const st = await kokoro.getStatus();
+    if (!st.ready) return res.status(503).json({ ok: false, error: 'voice model not installed', install: st.install });
+    const r = await kokoro.synthesize(text, { voice: req.body?.voice, speed: Number(req.body?.speed) || 1.0, language: req.body?.language });
+    if (!r.ok || !r.audioBuf) return res.status(502).json({ ok: false, error: r.reason || 'synthesis failed' });
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(r.audioBuf);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 // POST /api/voice/narrate — synthesize text → a downloadable audio artifact.
 // Powers video narration; the .wav lands in state/artifacts → the AI Output screen.
 router.post('/narrate', async (req, res) => {

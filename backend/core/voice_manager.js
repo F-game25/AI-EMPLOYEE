@@ -79,6 +79,7 @@ const DEFAULT_CONFIG = {
   tone: 'futuristic',
   voiceStyle: 'default',
   bootGreeting: true,
+  kokoro: { enabled: true, voice: 'af_sarah', speed: 1.0, language: 'en-us' },
   identity: {
     userName: 'Lars',
     rank: 'Chief',
@@ -190,6 +191,7 @@ function loadConfig() {
           ...voiceTeammate.profileToVoiceCore(voiceProfiles.internal, parsed.voiceCore || {}),
         },
         voiceLite: { ...DEFAULT_CONFIG.voiceLite, ...(parsed.voiceLite || {}) },
+        kokoro: { ...DEFAULT_CONFIG.kokoro, ...(parsed.kokoro || {}) },
         fishSpeech: { ...DEFAULT_CONFIG.fishSpeech, ...(parsed.fishSpeech || {}) },
         events: { ...DEFAULT_CONFIG.events, ...(parsed.events || {}) },
         customer: {
@@ -538,6 +540,7 @@ async function stopCall(sessionId) {
     channel: 'system',
     voiceCore: config.voiceCore,
     voiceProfile: config.voiceProfiles?.internal,
+    kokoro: config.kokoro,
   });
 }
 

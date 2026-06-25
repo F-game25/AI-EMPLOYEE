@@ -206,6 +206,7 @@ function setProvider(provider) {
   const value = String(provider || '').trim();
   if (value === 'voice_core_local' || value === 'voice_core' || value === 'default_voice') engineProvider = 'voice_core_local';
   else if (value.startsWith('voice_lite')) engineProvider = 'voice_lite';
+  else if (value === 'kokoro') engineProvider = 'kokoro';
   else engineProvider = ['fish_speech', 'local'].includes(value) ? value : 'voice_core_local';
 }
 
