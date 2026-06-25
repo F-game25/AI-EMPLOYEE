@@ -10,6 +10,7 @@ const { spawn, spawnSync } = require('child_process');
 const fishSpeech = require('./fish_speech');
 const voiceLite = require('./voice_lite');
 const voiceCore = require('./voice_core_local');
+const nemotronAsr = require('./nemotron_asr');
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const AI_HOME = path.resolve(
@@ -54,6 +55,19 @@ const FISH_MODEL = {
   path: path.join(VOICE_MODEL_ROOT, 'fish-speech', 's2-pro'),
   license: 'Fish Audio Research License',
   source: 'https://huggingface.co/fishaudio/s2-pro',
+};
+
+// Nemotron-3.5-ASR streaming 0.6B, ONNX int4 build (CPU-only, no torch). Multi-file
+// RNN-T model driven by onnxruntime-genai. Downloaded once via the HF repo file list.
+const NEMOTRON_MODEL = {
+  component: 'nemotron_asr',
+  label: 'Nemotron-3.5-ASR streaming 0.6B (ONNX int4)',
+  repo: 'onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4',
+  revision: 'main',
+  path: path.join(VOICE_MODEL_ROOT, 'nemotron'),
+  license: 'MIT',
+  source: 'https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4',
+  required_files: nemotronAsr.REQUIRED_FILES,
 };
 
 const WHISPER_BINARY_CANDIDATES = [
@@ -353,6 +367,18 @@ function getWhisperRuntime() {
   };
 }
 
+// Pick the active STT engine from a preference ('auto'|'nemotron'|'whisper') and what
+// is actually installed. 'auto' prefers Nemotron (multilingual streaming) when present,
+// otherwise whisper.cpp. Never hardcoded — preference comes from config/env/options.
+function resolveAsrEngine(pref, { whisperReady, nemotronReady }) {
+  const want = String(pref || process.env.VOICE_ASR_ENGINE || 'auto').toLowerCase();
+  if (want === 'nemotron') return nemotronReady ? 'nemotron' : (whisperReady ? 'whisper' : 'none');
+  if (want === 'whisper') return whisperReady ? 'whisper' : (nemotronReady ? 'nemotron' : 'none');
+  if (nemotronReady) return 'nemotron';
+  if (whisperReady) return 'whisper';
+  return 'none';
+}
+
 function voiceCoreCheck(status, id) {
   return (status?.checks || []).find((check) => check.id === id) || null;
 }
@@ -392,9 +418,13 @@ async function getStatus() {
   else if (!fishModel) ttsState = 'model_missing';
   else ttsState = 'error';
 
+  const whisperReady = Boolean(whisperRuntime.binary && whisperModel);
+  const nemotronReady = nemotronAsr.modelsPresent();
+  const whisperEngineState = whisperReady ? 'ready' : (whisperRuntime.binary ? 'model_missing' : 'runtime_missing');
   let sttState = 'runtime_missing';
-  if (whisperRuntime.binary && whisperModel) sttState = 'ready';
+  if (whisperReady || nemotronReady) sttState = 'ready';
   else if (whisperRuntime.binary && !whisperModel) sttState = 'model_missing';
+  const activeAsrEngine = resolveAsrEngine(null, { whisperReady, nemotronReady });
 
   const vadRuntimeReady = hasOnnxRuntime();
   const sileroState = vadModel ? (vadRuntimeReady ? 'ready' : 'runtime_missing') : 'model_missing';
@@ -433,6 +463,7 @@ async function getStatus() {
       whisper_model: ASSETS.whisper_model,
       vad_model: ASSETS.vad_model,
       fish_speech: FISH_MODEL,
+      nemotron_asr: NEMOTRON_MODEL,
     },
     hardware,
     recommendation,
@@ -470,13 +501,33 @@ async function getStatus() {
       },
     },
     stt: {
-      provider: 'whisper.cpp',
+      provider: activeAsrEngine === 'nemotron' ? 'nemotron_asr' : 'whisper.cpp',
       state: sttState,
+      active_engine: activeAsrEngine,
       runtime: whisperRuntime,
       model_path: whisperModelPath,
       model_ready: whisperModel,
       recommended_model: 'base.en',
       bundled: Boolean(coreWhisperRuntime?.passed && coreWhisperModel?.passed),
+      engines: {
+        whisper: {
+          state: whisperEngineState,
+          model_ready: whisperModel,
+          runtime_ready: Boolean(whisperRuntime.binary),
+          model_path: whisperModelPath,
+          local: true,
+        },
+        nemotron: {
+          state: nemotronReady ? 'ready' : 'not_installed',
+          model_ready: nemotronReady,
+          model_dir: NEMOTRON_MODEL.path,
+          languages_supported: 33,
+          streaming: true,
+          local: true,
+          requires_gpu: false,
+          install_hint: nemotronReady ? null : 'pip install onnxruntime-genai soundfile + download the nemotron_asr component',
+        },
+      },
     },
     vad: {
       provider: vadProvider,
@@ -734,6 +785,51 @@ async function downloadFishModel(options, emit, token = null) {
   return true;
 }
 
+async function downloadNemotronModel(emit, token = null) {
+  const apiUrl = `https://huggingface.co/api/models/${NEMOTRON_MODEL.repo}?revision=${encodeURIComponent(NEMOTRON_MODEL.revision)}`;
+  // ~0.6B int4 + external .data tensors; reserve generously and verify free space.
+  assertFreeSpace(NEMOTRON_MODEL.path, 3 * 1024 * 1024 * 1024, NEMOTRON_MODEL.label);
+  downloadState = { component: NEMOTRON_MODEL.component, state: 'downloading', percent: 0 };
+  emit({ type: 'download.started', component: NEMOTRON_MODEL.component, state: 'downloading', percent: 0, message: 'Reading Nemotron ASR file list' });
+  assertNotCancelled(token);
+  const response = await fetch(apiUrl);
+  if (!response.ok) throw new Error(`Nemotron model metadata HTTP ${response.status}`);
+  const data = await response.json();
+  const siblings = (data.siblings || [])
+    .map((item) => item.rfilename)
+    .filter((name) => name && name !== '.gitattributes');
+  if (!siblings.length) throw new Error('Nemotron model file list is empty.');
+
+  let index = 0;
+  const files = [];
+  for (const name of siblings) {
+    index += 1;
+    assertNotCancelled(token);
+    const urlPath = name.split('/').map(encodeURIComponent).join('/');
+    const fileUrl = `https://huggingface.co/${NEMOTRON_MODEL.repo}/resolve/${NEMOTRON_MODEL.revision}/${urlPath}`;
+    const dest = safeModelPath(NEMOTRON_MODEL.path, name);
+    const percent = Math.round(((index - 1) / siblings.length) * 100);
+    downloadState = { component: NEMOTRON_MODEL.component, state: 'downloading', percent };
+    emit({ type: 'download.progress', component: NEMOTRON_MODEL.component, state: 'downloading', percent, message: `Downloading ${name}` });
+    await downloadFile(fileUrl, dest, () => {}, token);
+    files.push({ file: name, size: fs.statSync(dest).size, sha256: await sha256File(dest) });
+  }
+  writeManifest(NEMOTRON_MODEL.path, {
+    component: NEMOTRON_MODEL.component,
+    label: NEMOTRON_MODEL.label,
+    repo: NEMOTRON_MODEL.repo,
+    revision: NEMOTRON_MODEL.revision,
+    source: NEMOTRON_MODEL.source,
+    license: NEMOTRON_MODEL.license,
+    files,
+  });
+  downloadState = null;
+  const missing = NEMOTRON_MODEL.required_files.filter((f) => !exists(path.join(NEMOTRON_MODEL.path, f)));
+  if (missing.length) throw new Error(`Nemotron download incomplete; missing ${missing.join(', ')}`);
+  emit({ type: 'download.complete', component: NEMOTRON_MODEL.component, state: 'ready', percent: 100, message: 'Nemotron ASR model ready' });
+  return true;
+}
+
 async function download(component, options = {}, emit = () => {}) {
   const name = String(component || '').trim();
   const token = name.startsWith('voice_lite') || name === 'piper_runtime' || name === 'base_en' || name === 'base_nl'
@@ -758,6 +854,7 @@ async function download(component, options = {}, emit = () => {}) {
     if (name === 'whisper' || name === 'whisper_model') return await downloadKnownAsset(ASSETS.whisper_model, emit, token);
     if (name === 'vad' || name === 'vad_model') return await downloadKnownAsset(ASSETS.vad_model, emit, token);
     if (name === 'fish' || name === 'fish_speech') return await downloadFishModel(options, emit, token);
+    if (name === 'nemotron' || name === 'nemotron_asr') return await downloadNemotronModel(emit, token);
     throw new Error(`Unknown voice runtime component: ${name}`);
   } catch (err) {
     downloadState = null;
@@ -1195,10 +1292,47 @@ async function selfTest(options = {}) {
   };
 }
 
+// Engine-aware STT entry point. Picks Nemotron or whisper.cpp from the caller's
+// preference (config.asr.engine / VOICE_ASR_ENGINE) and availability. Nemotron failures
+// degrade to whisper when whisper is ready, so a turn is never silently lost.
 async function transcribeWav(filePath, options = {}) {
   const status = await getStatus();
-  if (status.stt.state !== 'ready') {
+  const whisperReady = status.stt.engines.whisper.state === 'ready';
+  const nemotronReady = status.stt.engines.nemotron.state === 'ready';
+  const engine = resolveAsrEngine(options.engine, { whisperReady, nemotronReady });
+  if (engine === 'none') {
     throw new Error(`Local STT is not ready: ${status.stt.state}`);
+  }
+  if (engine === 'nemotron') {
+    const result = await nemotronAsr.transcribe(filePath, {
+      language: options.language,
+      langId: options.langId,
+      timeoutMs: options.timeoutMs,
+    });
+    if (result.ok) {
+      if (!result.text) throw new Error('Nemotron ASR returned an empty transcript.');
+      return {
+        text: result.text,
+        confidence: null,
+        elapsed_ms: result.elapsed_ms,
+        model: NEMOTRON_MODEL.label,
+        runtime: 'onnxruntime-genai',
+        engine: 'nemotron',
+        normalized: false,
+        source_sample_rate: result.sample_rate || 16000,
+        source_channels: 1,
+      };
+    }
+    log('warn', `Nemotron ASR failed (${result.reason})${whisperReady ? '; falling back to whisper.cpp' : ''}`);
+    if (!whisperReady) throw new Error(`Nemotron ASR failed: ${result.reason}`);
+  }
+  return transcribeWithWhisper(filePath, options, status);
+}
+
+async function transcribeWithWhisper(filePath, options = {}, status = null) {
+  status = status || await getStatus();
+  if (!status.stt.runtime?.binary || status.stt.engines.whisper.state !== 'ready') {
+    throw new Error(`Local Whisper STT is not ready: ${status.stt.engines.whisper.state}`);
   }
   const binary = status.stt.runtime.binary;
   const model = status.stt.model_path;
@@ -1274,8 +1408,11 @@ function getLogs(limit = 100) {
 module.exports = {
   ASSETS,
   FISH_MODEL,
+  NEMOTRON_MODEL,
   AI_HOME,
   VOICE_MODEL_ROOT,
+  resolveAsrEngine,
+  nemotronAsrStatus: nemotronAsr.getStatus,
   getStatus,
   getLogs,
   doctor,

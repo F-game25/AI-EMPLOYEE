@@ -381,7 +381,12 @@ async function processVoiceAudioTurn(req, res, session, audioBuffer) {
   const filePath = tempWavPath(session.id);
   try {
     await fs.promises.writeFile(filePath, audioBuffer);
-    const transcription = await voiceRuntime.transcribeWav(filePath);
+    const asrCfg = voiceManager.getConfig().asr || {};
+    const transcription = await voiceRuntime.transcribeWav(filePath, {
+      engine: asrCfg.engine,
+      language: asrCfg.language,
+      timeoutMs: asrCfg.timeoutMs,
+    });
     const transcript = String(transcription?.text || '').trim();
     if (!transcript) {
       const message = 'Whisper returned an empty transcript.';
@@ -719,6 +724,12 @@ router.get('/config', async (_req, res) => {
       tones: ['calm', 'warm', 'focused', 'authoritative', 'concerned', 'urgent', 'professional', 'firm'],
       emotions: ['neutral', 'calm', 'warm_confident', 'focused', 'curious', 'concerned', 'firm', 'urgent', 'subtle_excited'],
       approval_modes: ['approval_gates'],
+      asr_engines: ['auto', 'nemotron', 'whisper'],
+    },
+    asr: {
+      ...(cfg.asr || {}),
+      active_engine: runtime.stt?.active_engine || null,
+      engines: runtime.stt?.engines || null,
     },
     profiles: profiles.filter((p) => !p.startsWith('customer_')),
     customer_profiles: profiles.filter((p) => p.startsWith('customer_')),

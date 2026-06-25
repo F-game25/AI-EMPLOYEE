@@ -80,6 +80,9 @@ const DEFAULT_CONFIG = {
   voiceStyle: 'default',
   bootGreeting: true,
   kokoro: { enabled: true, voice: 'af_sarah', speed: 1.0, language: 'en-us' },
+  // STT / "hear" engine selection. engine: 'auto' (Nemotron if installed, else
+  // whisper.cpp) | 'nemotron' | 'whisper'. language: 'auto' multilingual auto-detect.
+  asr: { engine: 'auto', language: 'auto', timeoutMs: 120000 },
   identity: {
     userName: 'Lars',
     rank: 'Chief',
@@ -192,6 +195,7 @@ function loadConfig() {
         },
         voiceLite: { ...DEFAULT_CONFIG.voiceLite, ...(parsed.voiceLite || {}) },
         kokoro: { ...DEFAULT_CONFIG.kokoro, ...(parsed.kokoro || {}) },
+        asr: { ...DEFAULT_CONFIG.asr, ...(parsed.asr || {}) },
         fishSpeech: { ...DEFAULT_CONFIG.fishSpeech, ...(parsed.fishSpeech || {}) },
         events: { ...DEFAULT_CONFIG.events, ...(parsed.events || {}) },
         customer: {
@@ -257,6 +261,7 @@ function applyConfig(patch) {
       ...voiceTeammate.profileToVoiceCore(voiceProfiles.internal, mergedVoiceCore),
     },
     voiceLite: { ...config.voiceLite, ...(patch.voiceLite || {}) },
+    asr: { ...config.asr, ...(patch.asr || {}) },
     fishSpeech: { ...config.fishSpeech, ...(patch.fishSpeech || {}) },
     events: { ...config.events, ...(patch.events || {}) },
     customer: {

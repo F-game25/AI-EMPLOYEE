@@ -38,6 +38,20 @@ avatar(eye): listening ◄── thinking ◄── speaking ─┤
 - Engine adapters (graceful, no-crash if model absent): `nemotron_asr.js`
   (ONNX int4) + `kokoro.js` (kokoro-onnx). Install via the manager's downloader.
 
+> **Status — ASR "hear" engine shipped.** `nemotron_asr.js` + `nemotron_asr.py`
+> (onnxruntime-genai `nemotron_speech`, CPU int4, no torch) are wired into the
+> single STT entry point `voice_runtime_manager.transcribeWav()`, which now selects
+> the engine from `config.asr.engine` (`auto` | `nemotron` | `whisper`, env override
+> `VOICE_ASR_ENGINE`) and availability. `auto` prefers Nemotron when installed and
+> falls back to whisper.cpp; a Nemotron runtime failure also degrades to whisper so a
+> turn is never lost. Model is owner-downloaded via the `nemotron_asr` component
+> (HF repo `onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4`, checksummed +
+> manifested, behind `requireAuth`). The existing mic → `/api/voice/sessions/:id/audio`
+> pipeline uses it automatically. Engines + active engine are surfaced in
+> `GET /api/voice/runtime` (`stt.engines`, `stt.active_engine`) and
+> `GET /api/voice/config` (`asr`, `voice_controls.asr_engines`). Config-driven UI
+> panel + a settings route remain (P1 frontend).
+
 **P2 — Live voice chat + avatar.**
 - Frontend mic capture → stream to Nemotron ASR → live transcript (captions) →
   companion → Kokoro audio playback. Avatar(eye) reacts per phase. Barge-in.
