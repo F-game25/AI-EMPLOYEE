@@ -88,7 +88,8 @@ module.exports = function createArtifactsTasksRouter(deps) {
     if (token) {
       try {
         const jwt = require('jsonwebtoken');
-        jwt.verify(token, process.env.JWT_SECRET_KEY || '');
+        // Fail closed (no empty-secret fallback) and pin the signing algorithm.
+        jwt.verify(token, process.env.JWT_SECRET_KEY, { algorithms: ['HS256'] });
       } catch {
         return res.status(401).send('Unauthorized');
       }
