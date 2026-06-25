@@ -34,6 +34,7 @@
 .aiout__empty { color: #6f9c92; font-size: 13px; padding: 24px; text-align: center; }
 .aiout__pre { white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #cfe8e2; margin: 0; line-height: 1.5; }
 .aiout__media { max-width: 100%; max-height: 70vh; border-radius: 6px; }
+.aiout__audio { width: 100%; margin-top: 8px; }
 
 .aiout__md { line-height: 1.6; color: #d6ebe6; font-size: 14px; }
 .aiout__md h1 { font-size: 20px; color: #00FFB4; margin: 14px 0 6px; }

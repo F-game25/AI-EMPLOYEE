@@ -14,9 +14,11 @@ const extOf = (name = '') => (name.split('.').pop() || '').toLowerCase()
 const fmtBytes = (b) => (!b ? '' : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`)
 const fmtDate = (d) => { try { return new Date(d).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
 
+const AUDIO_EXT = ['wav', 'mp3', 'ogg', 'm4a', 'flac']
 const CATEGORY = (name = '', source = '') => {
   const e = extOf(name)
   if (['mp4', 'mov', 'webm'].includes(e)) return 'media'
+  if (AUDIO_EXT.includes(e)) return 'media'
   if (['png', 'jpg', 'jpeg', 'gif', 'svg'].includes(e)) return 'media'
   if (['py', 'js', 'ts', 'tsx', 'jsx', 'json', 'sh', 'rs', 'go'].includes(e)) return 'code'
   if (source === 'research') return 'research'
@@ -179,7 +181,10 @@ export default function AIOutputPage() {
                 {preview.status === 'ready' && selected.category === 'media' && extOf(selected.name) === 'mp4' && (
                   <video src={`${selected.url}?token=${encodeURIComponent(sessionStorage.getItem('ai_jwt') || '')}`} controls className="aiout__media" />
                 )}
-                {preview.status === 'ready' && selected.category === 'media' && extOf(selected.name) !== 'mp4' && (
+                {preview.status === 'ready' && selected.category === 'media' && AUDIO_EXT.includes(extOf(selected.name)) && (
+                  <audio src={`${selected.url}?token=${encodeURIComponent(sessionStorage.getItem('ai_jwt') || '')}`} controls className="aiout__audio" />
+                )}
+                {preview.status === 'ready' && selected.category === 'media' && extOf(selected.name) !== 'mp4' && !AUDIO_EXT.includes(extOf(selected.name)) && (
                   <img src={`${selected.url}?token=${encodeURIComponent(sessionStorage.getItem('ai_jwt') || '')}`} alt={selected.name} className="aiout__media" />
                 )}
                 {preview.status === 'ready' && selected.category !== 'media' && (

@@ -820,6 +820,32 @@ router.post('/config', (req, res) => {
   }
 });
 
+// POST /api/voice/narrate — synthesize text → a downloadable audio artifact.
+// Powers video narration; the .wav lands in state/artifacts → the AI Output screen.
+router.post('/narrate', async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ ok: false, error: 'text required' });
+  if (text.length > 20000) return res.status(400).json({ ok: false, error: 'text too long (max 20000 chars)' });
+  try {
+    const kokoro = require('../services/voice/kokoro');
+    const st = await kokoro.getStatus();
+    if (!st.ready) return res.status(503).json({ ok: false, error: 'voice model not installed', install: st.install });
+    const result = await kokoro.synthesize(text, {
+      voice: req.body?.voice, speed: Number(req.body?.speed) || 1.0, language: req.body?.language,
+    });
+    if (!result.ok) return res.status(502).json({ ok: false, error: result.reason });
+    const os = require('os'); const fsx = require('fs'); const pathx = require('path');
+    const AI_HOME = pathx.resolve(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || pathx.join(os.homedir(), '.ai-employee'));
+    const dir = pathx.join(process.env.STATE_DIR || pathx.join(AI_HOME, 'state'), 'artifacts');
+    fsx.mkdirSync(dir, { recursive: true });
+    const name = `narration-${Date.now()}.wav`;
+    fsx.writeFileSync(pathx.join(dir, name), result.audioBuf);
+    res.json({ ok: true, artifact: name, url: `/api/artifacts/${name}`, bytes: result.audioBuf.length });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 // POST /api/voice/test
 router.post('/test', async (req, res) => {
   try {
