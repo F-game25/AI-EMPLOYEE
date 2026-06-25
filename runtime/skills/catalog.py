@@ -313,6 +313,24 @@ class ExecutableSkillCatalog(SkillCatalog):
             return {"status": "error", "note": "no goal provided"}
         wanted = str(ctx.get("skill_id") or "").strip()
 
+        # 0a) For a free-text goal (no explicit skill_id), prefer a VALIDATED
+        #     tool-composing skill when the goal maps to one: it runs the real
+        #     ToolRegistry chain (auditable, HITL-gated) rather than a fuzzy
+        #     859-skill semantic match that can tie across unrelated domains
+        #     (e.g. "research the market" ties market-trend / keyword / earnings).
+        #     Falls through on no match or tool failure. (routing-quality.)
+        if not wanted:
+            _tool_matches = self.find_for_goal(goal)
+            if _tool_matches:
+                _tname = _tool_matches[0]["name"]
+                _res = self.execute_skill(
+                    _tname, {"topic": goal, "query": goal, "goal": goal},
+                    agent_id=str(ctx.get("agent_id") or "system"))
+                if _res.get("ok"):
+                    return {"status": "ok", "skill_id": _tname, "via": "skill_catalog_tools",
+                            "tools": (self.get_skill(_tname) or {}).get("tools", []),
+                            "output": _res.get("result")}
+
         # 0) Prefer the DEEPENED, full-quality executable skills (the SkillBase
         #    catalog where the ~859 validated skills live). Explicit skill_id wins;
         #    otherwise match the goal to the best one. Without this, goal dispatch
