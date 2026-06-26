@@ -350,6 +350,63 @@ BATCH8_SKILL_IDS: tuple[str, ...] = (
     "keyword_search_plan_builder",
 )
 
+BATCH9_SKILL_IDS: tuple[str, ...] = (
+    "lesson_content_writer",
+    "linkedin_profile_optimization_reviewer",
+    "list_segmentation_planner",
+    "market_entry_strategy_reviewer",
+    "market_positioning_reviewer",
+    "message_performance_tracking_reporter",
+    "messaging_framework_reviewer",
+    "meta_ads_strategy_reviewer",
+    "risk_mitigation_plan_builder",
+    "notification_dispatch_reviewer",
+    "order_aggregation_reconciler",
+    "outreach_sequence_reviewer",
+    "performance_diagnosis_analyst",
+    "performance_prediction_reviewer",
+    "performance_tracking_reporter",
+    "buyer_persona_builder",
+    "plg_strategy_reviewer",
+    "ppc_campaign_architecture_reviewer",
+    "prediction_market_analysis_brief_builder",
+    "price_prediction_review_brief_builder",
+    "profit_margin_calculation_reviewer",
+    "prospect_research_brief_builder",
+    "quiz_content_builder",
+    "report_generation_reviewer",
+    "rss_feed_fetch_plan_builder",
+    "scene_extraction_reviewer",
+    "schema_markup_reviewer",
+    "content_script_writer",
+    "self_improvement_proposal_reviewer",
+    "seo_optimization_reviewer",
+    "smart_contract_parameter_reviewer",
+    "brand_storytelling_reviewer",
+    "strategic_analysis_brief_builder",
+    "subscriber_management_reviewer",
+    "swarm_simulation_plan_reviewer",
+    "thought_leadership_content_reviewer",
+    "tiktok_script_writer",
+    "tiktok_trend_scan_reporter",
+    "customer_touchpoint_map_builder",
+    "trading_bot_code_reviewer",
+)
+
+BATCH10_SKILL_IDS: tuple[str, ...] = (
+    "trend_analysis_brief_builder",
+    "typography_system_reviewer",
+    "user_flow_design_reviewer",
+    "ux_writing_reviewer",
+    "viral_content_reviewer",
+    "viral_marketing_plan_reviewer",
+    "viral_loop_mechanics_reviewer",
+    "visual_identity_brief_builder",
+    "email_warmup_plan_builder",
+    "website_audit_checker",
+    "whatsapp_notification_reviewer",
+)
+
 
 PRODUCTION_FIELDS: tuple[str, ...] = (
     "subcategory",
@@ -489,3 +546,13 @@ def validate_batch7_library(path: Path | None = None) -> dict[str, Any]:
 def validate_batch8_library(path: Path | None = None) -> dict[str, Any]:
     """Return a structured readiness report for the eighth 40 skills."""
     return _validate_skill_batch(BATCH8_SKILL_IDS, path, "batch_8")
+
+
+def validate_batch9_library(path: Path | None = None) -> dict[str, Any]:
+    """Return a structured readiness report for the ninth 40 skills."""
+    return _validate_skill_batch(BATCH9_SKILL_IDS, path, "batch_9")
+
+
+def validate_batch10_library(path: Path | None = None) -> dict[str, Any]:
+    """Return a structured readiness report for the final 11 skills."""
+    return _validate_skill_batch(BATCH10_SKILL_IDS, path, "batch_10")

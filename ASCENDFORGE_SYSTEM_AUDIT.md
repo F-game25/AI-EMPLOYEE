@@ -236,7 +236,7 @@ deep research, doctor/diagnostics. WS `forge:*` events stream run/queue/diagnost
 |---|---|---:|---|---|
 | Coding quality | PARTIAL | 4 | single-shot codegen, no diff test-loop | P0 |
 | Planning quality | PARTIAL | 6 | lifecycle plans the *plan*, not the diff | P1 |
-| Skill execution | PARTIAL | 4 | 560/570 prompt-only, no schema/tests | P1 |
+| Skill execution | IMPROVED | 6 | all 371 generated skills upgraded to full production schema (input/output contracts, safety+approval gates, audit events, wired UI); batches 1–10 complete, 0 weak backfill entries left. Still prompt-grounded (no per-skill exec harness yet) | P1 |
 | Agent orchestration | WORKING | 7 | run_goal + dispatcher + MCP wired | P2 |
 | Model routing | WORKING | 6 | no quality/regression scoring | P1 |
 | Context handling | PARTIAL | 5 | keyword relevance; not call-graph/RAG-on-prompt | P1 |
