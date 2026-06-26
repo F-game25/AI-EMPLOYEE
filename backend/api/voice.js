@@ -15,8 +15,11 @@ const voiceRuntime = require('../services/voice/voice_runtime_manager');
 const voiceTeammate = require('../services/voice/voice_teammate_service');
 const { splitSentences } = require('../services/voice/stream_pipeline');
 const { getWorker } = require('../py_worker_client');
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
 const router = Router();
+// File-writing voice routes are rate-limited (CodeQL: missing rate limiting).
+const narrateLimit = createRouteRateLimit({ max: 10, windowMs: 60_000, keyPrefix: 'voice-narrate' });
 const audioBodyParser = raw({
   type: ['audio/wav', 'audio/x-wav', 'audio/wave', 'application/octet-stream'],
   limit: '25mb',
@@ -852,7 +855,7 @@ router.post('/speak', async (req, res) => {
 
 // POST /api/voice/narrate — synthesize text → a downloadable audio artifact.
 // Powers video narration; the .wav lands in state/artifacts → the AI Output screen.
-router.post('/narrate', async (req, res) => {
+router.post('/narrate', narrateLimit, async (req, res) => {
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ ok: false, error: 'text required' });
   if (text.length > 20000) return res.status(400).json({ ok: false, error: 'text too long (max 20000 chars)' });
