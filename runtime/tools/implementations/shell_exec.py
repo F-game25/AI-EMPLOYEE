@@ -89,7 +89,12 @@ def _parse_pipeline(command: str):
     if not allowed:
         return None, "no command allowlist configured (deny-by-default)"
     for argv in stages:
-        exe = os.path.basename(argv[0])
+        exe = argv[0]
+        # Reject path-qualified executables (./echo, /tmp/echo, ..\\bin) so a bare
+        # allowlisted name can ONLY resolve via PATH — never a binary planted in
+        # the (world-writable) cwd. shell=False already prevents shell resolution.
+        if "/" in exe or "\\" in exe or os.sep in exe or (os.altsep and os.altsep in exe):
+            return None, f"executable must be a bare command name, not a path: '{exe}'"
         if exe not in allowed:
             return None, f"command '{exe}' is not allowlisted"
     return stages, ""
@@ -112,7 +117,7 @@ def shell_exec(command: str, cwd: str = "/tmp", timeout: int = 30, **_) -> dict:
         return {"stdout": "", "stderr": f"Command blocked: {reason}",
                 "returncode": -1, "ok": False}
 
-    timeout = min(int(timeout), 120)
+    timeout = max(1, min(int(timeout), 120))
     env = {k: v for k, v in os.environ.items() if k in _ALLOWED_ENVS}
     env["HOME"] = os.environ.get("HOME", "/tmp")
     if not os.path.isabs(cwd):
@@ -163,3 +168,12 @@ def shell_exec(command: str, cwd: str = "/tmp", timeout: int = 30, **_) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.error("shell_exec error: %s", exc)
         return {"stdout": "", "stderr": str(exc), "returncode": -1, "ok": False}
+    finally:
+        # Never leak processes/fds on any error path (mid-pipeline Popen failure,
+        # ValueError, OSError, etc.) — kill anything still running.
+        for p in procs:
+            try:
+                if p.poll() is None:
+                    p.kill()
+            except Exception:  # noqa: BLE001
+                pass

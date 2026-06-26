@@ -72,6 +72,15 @@ def test_secrets_are_stripped_from_child_env():
         os.environ.pop("MY_FAKE_SECRET_TOKEN", None)
 
 
+def test_path_qualified_executable_blocked():
+    # ./echo, /tmp/echo, ../bin/echo must NOT pass as the allowlisted 'echo'
+    # (would run a binary planted in the world-writable cwd).
+    for cmd in ("./echo hi", "/tmp/echo hi", "../bin/echo hi", "bin/echo hi"):
+        r = shell_exec(cmd)
+        assert r["ok"] is False, cmd
+        assert "not a path" in r["stderr"], r["stderr"]
+
+
 def test_empty_command_blocked():
     assert shell_exec("")["ok"] is False
     assert shell_exec("   ")["ok"] is False
