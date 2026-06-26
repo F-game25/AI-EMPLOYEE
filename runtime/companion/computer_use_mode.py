@@ -37,26 +37,31 @@ def _path() -> Path:
 
 
 def get_mode() -> dict:
-    """Return ``{enabled, desktop_available, updated_at}``. Fails safe to OFF."""
+    """Return ``{enabled, desktop, desktop_available, updated_at}``. Fails safe to OFF.
+
+    ``enabled``  — master Computer-Use switch.
+    ``desktop``  — desktop (screen/system) sub-switch; control needs BOTH on.
+    """
     with _LOCK:
         try:
             data = json.loads(_path().read_text(encoding="utf-8"))
             return {
                 "enabled": bool(data.get("enabled", False)),
-                "desktop_available": False,  # Phase 2 — desktop not wired yet
+                "desktop": bool(data.get("desktop", False)),
+                "desktop_available": False,  # kept for back-compat (driver check lives in desktop_control)
                 "updated_at": data.get("updated_at"),
             }
         except FileNotFoundError:
-            return {"enabled": False, "desktop_available": False, "updated_at": None}
+            return {"enabled": False, "desktop": False, "desktop_available": False, "updated_at": None}
         except Exception as exc:  # noqa: BLE001
             logger.warning("computer_use_mode read failed (defaulting OFF): %s", exc)
-            return {"enabled": False, "desktop_available": False, "updated_at": None}
+            return {"enabled": False, "desktop": False, "desktop_available": False, "updated_at": None}
 
 
-def set_mode(enabled: bool) -> dict:
-    """Persist the mode and return the new state."""
+def _write(enabled: bool, desktop: bool) -> dict:
     payload = {
         "enabled": bool(enabled),
+        "desktop": bool(desktop),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z") or time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     with _LOCK:
@@ -66,9 +71,26 @@ def set_mode(enabled: bool) -> dict:
             p.write_text(json.dumps(payload), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             logger.warning("computer_use_mode write failed: %s", exc)
-    return {"enabled": bool(enabled), "desktop_available": False, "updated_at": payload["updated_at"]}
+    return {**payload, "desktop_available": False}
+
+
+def set_mode(enabled: bool) -> dict:
+    """Persist the master switch (preserving the desktop sub-switch)."""
+    return _write(enabled, get_mode().get("desktop", False))
+
+
+def set_desktop(enabled: bool) -> dict:
+    """Persist the desktop sub-switch (preserving the master switch). Desktop
+    control requires the master switch AND this sub-switch ON."""
+    return _write(get_mode().get("enabled", False), enabled)
 
 
 def computer_use_enabled() -> bool:
     """True only when the master Computer-Use switch is ON."""
     return bool(get_mode().get("enabled"))
+
+
+def desktop_enabled() -> bool:
+    """True only when BOTH the master switch and the desktop sub-switch are ON."""
+    m = get_mode()
+    return bool(m.get("enabled")) and bool(m.get("desktop"))
