@@ -156,7 +156,9 @@ def _usage(data: dict) -> dict:
 
 def _idempotency_key(json_data: dict) -> str:
     payload = json.dumps(json_data, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    # Non-security idempotency key (dedupes identical requests), not password
+    # hashing — flag it so CodeQL doesn't treat it as a weak credential hash.
+    digest = hashlib.sha256(payload.encode("utf-8"), usedforsecurity=False).hexdigest()[:32]
     return f"last30days:{digest}"
 
 

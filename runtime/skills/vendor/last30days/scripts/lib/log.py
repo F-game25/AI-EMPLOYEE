@@ -1,15 +1,28 @@
 """Shared logging utilities for last30days skill."""
 
 import os
+import re
 import sys
 
 DEBUG = os.environ.get("LAST30DAYS_DEBUG", "").lower() in ("1", "true", "yes")
+
+# Redact common secret/token patterns before anything reaches stderr, so debug/
+# source logs can never emit clear-text credentials (CodeQL: clear-text logging
+# of sensitive information).
+_SECRET_RE = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|"
+    r"passwd|authorization|bearer)\b(\s*[:=]\s*|\s+)(\S+)"
+)
+
+
+def _redact(msg: object) -> str:
+    return _SECRET_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}***REDACTED***", str(msg))
 
 
 def debug(msg: str) -> None:
     """Log debug message to stderr (only when LAST30DAYS_DEBUG is set)."""
     if DEBUG:
-        sys.stderr.write(f"[DEBUG] {msg}\n")
+        sys.stderr.write(f"[DEBUG] {_redact(msg)}\n")
         sys.stderr.flush()
 
 
@@ -31,5 +44,5 @@ def source_log(prefix: str, msg: str, *, tty_only: bool = True) -> None:
     """
     if tty_only and not sys.stderr.isatty():
         return
-    sys.stderr.write(f"[{prefix}] {msg}\n")
+    sys.stderr.write(f"[{prefix}] {_redact(msg)}\n")
     sys.stderr.flush()
