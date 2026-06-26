@@ -112,7 +112,11 @@ jobs:
         run: npm ci
 
       - name: Install backend test deps
-        run: npm install --no-save better-sqlite3@12.9.0
+        run: |
+          npm install --no-save better-sqlite3@12.9.0
+          # Backend deps (express etc.) so node tests that load backend modules
+          # (e.g. test_update_endpoint_auth.js → routes/system-ops) resolve.
+          npm --prefix backend install --ignore-scripts
 
       - name: Node syntax check — backend/server.js
         run: node --check backend/server.js
