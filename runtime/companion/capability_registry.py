@@ -115,7 +115,7 @@ def _seed(reg: CapabilityRegistry) -> None:
         ),
         Capability(
             id="system.overview",
-            subsystem="system",
+            subsystem="monitoring",
             name="System overview status report",
             description="Full status report: active tasks, completed today, agent count, "
                         "system health, recent activity. what are you working on, status "

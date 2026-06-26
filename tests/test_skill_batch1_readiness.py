@@ -98,7 +98,7 @@ def test_batch9_library_is_ready_and_count_preserved():
     report = validate_batch9_library()
     assert report["ok"], report
     assert report["batch_size"] == 40
-    assert report["total"] == 570
+    assert report["total"] == 571
     assert len(BATCH9_SKILL_IDS) == 40
 
 
@@ -108,7 +108,7 @@ def test_batch10_library_is_ready_and_count_preserved():
     report = validate_batch10_library()
     assert report["ok"], report
     assert report["batch_size"] == 11
-    assert report["total"] == 570
+    assert report["total"] == 571
     assert len(BATCH10_SKILL_IDS) == 11
 
 
