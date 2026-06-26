@@ -30,6 +30,7 @@ const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
+const { rateLimit: expressRateLimit } = require('express-rate-limit');
 const compression = require('compression');
 
 const gateway = require('./gateway');
@@ -398,7 +399,7 @@ const _rl_upload      = makeRateLimit(20);   // /api/workspace/upload — 20/min
 const _rl_ollama_pull = makeRateLimit(3);    // /api/ollama/pull — 3/min per IP (expensive operation)
 const _rl_chat        = makeRateLimit(30);   // /api/chat — 30/min per IP
 const _rl_tasks_run   = makeRateLimit(30);   // /api/tasks/run — 30/min per IP
-const _rl_api_global  = makeRateLimit(120);  // /api/* catch-all — 120/min per IP
+const _rl_api_global  = expressRateLimit({ windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false });  // /api/* catch-all — 120/min per IP (express-rate-limit: recognised by CodeQL)
 
 // Simple in-memory response cache with TTL.
 // Returns middleware that serves cached JSON for ttlMs, then refreshes.
@@ -485,7 +486,6 @@ app.use(express.json({ limit: '64kb' }));
 // Per-route limiters above stay stricter for sensitive routes; this bounds
 // unauthenticated floods / DoS on every other route. Generous so the local
 // dashboard's polling is never throttled. (CodeQL: js/missing-rate-limiting.)
-const { rateLimit: expressRateLimit } = require('express-rate-limit');
 app.use(expressRateLimit({
   windowMs: 60_000,
   max: 3000,
