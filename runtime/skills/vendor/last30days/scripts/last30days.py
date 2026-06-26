@@ -15,6 +15,26 @@ import sys
 import threading
 from pathlib import Path
 
+# Redact sensitive keys before emitting JSON to stdout (CodeQL: clear-text
+# logging of sensitive information). Used by the setup-result prints below.
+_SENSITIVE_RESULT_KEYS = {
+    "api_key", "access_token", "refresh_token", "token",
+    "password", "secret", "authorization",
+}
+
+
+def _sanitize_for_stdout(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            k: ("***REDACTED***" if isinstance(k, str) and k.lower() in _SENSITIVE_RESULT_KEYS
+                else _sanitize_for_stdout(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_for_stdout(v) for v in value]
+    return value
+
+
 MIN_PYTHON = (3, 12)
 
 
@@ -988,7 +1008,7 @@ def main() -> int:
         from lib import setup_wizard
         if "--openclaw" in extra_argv:
             results = setup_wizard.run_openclaw_setup(config)
-            print(json.dumps(results))
+            print(json.dumps(_sanitize_for_stdout(results)))
             return 0
         if "--github" in extra_argv or "--device-auth" in extra_argv:
             if "--github" in extra_argv:
@@ -1004,7 +1024,7 @@ def main() -> int:
                 results["api_key"] = setup_wizard.mask_api_key(api_key)
             else:
                 results["persisted"] = False
-            print(json.dumps(results))
+            print(json.dumps(_sanitize_for_stdout(results)))
             return 0
         sys.stderr.write("Running auto-setup...\n")
         results = setup_wizard.run_auto_setup(
