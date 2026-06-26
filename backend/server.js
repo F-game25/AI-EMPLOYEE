@@ -481,11 +481,17 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '64kb' }));
 
-// Global API rate-limit backstop. Per-route limiters above stay stricter for
-// sensitive routes; this bounds unauthenticated floods / DoS on every other
-// route. Generous so the local dashboard's polling is never throttled.
-// (CodeQL: missing rate limiting.)
-app.use(makeRateLimit(3000));
+// Global API rate-limit backstop using express-rate-limit (recognised by CodeQL).
+// Per-route limiters above stay stricter for sensitive routes; this bounds
+// unauthenticated floods / DoS on every other route. Generous so the local
+// dashboard's polling is never throttled. (CodeQL: js/missing-rate-limiting.)
+const { rateLimit: expressRateLimit } = require('express-rate-limit');
+app.use(expressRateLimit({
+  windowMs: 60_000,
+  max: 3000,
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
 
 // ── Multi-tenancy middleware (extracts tenant from JWT) ───────────────────────
 app.use(tenantMiddleware(JWT_SECRET));
