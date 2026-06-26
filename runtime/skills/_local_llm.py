@@ -15,7 +15,13 @@ _TIMEOUT_S = int(os.getenv("LOCAL_LLM_TIMEOUT_S", "120"))
 
 
 def _is_loopback(host: str) -> bool:
-    return host.startswith(("http://localhost", "http://127.0.0.1", "https://localhost", "https://127.0.0.1"))
+    # Exact hostname match — a prefix check would accept http://localhost.evil.com.
+    from urllib.parse import urlparse
+    try:
+        h = (urlparse(host).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+    return h in ("localhost", "127.0.0.1", "::1")
 
 
 def local_chat(prompt: str, system: str | None = None, num_predict: int = 512,

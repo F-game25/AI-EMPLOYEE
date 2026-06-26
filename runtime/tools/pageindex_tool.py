@@ -91,8 +91,10 @@ def _local_llm_select(query: str, sections: list[dict], k: int) -> list[int] | N
         "options": {"temperature": 0.0, "num_predict": 64},
     }).encode("utf-8")
     try:
-        # Hard local-only: never anything but the loopback Ollama host.
-        if not _OLLAMA_HOST.startswith(("http://localhost", "http://127.0.0.1")):
+        # Hard local-only: never anything but the loopback Ollama host. Exact
+        # hostname match (a prefix check would accept http://localhost.evil.com).
+        from urllib.parse import urlparse
+        if (urlparse(_OLLAMA_HOST).hostname or "").lower() not in ("localhost", "127.0.0.1", "::1"):
             return None
         req = urllib.request.Request(f"{_OLLAMA_HOST}/api/chat", data=body,
                                      headers={"Content-Type": "application/json"})
