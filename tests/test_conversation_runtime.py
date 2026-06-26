@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runtime"))
 from companion.session_state import get_session_store, extract_options  # noqa: E402
 from companion.context_resolver import resolve_option_selection  # noqa: E402
 from companion.response_policy import policy_for  # noqa: E402
-from companion.conversation_runtime import ConversationRuntime  # noqa: E402
+from companion.conversation_runtime import ConversationRuntime, _render_dialogue  # noqa: E402
 from companion.schemas import CompanionRequest  # noqa: E402
 
 
@@ -101,3 +101,56 @@ def test_policy_value_is_short_and_no_tutorial():
 def test_policy_relaxes_when_user_asks_for_detail():
     p = policy_for({"mode": "conversation"}, user_text="explain in detail step by step")
     assert p.allow_tutorial
+
+
+# ── Conversation depth: the whole running dialogue reaches the model ───────────
+
+def test_as_context_exposes_running_dialogue():
+    store = get_session_store()
+    st = store.load("sess-depth-1", "default")
+    st.note_user("we are launching a SaaS for dentists")
+    st.note_assistant("Got it — a SaaS for dental clinics. What's the pricing model?")
+    st.note_user("monthly subscription, 49 euro")
+    store.save(st)
+    ctx = store.load("sess-depth-1", "default").as_context()
+    msgs = ctx.get("recent_messages")
+    assert isinstance(msgs, list) and len(msgs) == 3
+    # earliest turn is still present — not just the last exchange
+    assert any("dentists" in m["content"] for m in msgs)
+
+
+def test_render_dialogue_formats_and_bounds():
+    msgs = [
+        {"role": "user", "content": "first thing"},
+        {"role": "assistant", "content": "noted first"},
+        {"role": "user", "content": "second thing"},
+    ]
+    rendered = _render_dialogue(msgs)
+    assert "User: first thing" in rendered
+    assert "Assistant: noted first" in rendered
+    # role labels, oldest first
+    assert rendered.index("first thing") < rendered.index("second thing")
+    # char budget keeps the transcript bounded as the session grows
+    os.environ["COMPANION_DIALOGUE_CHAR_BUDGET"] = "40"
+    try:
+        long_msgs = [{"role": "user", "content": "x" * 100} for _ in range(10)]
+        bounded = _render_dialogue(long_msgs)
+        assert len(bounded) <= 200  # at most one clipped line survives the 40-char budget
+    finally:
+        del os.environ["COMPANION_DIALOGUE_CHAR_BUDGET"]
+    assert _render_dialogue([]) == "" and _render_dialogue(None) == ""
+
+
+def test_session_context_prompt_includes_multiturn_history():
+    ctx = {
+        "current_topic": "saas_launch",
+        "recent_messages": [
+            {"role": "user", "content": "we sell to dentists"},
+            {"role": "assistant", "content": "understood, dental clinics"},
+            {"role": "user", "content": "what channel should we use first?"},
+        ],
+    }
+    block = ConversationRuntime._session_context_prompt(ctx)
+    assert "Recent conversation" in block
+    assert "dentists" in block and "dental clinics" in block
+    assert "Conversation topic so far: saas_launch" in block

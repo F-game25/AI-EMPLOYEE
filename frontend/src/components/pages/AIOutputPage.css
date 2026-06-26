@@ -1,0 +1,48 @@
+.aiout { display: flex; flex-direction: column; height: 100%; padding: 20px 24px; gap: 14px; color: #d6ebe6; }
+.aiout__head { display: flex; align-items: flex-start; justify-content: space-between; }
+.aiout__title { margin: 0; font-size: 20px; letter-spacing: 0.02em; color: #00FFB4; }
+.aiout__sub { margin: 2px 0 0; font-size: 12px; color: #7fb3a8; }
+.aiout__refresh { background: rgba(0,255,180,0.08); border: 1px solid rgba(0,255,180,0.3); color: #00FFB4; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
+.aiout__refresh:hover { background: rgba(0,255,180,0.16); }
+
+.aiout__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.aiout__tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.aiout__tab { background: rgba(255,255,255,0.03); border: 1px solid rgba(0,255,180,0.15); color: #9fd5ca; border-radius: 16px; padding: 5px 12px; cursor: pointer; font-size: 12px; }
+.aiout__tab.is-active { background: rgba(0,255,180,0.14); border-color: rgba(0,255,180,0.5); color: #00FFB4; }
+.aiout__count { opacity: 0.6; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.aiout__search { background: rgba(15,22,41,0.6); border: 1px solid rgba(0,217,255,0.2); color: #d6ebe6; border-radius: 6px; padding: 7px 12px; font-size: 12px; min-width: 220px; outline: none; }
+
+.aiout__body { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 16px; flex: 1; min-height: 0; }
+.aiout__list { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
+.aiout__item { display: flex; align-items: center; gap: 10px; text-align: left; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 9px 11px; cursor: pointer; color: inherit; width: 100%; }
+.aiout__item:hover { border-color: rgba(0,255,180,0.3); background: rgba(0,255,180,0.05); }
+.aiout__item.is-selected { border-color: rgba(0,255,180,0.6); background: rgba(0,255,180,0.1); }
+.aiout__item-icon { font-size: 16px; flex: 0 0 auto; }
+.aiout__item-main { display: flex; flex-direction: column; min-width: 0; }
+.aiout__item-name { font-size: 13px; color: #d6ebe6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aiout__item-meta { font-size: 10px; color: #6f9c92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.aiout__preview { border: 1px solid rgba(0,255,180,0.15); border-radius: 10px; background: rgba(8,20,18,0.5); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.aiout__preview-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid rgba(0,255,180,0.12); gap: 10px; }
+.aiout__preview-name { font-size: 13px; color: #cfe8e2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aiout__actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.aiout__actions button { background: rgba(0,255,180,0.08); border: 1px solid rgba(0,255,180,0.3); color: #00FFB4; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 11px; }
+.aiout__actions button:hover { background: rgba(0,255,180,0.16); }
+.aiout__actions a { text-decoration: none; }
+.aiout__preview-body { padding: 16px; overflow-y: auto; flex: 1; }
+
+.aiout__empty { color: #6f9c92; font-size: 13px; padding: 24px; text-align: center; }
+.aiout__pre { white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #cfe8e2; margin: 0; line-height: 1.5; }
+.aiout__media { max-width: 100%; max-height: 70vh; border-radius: 6px; }
+.aiout__audio { width: 100%; margin-top: 8px; }
+
+.aiout__md { line-height: 1.6; color: #d6ebe6; font-size: 14px; }
+.aiout__md h1 { font-size: 20px; color: #00FFB4; margin: 14px 0 6px; }
+.aiout__md h2 { font-size: 16px; color: #9fd5ca; margin: 12px 0 5px; }
+.aiout__md h3 { font-size: 14px; color: #b8d8d0; margin: 10px 0 4px; }
+.aiout__md p { margin: 4px 0; }
+.aiout__md code { background: rgba(0,255,180,0.1); padding: 1px 5px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.aiout__md .aiout__li { margin: 2px 0 2px 8px; }
+.aiout__md .aiout__br { height: 8px; }
+
+@media (max-width: 820px) { .aiout__body { grid-template-columns: 1fr; } }

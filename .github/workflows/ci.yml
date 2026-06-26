@@ -112,7 +112,13 @@ jobs:
         run: npm ci
 
       - name: Install backend test deps
-        run: npm install --no-save better-sqlite3@12.9.0
+        run: |
+          npm install --no-save better-sqlite3@12.9.0
+          # Backend deps (express, multer, better-sqlite3 native build) so node
+          # tests that load backend modules (e.g. test_update_endpoint_auth.js →
+          # routes/system-ops) resolve. NO --ignore-scripts: better-sqlite3 needs
+          # its native build step (backend has no custom install scripts).
+          npm --prefix backend install
 
       - name: Node syntax check — backend/server.js
         run: node --check backend/server.js
@@ -134,6 +140,18 @@ jobs:
 
       - name: Run compute dispatch + egress-guard tests (D1)
         run: node tests/test_compute_dispatch.js
+
+      - name: Run system update endpoint auth regression test
+        run: node tests/test_update_endpoint_auth.js
+
+      - name: Run Kokoro voice adapter test
+        run: node tests/test_kokoro_voice.js
+
+      - name: Run route-auth scanner unit tests (M1)
+        run: node tests/test_route_auth_scanner.js
+
+      - name: Run JWT algorithm-pin regression test (M1)
+        run: node tests/test_jwt_alg_pin.js
 
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
@@ -189,6 +207,38 @@ jobs:
       - name: Bandit static analysis
         run: bandit -r runtime/ -ll -q || true
         continue-on-error: true
+
+  # ─────────────────────────────────────────────────────────────────
+  # ROUTE AUTH SCANNER (advisory, non-blocking) — M1
+  # Flags any sensitive Express route lacking an auth guard. Policy in
+  # runtime/config/security.yml (route_auth). Fail-closed on missing config.
+  # Promote to blocking (add to all-green needs) once stable — see
+  # docs/governance/IMPLEMENTATION_PLAN.md (module 1).
+  # ─────────────────────────────────────────────────────────────────
+  route-auth-scan:
+    name: Route Auth Scanner (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Scan route auth coverage
+        run: node backend/security/route_auth_scanner.js --json | tee route-auth-report.json
+        continue-on-error: true
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: route-auth-report
+          path: route-auth-report.json
+          retention-days: 30
 
   # ─────────────────────────────────────────────────────────────────
   # GATE — all required checks must pass

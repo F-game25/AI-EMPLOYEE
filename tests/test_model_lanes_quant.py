@@ -34,7 +34,11 @@ def test_resolve_tier_with_quant_shape():
 
 def test_coding_role_never_degrades_to_general():
     out = ml.model_and_quant_for_role("coding")
-    assert "coder" in out["model"].lower()  # must stay a coder model
+    # Coding must resolve to a DESIGNATED coding model from the role config
+    # (qwythos — the primary model with a hardened codegen Modelfile — or a
+    # dedicated *coder), never a general fallback. Config-driven, no hardcoding.
+    coding_models = {m.lower() for m in ml._model_roles()["coding"]["preferred_models"]}
+    assert (out["model"] or "").lower() in coding_models, f"degraded to {out['model']}"
 
 
 def test_execution_role_resolves_a_model():

@@ -1,8 +1,11 @@
 """
-OpenAI Client — first-class LLM provider.
+OpenAI Client — internal leaf adapter for a single provider.
 
-Used alongside Anthropic / OpenRouter / Ollama, independently and concurrently
-via LLMProviderRouter. OpenAI-compatible chat/completions API. Key from Settings.
+NOT called directly: it is invoked only through LLMProviderRouter, which is the
+audited surface that applies the egress guard (no secrets/PII leave the box),
+retries, and writes redacted call metadata to llm_calls.jsonl. Used alongside
+Anthropic / OpenRouter / Ollama / NVIDIA, independently and concurrently.
+OpenAI-compatible chat/completions API. Key from Settings.
 """
 
 import json

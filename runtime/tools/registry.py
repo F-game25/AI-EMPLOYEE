@@ -231,6 +231,8 @@ def _autoregister() -> None:
         from . import write_file_tool     # noqa: F401
         from . import http_request_tool   # noqa: F401
         from . import system_info         # noqa: F401
+        from . import video_render_tool   # noqa: F401
+        from . import pageindex_tool      # noqa: F401
     except Exception as e:
         logger.debug("tool autoregister partial failure: %s", e)
 

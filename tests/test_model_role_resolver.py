@@ -22,7 +22,7 @@ def test_execution_blocked_when_nothing_installed(monkeypatch):
     monkeypatch.setattr(rr, "_installed_models", lambda: set())
     out = rr.execution_reasoning_ready()
     assert out["available"] is False
-    assert out["install_suggestion"] == "gemma4:e4b-it-qat"  # first preferred
+    assert out["install_suggestion"] == "qwythos:q4"  # first preferred (primary system model)
     assert out["model"] is None
 
 

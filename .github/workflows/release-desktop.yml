@@ -1,0 +1,121 @@
+# Cross-platform desktop release — builds the AETERNUS NEXUS app installers on
+# native runners (one per OS) and attaches them to a DRAFT GitHub Release.
+#
+# Why a matrix: electron-builder cannot produce a signed macOS .dmg or a Windows
+# NSIS installer from Linux, so each installer is built on its own OS runner.
+#
+# Security posture (deliberate, per project rules — no auto-deploy/expose):
+#   • Builds are UNSIGNED (no code-signing certs in CI). CSC auto-discovery is off.
+#   • The build job is given NO GitHub token, so electron-builder cannot auto-publish.
+#   • Artifacts are attached to a DRAFT release only — nothing goes public until a
+#     human reviews and clicks Publish.
+#   • Triggers are explicit: a version tag (v*) or a manual run. Never on every push.
+name: Release Desktop
+
+"on":
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you building installers? (audit note)"
+        required: false
+        default: "manual build"
+  push:
+    tags:
+      - "v*"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+            eb_flags: "--linux AppImage deb"
+            artifacts: |
+              launcher/dist/*.AppImage
+              launcher/dist/*.deb
+          - os: macos-latest
+            label: macos
+            eb_flags: "--mac dmg zip --x64 --arm64"
+            artifacts: |
+              launcher/dist/*.dmg
+              launcher/dist/*.zip
+          - os: windows-latest
+            label: windows
+            eb_flags: "--win nsis portable --x64"
+            artifacts: |
+              launcher/dist/*.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The launcher bundles frontend/dist via extraResources, so it must be built
+      # before electron-builder packages the app.
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+      - name: Install launcher dependencies
+        run: npm --prefix launcher ci
+
+      # Same per-OS targets the local `dist:desktop:*` scripts use. Icons are
+      # committed under launcher/assets, so no Python/icon-generation step is needed.
+      # No GH/GITHUB token is exposed here → electron-builder cannot publish.
+      - name: Build installers (${{ matrix.label }})
+        working-directory: launcher
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx --no-install electron-builder ${{ matrix.eb_flags }}
+
+      - name: List build output
+        run: ls -la launcher/dist
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-${{ matrix.label }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish draft release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create draft release with installers
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: artifacts/**/*

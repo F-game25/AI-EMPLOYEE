@@ -1,10 +1,12 @@
 """
-NVIDIA Client — hosted NVIDIA AI (NIM / build.nvidia.com) provider.
+NVIDIA Client — internal leaf adapter (hosted NVIDIA AI / NIM / build.nvidia.com).
 
+NOT called directly: invoked only through LLMProviderRouter, the audited surface
+that applies the egress guard, retries, and redacted llm_calls.jsonl logging.
 Gives "external extra power" for deploying agents on NVIDIA-cloud GPUs (Llama,
 Nemotron, etc.). OpenAI-compatible chat/completions API at integrate.api.nvidia.com.
 Used alongside Anthropic / OpenAI / OpenRouter / Ollama, independently and
-concurrently via LLMProviderRouter. Key (NVIDIA_API_KEY, 'nvapi-…') from Settings.
+concurrently. Key (NVIDIA_API_KEY, 'nvapi-…') from Settings.
 """
 
 import json

@@ -63,6 +63,54 @@ class SandboxPolicy:
             ]
 
 
+# Only these environment variables are exposed to sandboxed code. The host
+# environment carries secrets (API keys, JWT_SECRET_KEY, DB creds); passing it to
+# executed code — which is LLM/user-authored and may escape the restricted builtins
+# — would leak every secret. Allowlist the minimum needed to run Python.
+_SANDBOX_ENV_ALLOW = (
+    "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TEMP", "TMP",
+    "PYTHONPATH", "PYTHONUNBUFFERED", "PYTHONHASHSEED", "SYSTEMROOT", "PATHEXT",
+)
+
+
+def _sandbox_env() -> dict:
+    """Sanitized environment for the sandbox subprocess — secrets stripped."""
+    env = {k: v for k, v in os.environ.items() if k in _SANDBOX_ENV_ALLOW}
+    env["PYTHONUNBUFFERED"] = "1"
+    env.setdefault("HOME", tempfile.gettempdir())
+    return env
+
+
+def _rlimit_preexec(policy: "SandboxPolicy"):
+    """Return a preexec_fn that applies OS resource limits (POSIX only).
+
+    Caps CPU time, address space (memory), output file size, and process count so
+    sandboxed code cannot exhaust the host or fork-bomb. Returns None where rlimits
+    are unavailable (e.g. Windows), where the subprocess timeout remains the guard.
+    """
+    if os.name != "posix":
+        return None
+    try:
+        import resource  # noqa: PLC0415 — POSIX-only
+    except Exception:  # noqa: BLE001
+        return None
+
+    cpu = max(1, int(getattr(policy, "max_cpu_seconds", 30)))
+    mem_bytes = max(64, int(getattr(policy, "max_memory_mb", 500))) * 1024 * 1024
+
+    def _apply():  # runs in the child before exec
+        try:
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 1))
+            resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+            resource.setrlimit(resource.RLIMIT_FSIZE, (50 * 1024 * 1024, 50 * 1024 * 1024))
+            if hasattr(resource, "RLIMIT_NPROC"):
+                resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
+        except Exception:  # noqa: BLE001 — never block execution on a missing limit
+            pass
+
+    return _apply
+
+
 class SandboxManager:
     """Manage sandboxed agent execution"""
 
@@ -237,7 +285,8 @@ class SandboxManager:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env={**os.environ, 'PYTHONUNBUFFERED': '1'},
+                env=_sandbox_env(),  # secrets stripped — host env never reaches sandboxed code
+                preexec_fn=_rlimit_preexec(self.policy),  # CPU/mem/fsize/nproc caps (POSIX)
             )
 
             # Parse output
@@ -276,36 +325,35 @@ class SandboxManager:
             'zip', '__name__', '__doc__',
         }
 
-        # Create sandbox with limited builtins
-        builtin_whitelist = {name: __builtins__[name] for name in safe_builtins if name in __builtins__}
-
         context_json = json.dumps(context, default=str)
         allowed_imports = json.dumps(self.policy.allowed_imports)
+        safe_names = json.dumps(sorted(safe_builtins))
 
+        # Build a real restricted-builtins DICT in the child (callables can't be
+        # JSON-serialized), exec the code with explicit globals, and embed the code
+        # via repr() so content containing triple-quotes cannot break out of the
+        # wrapper. NOTE: restricted builtins is a soft barrier (object-graph escapes
+        # exist); the hard controls are the stripped env (no secrets) + the POSIX
+        # rlimits applied to this subprocess. Use forge_sandbox_manager / a container
+        # for genuinely untrusted code.
         return f'''
-import json
-import sys
+import json, sys
+import builtins as _b
 
-# Restrict builtins
-__builtins__ = {json.dumps(list(safe_builtins))}
-
-# Load provided context
+_SAFE_NAMES = {safe_names}
+_restricted = {{n: getattr(_b, n) for n in _SAFE_NAMES if hasattr(_b, n)}}
 __context__ = json.loads({repr(context_json)})
-
-# Restrict imports
 __allowed_imports__ = {allowed_imports}
 
-# Execute user code with sandbox environment
+_g = {{"__builtins__": _restricted, "__context__": __context__,
+       "__allowed_imports__": __allowed_imports__}}
 try:
-    exec("""
-{code}
-    """)
-    result = {{'success': True, 'result': locals().get('result')}}
+    exec({repr(code)}, _g)
+    result = {{"success": True, "result": _g.get("result")}}
 except Exception as e:
-    result = {{'success': False, 'error': str(e)}}
+    result = {{"success": False, "error": str(e)}}
 
-# Output result as JSON
-print(json.dumps(result))
+sys.stdout.write(json.dumps(result, default=str))
 '''
 
     def run_code(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
@@ -323,6 +371,30 @@ print(json.dumps(result))
             context=kwargs.get("context", {}),
             timeout=kwargs.get("timeout"),
         )
+
+    def execute_safe(self, action_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalised entrypoint used by execution_engine / real_execution_engine.
+
+        Runs the payload's code via ``run_code`` and maps the internal
+        ``{'success': ...}`` shape onto the ``{ok, result, error}`` contract the
+        callers rely on. Never raises (fail-closed) — the callers previously hit
+        AttributeError because this method did not exist.
+        """
+        payload = payload or {}
+        code = str(payload.get("code", "") or "")
+        language = str(payload.get("language", "python") or "python")
+        try:
+            res = self.run_code(code, language=language,
+                                 context=payload.get("context", {}),
+                                 timeout=payload.get("timeout"))
+        except Exception as exc:  # noqa: BLE001 — never raise to callers
+            return {"ok": False, "result": None, "error": str(exc)}
+        if not isinstance(res, dict):
+            return {"ok": False, "result": None, "error": "sandbox returned no result"}
+        ok = bool(res.get("ok", res.get("success", False)))
+        return {"ok": ok,
+                "result": res.get("result", res.get("output")),
+                "error": res.get("error", "") if not ok else ""}
 
     def _run_rust(self, code: str, dependencies: list = None, timeout: int = 30) -> Dict[str, Any]:
         """Compile and run Rust code in a temp Cargo project."""

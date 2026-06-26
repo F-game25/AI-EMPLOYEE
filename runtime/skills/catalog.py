@@ -15,6 +15,9 @@ from typing import Any, Callable
 
 from skills.base import SkillBase
 from skills.context_research import ContextResearchSkill
+from skills.product_video import ProductVideoSkill
+from skills.document_qa import DocumentQASkill
+from skills.last30days_skill import Last30DaysSkill
 
 # Capability tags per skill name
 _SKILL_TAGS: dict[str, list[str]] = {
@@ -106,8 +109,24 @@ class SkillCatalog:
             )
             for skill_name, desc in configured
         }
-        # First-class skill: context research (executable directly, no dispatch indirection)
+        # First-class skills: executable directly (compose atomic tools), no dispatch indirection.
         skills["context-research"] = ContextResearchSkill()
+        skills["product-video"] = ProductVideoSkill()
+        skills["document-qa"] = DocumentQASkill()
+        # FULL-QUALITY upgrade: every library skill (+ generated definitions for the
+        # previously-undefined ones) is registered as EXECUTABLE — validated output +
+        # artifact via a category-derived quality gate — overriding the prompt-only
+        # version. The 15 top skills keep their hand-tuned gold gates.
+        try:
+            from skills.executable_content import build_all_executable_skills
+            from skills.generated_defs import load_generated_defs
+            skills.update(build_all_executable_skills(extra_library=load_generated_defs()))
+        except Exception:  # never break catalog load
+            pass
+        # First-class executable adapter must win over the generic library executor
+        # auto-built above (it has a real `last30days` entry in skills_library.json
+        # for planner discovery, but execution must run the vendored research code).
+        skills["last30days"] = Last30DaysSkill()
         skills.update(self._load_configured_skills(existing=set(skills)))
         return skills
 
@@ -234,6 +253,51 @@ class ExecutableSkillCatalog(SkillCatalog):
 
     # ── Unified dispatch (the one skill chain) ─────────────────────────────────
 
+    _MATCH_STOP = frozenset({
+        "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "is",
+        "are", "be", "can", "i", "my", "this", "that", "it", "as", "at", "by", "me",
+        "you", "our", "us", "please", "want", "need", "would", "could", "should",
+        "about", "some", "get", "give",
+    })
+
+    @staticmethod
+    def _hit(t: str, toks: set) -> bool:
+        """Token match with controlled prefix-stemming (write↔writing, lead↔leads,
+        score↔scoring) — bounded length delta so short tokens don't over-match."""
+        if t in toks:
+            return True
+        if len(t) >= 4:
+            return any((h.startswith(t) or t.startswith(h)) and abs(len(h) - len(t)) <= 3 for h in toks)
+        return False
+
+    def _match_executable_skillbase(self, goal: str):
+        """Best-matching deepened executable skill (version 2.0) for a free-text goal.
+        Field-weighted: id/name (curated, specific) > tags > description (noisy).
+        Returns (id, skill) or None."""
+        import re
+        q = {t for t in re.findall(r"[a-z0-9_]+", goal.lower())
+             if len(t) > 2 and t not in self._MATCH_STOP}
+        if not q:
+            return None
+        best, best_score = None, 0
+        for sid, sk in self._skills.items():
+            if getattr(sk, "version", None) != "2.0":  # only the full-quality executable skills
+                continue
+            id_toks = set(re.findall(r"[a-z0-9_]+", f"{sid} {getattr(sk, 'name', '')}".lower()))
+            tag_toks = set(re.findall(r"[a-z0-9_]+", " ".join(getattr(sk, "capability_tags", [])).lower()))
+            desc_toks = set(re.findall(r"[a-z0-9_]+", str(getattr(sk, "description", "")).lower()))
+            score = 0
+            for t in q:
+                if self._hit(t, id_toks):
+                    score += 3
+                elif self._hit(t, tag_toks):
+                    score += 2
+                elif self._hit(t, desc_toks):
+                    score += 1
+            if score > best_score:
+                best_score, best = score, (sid, sk)
+        return best if best_score >= 3 else None
+
     def dispatch_for_goal(self, goal: str, ctx: dict | None = None) -> dict:
         """Run a free-text goal through the SAME skill chain the Executor uses.
 
@@ -247,9 +311,59 @@ class ExecutableSkillCatalog(SkillCatalog):
         goal = (goal or "").strip()
         if not goal:
             return {"status": "error", "note": "no goal provided"}
+        wanted = str(ctx.get("skill_id") or "").strip()
+
+        # 0a) For a free-text goal (no explicit skill_id), prefer a VALIDATED
+        #     tool-composing skill when the goal maps to one: it runs the real
+        #     ToolRegistry chain (auditable, HITL-gated) rather than a fuzzy
+        #     859-skill semantic match that can tie across unrelated domains
+        #     (e.g. "research the market" ties market-trend / keyword / earnings).
+        #     Falls through on no match or tool failure. (routing-quality.)
+        if not wanted:
+            _tool_matches = self.find_for_goal(goal)
+            if _tool_matches:
+                _tname = _tool_matches[0]["name"]
+                _res = self.execute_skill(
+                    _tname, {"topic": goal, "query": goal, "goal": goal},
+                    agent_id=str(ctx.get("agent_id") or "system"))
+                if _res.get("ok"):
+                    return {"status": "ok", "skill_id": _tname, "via": "skill_catalog_tools",
+                            "tools": (self.get_skill(_tname) or {}).get("tools", []),
+                            "output": _res.get("result")}
+
+        # 0) Prefer the DEEPENED, full-quality executable skills (the SkillBase
+        #    catalog where the ~859 validated skills live). Explicit skill_id wins;
+        #    otherwise match the goal to the best one. Without this, goal dispatch
+        #    would never reach them (it would fall to the _exec_skills registry).
+        sb_id, sb = None, None
+        if wanted and self.get(wanted) is not None:
+            sb_id, sb = wanted, self.get(wanted)
+        elif not wanted:
+            picked = self._match_executable_skillbase(goal)
+            if picked is not None:
+                sb_id, sb = picked
+        # HITL contract: an explicitly requested approval-gated / high-risk skill runs
+        # through the library path so the model receives its developer guidance + an
+        # approval notice, and the result surfaces requires_human_approval/safety_level.
+        if wanted and sb is not None and (
+                getattr(sb, "requires_human_approval", False)
+                or str(getattr(sb, "risk_level", "")).lower() in ("dangerous", "high")):
+            return self._run_library_skill(goal, ctx)
+        if sb is not None and hasattr(sb, "execute"):
+            try:
+                res = sb.execute({"brief": goal, "query": goal, "topic": goal,
+                                  "document": ctx.get("document")}, lambda a, p: {})
+                if isinstance(res, dict) and res.get("status") in (
+                        "success", "planned", "partial", "low_quality"):
+                    return {"status": "ok", "skill_id": sb_id, "via": "executable_skillbase",
+                            "output": res, "quality": res.get("quality"),
+                            "artifact": res.get("artifact"),
+                            "requires_human_approval": getattr(sb, "requires_human_approval", False),
+                            "safety_level": getattr(sb, "safety_level", None)}
+            except Exception:  # noqa: BLE001 — fall through to legacy paths
+                pass
 
         # 1) Tool-composing executable skill — explicit id or best description match.
-        wanted = str(ctx.get("skill_id") or "").strip()
         name = wanted if (wanted and self.get_skill(wanted)) else None
         if wanted and name is None:
             return self._run_library_skill(goal, ctx)

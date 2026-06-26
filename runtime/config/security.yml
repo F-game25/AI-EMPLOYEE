@@ -87,3 +87,86 @@ limits:
   max_concurrent_requests: 10
   max_memory_usage_mb: 1024
   request_timeout_seconds: 30
+
+# Tool execution policy (consumed by runtime/tools/implementations/shell_exec.py)
+tools:
+  shell_exec:
+    # Allowlist of executable BASENAMES shell_exec may run (controlled-pipelines
+    # policy: only these, optionally piped with '|'; no redirects/substitution/
+    # chaining). Deny-by-default — if this list is empty/missing, shell_exec runs
+    # nothing. Network tools (curl/wget) and destructive ones are intentionally
+    # excluded; add here (or in security.local.yml) only after considering risk.
+    allowed_commands:
+      # read-only inspection
+      - ls
+      - cat
+      - head
+      - tail
+      - grep
+      - egrep
+      - fgrep
+      - find
+      - wc
+      - echo
+      - pwd
+      - which
+      - file
+      - stat
+      - tree
+      - sort
+      - uniq
+      - cut
+      - tr
+      - awk
+      - sed
+      - diff
+      - basename
+      - dirname
+      - realpath
+      - date
+      - env
+      - jq
+      # dev toolchain (note: interpreters can run arbitrary code — contained by
+      # the surrounding sandbox, not the allowlist)
+      - python
+      - python3
+      - pip
+      - pip3
+      - node
+      - npm
+      - npx
+      - pytest
+      - git
+      - make
+
+# Route auth coverage policy (consumed by backend/security/route_auth_scanner.js).
+# A route is "sensitive" if any path segment matches a sensitive_prefix; sensitive
+# routes must carry an auth guard (requireAuth/requireScope/...) unless explicitly
+# listed in public_allowlist. Fail-closed: if this block is missing the scanner
+# treats every route as sensitive.
+route_auth:
+  public_allowlist:
+    - "/health"
+    - "/version"
+    - "/api/readiness"
+    - "/api/auth/token"
+    - "/api/auth/auto-token"
+    - "/api/auth/service-token"
+    - "/api/identity/public"
+    - "/api/boot/phase"
+    - "/api/onboarding/palettes"
+    - "/metrics"
+    - "/internal/events"
+    - "/workspace/*"
+  sensitive_prefixes:
+    - "secrets"
+    - "remote-compute"
+    - "compute"
+    - "sandbox"
+    - "forge"
+    - "evolution"
+    - "deployment"
+    - "orders"
+    - "marketplace"
+    - "memory"
+    - "rag"

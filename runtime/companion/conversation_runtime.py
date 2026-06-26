@@ -64,6 +64,55 @@ _CRITIQUE_MODES = frozenset({"execution", "planning", "debugging"})
 _LOW_CONFIDENCE_THRESHOLD = 0.55
 
 
+def _int_env(name: str, default: int) -> int:
+    """Read a positive int env override, falling back to ``default`` on anything bad."""
+    try:
+        val = int(str(os.getenv(name, "")).strip() or default)
+        return val if val > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+# Multi-turn conversation depth. The running dialogue is rendered into the prompt so
+# the model reasons over the whole session, bounded by a turn count + total char budget
+# (and a per-line clip) so context can never grow unbounded. All env-tunable — no magic.
+def _dialogue_max_turns() -> int:
+    return _int_env("COMPANION_DIALOGUE_TURNS", 12)
+
+
+def _dialogue_line_clip() -> int:
+    return _int_env("COMPANION_DIALOGUE_LINE_CLIP", 400)
+
+
+def _dialogue_char_budget() -> int:
+    return _int_env("COMPANION_DIALOGUE_CHAR_BUDGET", 3000)
+
+
+def _render_dialogue(messages: Any) -> str:
+    """Render the rolling dialogue into ``User:/Assistant:`` lines for the prompt.
+
+    Bounded three ways so context stays flat as a session grows: keep at most the last
+    N turns, clip each line, then drop oldest lines until the total fits the char
+    budget. Returns ``""`` when there is nothing usable.
+    """
+    if not isinstance(messages, list) or not messages:
+        return ""
+    line_clip = _dialogue_line_clip()
+    lines: list[str] = []
+    for msg in messages[-_dialogue_max_turns():]:
+        if not isinstance(msg, dict):
+            continue
+        role = "User" if str(msg.get("role")) == "user" else "Assistant"
+        content = " ".join(str(msg.get("content") or "").split())
+        if not content:
+            continue
+        lines.append(f"{role}: {content[:line_clip]}")
+    budget = _dialogue_char_budget()
+    while len(lines) > 1 and sum(len(line) for line in lines) > budget:
+        lines.pop(0)
+    return "\n".join(lines)
+
+
 def _critique_enabled() -> bool:
     """Master critique switch (default ON; ``COMPANION_CRITIQUE=0`` disables)."""
     return os.getenv("COMPANION_CRITIQUE", "1").strip() != "0"
@@ -84,10 +133,10 @@ class ConversationRuntime:
         """Run a turn. Never raises — failures become ok=False responses."""
         t0 = time.time()
         try:
-            return self._handle_inner(request, t0)
+            response = self._handle_inner(request, t0)
         except Exception as exc:  # noqa: BLE001 — total failure → safe response
             logger.exception("conversation runtime failed: %s", exc)
-            return CompanionResponse(
+            response = CompanionResponse(
                 ok=False,
                 mode="conversation",
                 reply="I hit an internal error handling that. Nothing was executed.",
@@ -95,6 +144,13 @@ class ConversationRuntime:
                 meta={"error": str(exc),
                       "latency_ms": int((time.time() - t0) * 1000)},
             )
+        # Voice channel invariant: every spoken turn carries a voice_summary, even on
+        # response paths that don't set one explicitly. The full reply still goes to
+        # chat; TTS speaks this. Centralised here so no single path can forget it.
+        if (request.channel or "").lower() == "voice" and isinstance(response.meta, dict):
+            if not str(response.meta.get("voice_summary") or "").strip():
+                response.meta["voice_summary"] = self._voice_summary(response.reply)
+        return response
 
     # ── Pipeline ─────────────────────────────────────────────────────────────────
 
@@ -367,11 +423,25 @@ class ConversationRuntime:
 
     @staticmethod
     def _session_context_prompt(ctx: dict) -> str:
-        """Small factual context block for conversational follow-ups."""
+        """Factual context block giving the model real multi-turn depth.
+
+        Renders the running dialogue (bounded by turns + char budget) so follow-ups,
+        clarifications, and references resolve against the whole session — not just the
+        last exchange. Falls back to the single last reply when no dialogue is present.
+        """
         parts: list[str] = []
-        last_assistant = str(ctx.get("last_assistant_message") or "").strip()
-        if last_assistant:
-            parts.append(f"Previous assistant reply: {last_assistant[:900]}")
+        topic = str(ctx.get("current_topic") or "").strip()
+        if topic:
+            parts.append(f"Conversation topic so far: {topic[:300]}")
+
+        dialogue = _render_dialogue(ctx.get("recent_messages"))
+        if dialogue:
+            parts.append("Recent conversation (oldest first):\n" + dialogue)
+        else:
+            last_assistant = str(ctx.get("last_assistant_message") or "").strip()
+            if last_assistant:
+                parts.append(f"Previous assistant reply: {last_assistant[:900]}")
+
         tool_results = ctx.get("recent_tool_results") or []
         if isinstance(tool_results, list) and tool_results:
             try:
@@ -390,7 +460,11 @@ class ConversationRuntime:
     def _generate_plan(self, text: str, ctx: dict, model_info: dict) -> str:
         system = ("You are a planning assistant. Produce a short, numbered, "
                   "actionable plan. Do NOT execute anything. 3-7 steps max.")
-        return self._llm(text, system, model_info,
+        prompt = text
+        session_context = self._session_context_prompt(ctx)
+        if session_context:
+            prompt = f"{session_context}\n\nUser: {text}"
+        return self._llm(prompt, system, model_info,
                          fallback=("Plan (LLM offline — outline only):\n"
                                    "1. Clarify the goal and constraints.\n"
                                    "2. Identify the subsystems involved.\n"
@@ -482,21 +556,46 @@ class ConversationRuntime:
 
     @staticmethod
     def _summarize_execution(out: dict, intent: dict) -> str:
-        ran = out.get("executed") or []
         appr = out.get("approvals_required") or []
+        results = out.get("results") or []
         parts: list[str] = []
-        if ran:
-            parts.append(f"Ran: {', '.join(ran)}.")
+
+        # Surface the ACTUAL deliverable, not just "Ran: X". The skill result is
+        # nested in result['data'] (the skills.run -> dispatch_for_goal payload).
+        for r in results:
+            if r.get("status") != "ok":
+                continue
+            data = r.get("data") if isinstance(r.get("data"), dict) else {}
+            skill_id = data.get("skill_id")
+            out_obj = data.get("output")
+            deliverable, artifact = None, data.get("artifact")
+            if isinstance(out_obj, dict):
+                deliverable = (out_obj.get("output") or out_obj.get("answer")
+                               or out_obj.get("summary") or out_obj.get("report_md"))
+                artifact = out_obj.get("artifact") or artifact
+            elif isinstance(out_obj, str):
+                deliverable = out_obj
+            if deliverable:
+                head = f"✅ Done — **{skill_id or r.get('cap')}**"
+                if artifact:
+                    head += f"  ·  saved: `{artifact}`"
+                body = str(deliverable).strip()
+                if len(body) > 2400:
+                    body = body[:2400] + "\n\n…(full deliverable saved as the artifact above)"
+                parts.append(f"{head}\n\n{body}")
+
         if appr:
             names = ", ".join(a.get("action", a.get("cap", "?")) for a in appr)
             parts.append(f"Awaiting your approval before running: {names}.")
-        not_impl = [r["cap"] for r in out.get("results", [])
-                    if r.get("status") == "not_implemented"]
+        not_impl = [r["cap"] for r in results if r.get("status") == "not_implemented"]
         if not_impl:
             parts.append(f"Not yet wired (no fabricated result): {', '.join(not_impl)}.")
+        # Only fall back to the bare "Ran:" line when nothing concrete surfaced.
         if not parts:
-            parts.append("No capability matched that request — nothing executed.")
-        return " ".join(parts)
+            ran = out.get("executed") or []
+            parts.append(f"Ran: {', '.join(ran)}." if ran
+                         else "No capability matched that request — nothing executed.")
+        return "\n\n".join(parts)
 
     @staticmethod
     def _summarize_monitoring(out: dict) -> str:
@@ -526,6 +625,8 @@ class ConversationRuntime:
                     parts.append("GPU " + ", ".join(names))
                 if parts:
                     return "This PC — " + "; ".join(parts) + "."
+            if cap == "system.overview" and isinstance(res, dict):
+                return ConversationRuntime._format_overview(res.get("overview") or res)
         ok = [r for r in results if r.get("status") == "ok"]
         if ok:
             ids = ", ".join(r["cap"] for r in ok)
@@ -535,6 +636,24 @@ class ConversationRuntime:
             return ("Monitoring adapters for these aren't wired yet (no fabricated "
                     f"data): {', '.join(stubs)}.")
         return "Nothing to report from the monitoring read."
+
+    @staticmethod
+    def _format_overview(ov: dict) -> str:
+        """Readable system status report from real aggregated state."""
+        lines = ["📊 **System status**", f"• Active tasks: {ov.get('active_tasks', 0)}"]
+        for t in (ov.get("tasks") or [])[:5]:
+            if isinstance(t, dict):
+                name = t.get("title") or t.get("goal") or t.get("name") or t.get("id") or "task"
+                lines.append(f"   – {str(name)[:80]} [{t.get('status', '?')}]")
+        lines.append(f"• Agents available: {ov.get('agents_total', 0)}")
+        h = ov.get("health") or {}
+        if h:
+            extra = f" · CPU {h.get('cpu_percent')}% · MEM {h.get('memory_percent')}%" if h.get("cpu_percent") is not None else ""
+            lines.append(f"• Health: {h.get('status', 'ok')}{extra}")
+        acts = ov.get("recent_activity") or []
+        if acts:
+            lines.append("• Recent: " + ", ".join(str(a)[:40] for a in acts[:5]))
+        return "\n".join(lines)
 
     @staticmethod
     def _format_morning_brief(data: dict) -> str:

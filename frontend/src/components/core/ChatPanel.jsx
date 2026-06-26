@@ -22,9 +22,13 @@ export default function ChatPanel({ isOpen, onClose }) {
   const companionThinking = useCompanionStore(s => s.thinking)
   const companionMessages = useCompanionStore(s => s.messages)
   const sendCompanionMessage = useCompanionStore(s => s.sendMessage)
+  const lastActions = useCompanionStore(s => s.lastActions)
   const [input, setInput] = useState('')
   const [researchRuns, setResearchRuns] = useState([])
   const [startingResearch, setStartingResearch] = useState(false)
+  const [voiceOn, setVoiceOn] = useState(() => { try { return localStorage.getItem('teammate_voice') === '1' } catch { return false } })
+  const spokenRef = useRef(0)
+  const audioRef = useRef(null)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const inputId = useId()
@@ -76,11 +80,11 @@ export default function ChatPanel({ isOpen, onClose }) {
   // Dedicated Deep Research trigger: uses the current input as the topic, launches
   // the multi-hop research engine, and renders a live inline card in the chat that
   // visualizes phases + sites visited + progress and reports back the final report.
-  const startDeepResearch = async (depth = 'deep') => {
-    const topic = input.trim()
+  const startDeepResearch = async (depth = 'deep', topicArg = null) => {
+    const topic = (topicArg || input.trim()).trim()
     if (!topic || startingResearch) return
     setStartingResearch(true)
-    addChatMessage?.({ role: 'user', content: `🔬 Deep research: ${topic}`, ts: Date.now() })
+    if (!topicArg) addChatMessage?.({ role: 'user', content: `🔬 Deep research: ${topic}`, ts: Date.now() })
     try {
       const r = await fetch('/api/research/deep/start', {
         method: 'POST',
@@ -90,7 +94,7 @@ export default function ChatPanel({ isOpen, onClose }) {
       const d = await r.json()
       if (d.ok && d.report_id) {
         setResearchRuns(prev => [...prev, { id: d.report_id, topic, depth, ts: Date.now() }])
-        setInput('')
+        if (!topicArg) setInput('')
       } else {
         addChatMessage?.({ role: 'assistant', content: '⚠ Could not start deep research. Try again.', ts: Date.now() })
       }
@@ -100,6 +104,56 @@ export default function ChatPanel({ isOpen, onClose }) {
       setStartingResearch(false)
     }
   }
+
+  // When the teammate emits a deep_research DIRECTIVE (you asked it in chat), start
+  // the real run + render the live card here — so chat deep research actually runs
+  // and shows progress + the report, instead of just confirming.
+  const handledDirectivesRef = useRef(new Set())
+  useEffect(() => {
+    for (const a of (lastActions || [])) {
+      const d = a?.data && typeof a.data === 'object' ? a.data : null
+      if (d?.directive === 'deep_research' && d.topic) {
+        const key = `${d.topic}|${d.depth || 'deep'}`
+        if (handledDirectivesRef.current.has(key)) continue
+        handledDirectivesRef.current.add(key)
+        startDeepResearch(d.depth || 'deep', d.topic)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastActions])
+
+  const toggleVoice = () => setVoiceOn(v => {
+    const nv = !v
+    try { localStorage.setItem('teammate_voice', nv ? '1' : '0') } catch { /* noop */ }
+    if (!nv && audioRef.current) { try { audioRef.current.pause() } catch { /* noop */ } }
+    return nv
+  })
+
+  // Speak each new companion reply via the local Kokoro voice (browser playback).
+  // Uses the concise voice_summary when present so spoken replies stay short.
+  useEffect(() => {
+    if (!voiceOn || !companionMessages?.length) return
+    const last = companionMessages[companionMessages.length - 1]
+    if (!last || last.role !== 'companion' || (last.ts || 0) <= spokenRef.current) return
+    spokenRef.current = last.ts || Date.now()
+    const text = String(last.meta?.voice_summary || last.text || '').trim()
+    if (!text) return
+    let url = null
+    ;(async () => {
+      try {
+        const r = await fetch('/api/voice/speak', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: text.slice(0, 1200) }) })
+        if (!r.ok) return
+        const blob = await r.blob()
+        url = URL.createObjectURL(blob)
+        if (audioRef.current) { try { audioRef.current.pause() } catch { /* noop */ } }
+        const audio = new Audio(url)
+        audioRef.current = audio
+        audio.onended = () => { try { URL.revokeObjectURL(url) } catch { /* noop */ } }
+        audio.play().catch(() => {})
+      } catch { /* voice is best-effort */ }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companionMessages, voiceOn])
 
   const handleKey = e => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -297,6 +351,14 @@ export default function ChatPanel({ isOpen, onClose }) {
           onKeyDown={handleKey}
           autoComplete="off"
         />
+        <button
+          className={`chat-panel__voice ${voiceOn ? 'is-on' : ''}`}
+          onClick={toggleVoice}
+          aria-label={voiceOn ? 'Voice on — teammate speaks replies' : 'Voice off'}
+          title={voiceOn ? 'Voice ON — teammate speaks (Kokoro). Click to mute.' : 'Voice OFF — click to let the teammate speak'}
+        >
+          {voiceOn ? '🔊' : '🔇'}
+        </button>
         <button
           className="chat-panel__research"
           onClick={() => startDeepResearch('deep')}

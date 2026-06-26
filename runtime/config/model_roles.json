@@ -10,13 +10,13 @@
       "never_degrade_to_general": "coding must never resolve to a non-coder model",
       "text_only_fallback": "vision role may fall back to text-only when no multimodal model fits"
     },
-    "updated": "2026-06-17"
+    "updated": "2026-06-25"
   },
 
   "execution_reasoning": {
     "tier": "HEAVY",
     "min_quant": "q4_0",
-    "preferred_models": ["gemma4:e4b-it-qat", "gemma3:4b-it-qat", "gemma3:12b-it-qat", "qwen3.5"],
+    "preferred_models": ["qwythos:q4", "gemma4:e4b-it-qat", "gemma3:4b-it-qat", "gemma3:12b-it-qat", "qwen3.5"],
     "required_for": ["pc_control", "browser_action", "forge_action"],
     "on_unavailable": "block_or_manual_or_remote"
   },
@@ -24,7 +24,7 @@
   "coding": {
     "tier": "CODE",
     "min_quant": "q4_K_M",
-    "preferred_models": ["qwen2.5-coder:14b", "qwen2.5-coder:7b"],
+    "preferred_models": ["qwythos:q4", "qwen2.5-coder:14b", "qwen2.5-coder:7b"],
     "never_degrade_to_general": true,
     "on_unavailable": "block_or_remote"
   },
