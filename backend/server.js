@@ -481,6 +481,12 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '64kb' }));
 
+// Global API rate-limit backstop. Per-route limiters above stay stricter for
+// sensitive routes; this bounds unauthenticated floods / DoS on every other
+// route. Generous so the local dashboard's polling is never throttled.
+// (CodeQL: missing rate limiting.)
+app.use(makeRateLimit(3000));
+
 // ── Multi-tenancy middleware (extracts tenant from JWT) ───────────────────────
 app.use(tenantMiddleware(JWT_SECRET));
 // Inject role from JWT claims onto req.user (RBAC — non-breaking augmentation)

@@ -372,6 +372,30 @@ sys.stdout.write(json.dumps(result, default=str))
             timeout=kwargs.get("timeout"),
         )
 
+    def execute_safe(self, action_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalised entrypoint used by execution_engine / real_execution_engine.
+
+        Runs the payload's code via ``run_code`` and maps the internal
+        ``{'success': ...}`` shape onto the ``{ok, result, error}`` contract the
+        callers rely on. Never raises (fail-closed) — the callers previously hit
+        AttributeError because this method did not exist.
+        """
+        payload = payload or {}
+        code = str(payload.get("code", "") or "")
+        language = str(payload.get("language", "python") or "python")
+        try:
+            res = self.run_code(code, language=language,
+                                 context=payload.get("context", {}),
+                                 timeout=payload.get("timeout"))
+        except Exception as exc:  # noqa: BLE001 — never raise to callers
+            return {"ok": False, "result": None, "error": str(exc)}
+        if not isinstance(res, dict):
+            return {"ok": False, "result": None, "error": "sandbox returned no result"}
+        ok = bool(res.get("ok", res.get("success", False)))
+        return {"ok": ok,
+                "result": res.get("result", res.get("output")),
+                "error": res.get("error", "") if not ok else ""}
+
     def _run_rust(self, code: str, dependencies: list = None, timeout: int = 30) -> Dict[str, Any]:
         """Compile and run Rust code in a temp Cargo project."""
         import shutil
