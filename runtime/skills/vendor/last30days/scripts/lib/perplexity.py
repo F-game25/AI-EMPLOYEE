@@ -154,10 +154,26 @@ def _usage(data: dict) -> dict:
     return usage if isinstance(usage, dict) else {}
 
 
+_IDEMPOTENCY_SECRET_KEYS = {
+    "api_key", "apikey", "authorization", "token", "access_token",
+    "refresh_token", "bearer", "secret", "password", "key",
+}
+
+
+def _strip_secrets(obj: object) -> object:
+    """Recursively drop credential fields so they are never hashed."""
+    if isinstance(obj, dict):
+        return {k: _strip_secrets(v) for k, v in obj.items()
+                if not (isinstance(k, str) and k.lower() in _IDEMPOTENCY_SECRET_KEYS)}
+    if isinstance(obj, list):
+        return [_strip_secrets(v) for v in obj]
+    return obj
+
+
 def _idempotency_key(json_data: dict) -> str:
-    payload = json.dumps(json_data, sort_keys=True, separators=(",", ":"))
-    # Non-security idempotency key (dedupes identical requests), not password
-    # hashing — flag it so CodeQL doesn't treat it as a weak credential hash.
+    # Dedup key over request CONTENT only — strip credential fields so no secret
+    # is ever hashed (they identify the caller, not the request content).
+    payload = json.dumps(_strip_secrets(json_data), sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(payload.encode("utf-8"), usedforsecurity=False).hexdigest()[:32]
     return f"last30days:{digest}"
 

@@ -43,7 +43,8 @@ class ArtifactEngine:
             score = _keyword_score(tokens, content)
             if score == 0.0:
                 continue
-            uid = hashlib.md5(f"artifact:{art.get('id', name)}".encode()).hexdigest()[:12]
+            # Short non-security UID for an artifact (id/name) — not a credential.
+            uid = hashlib.md5(f"artifact:{art.get('id', name)}".encode(), usedforsecurity=False).hexdigest()[:12]
             results.append(NormalizedSearchResult(
                 id=uid,
                 title=name,

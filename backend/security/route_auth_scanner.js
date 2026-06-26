@@ -210,8 +210,10 @@ function extractStatement(src, startPos) {
  * Check whether an argument string references any known auth guard.
  */
 function containsAuthGuard(str) {
+  // Identifier-boundary match so a guard name inside another word, a comment, or
+  // a string literal can't produce a false "protected" pass in a security gate.
   for (const guard of AUTH_GUARDS) {
-    if (str.includes(guard)) return true;
+    if (new RegExp(`\\b${guard}\\b`).test(str)) return true;
   }
   return false;
 }
