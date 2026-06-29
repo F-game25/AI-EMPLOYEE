@@ -61,7 +61,7 @@ def _denied(reason: str) -> dict:
 def _audit(event: str, **fields) -> None:
     """Write a redacted desktop-control audit event to logs, audit storage, and bus."""
     safe = {k: ("***" if str(k).lower() in _SECRET_PARAM_KEYS else v) for k, v in fields.items()}
-    logger.info("AUDIT desktop.%s %s", event, safe)
+    logger.info("AUDIT desktop.%s fields=%s", event, sorted(safe))
     try:
         from core.audit_engine import get_audit_engine  # noqa: PLC0415
         get_audit_engine().record(
