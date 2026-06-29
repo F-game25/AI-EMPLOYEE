@@ -9,6 +9,8 @@ import companion.desktop_control as dc
 
 
 def _isolate(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRICT_PIPELINE", "1")
+    monkeypatch.setenv("AI_HOME", str(tmp_path))
     monkeypatch.setattr(cm, "_state_dir", lambda: tmp_path)
 
 
@@ -41,7 +43,8 @@ def test_plan_action_flags_approval_and_rejects_unknown(tmp_path, monkeypatch):
 
 def test_actuation_blocked_without_approval(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
-    cm.set_mode(True); cm.set_desktop(True)  # gates fully ON
+    cm.set_mode(True)
+    cm.set_desktop(True)  # gates fully ON
     r = dc.execute_approved({"action": "click", "params": {"x": 1, "y": 2}}, approved=False)
     assert r["ok"] is False and "not approved" in r["reason"]
 
@@ -55,6 +58,54 @@ def test_execute_blocked_when_gates_off_even_if_approved(tmp_path, monkeypatch):
 
 def test_non_approvable_action_rejected(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
-    cm.set_mode(True); cm.set_desktop(True)
+    cm.set_mode(True)
+    cm.set_desktop(True)
     r = dc.execute_approved({"action": "screenshot"}, approved=True)
     assert r["ok"] is False  # screenshot isn't an "approvable" actuation route
+
+
+def test_audit_redacts_command_payload(monkeypatch):
+    recorded = {}
+
+    class FakeAudit:
+        def record(self, **kwargs):
+            recorded.update(kwargs)
+
+    import core.audit_engine as audit_engine
+
+    monkeypatch.setattr(audit_engine, "get_audit_engine", lambda: FakeAudit())
+    monkeypatch.setattr(dc, "get_bus", lambda: None, raising=False)
+    dc._audit("execute", action="run", command="echo $SECRET", token="abc", x=1)
+
+    assert recorded["input_data"]["command"] == "***"
+    assert recorded["input_data"]["token"] == "***"
+    assert recorded["input_data"]["x"] == 1
+
+
+def test_screenshot_save_dir_stays_under_artifacts(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    cm.set_mode(True)
+    cm.set_desktop(True)
+    saved = {}
+
+    class FakeImage:
+        size = (10, 20)
+
+        def save(self, path):
+            saved["path"] = path
+
+    class FakePyAutoGui:
+        FAILSAFE = False
+
+        @staticmethod
+        def screenshot():
+            return FakeImage()
+
+    monkeypatch.setattr(dc, "_pyautogui", lambda: FakePyAutoGui())
+    monkeypatch.setattr(dc, "_artifacts_dir", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(dc, "_audit", lambda *args, **kwargs: None)
+
+    result = dc.screenshot(save_dir="/tmp/outside")
+
+    assert result["ok"] is True
+    assert (tmp_path / "artifacts").resolve() in saved["path"].resolve().parents

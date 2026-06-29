@@ -29,10 +29,11 @@ _ACTUATION = {"move", "click", "double_click", "right_click", "drag",
 _RUN = "run"
 _APPROVAL_REQUIRED = _ACTUATION | {_RUN}
 _READONLY = {"screenshot"}
-_SECRET_PARAM_KEYS = {"text", "password", "secret", "token", "api_key"}
+_SECRET_PARAM_KEYS = {"text", "password", "secret", "token", "api_key", "command"}
 
 
 def _pyautogui():
+    """Return the optional desktop driver, or ``None`` when unavailable."""
     try:
         import pyautogui  # noqa: PLC0415
         pyautogui.FAILSAFE = True  # slamming the mouse to a screen corner aborts
@@ -52,21 +53,35 @@ def desktop_ready() -> dict:
 
 
 def _denied(reason: str) -> dict:
+    """Return a standardized denial result and log the reason."""
     logger.info("desktop action denied: %s", reason)
     return {"ok": False, "status": "denied", "reason": reason}
 
 
 def _audit(event: str, **fields) -> None:
-    safe = {k: ("***" if k in _SECRET_PARAM_KEYS else v) for k, v in fields.items()}
+    """Write a redacted desktop-control audit event to logs, audit storage, and bus."""
+    safe = {k: ("***" if str(k).lower() in _SECRET_PARAM_KEYS else v) for k, v in fields.items()}
     logger.info("AUDIT desktop.%s %s", event, safe)
+    try:
+        from core.audit_engine import get_audit_engine  # noqa: PLC0415
+        get_audit_engine().record(
+            actor="desktop_control",
+            action=f"desktop_{event}",
+            input_data=safe,
+            risk_score=0.75 if event.startswith(("execute", "blocked")) else 0.25,
+            meta={"surface": "desktop_control"},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("desktop audit persistence failed: %s", exc)
     try:  # best-effort; never block on the bus
         from core.bus import get_bus  # noqa: PLC0415
         get_bus().publish("logs", {"surface": "desktop_control", "event": event, **safe})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("desktop audit bus publish failed: %s", exc)
 
 
 def _describe(action: str, p: dict) -> str:
+    """Create human-readable text for an approval plan."""
     p = p or {}
     if action in ("click", "double_click", "right_click", "move"):
         at = f"at ({p.get('x')}, {p.get('y')})" if "x" in p else "at current position"
@@ -112,7 +127,7 @@ def screenshot(save_dir: str | None = None) -> dict:
         return _denied("desktop driver (pyautogui) not available")
     try:
         img = pg.screenshot()
-        out_dir = Path(save_dir) if save_dir else _artifacts_dir()
+        out_dir = _screenshot_dir(save_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"screen-{int(time.time())}.png"
         img.save(path)
@@ -152,6 +167,7 @@ def execute_approved(plan: dict, *, approved: bool, approver: str = "") -> dict:
 
 
 def _actuate(pg, action: str, p: dict) -> Any:
+    """Dispatch a pyautogui action after approval and gate checks."""
     x, y = p.get("x"), p.get("y")
     if action == "move":
         pg.moveTo(x, y)
@@ -192,8 +208,25 @@ def _run_command(command: str) -> dict:
 
 
 def _artifacts_dir() -> Path:
+    """Return the controlled artifact root for desktop captures."""
     try:
         from core.state_paths import canonical_state_dir  # noqa: PLC0415
         return canonical_state_dir() / "artifacts"
     except Exception:  # noqa: BLE001
         return Path(__file__).resolve().parents[2] / "state" / "artifacts"
+
+
+def _screenshot_dir(save_dir: str | None = None) -> Path:
+    """Resolve a screenshot directory under the controlled artifacts root."""
+    root = _artifacts_dir().resolve()
+    if not save_dir:
+        return root
+    subdir = Path(save_dir)
+    if subdir.is_absolute() or ".." in subdir.parts:
+        logger.warning("ignoring unsafe desktop screenshot save_dir")
+        return root
+    candidate = (root / subdir).resolve()
+    if root == candidate or root in candidate.parents:
+        return candidate
+    logger.warning("ignoring desktop screenshot save_dir outside artifacts")
+    return root
