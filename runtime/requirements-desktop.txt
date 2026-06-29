@@ -1,0 +1,3 @@
+# Optional — HITL desktop (screen/system) control driver. Install only when
+# enabling computer-use desktop mode. The feature degrades gracefully without it.
+pyautogui>=0.9.54
