@@ -152,7 +152,8 @@ Ordered for **coherence-first** with the **money anchor** woven in. Each phase i
 - Collapse the 3 intent classifiers + static `_INTENT_AGENT_PROFILES` onto **one shared intent+skill-registry service**.
 - **Proof:** identical input classifies identically across chat/tasks/companion; `STRICT_PIPELINE=1` surfaces failures on all entrypoints; single call-graph diagram. Size: L.
 
-### Phase C2 — One agent/skill/tool chain (P0: B1,B2,B3)
+### Phase C2 — One agent/skill/tool chain (P0: B1,B2,B3)  — **STATUS: B3 DONE; remaining slice scoped in `docs/SYSTEM_COHERENCE_C2_PLAN.md` (DRAFT, awaiting go)**
+> Reconciliation (2026-06-30): **B3 done** (`ff5ba02d` — timer completions flagged `verified:false`; real completion from AgentController). Infra exists — `dispatch_for_goal → execute_skill → ToolRegistry` (19 tools) — but **0 of 577 skills declare `tools[]`**, so all collapse to the LLM path; `BaseAgent.execute` still calls the LLM directly. Remaining (B2 executable tool-chain contract + interpreter, B1 agent dispatch) lives in **`docs/SYSTEM_COHERENCE_C2_PLAN.md`**.
 - `BaseAgent.execute()` dispatches through `SkillCatalog`/`ToolRegistry` (stop reimplementing LLM calls). Migrate agents off bespoke poll-loops incrementally (start with the revenue + lead agents).
 - Give library skills a real `tools[]` + `execution_steps` executable contract + an interpreter in `_emit_action` that **uses** the library `system_prompt`/`execution_steps` and runs the tool steps. Convert the top N revenue-relevant skills first.
 - Replace Node `index.js` simulation with **real** Python agent execution — no fabricated `task:completed`.
