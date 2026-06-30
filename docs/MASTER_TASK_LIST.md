@@ -67,13 +67,13 @@ This is the single consolidated backlog so nothing is lost. Keep it updated; arc
 ## Plan inventory (duplicates to resolve)
 | Doc | Note |
 |---|---|
-| `MASTER_PLAN.md`, `V2_MASTER_PLAN.md`, `MASTER_PLAN_V3.md` | 3 master plans — V3 likely newest; confirm + archive older |
+| ✅ `MASTER_PLAN.md`, `V2_MASTER_PLAN.md`, `MASTER_PLAN_V3.md` | **RESOLVED (2026-06-30):** older two → `docs/archive/`. `MASTER_PLAN_V3.md` KEPT as the feature-roadmap + build-status **companion** to the canonical plan. |
 | `DESKTOP_APP_PLAN.md` vs `ENTERPRISE_DESKTOP_APP_PLAN.md` | two desktop plans — `DESKTOP_APP_PLAN.md` is the active one (this effort) |
 | `ASCENDFORGE_*` / `ASCEND_FORGE_*` v2→v7 | many iterations — v7 is latest |
-| `SYSTEM_COHERENCE_PLAN.md`, `SYSTEM_CONNECTIVITY_ROADMAP.md`, `TARGET_ARCHITECTURE.md`, `SYSTEM_REALITY_AUDIT.md` | overlapping architecture/coherence — reconcile into one source of truth |
+| ✅ `SYSTEM_COHERENCE_PLAN.md` | **CANONICAL (2026-06-30)** — single authoritative architecture/control plan; incoming research lands in its Appendix A (R-1…R-4 added). `SYSTEM_CONNECTIVITY_ROADMAP.md`/`TARGET_ARCHITECTURE.md`/`SYSTEM_REALITY_AUDIT.md` remain reference inputs to reconcile into it over time. |
 
 ## Needs-decision (Lars)
-- ❓ Which master plan is authoritative (archive the rest)?
+- ✅ **Which master plan is authoritative?** → `SYSTEM_COHERENCE_PLAN.md` (canonical); `MASTER_PLAN_V3.md` kept as companion; `MASTER_PLAN.md` + `V2_MASTER_PLAN.md` archived. _(decided 2026-06-30)_
 - ❓ Desktop milestone order after M3 — updater (M4) next, or jump to Linux bundle (M5)?
 - ❓ Do the AETERNUS→AETHERNUS rename now (touches identity contract) or after desktop v1?
 - ❓ Re-run the full 40-doc audit agent (fresh session) to make this list exhaustive?
