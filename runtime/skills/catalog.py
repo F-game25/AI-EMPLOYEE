@@ -9,6 +9,8 @@ direct skill execution.
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 import threading
 from typing import Any, Callable
@@ -294,6 +296,16 @@ class ExecutableSkillCatalog(SkillCatalog):
             skill = picks[0] if picks else None
         if skill is None:
             return {"status": "no_skill", "note": "no matching skill in the library for this goal"}
+
+        # B2 — executable tool chain. If the skill declares deterministic
+        # ``tool_steps`` (real ToolRegistry calls), run them instead of an
+        # LLM-only prose pass. Absent → fall through to the LLM guidance path
+        # below (fully backward-compatible). The chain's status (ok/blocked/
+        # error) is surfaced honestly — no silent fallback masks a real failure.
+        chain = ExecutableSkillCatalog._run_tool_chain(skill, goal, ctx)
+        if chain is not None:
+            return chain
+
         system = str(skill.get("system_prompt") or
                      f"You are the '{skill.get('name', 'specialist')}' capability. "
                      "Complete the user's goal concretely and concisely.")
@@ -330,6 +342,118 @@ class ExecutableSkillCatalog(SkillCatalog):
                     "fallback_strategy": skill.get("fallback_strategy")}
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
+
+    # ── B2: executable tool-chain interpreter ─────────────────────────────────
+
+    _PLACEHOLDER = re.compile(r"\{([a-zA-Z0-9_.]+)\}")
+
+    @staticmethod
+    def _resolve_inputs(inputs: Any, goal: str, ctx: dict, variables: dict) -> Any:
+        """Render a step's inputs from a STRICT template — only ``{goal}``,
+        ``{vars.NAME}`` (prior step output) and ``{ctx.KEY}`` placeholders. No
+        eval, no arbitrary expressions: raw model text never becomes a tool arg
+        except where the skill author explicitly placed a placeholder."""
+        def _lookup(key: str) -> Any:
+            if key == "goal":
+                return goal
+            if key.startswith("vars."):
+                return variables.get(key[5:], "")
+            if key.startswith("ctx."):
+                return ctx.get(key[4:], "")
+            return None
+
+        def _render(value: Any) -> Any:
+            if isinstance(value, str):
+                # Whole-string single placeholder → preserve the native type.
+                m = ExecutableSkillCatalog._PLACEHOLDER.fullmatch(value)
+                if m:
+                    found = _lookup(m.group(1))
+                    return found if found is not None else value
+
+                def _sub(match: "re.Match") -> str:
+                    found = _lookup(match.group(1))
+                    if found is None:
+                        return match.group(0)  # leave unknown placeholder literal
+                    return found if isinstance(found, str) else json.dumps(found, default=str)
+
+                return ExecutableSkillCatalog._PLACEHOLDER.sub(_sub, value)
+            if isinstance(value, dict):
+                return {k: _render(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_render(v) for v in value]
+            return value
+
+        return _render(inputs if isinstance(inputs, dict) else {})
+
+    @staticmethod
+    def _run_tool_chain(skill: dict, goal: str, ctx: dict) -> dict | None:
+        """Run a skill's declared ``tool_steps`` through the ToolRegistry.
+
+        Returns ``None`` when the skill declares no chain (caller falls back to
+        the LLM guidance path). Otherwise returns an honest envelope:
+        ``ok`` (all steps ran), ``blocked`` (a step's tool exceeds the auto-run
+        risk ceiling and is not pre-approved → needs HITL), or ``error`` (unknown
+        tool / step failure). Each step:
+        ``{"tool": <registered>, "inputs": {...templated...}, "save_as": <var>}``.
+
+        Safety: tools are risk-gated via the registry — only tools at or below
+        ``SKILL_CHAIN_MAX_AUTORISK`` (default 1 = read + local-write) auto-run;
+        anything higher (send_email, call_api, shell/code exec, browser) is
+        blocked unless its name is in ``ctx['approved_tools']``. Fail-closed:
+        an unknown tool or a failing step stops the chain with an explicit error.
+        """
+        steps = skill.get("tool_steps")
+        if not isinstance(steps, list) or not steps:
+            return None
+
+        from tools.registry import get_tool_registry
+        reg = get_tool_registry()
+        try:
+            max_risk = int(os.environ.get("SKILL_CHAIN_MAX_AUTORISK", "1"))
+        except ValueError:
+            max_risk = 1
+        registered = {t["name"] for t in reg.list_tools(max_risk=5)}
+        auto_ok = {t["name"] for t in reg.list_tools(max_risk=max_risk)}
+        approved = set(ctx.get("approved_tools") or [])
+        agent_id = str(ctx.get("agent_id") or "system")
+
+        variables: dict[str, Any] = {}
+        results: list[dict[str, Any]] = []
+        skill_id = skill.get("id")
+
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] is not an object", "steps": results}
+            tool = str(step.get("tool") or "").strip()
+            if tool not in registered:
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] unknown tool '{tool}'", "steps": results}
+            if tool not in auto_ok and tool not in approved:
+                return {"status": "blocked", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "requires_approval": True, "blocked_tool": tool,
+                        "error": (f"step[{i}] tool '{tool}' exceeds the auto-run risk ceiling "
+                                  f"(SKILL_CHAIN_MAX_AUTORISK={max_risk}) and is not approved"),
+                        "steps": results}
+            inputs = ExecutableSkillCatalog._resolve_inputs(
+                step.get("inputs") or {}, goal, ctx, variables)
+            envelope = reg.execute(tool, inputs, agent_id=agent_id)
+            ok = bool(envelope.get("ok"))
+            results.append({"tool": tool, "ok": ok,
+                            "result": envelope.get("result"), "error": envelope.get("error")})
+            if not ok:
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] tool '{tool}' failed: {envelope.get('error')}",
+                        "steps": results}
+            save_as = step.get("save_as")
+            if save_as:
+                variables[str(save_as)] = envelope.get("result")
+
+        output = variables.get("output", results[-1]["result"] if results else None)
+        return {"status": "ok", "via": "skill_tool_chain", "skill_id": skill_id,
+                "skill_name": skill.get("name"),
+                "tools": [r["tool"] for r in results],
+                "steps": results, "output": output}
 
     # ── Default skills ────────────────────────────────────────────────────────
 

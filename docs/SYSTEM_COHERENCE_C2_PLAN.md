@@ -53,7 +53,7 @@ Make the architecture spec's spine real: **Orchestrator → Skills → Tools.** 
 
 ## 4. Proposed C2 execution order (gated, incremental)
 
-1. **B2 interpreter** — `_run_tool_chain` + `dispatch_for_goal` step 1.5 + schema for `steps[]`. No skill data changed yet → pure additive infra + tests (chain runs, dangerous tools gated, backward-compat).
+1. **B2 interpreter** — **DONE (2026-06-30).** `ExecutableSkillCatalog._run_tool_chain` + `_resolve_inputs` (strict `{goal}`/`{vars.X}`/`{ctx.Y}` templating, no eval) wired into `_run_library_skill`: a library skill carrying `tool_steps` (`{tool, inputs, save_as}`) now runs real `ToolRegistry` calls, threading outputs; absent → unchanged LLM path. Risk-gated by `SKILL_CHAIN_MAX_AUTORISK` (default 1 = read+local-write; risky tools blocked unless `ctx['approved_tools']`). Fail-closed (unknown tool / failed step → explicit error). `tests/test_skill_tool_chain.py` 9/9; existing `test_skill_chain.py` 5/5 (backward-compat); lint clean. **No skill data changed yet — interpreter is dormant until batch-1 declares chains.**
 2. **B2 convert batch 1** — ~10–15 revenue/lead/content/research skills get real `steps[]`; one test each.
 3. **B1 migrate batch 1 agents** — revenue + lead agents dispatch through the chain; integration tests.
 4. Measure: executable-skill count, agent-activity↔real-run 1:1, then iterate batches behind the same gate.
