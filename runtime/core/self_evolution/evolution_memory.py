@@ -26,9 +26,8 @@ class EvolutionMemory:
 
     @staticmethod
     def _default_path() -> Path:
-        ai_home = os.environ.get("AI_HOME")
-        base = Path(ai_home) if ai_home else Path(__file__).resolve().parents[3]
-        return base / "state" / "evolution_memory.json"
+        from core.state_paths import canonical_state_dir
+        return canonical_state_dir() / "evolution_memory.json"
 
     @staticmethod
     def _ts() -> str:

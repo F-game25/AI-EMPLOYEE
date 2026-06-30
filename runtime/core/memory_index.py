@@ -56,9 +56,8 @@ _DIM = 32  # kept for backward-compat imports; use _embedding_dim() at runtime
 
 
 def _state_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    path = base / "state" / "memory_index.json"
+    from core.state_paths import canonical_state_dir
+    path = canonical_state_dir() / "memory_index.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

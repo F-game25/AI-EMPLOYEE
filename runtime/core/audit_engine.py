@@ -173,9 +173,8 @@ class AuditEngine:
 
     @staticmethod
     def _default_path() -> Path:
-        ai_home = os.environ.get("AI_HOME")
-        base = Path(ai_home) if ai_home else Path(__file__).resolve().parents[3]
-        return base / "state" / "audit_log.db"
+        from core.state_paths import canonical_state_dir
+        return canonical_state_dir() / "audit_log.db"
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))

@@ -56,9 +56,8 @@ def _default_path() -> Path:
     if state:
         path = Path(state) / "vector_store.json"
     else:
-        home = os.getenv("AI_EMPLOYEE_HOME") or os.getenv("AI_HOME")
-        base = Path(home) if home else Path(__file__).resolve().parents[2]
-        path = base / "state" / "vector_store.json"
+        from core.state_paths import canonical_state_dir
+        path = canonical_state_dir() / "vector_store.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -83,9 +83,8 @@ def _agent_key(agent_id: str) -> str:
 
 
 def _state_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    p = base / "state" / "agent_learning_profiles.json"
+    from core.state_paths import canonical_state_dir
+    p = canonical_state_dir() / "agent_learning_profiles.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 

@@ -16,9 +16,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger(__name__)
 
-_BUILD_DIR = Path("state/build_outputs")
+# Canonical state tree (honours STATE_DIR / AI_HOME) — not repo-local ./state. C0.
+_BUILD_DIR = canonical_state_dir() / "build_outputs"
 
 _SCAFFOLD_PROMPTS: dict[str, str] = {
     "fastapi_app": (

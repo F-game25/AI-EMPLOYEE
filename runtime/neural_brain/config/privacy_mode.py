@@ -24,9 +24,12 @@ from enum import Enum
 from pathlib import Path
 import json
 
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger(__name__)
 
-_MODE_FILE = Path("state/privacy_mode.json")
+# Canonical state tree (honours STATE_DIR / AI_HOME) — not repo-local ./state. C0.
+_MODE_FILE = canonical_state_dir() / "privacy_mode.json"
 
 
 class PrivacyMode(str, Enum):

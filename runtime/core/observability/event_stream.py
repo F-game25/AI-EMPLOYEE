@@ -23,9 +23,8 @@ class EventStream:
 
     @staticmethod
     def _default_path() -> Path:
-        ai_home = os.environ.get("AI_HOME")
-        base = Path(ai_home) if ai_home else Path(__file__).resolve().parents[3]
-        return base / "state" / "observability_events.db"
+        from core.state_paths import canonical_state_dir
+        return canonical_state_dir() / "observability_events.db"
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))

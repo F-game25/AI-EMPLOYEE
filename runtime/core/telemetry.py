@@ -22,7 +22,8 @@ logger = logging.getLogger("ai_employee.telemetry")
 
 _SKIP_PATHS = {"/health", "/metrics", "/api/status"}
 
-_STATE_DIR = Path(os.environ.get("AI_HOME", Path.home() / ".ai-employee")) / "state"
+from core.state_paths import canonical_state_dir
+_STATE_DIR = canonical_state_dir()  # honours STATE_DIR first, then AI_HOME (C0)
 
 # ── HMAC helper ────────────────────────────────────────────────────────────────
 

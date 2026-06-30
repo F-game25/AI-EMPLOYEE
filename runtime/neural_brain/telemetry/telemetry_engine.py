@@ -37,6 +37,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger(__name__)
 
 _BUNDLE_INTERVAL_S  = int(os.getenv("TELEMETRY_BUNDLE_INTERVAL_S", str(24 * 3600)))  # 24h
@@ -47,9 +49,11 @@ _SAMPLE_RATE_NORMAL = 1.0    # 100% capture when load is low
 _SAMPLE_RATE_HIGH   = 0.25   # 25% capture when buffer > 80% full
 _SAMPLE_THRESHOLD   = int(_BUFFER_SIZE * 0.8)
 _SCHEMA_VERSION     = "2.0"
-_BUNDLE_DIR         = Path("state/telemetry/bundles")
-_STATS_PATH         = Path("state/telemetry/local_stats.json")
-_NONCE_PATH         = Path("state/telemetry/.nonce_counter")
+# Canonical state tree (honours STATE_DIR / AI_HOME) — not repo-local ./state. C0.
+_TELEMETRY_DIR      = canonical_state_dir() / "telemetry"
+_BUNDLE_DIR         = _TELEMETRY_DIR / "bundles"
+_STATS_PATH         = _TELEMETRY_DIR / "local_stats.json"
+_NONCE_PATH         = _TELEMETRY_DIR / ".nonce_counter"
 
 
 @dataclass
@@ -389,7 +393,7 @@ class TelemetryEngine:
     @staticmethod
     def _get_or_create_system_id() -> str:
         """Stable anon ID for this installation. NOT linked to any user or IP."""
-        id_path = Path("state/telemetry/.system_id")
+        id_path = _TELEMETRY_DIR / ".system_id"
         try:
             id_path.parent.mkdir(parents=True, exist_ok=True)
             if id_path.exists():
@@ -405,7 +409,7 @@ class TelemetryEngine:
 
     def rotate_system_id(self) -> str:
         """Admin action: rotate the anon system ID. Breaks linkability to past bundles."""
-        id_path = Path("state/telemetry/.system_id")
+        id_path = _TELEMETRY_DIR / ".system_id"
         new_id = hashlib.sha256(os.urandom(32)).hexdigest()
         try:
             id_path.write_text(new_id)

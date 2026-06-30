@@ -20,10 +20,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger(__name__)
 
 _BUFFER_SIZE = 10_000
-_LOG_PATH = Path("state/telemetry.jsonl")
+# Canonical state tree (honours STATE_DIR / AI_HOME). Was relative Path("state/…")
+# which resolved to CWD-relative ./state — repo-local split-brain (134MB stray log).
+# See docs/SYSTEM_COHERENCE_PLAN.md C0.
+_LOG_PATH = canonical_state_dir() / "telemetry.jsonl"
 
 
 class TelemetryCategory(str, Enum):

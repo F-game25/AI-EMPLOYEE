@@ -22,8 +22,8 @@ W_MAX     = 1.0
 W_MIN     = 0.0
 
 def _state_path() -> Path:
-    base = Path(os.getenv('AI_HOME', Path(__file__).parents[3]))
-    return base / 'state' / 'stdp_weights.npy'
+    from core.state_paths import canonical_state_dir
+    return canonical_state_dir() / 'stdp_weights.npy'
 
 class STDPEngine:
     def __init__(self):

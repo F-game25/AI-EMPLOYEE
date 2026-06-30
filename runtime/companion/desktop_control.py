@@ -212,8 +212,8 @@ def _artifacts_dir() -> Path:
     try:
         from core.state_paths import canonical_state_dir  # noqa: PLC0415
         return canonical_state_dir() / "artifacts"
-    except Exception:  # noqa: BLE001
-        return Path(__file__).resolve().parents[2] / "state" / "artifacts"
+    except Exception:  # noqa: BLE001 — never repo-local ./state (C0); mirror canonical default
+        return Path.home() / ".ai-employee" / "state" / "artifacts"
 
 
 def _screenshot_dir(save_dir: str | None = None) -> Path:

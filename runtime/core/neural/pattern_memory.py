@@ -15,8 +15,8 @@ except ImportError:
 MAX_PATTERNS = 2000
 
 def _path() -> Path:
-    base = Path(os.getenv('AI_HOME', Path(__file__).parents[3]))
-    return base / 'state' / 'pattern_memory.json'
+    from core.state_paths import canonical_state_dir
+    return canonical_state_dir() / 'pattern_memory.json'
 
 class PatternMemory:
     def __init__(self):

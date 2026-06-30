@@ -63,9 +63,8 @@ _last_learning_update: str | None = None
 
 
 def _state_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    path = base / "state" / "brain_weights.json"
+    from core.state_paths import canonical_state_dir
+    path = canonical_state_dir() / "brain_weights.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

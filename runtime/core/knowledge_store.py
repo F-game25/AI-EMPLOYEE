@@ -47,12 +47,8 @@ class KnowledgeStore:
 
     @staticmethod
     def _default_path() -> Path:
-        home = os.getenv("AI_HOME")
-        if home:
-            base = Path(home)
-        else:
-            base = Path(__file__).resolve().parents[2]
-        return base / "state" / "knowledge_store.json"
+        from core.state_paths import canonical_state_dir
+        return canonical_state_dir() / "knowledge_store.json"
 
     @staticmethod
     def _ts() -> str:

@@ -32,12 +32,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger(__name__)
 
-_PENDING_DIR   = Path("state/updates/pending")
-_APPLIED_DIR   = Path("state/updates/applied")
-_MANIFEST_PATH = Path("state/updates/last_manifest.json")
-_VERSION_FILE  = Path("state/version.json")
+# Canonical state tree (honours STATE_DIR / AI_HOME) — not repo-local ./state. C0.
+_STATE_DIR     = canonical_state_dir()
+_PENDING_DIR   = _STATE_DIR / "updates" / "pending"
+_APPLIED_DIR   = _STATE_DIR / "updates" / "applied"
+_MANIFEST_PATH = _STATE_DIR / "updates" / "last_manifest.json"
+_VERSION_FILE  = _STATE_DIR / "version.json"
 _CHECK_INTERVAL_S = int(os.getenv("UPDATE_CHECK_INTERVAL_S", str(6 * 3600)))  # 6h
 _DOWNLOAD_TIMEOUT_S = int(os.getenv("UPDATE_DOWNLOAD_TIMEOUT_S", "30"))
 

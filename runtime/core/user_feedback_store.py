@@ -108,9 +108,8 @@ def _iso_now() -> str:
 
 
 def _state_dir() -> Path:
-    ai_home = os.environ.get("AI_HOME", "")
-    base = Path(ai_home) if ai_home else Path(__file__).resolve().parents[3]
-    return base / "state"
+    from core.state_paths import canonical_state_dir
+    return canonical_state_dir()
 
 
 def _default_path() -> Path:
