@@ -389,7 +389,17 @@ function createTurnRunner(deps) {
         broadcast('action:completed', { turn_id: turnId, task_id: queued.taskId, action: 'agent_controller', status: source === 'agent_controller' ? 'completed' : 'failed' });
       }
 
-      if (!assistantReply) {
+      // Pipeline-first inversion (C1/R1): `/api/chat` runs process_user_input,
+      // whose Phase 0 already executes the real_execution_engine — so for chat
+      // the pipeline IS the controlled execution path (with the adversarial
+      // filter, STRICT_PIPELINE and telemetry the standalone subprocess skips).
+      // Default: call the pipeline first for chat and skip the redundant
+      // run_execution.py subprocess. Set TURN_RUNNER_PIPELINE_FIRST=0 to restore
+      // the legacy order (execution-engine subprocess → pipeline).
+      const pipelineFirst = process.env.TURN_RUNNER_PIPELINE_FIRST !== '0';
+
+      const tryExecutionEngine = async () => {
+        if (assistantReply) return;
         broadcast('action:started', { turn_id: turnId, task_id: queued.taskId, action: 'real_execution_engine' });
         const execResult = await withTimeout(deps.runPythonExecution(input), options.executionTimeoutMs || 120000);
         if (execResult && execResult.is_goal && execResult.reply) {
@@ -407,9 +417,10 @@ function createTurnRunner(deps) {
           degraded = degraded || execResult.success === false;
         }
         broadcast('action:completed', { turn_id: turnId, task_id: queued.taskId, action: 'real_execution_engine', status: assistantReply ? 'completed' : 'skipped' });
-      }
+      };
 
-      if (!assistantReply && await deps.isPythonBackendUp()) {
+      const tryPipeline = async () => {
+        if (assistantReply || !(await deps.isPythonBackendUp())) return;
         broadcast('action:started', { turn_id: turnId, task_id: queued.taskId, action: 'python_llm' });
         try {
           pyPayload = await deps.requestPythonChatPayload(input, options.modelRoute, userId, memoryTrace);
@@ -430,6 +441,15 @@ function createTurnRunner(deps) {
           errors.push({ stage: 'python_llm', message: compactError(error) });
         }
         broadcast('action:completed', { turn_id: turnId, task_id: queued.taskId, action: 'python_llm', status: assistantReply ? 'completed' : 'failed' });
+      };
+
+      if (kind === 'chat' && pipelineFirst) {
+        // Pipeline is the spine for chat; its Phase 0 covers goal execution.
+        await tryPipeline();
+      } else {
+        // Tasks (after AgentController above), or legacy order when flag=0.
+        await tryExecutionEngine();
+        await tryPipeline();
       }
 
       if (!assistantReply) {

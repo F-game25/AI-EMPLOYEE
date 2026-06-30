@@ -49,6 +49,8 @@ The chat ladder in `backend/services/turn-runner.js::runTurn` (verified 2026-06-
 
 **Acceptance:** a chat turn with Python up produces `source: 'python-llm'` (pipeline) with a pipeline `trace_id` in proof; the execution-engine subprocess is never spawned for chat; killing the pipeline yields `ollama` then `node-fallback`, each marked degraded.
 
+**STATUS: DONE.** `TURN_RUNNER_PIPELINE_FIRST` **defaults ON** (Lars). For `kind==='chat'` the turn-runner now calls the pipeline first and skips the `run_execution.py` subprocess (the two rungs are order-data-driven closures); `=0` restores legacy exec-first order. The **legacy `server.js` WS ladder** (reached only on `use_turn_runner:false`) was inverted the same way under the same flag. `tests/test_turn_runner_node.js` rewritten: proves pipeline-first (`source==='python-llm'`, exec subprocess **not** called via spy), legacy order under `=0` (`source==='execution-engine'`), and approval-gate-before-execution. Node suites green (turn-runner, agent-real-completion 6/6, boot-contract 15/15). `run_execution.py` retained — still used under flag=0 and for `kind==='task'`; not deleted.
+
 ### R2 — Companion + Node don't yet source intent through the seam (P1, A3-adoption) — **STATUS: DONE (companion); Node hint deferred to R1**
 `intent_service` was consumed **only** by `unified_pipeline.py:392-393`. The companion was the real divergent *answer-path* classifier — it called `companion.intent_classifier.classify()` directly (`conversation_runtime.py:130`).
 

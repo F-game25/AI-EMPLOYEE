@@ -3470,28 +3470,35 @@ wss.on('connection', (ws, req) => {
 	            });
 	          }
 
-	          // 1. Real execution engine — structured goal → real tools
-	          _broadcastStep('Planning AI pipeline');
-          try {
-            const execResult = await runPythonExecution(parsed.message);
-            if (execResult && execResult.is_goal && execResult.reply) {
-              console.info('[AI FLOW] → Real execution engine (WS): steps=%d success=%s', execResult.steps || 0, execResult.success);
-              // Broadcast individual tool steps from the execution result
-              const toolSteps = execResult.step_actions || [];
-              toolSteps.slice(0, 5).forEach((s) => {
-                if (s && s.action) _broadcastStep(`Tool: ${s.action}`, s.status || null);
-              });
-              _broadcastStep('Generating response');
-              return _broadcast(execResult.reply, execResult.attachments);
-            }
-          } catch (_) {}
+          const _wsPipelineFirst = process.env.TURN_RUNNER_PIPELINE_FIRST !== '0';
+          let reply = null;
 
-	          // 2. Python LLM backend (full pipeline)
-	          let reply = null;
-	          try { reply = await requestPythonChat(parsed.message, wsModelRoute, wsUserId, memoryTrace); } catch (_) {}
-	          if (reply) {
-	            const structuredWsPyReply = applyStructuredFormat(reply, 'AI Employee');
-	            console.info('[AI FLOW] → LLM response returned (WS→Python): len=%d', structuredWsPyReply.length);
+          // Pipeline-first (C1/R1): the Python /api/chat pipeline runs the
+          // execution engine as Phase 0, so it is the controlled path (adversarial
+          // filter + STRICT_PIPELINE + telemetry the subprocess skips). Default
+          // calls it first and skips the redundant run_execution.py subprocess.
+          // Set TURN_RUNNER_PIPELINE_FIRST=0 to restore execution-engine-first.
+          _broadcastStep('Planning AI pipeline');
+          if (!_wsPipelineFirst) {
+            try {
+              const execResult = await runPythonExecution(parsed.message);
+              if (execResult && execResult.is_goal && execResult.reply) {
+                console.info('[AI FLOW] -> Real execution engine (WS legacy): steps=%d success=%s', execResult.steps || 0, execResult.success);
+                const toolSteps = execResult.step_actions || [];
+                toolSteps.slice(0, 5).forEach((s) => {
+                  if (s && s.action) _broadcastStep(`Tool: ${s.action}`, s.status || null);
+                });
+                _broadcastStep('Generating response');
+                return _broadcast(execResult.reply, execResult.attachments);
+              }
+            } catch (_) {}
+          }
+
+          // Python LLM backend (full pipeline) — first rung when pipeline-first.
+          try { reply = await requestPythonChat(parsed.message, wsModelRoute, wsUserId, memoryTrace); } catch (_) {}
+          if (reply) {
+            const structuredWsPyReply = applyStructuredFormat(reply, 'AI Employee');
+            console.info('[AI FLOW] -> LLM response returned (WS->Python): len=%d', structuredWsPyReply.length);
             _broadcastStep('Generating response');
             return _broadcast(structuredWsPyReply);
           }
