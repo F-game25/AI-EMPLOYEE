@@ -1,6 +1,6 @@
 # C1 — One Execution Spine: status reconciliation + remaining-work plan
 
-**Date:** 2026-06-30 · **Author:** Pulse (for Lars) · **Status:** DRAFT — doc-first, awaiting Lars's go before any code.
+**Date:** 2026-06-30 · **Author:** Pulse (for Lars) · **Status:** COMPLETE — remaining slice (R1–R4) shipped 2026-06-30, order R2→R4→R1→R3 (Lars-approved). R1 flag `TURN_RUNNER_PIPELINE_FIRST` defaults ON.
 **Parent:** `docs/SYSTEM_COHERENCE_PLAN.md` §5 Phase C1 (P0: A1,A2 · P1: A3,A4). This doc supersedes the parent's C1 sketch with **ground truth from the current code** (the parent's `file:line` map was point-in-time and is now behind the implementation).
 
 > **Headline:** C1 is **~60% already shipped** across prior merged commits. The parent plan describes "three orchestrators" as if untouched; in reality A1-Python and the A3 seam are done and the companion already delegates to the skill chain. This doc records exactly what is done (with commit evidence) and scopes **only the remaining slice**, so we don't rebuild what exists.
@@ -61,9 +61,17 @@ The chat ladder in `backend/services/turn-runner.js::runTurn` (verified 2026-06-
 ### R3 — Companion `ExecutionBroker` direct side effects (P0/P1, A2-residual)
 `ExecutionBroker.execute()` (`execution_broker.py:159`) runs capability adapters that call subsystems directly. The **read-only** probes (system health, memory search, logs, briefing) are fine and intentionally fast/local. The concern is any **side-effecting** capability bypassing the one spine/gateway.
 
-**Proposed change (this phase = classify only, no rewrite):** enumerate every capability the broker can `_run`, tag each `read_only` vs `side_effecting`. Read-only stays. Side-effecting routes through the spine (and later the R-4 P0.1 gateway). Deliver the classification table in this phase; migrate side-effecting ones in C2 where the skill chain lands.
+**STATUS: DONE (audit + lock-in, no rewrite needed).** The audit found the broker is already correctly gated: every dispatched capability passes `SafetyGate.evaluate()` and only runs when `allowed AND not requires_approval`; the registry already carries machine-readable `risk_level` + `side_effects` per capability. **No violations** — no cap is both dispatchable and approval-gated; the two high-risk side effects (`forge.apply_patch` L3, `browser.act` L3) are approval-gated AND deliberately absent from `_dispatch`; all dispatchable caps are L0/L1 with only **local** side effects.
 
-**Risk:** none this phase (audit only). Acceptance: a table in this doc + a test asserting no broker capability marked `side_effecting` executes without going through the skill chain.
+Classification (auto-dispatchable caps, from `capability_registry`):
+
+| Side effect | Caps (all L0/L1, gate-cleared) |
+|---|---|
+| **Read-only (L0)** | system.health.read, system.tasks.active, system.logs.search, system.briefing.morning, teammate.routine.status, memory.search, forge.search_code, security.score_action, research.audit_quality, context.retrieve, company.validate/refine, browser.open/snapshot/extract/close |
+| **Bounded local write (L1)** | memory.write_structured, context.write, context.compress_session, teammate.routine.configure, teammate.briefing.create_task, content.produce (staged, no posting), finance.draft, forge.run_tests (local processes), research.deep.start (network read + knowledge write), browser.capture (state file) |
+| **Approval-gated, NOT dispatchable (L3)** | forge.apply_patch (modifies source), browser.act (external site) |
+
+**Delivered:** `tests/test_broker_side_effect_audit.py` (5) locks the invariants — no dispatchable cap is `requires_approval`; only L0/L1 are dispatchable; the two dangerous caps stay gated+undispatchable; side-effecting dispatchable caps are ≤ L1; and a behavioural test proving nothing executes when the gate requires approval. Migrating the L1 local-write caps onto the C2 skill chain / R-4 P0.1 gateway is future work (the gate already mediates them).
 
 ### R4 — `classify_decision` internal routing (P1, A4) — **STATUS: DONE**
 Found the residual static table: `classify_decision` got the intent label from the seam but **discarded** the seam's registry-backed `candidate_agents`, then routed `intent → agent` through the hardcoded `_INTENT_AGENT_PROFILES` dict (`unified_pipeline.py:352/401/425`).
