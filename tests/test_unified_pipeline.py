@@ -240,6 +240,36 @@ class TestClassifyDecision:
 
         assert len(result["selected_agents"]) > 0
 
+    # ── R4: agent selection is registry-backed, not the static intent->agent table
+    def test_agent_from_registry_candidates(self):
+        """The seam's registry-scored candidate is the agent — NOT the static
+        per-intent profile agent (C1/R4)."""
+        from core.intent_service import IntentResult
+        fake = IntentResult(text="x", business_intent="content",
+                            candidate_agents=["blog-writer-pro"])
+        with patch("core.intent_service.get_intent_service") as mock_is, \
+             patch("core.decision_engine.get_decision_engine") as mock_de:
+            mock_is.return_value.classify.return_value = fake
+            mock_de.return_value.rank_actions.side_effect = \
+                lambda actions: [MagicMock(skill=actions[0].skill, score=6.0)]
+            result = classify_decision("write a blog post", {})
+        assert result["selected_agents"] == ["blog-writer-pro"]   # registry, not "content-calendar"
+        assert "via registry" in result["execution_plan"]
+
+    def test_agent_falls_back_to_profile_when_no_candidates(self):
+        """With no registry candidate, fall back to the intent profile agent and
+        say so in the plan (deny-by-default still needs an agent)."""
+        from core.intent_service import IntentResult
+        fake = IntentResult(text="x", business_intent="content", candidate_agents=[])
+        with patch("core.intent_service.get_intent_service") as mock_is, \
+             patch("core.decision_engine.get_decision_engine") as mock_de:
+            mock_is.return_value.classify.return_value = fake
+            mock_de.return_value.rank_actions.side_effect = \
+                lambda actions: [MagicMock(skill=actions[0].skill, score=6.0)]
+            result = classify_decision("zzqq", {})
+        assert result["selected_agents"] == ["content-calendar"]  # static fallback for 'content'
+        assert "via fallback_profile" in result["execution_plan"]
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 5 — decompose_to_tasks

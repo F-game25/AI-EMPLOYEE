@@ -63,10 +63,12 @@ The chat ladder in `backend/services/turn-runner.js::runTurn` (verified 2026-06-
 
 **Risk:** none this phase (audit only). Acceptance: a table in this doc + a test asserting no broker capability marked `side_effecting` executes without going through the skill chain.
 
-### R4 — `classify_decision` internal routing (P1, A4)
-The seam's `classify()` avoids a hardcoded intent→agent table, but `classify_decision` (`unified_pipeline.py`) still internally delegates to `TaskOrchestrator.classify_intent` (behavior-preserving per the A3 commit). Confirm there is no remaining static `intent→agent` dict on the hot path; if found, route through the registry-backed scoring the seam already provides.
+### R4 — `classify_decision` internal routing (P1, A4) — **STATUS: DONE**
+Found the residual static table: `classify_decision` got the intent label from the seam but **discarded** the seam's registry-backed `candidate_agents`, then routed `intent → agent` through the hardcoded `_INTENT_AGENT_PROFILES` dict (`unified_pipeline.py:352/401/425`).
 
-**Risk:** low. Acceptance: grep shows no static intent→agent dict consulted during `process_user_input`; routing decisions cite the registry score.
+**Delivered:** `classify_decision` now captures the full `IntentResult` in one `classify()` call and selects the agent from `candidate_agents` (registry token-overlap scoring). The static dict is renamed `_INTENT_SCORE_PROFILES` and reduced to its legitimate role — per-intent `(profit, speed, complexity)` heuristics for the DecisionEngine + a **last-resort agent fallback** only when the registry yields nothing. `execution_plan` now cites the source (`via registry` / `via fallback_profile`). Tests: `test_unified_pipeline.py` registry-primary + fallback cases; full suite 109/109.
+
+**Acceptance met:** the hot path no longer routes `intent→agent` via a static dict (registry is primary; dict is fallback-only + scoring); routing decisions cite the source in the plan string.
 
 ---
 
