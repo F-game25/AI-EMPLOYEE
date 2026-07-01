@@ -100,7 +100,7 @@ scrub.py               trace_collector.py
 
 ### Missing
 
-`trace_store.py` — plan: "JSONL → SQLite; `~/.ai-employee/evolution/`". The `trace_collector.py` appends traces but there is no durable SQLite-backed store module. Without it, traces survive only until process restart; replay and promotion gates can't query historical traces reliably.
+`trace_store.py` — plan: "JSONL → SQLite; `~/.ai-employee/evolution/`". `trace_collector.py`'s `_drain()` already persists finalized traces to durable daily JSONL files (`~/.ai-employee/evolution/traces/traces-YYYY-MM-DD.jsonl`), so traces do NOT survive only until process restart (corrected 2026-07-02) — that overstated the failure mode. The real gap is narrower: no SQLite/query module exists over those JSONL files, so replay and promotion gates can't query historical traces efficiently (e.g., by agent, outcome, or date range) without scanning files directly.
 
 **Priority:** High — evolution engine's value depends on persistent trace history.
 
@@ -115,7 +115,7 @@ scrub.py               trace_collector.py
 
 ### Gaps
 
-**ServiceControlPanel UI not found.** Plan: "ServiceControlPanel + ComputeRouterStatus on Infrastructure page". Backend `/api/services` route exists (`backend/routes/services.js`) but no matching React panel found under `frontend/src/` — only `ComputeCenterPage.jsx` and `ComputerUseToggle.jsx` exist.
+**ServiceControlPanel UI: DONE, not missing (corrected 2026-07-02).** `frontend/src/components/pages/SystemHealthPage.jsx` already defines both `ServiceControlPanel` and `ComputeRouterStatus` and renders them in `SystemHealthPage`, which is routed from the `infrastructure` page in `Dashboard.jsx`. `ComputeCenterPage.jsx`/`ComputerUseToggle.jsx` are separate, additional surfaces, not replacements. No implementation work is needed here — validate/improve the existing panel rather than duplicate it.
 
 **Desktop Phase 2 orphaned.** `runtime/infra/rpa/desktop_worker.py` exists with `pyautogui` code and `FAILSAFE = True`, but:
 - pyautogui not installed/unlinked on Linux
@@ -195,9 +195,9 @@ session_compressor.py  context_permissions.py  __init__.py
 | `retrieval_trace.py` | The "trace always returned" requirement — debuggable retrieval path |
 | `memory_writer.py` | Validated writes to context tree (the `write(path,content,validate)` interface) |
 
-Without `context_node.py`, `context_tree.py` is likely using an ad-hoc dict structure. Without `retrieval_trace.py`, the "trace always returned" DoD is unmet. Without `memory_writer.py`, session data can't be durably written back.
+**Corrected 2026-07-02 — the functionality these files would provide already exists, under different names:** `recursive_retriever.retrieve()` always returns `{nodes, trace}` (never raises — errors are captured into the trace instead), satisfying the "trace always returned" DoD without a separate `retrieval_trace.py`. `ContextTree.write(path, content, validate)` already implements the validated-write interface, and `session_compressor.compress_session()` calls `tree.write(...)` to durably persist compressed session nodes — so writes are not broken. The real gap is naming/decomposition only: `context_node.py`'s dataclass-per-node structure doesn't exist as its own module (node representation is inline in `context_tree.py`), which is a maintainability nit, not a functional one.
 
-**Priority:** Medium — retrieval reads work; write path and traceability are broken.
+**Priority:** Low — retrieval and write both work end-to-end; this is an optional refactor for clarity, not a broken interface.
 
 ---
 
@@ -244,9 +244,9 @@ work_lifecycle.py  __init__.py
 | `money_memory.py` | Persistent work/client memory across sessions |
 | `marketplace_adapters/` | Directory of per-platform adapters (Upwork, Fiverr, etc.) |
 
-`work_lifecycle.py` covers basic lifecycle but without `submission_queue.py` the two hard approval gates aren't enforced. Without `marketplace_adapters/`, there's no actual marketplace connectivity — the engine is self-contained with no inputs.
+**Corrected 2026-07-02 — the two hard approval gates ARE enforced, in `work_lifecycle.py`:** `quote()` and `deliver()` both call `gate.require_approval(...)` and park the record in a pending state; `confirm_quote_sent()` / `confirm_delivered()` refuse to advance unless that gate's status is approved. Missing `submission_queue.py` is a plan-shape/naming gap (no separately-named staging module), not a missing safety invariant — autonomous submission is already blocked by the existing gate calls. Without `marketplace_adapters/`, there's still no actual marketplace connectivity — the engine is self-contained with no inputs.
 
-**Priority:** High for `submission_queue.py` (safety invariant: no autonomous submission). Medium for adapters.
+**Priority:** Medium for `submission_queue.py` (naming/decomposition only — the safety invariant is already enforced). Medium for adapters.
 
 ---
 
@@ -428,8 +428,8 @@ Based on dependencies and risk level:
 | Category | Count |
 |---|---|
 | Entirely missing modules | 4 (M9, M10, M11, M12) |
-| Partially built modules | 9 (P2, P4, P7, P9, P10, M1, M2, M3, M4, M5, M6, M8) |
+| Partially built modules | 12 (P2, P4, P7, P9, P10, M1, M2, M3, M4, M5, M6, M8) |
 | Missing individual files across partial modules | ~25 |
-| Cross-cutting issues | 5 |
+| Cross-cutting issues | 4 |
 | Intentionally deferred (P9.5) | 1 |
 | Fully done | 7 (P1, P3, P5, P6, P8, M7, P9-core) |
