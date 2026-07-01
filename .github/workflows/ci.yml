@@ -156,6 +156,9 @@ jobs:
       - name: Run workspace upload router unit tests
         run: node tests/test_upload_unit.js
 
+      - name: Run workspace routes regression tests (tenant fail-closed + exact-match)
+        run: node tests/test_workspace_routes.js
+
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
   # ─────────────────────────────────────────────────────────────────
