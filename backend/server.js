@@ -539,6 +539,18 @@ if (HAS_FRONTEND_DIST) {
 const WORKSPACE_DIR = path.join(os.homedir(), '.ai-employee', 'workspace');
 app.use('/workspace', express.static(WORKSPACE_DIR, { index: false }));
 
+// Tenant file-upload workspace API (upload/list/download/delete) — the
+// frontend (WorkspacePage.jsx, FileUploadZone.jsx) already calls
+// /api/workspace/* unconditionally; requireAuth here since the router itself
+// has no auth check and only scopes by req.tenant, which is populated by
+// tenantMiddleware whether or not the caller is authenticated.
+app.use('/api/workspace', requireAuth, require('./routes/workspace'));
+// Error-handling middleware (4-arg signature) must be registered after the
+// router so multer errors (oversized file, disallowed extension, too many
+// files) reach it via next(err) instead of falling through to Express's
+// default handler, which would leak a raw stack trace to the client.
+app.use('/api/workspace', require('./middleware/upload').handleUploadError);
+
 // Serve AI-generated artifacts (summaries, code files) at /api/artifacts/:filename
 const ARTIFACTS_DIR = path.join(STATE_DIR, 'artifacts');  // canonical, not repo-local (C0)
 // Preview HTML artifacts inline (no auth cookie needed — token in query param for iframe src)

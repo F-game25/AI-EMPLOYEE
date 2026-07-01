@@ -5,11 +5,17 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { upload } = require('../middleware/upload');
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
 const router = express.Router();
 
+// Each handler below does synchronous filesystem work (readdirSync/statSync
+// over the tenant's upload directory, or a file read for download) — bound
+// the request rate per IP so repeated calls can't be used to hammer the disk.
+const rateLimit = createRouteRateLimit({ keyPrefix: 'workspace-fs', max: 30, windowMs: 60_000 });
+
 // POST /upload — upload files into tenant workspace
-router.post('/upload', upload.fields([{ name: 'files', maxCount: 100 }, { name: 'file', maxCount: 100 }]), (req, res) => {
+router.post('/upload', rateLimit, upload.fields([{ name: 'files', maxCount: 100 }, { name: 'file', maxCount: 100 }]), (req, res) => {
   const uploaded = [
     ...(req.files?.files || []),
     ...(req.files?.file || []),
@@ -27,7 +33,7 @@ router.post('/upload', upload.fields([{ name: 'files', maxCount: 100 }, { name: 
 });
 
 // GET /files — list workspace files
-router.get('/files', (req, res) => {
+router.get('/files', rateLimit, (req, res) => {
   try {
     const tenantId = req.tenant?.tenantId || 'default';
     const dir = path.join(os.homedir(), '.ai-employee', 'tenants', tenantId, 'workspace', 'uploads');
@@ -43,7 +49,7 @@ router.get('/files', (req, res) => {
 });
 
 // GET /download/:fileId — download a workspace file
-router.get('/download/:fileId', (req, res) => {
+router.get('/download/:fileId', rateLimit, (req, res) => {
   const tenantId = req.tenant?.tenantId || 'default';
   const dir = path.join(os.homedir(), '.ai-employee', 'tenants', tenantId, 'workspace', 'uploads');
   const entries = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
@@ -53,7 +59,7 @@ router.get('/download/:fileId', (req, res) => {
 });
 
 // DELETE /files/:fileId — delete a workspace file
-router.delete('/files/:fileId', (req, res) => {
+router.delete('/files/:fileId', rateLimit, (req, res) => {
   const tenantId = req.tenant?.tenantId || 'default';
   const dir = path.join(os.homedir(), '.ai-employee', 'tenants', tenantId, 'workspace', 'uploads');
   const entries = fs.existsSync(dir) ? fs.readdirSync(dir) : [];

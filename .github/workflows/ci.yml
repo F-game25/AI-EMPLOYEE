@@ -153,6 +153,9 @@ jobs:
       - name: Run JWT algorithm-pin regression test (M1)
         run: node tests/test_jwt_alg_pin.js
 
+      - name: Run workspace upload router unit tests
+        run: node tests/test_upload_unit.js
+
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK
   # ─────────────────────────────────────────────────────────────────
