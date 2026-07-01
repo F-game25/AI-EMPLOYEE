@@ -85,7 +85,11 @@ def test_real_store_paths_isolated_per_tenant(tenancy):
     not one shared global file."""
     tn, mgr = tenancy
     import core.user_feedback_store as ufs
-    importlib.reload(ufs)
+    # Reset the pool's cached instances rather than reloading the module: a
+    # reload rebinds FeedbackEntry/UserFeedbackStore to new class objects, which
+    # breaks isinstance checks in any other test module that imported the old
+    # ones (e.g. test_user_feedback_store.py) when both run in one pytest session.
+    ufs._pool.reset()
 
     mgr.set_current_tenant(_ctx(tn, "tenant-aaa"))
     store_a = ufs.get_feedback_store()

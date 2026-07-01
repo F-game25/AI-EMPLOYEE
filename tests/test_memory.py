@@ -37,11 +37,11 @@ class TestMemoryIndex:
         """
         import core.memory_index as mi_mod
         monkeypatch.setenv("AI_HOME", str(tmp_path))
-        with mi_mod._instance_lock:
-            mi_mod._instance = None
+        monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("AI_EMPLOYEE_STATE_DIR", str(tmp_path / "state"))
+        mi_mod._pool.reset()
         yield
-        with mi_mod._instance_lock:
-            mi_mod._instance = None
+        mi_mod._pool.reset()
 
     def test_memory_index_importable(self) -> None:
         from core.memory_index import get_memory_index
