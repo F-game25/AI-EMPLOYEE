@@ -3106,7 +3106,7 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
   // ── Command Safety Classifier ─────────────────────────────────────────────────
   // Every command must be classified before execution. BLOCKED commands are never
   // run. DANGEROUS commands are logged with extra audit entries.
-  const CMD_BLOCKED   = [ /rm\s+-rf/, /git\s+(push\s+.*--force|clean\s+-fd|reset\s+--hard)/, /chmod\s+-[Rr]/, /curl\s+.*\|.*sh/, /wget\s+.*\|.*sh/, /cat\s+.*\.env/, /\benv\b.*(?:SECRET|API_KEY|TOKEN)/i, /mkfs\b/, /:\s*\(\)\s*\{.*\}/, /dd\s+if=/ ]
+  const CMD_BLOCKED   = [ /rm\s+(-\w*[rR]\w*[fF]|-\w*[fF]\w*[rR])/, /\brm\b(?=.*\s-\w*[rR]\b)(?=.*\s-\w*[fF]\b)/, /git\s+(push\s+.*--force|clean\s+-fd|reset\s+--hard)/, /chmod\s+-[Rr]/, /curl\s+.*\|.*sh/, /wget\s+.*\|.*sh/, /cat\s+.*\.env/, /\benv\b.*(?:SECRET|API_KEY|TOKEN)/i, /mkfs\b/, /:\s*\(\)\s*\{.*\}/, /dd\s+if=/, />\s*\/dev\/s[dr][a-z]/ ]
   const CMD_DANGEROUS = [ /npm\s+install\b/, /pip\s+install\b/, /yarn\s+add\b/, /pnpm\s+add\b/, /migrate\b/, /db:drop\b/, /database:drop\b/ ]
   const CMD_CAUTION   = [ /npm\s+run\b/, /npx\b/, /python3?\s+\S+\.py\b/, /node\s+\S+\.js\b/ ]
   const CMD_SAFE      = [ /^npm\s+(test|run\s+(lint|build|typecheck|verify))\b/, /^pytest\b/, /^python3?\s+-m\s+(pytest|py_compile)\b/, /^npx\s+(vitest|tsc|eslint)\b/, /^node\s+(--check|-c)\b/ ]

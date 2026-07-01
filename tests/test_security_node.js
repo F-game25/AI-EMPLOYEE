@@ -322,36 +322,43 @@ test('Blacklight tools: catalog exposes requested feature surface safely', (t) =
   t.end();
 });
 
-test('Blacklight tools: safe analyzers run locally', (t) => {
-  const email = blacklightTools.runTool('email-lookup', 'Operator@Example.COM');
+// async test variant — runTool returns a Promise
+function testAsync(name, fn) {
+  tests.push({ name, fn: async (t) => { await fn(t); } });
+}
+
+testAsync('Blacklight tools: safe analyzers run locally', async (t) => {
+  const email = await blacklightTools.runTool('email-lookup', 'Operator@Example.COM');
   t.ok(email.ok, 'Email analyzer runs');
   t.equal(email.result.domain, 'example.com', 'Email domain normalized');
 
-  const jwt = blacklightTools.runTool('jwt-analyzer', 'x.y.z');
+  const jwt = await blacklightTools.runTool('jwt-analyzer', 'x.y.z');
   t.ok(jwt.ok, 'JWT analyzer returns without throwing');
   t.ok(Array.isArray(jwt.result.warnings), 'JWT analyzer reports warnings');
   t.end();
 });
 
-test('Blacklight tools: passive network tools are blocked offline', (t) => {
-  const dns = blacklightTools.runTool('dns-lookup', 'example.com');
+testAsync('Blacklight tools: passive network tools are blocked offline', async (t) => {
+  const dns = await blacklightTools.runTool('dns-lookup', 'example.com');
   t.notOk(dns.ok, 'DNS lookup blocked without network approval');
   t.equal(dns.result.blocked, true, 'Blocked result is explicit');
   t.end();
 });
 
 if (module === require.main) {
-  let passed = 0;
-  for (const { name, fn } of tests) {
-    try {
-      fn(createAssertContext(name));
-      passed += 1;
-      console.log(`PASS ${name}`);
-    } catch (err) {
-      console.error(`FAIL ${name}`);
-      console.error(err.stack || err.message);
-      process.exit(1);
+  (async () => {
+    let passed = 0;
+    for (const { name, fn } of tests) {
+      try {
+        await fn(createAssertContext(name));
+        passed += 1;
+        console.log(`PASS ${name}`);
+      } catch (err) {
+        console.error(`FAIL ${name}`);
+        console.error(err.stack || err.message);
+        process.exit(1);
+      }
     }
-  }
-  console.log(`${passed}/${tests.length} security tests passed`);
+    console.log(`${passed}/${tests.length} security tests passed`);
+  })();
 }
