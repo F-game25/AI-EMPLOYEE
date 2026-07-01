@@ -40,6 +40,8 @@ const _INTERNAL_EVENT_ALLOWLIST = new Set([
  *   _lastBlacklightStatus {object|null} mutable ref — pass as wrapper { get, set }
  *   sampleSystemStatus   {function}
  *   getAgents            {function}
+ *   stopAllAgents        {function}  (reason?) => { cancelledTasks, runningAgents } — real halt, broadcasts itself
+ *   activateAgents       {function}  (count?) => { desiredActiveAgents, runningAgents } — real un-halt, broadcasts itself
  *   apiGatewayProtector  {object}
  *   securitySyncPolicy   {object}
  *   anomalyResponder     {object}
@@ -83,6 +85,8 @@ module.exports = function createHealthRouter(deps) {
     _lastBlacklightStatusRef,  // { get(), set(v) } wrapper so mutation is shared
     sampleSystemStatus,
     getAgents,
+    stopAllAgents,
+    activateAgents,
     apiGatewayProtector,
     securitySyncPolicy,
     anomalyResponder,
@@ -927,18 +931,21 @@ module.exports = function createHealthRouter(deps) {
   router.post('/api/system/halt', requireAuth, (req, res) => {
     validate(SCHEMAS.systemHalt, req, res); // optional body, validation is a no-op if body absent
     setSystemHalted(true);
-    runtimeState.agents = runtimeState.agents.map(a => ({ ...a, status: 'stopped' }));
+    // stopAllAgents cancels in-flight/queued tasks, parks every real agent at
+    // idle/offline, and broadcasts 'agents:list' itself (wired via
+    // onAgentEvent('agent:update', ...) in server.js) — no separate broadcast needed.
+    stopAllAgents('system_halt');
     broadcaster.broadcast('system:halted', { halted: true, at: new Date().toISOString() });
-    broadcaster.broadcast('agents:list', { agents: runtimeState.agents });
     res.json({ ok: true, halted: true, at: new Date().toISOString() });
   });
 
   // POST /api/system/restart
   router.post('/api/system/restart', requireAuth, (req, res) => {
     setSystemHalted(false);
-    runtimeState.agents = runtimeState.agents.map(a => ({ ...a, status: 'idle' }));
+    // Bring agents back from the halt's idle/offline park back to running/healthy.
+    // activateAgents also broadcasts 'agents:list' itself, same wiring as above.
+    activateAgents();
     broadcaster.broadcast('system:halted', { halted: false, at: new Date().toISOString() });
-    broadcaster.broadcast('agents:list', { agents: runtimeState.agents });
     res.json({ ok: true, halted: false, at: new Date().toISOString() });
   });
 
