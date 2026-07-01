@@ -6,14 +6,13 @@ const fs = require('fs');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
 
-// Allowed file extensions
+// Allowed file extensions (code + text only; binaries, images, PDFs are blocked)
 const ALLOWED_EXTENSIONS = new Set([
   '.py', '.js', '.ts', '.jsx', '.tsx',
   '.md', '.txt', '.json', '.sh',
   '.css', '.html',
-  '.rs', '.toml',
-  '.pdf', '.docx', '.xlsx', '.csv',
-  '.png', '.jpg', '.jpeg', '.gif', '.webp'
+  '.rs', '.toml', '.yaml', '.yml',
+  '.csv', '.sql', '.xml',
 ]);
 
 // Maximum file size: 50MB

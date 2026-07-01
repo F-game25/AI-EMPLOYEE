@@ -35,7 +35,7 @@ def _sanitize_for_stdout(value: object) -> object:
     return value
 
 
-MIN_PYTHON = (3, 12)
+MIN_PYTHON = (3, 11)
 
 
 def ensure_supported_python(version_info: tuple[int, int, int] | object | None = None) -> None:

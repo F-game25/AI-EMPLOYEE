@@ -40,7 +40,11 @@
     "tauri:build:linux": "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig ~/.cargo/bin/cargo tauri build --target x86_64-unknown-linux-gnu --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "compression": "^1.8.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "uuid": "^14.0.0"
   }
