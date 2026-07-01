@@ -108,8 +108,8 @@ def _iso_now() -> str:
 
 
 def _state_dir() -> Path:
-    from core.state_paths import canonical_state_dir
-    return canonical_state_dir()
+    from core.state_paths import tenant_state_dir
+    return tenant_state_dir()
 
 
 def _default_path() -> Path:
@@ -355,14 +355,12 @@ def _aggregate(entries: list[FeedbackEntry], *, label: str = "") -> dict[str, An
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 
-_store_instance: Optional[UserFeedbackStore] = None
-_store_lock     = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[UserFeedbackStore] = TenantSingletonPool(UserFeedbackStore)
 
 
 def get_feedback_store() -> UserFeedbackStore:
-    """Return the process-wide :class:`UserFeedbackStore` singleton."""
-    global _store_instance
-    with _store_lock:
-        if _store_instance is None:
-            _store_instance = UserFeedbackStore()
-    return _store_instance
+    """Return the :class:`UserFeedbackStore` for the active tenant (per-tenant
+    isolated; one shared ``__global__`` instance in local/default mode)."""
+    return _pool.get()

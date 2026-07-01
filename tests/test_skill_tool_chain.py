@@ -120,13 +120,46 @@ def test_step_failure_fails_closed(patch_registry):
 
 def test_templating_strict_and_typed():
     r = E._resolve_inputs(
-        {"a": "{goal}", "b": "{vars.k}", "c": "x-{ctx.u}-y", "d": "{unknown}", "n": 5},
+        {"a": "{goal}", "b": "{vars.k}", "c": "x-{ctx.u}-y", "n": 5},
         "find leads", {"u": "bob"}, {"k": [1, 2]})
     assert r["a"] == "find leads"
     assert r["b"] == [1, 2]            # whole-string placeholder preserves type
     assert r["c"] == "x-bob-y"          # ctx interpolation in a larger string
-    assert r["d"] == "{unknown}"        # unknown placeholder left literal (no eval)
     assert r["n"] == 5                   # non-string passthrough
+
+
+def test_templating_fails_closed_on_unresolved_placeholder():
+    """A typo'd / unknown / not-yet-saved placeholder must STOP the chain, not
+    coerce to '' and run the tool with a mutated arg (CodeRabbit hardening)."""
+    # Unknown namespace.
+    with pytest.raises(E.StrictTemplateError):
+        E._resolve_inputs({"x": "{unknown}"}, "g", {}, {})
+    # Missing prior-step var (e.g. {vars.hit} typo for {vars.hits}).
+    with pytest.raises(E.StrictTemplateError):
+        E._resolve_inputs({"x": "{vars.hit}"}, "g", {}, {"hits": 1})
+    # Missing ctx key.
+    with pytest.raises(E.StrictTemplateError):
+        E._resolve_inputs({"x": "pre-{ctx.absent}-post"}, "g", {}, {})
+
+
+def test_templating_fails_closed_on_malformed_inputs():
+    """Non-dict step inputs are malformed → fail closed before any tool runs."""
+    with pytest.raises(E.StrictTemplateError):
+        E._resolve_inputs("not-a-dict", "g", {}, {})
+    with pytest.raises(E.StrictTemplateError):
+        E._resolve_inputs(["list", "not", "dict"], "g", {}, {})
+
+
+def test_chain_stops_before_tool_on_bad_template(patch_registry):
+    """End-to-end: a step with an unresolved placeholder returns an error
+    envelope and NEVER calls the registry (no side effect)."""
+    reg = patch_registry(FakeRegistry(results={"web_search": "DATA"}))
+    skill = {"id": "bad", "name": "Bad", "tool_steps": [
+        {"tool": "web_search", "inputs": {"query": "{vars.never_saved}"}, "save_as": "output"}]}
+    out = E._run_tool_chain(skill, "scan leads", {})
+    assert out["status"] == "error"
+    assert "unresolved placeholder" in out["error"]
+    assert reg.calls == []              # tool was never executed
 
 
 def test_dispatch_for_goal_uses_chain_when_present(patch_registry, monkeypatch):

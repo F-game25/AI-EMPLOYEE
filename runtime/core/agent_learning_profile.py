@@ -83,8 +83,8 @@ def _agent_key(agent_id: str) -> str:
 
 
 def _state_path() -> Path:
-    from core.state_paths import canonical_state_dir
-    p = canonical_state_dir() / "agent_learning_profiles.json"
+    from core.state_paths import tenant_state_dir
+    p = tenant_state_dir() / "agent_learning_profiles.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -530,16 +530,19 @@ class AgentLearningProfile:
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 
-_instance: AgentLearningProfile | None = None
-_instance_lock = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[AgentLearningProfile] = TenantSingletonPool(AgentLearningProfile)
 
 
 def get_agent_learning_profile(path: Path | None = None) -> AgentLearningProfile:
-    """Return the process-wide AgentLearningProfile singleton."""
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = AgentLearningProfile(path)
-        elif path is not None and _instance._path != path:
-            _instance = AgentLearningProfile(path)
-    return _instance
+    """Return the AgentLearningProfile for the active tenant (per-tenant isolated;
+    one shared ``__global__`` instance in local/default mode). An explicit ``path``
+    pins a fresh instance for the active tenant (tests / reconfiguration)."""
+    if path is not None:
+        inst = _pool.get()
+        if inst._path != path:
+            inst = AgentLearningProfile(path)
+            _pool.set(inst)
+        return inst
+    return _pool.get()

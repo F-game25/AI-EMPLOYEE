@@ -22,7 +22,6 @@ import os
 import threading
 from enum import Enum
 from pathlib import Path
-import json
 
 from core.state_paths import canonical_state_dir
 
@@ -139,27 +138,26 @@ class PrivacySettings:
         env_val = os.getenv("PRIVACY_MODE", "").strip().upper()
         if env_val in PrivacyMode.__members__:
             return PrivacyMode(env_val)
-        # Persisted preference
-        try:
-            if _MODE_FILE.exists():
-                data = json.loads(_MODE_FILE.read_text())
-                return PrivacyMode(data.get("mode", "HYBRID"))
-        except Exception:
-            pass
+        # Persisted preference — lock-protected read so a concurrent _persist()
+        # in another process can't hand us a half-written file (the file is now
+        # installation-global state).
+        from core.file_lock import read_json_safe
+        data = read_json_safe(_MODE_FILE, default={})
+        if isinstance(data, dict) and data.get("mode") in PrivacyMode.__members__:
+            return PrivacyMode(data["mode"])
         return PrivacyMode.HYBRID
 
     def _persist(self) -> None:
-        try:
-            _MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with self._lock:
-                data = {
-                    "mode": self._mode.value,
-                    "telemetry_enabled": self._telemetry_enabled,
-                    "auto_update": self._auto_update,
-                }
-            _MODE_FILE.write_text(json.dumps(data, indent=2))
-        except Exception as e:
-            logger.debug("Privacy mode persist failed: %s", e)
+        with self._lock:
+            data = {
+                "mode": self._mode.value,
+                "telemetry_enabled": self._telemetry_enabled,
+                "auto_update": self._auto_update,
+            }
+        # Lock-protected write (fcntl sidecar) — serializes concurrent opt-in/
+        # opt-out updates so one worker's change can't clobber another's.
+        from core.file_lock import write_json_safe
+        write_json_safe(_MODE_FILE, data)
 
     def _emit_changed(self, old: PrivacyMode, new: PrivacyMode) -> None:
         try:

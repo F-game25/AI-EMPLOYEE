@@ -14,8 +14,20 @@ def _reload(module_name: str):
     return importlib.reload(module)
 
 
-def test_learning_engine_updates_strategy_agent_and_memory(tmp_path, monkeypatch):
+def _pin_state_dir(tmp_path, monkeypatch) -> None:
+    """Pin all state-dir env vars so canonical_state_dir() resolves under tmp_path.
+
+    The autouse isolated_ai_home fixture sets STATE_DIR to its own fake_home/state;
+    tests that override AI_HOME without updating STATE_DIR would write files to
+    fake_home/state while asserting existence under tmp_path/state.
+    """
     monkeypatch.setenv("AI_HOME", str(tmp_path))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("AI_EMPLOYEE_STATE_DIR", str(tmp_path / "state"))
+
+
+def test_learning_engine_updates_strategy_agent_and_memory(tmp_path, monkeypatch):
+    _pin_state_dir(tmp_path, monkeypatch)
     le = _reload("core.learning_engine")
     engine = le.get_learning_engine()
 
@@ -43,7 +55,7 @@ def test_learning_engine_updates_strategy_agent_and_memory(tmp_path, monkeypatch
 
 
 def test_learning_engine_short_term_memory_is_limited(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_HOME", str(tmp_path))
+    _pin_state_dir(tmp_path, monkeypatch)
     le = _reload("core.learning_engine")
     engine = le.get_learning_engine()
     for i in range(30):

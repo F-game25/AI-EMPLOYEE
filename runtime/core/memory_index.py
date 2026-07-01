@@ -56,8 +56,8 @@ _DIM = 32  # kept for backward-compat imports; use _embedding_dim() at runtime
 
 
 def _state_path() -> Path:
-    from core.state_paths import canonical_state_dir
-    path = canonical_state_dir() / "memory_index.json"
+    from core.state_paths import tenant_state_dir
+    path = tenant_state_dir() / "memory_index.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -288,15 +288,19 @@ class MemoryIndex:
                 self._save()
 
 
-_instance: MemoryIndex | None = None
-_instance_lock = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[MemoryIndex] = TenantSingletonPool(MemoryIndex)
 
 
 def get_memory_index(path: Path | None = None) -> MemoryIndex:
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = MemoryIndex(path)
-        elif path is not None and _instance._path != path:
-            _instance = MemoryIndex(path)
-    return _instance
+    """Return the MemoryIndex for the active tenant (per-tenant isolated; one
+    shared ``__global__`` instance in local/default mode). An explicit ``path``
+    pins a fresh instance for the active tenant (tests / reconfiguration)."""
+    if path is not None:
+        inst = _pool.get()
+        if inst._path != path:
+            inst = MemoryIndex(path)
+            _pool.set(inst)
+        return inst
+    return _pool.get()

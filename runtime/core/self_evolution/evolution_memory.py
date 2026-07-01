@@ -26,8 +26,8 @@ class EvolutionMemory:
 
     @staticmethod
     def _default_path() -> Path:
-        from core.state_paths import canonical_state_dir
-        return canonical_state_dir() / "evolution_memory.json"
+        from core.state_paths import tenant_state_dir
+        return tenant_state_dir() / "evolution_memory.json"
 
     @staticmethod
     def _ts() -> str:
@@ -109,15 +109,19 @@ class EvolutionMemory:
         }
 
 
-_instance: EvolutionMemory | None = None
-_instance_lock = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[EvolutionMemory] = TenantSingletonPool(EvolutionMemory)
 
 
 def get_evolution_memory(path: Path | None = None) -> EvolutionMemory:
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = EvolutionMemory(path)
-        elif path is not None and _instance._path != path:
-            _instance = EvolutionMemory(path)
-    return _instance
+    """Return the EvolutionMemory for the active tenant (per-tenant isolated; one
+    shared ``__global__`` instance in local/default mode). An explicit ``path``
+    pins a fresh instance for the active tenant (tests / reconfiguration)."""
+    if path is not None:
+        inst = _pool.get()
+        if inst._path != path:
+            inst = EvolutionMemory(path)
+            _pool.set(inst)
+        return inst
+    return _pool.get()

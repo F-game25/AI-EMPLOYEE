@@ -103,6 +103,34 @@ async function testPipelineFirstChat() {
   assert.equal(activities.length, 1);
 }
 
+async function testPipelineFirstFallsBackToExecution() {
+  // Codex P1: when chat is pipeline-first but the pipeline yields NO usable reply
+  // (backend down, or a goal its Phase 0 did not answer), the execution engine
+  // must still run before Ollama/node fallback — real goals must not slip through.
+  delete process.env.TURN_RUNNER_PIPELINE_FIRST; // default = pipeline-first
+  const spies = {};
+  const { runner } = makeRunner(spies, {
+    async requestPythonChatPayload() {
+      spies.pipelineCalled = true;
+      return {}; // pipeline produced nothing usable (no response/reply)
+    },
+  });
+
+  const turn = await runner.runTurn({
+    kind: 'chat',
+    source: 'test',
+    message: 'build a landing page',
+    userId: 'user:test',
+    tenantId: 'tenant:test',
+  });
+
+  assert.equal(spies.pipelineCalled, true, 'pipeline rung must run first');
+  assert.equal(spies.execCalled, true, 'execution engine must run when pipeline yields nothing');
+  assert.equal(turn.source, 'execution-engine', 'goal must reach the execution engine, not node fallback');
+  assert.equal(turn.status, 'completed');
+  assert.ok(turn.artifacts.some((item) => item.name === 'index.html'));
+}
+
 async function testLegacyOrderChat() {
   process.env.TURN_RUNNER_PIPELINE_FIRST = '0'; // restore execution-engine-first
   try {
@@ -147,6 +175,7 @@ async function testApprovalGate() {
 
 async function main() {
   await testPipelineFirstChat();
+  await testPipelineFirstFallsBackToExecution();
   await testLegacyOrderChat();
   await testApprovalGate();
 }

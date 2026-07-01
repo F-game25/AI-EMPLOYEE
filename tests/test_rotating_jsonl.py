@@ -15,7 +15,11 @@ from core import rotating_jsonl  # noqa: E402
 
 
 def _segments(path: Path):
-    return sorted(p for p in path.parent.glob(path.name + "*"))
+    # Exclude the inter-process FileLock sidecar (<path>.lock) — it is a 0-byte
+    # lock handle, not a JSONL data segment.
+    return sorted(
+        p for p in path.parent.glob(path.name + "*") if p.suffix != ".lock"
+    )
 
 
 def test_append_creates_file(tmp_path):
@@ -59,6 +63,25 @@ def test_append_many_single_batch(tmp_path):
     p = tmp_path / "batch.jsonl"
     rotating_jsonl.append_many(p, ({"n": n} for n in range(5)))
     assert len(p.read_text().splitlines()) == 5
+
+
+def test_append_many_oversized_batch_stays_bounded(tmp_path):
+    """A single batch far larger than the cap must NOT blow the active segment
+    past max_bytes — per-record rotation keeps it bounded (CodeRabbit hardening)."""
+    p = tmp_path / "drain.jsonl"
+    # 200 records × ~60 bytes ≈ 12 KiB in one batch, cap 1 KiB, 2 backups.
+    rotating_jsonl.append_many(
+        p,
+        ({"i": i, "pad": "z" * 40} for i in range(200)),
+        max_bytes=1024,
+        backups=2,
+    )
+    segs = _segments(p)
+    assert p in segs and len(segs) <= 3
+    total = sum(s.stat().st_size for s in segs)
+    assert total <= 1024 * 3 + 256  # not 12 KiB of one unbroken batch
+    # Active segment alone respects the cap.
+    assert p.stat().st_size <= 1024 + 128
 
 
 def test_no_cap_when_max_bytes_zero(tmp_path):

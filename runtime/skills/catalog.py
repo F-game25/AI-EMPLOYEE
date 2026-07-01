@@ -346,21 +346,40 @@ class ExecutableSkillCatalog(SkillCatalog):
     # ── B2: executable tool-chain interpreter ─────────────────────────────────
 
     _PLACEHOLDER = re.compile(r"\{([a-zA-Z0-9_.]+)\}")
+    _MISSING = object()  # sentinel: placeholder key absent (vs present-but-empty)
+
+    class StrictTemplateError(ValueError):
+        """A skill step referenced a placeholder that cannot be resolved, or its
+        inputs were malformed. The chain must fail closed rather than execute a
+        real tool with a silently-mutated argument."""
 
     @staticmethod
     def _resolve_inputs(inputs: Any, goal: str, ctx: dict, variables: dict) -> Any:
         """Render a step's inputs from a STRICT template — only ``{goal}``,
         ``{vars.NAME}`` (prior step output) and ``{ctx.KEY}`` placeholders. No
         eval, no arbitrary expressions: raw model text never becomes a tool arg
-        except where the skill author explicitly placed a placeholder."""
+        except where the skill author explicitly placed a placeholder.
+
+        Fail-closed: a malformed ``inputs`` shape, or any placeholder that does
+        not resolve (typo'd ``{vars.hit}``, an unknown namespace, a not-yet-saved
+        var), raises ``StrictTemplateError`` so the chain stops *before* the tool
+        runs — it never coerces the bad reference to ``""`` and proceeds."""
+        if not isinstance(inputs, dict):
+            raise ExecutableSkillCatalog.StrictTemplateError(
+                f"step inputs must be an object, got {type(inputs).__name__}")
+
+        missing = ExecutableSkillCatalog._MISSING
+
         def _lookup(key: str) -> Any:
             if key == "goal":
                 return goal
             if key.startswith("vars."):
-                return variables.get(key[5:], "")
+                name = key[5:]
+                return variables[name] if name in variables else missing
             if key.startswith("ctx."):
-                return ctx.get(key[4:], "")
-            return None
+                name = key[4:]
+                return ctx[name] if name in ctx else missing
+            return missing  # unknown namespace — not goal/vars./ctx.
 
         def _render(value: Any) -> Any:
             if isinstance(value, str):
@@ -368,12 +387,16 @@ class ExecutableSkillCatalog(SkillCatalog):
                 m = ExecutableSkillCatalog._PLACEHOLDER.fullmatch(value)
                 if m:
                     found = _lookup(m.group(1))
-                    return found if found is not None else value
+                    if found is missing:
+                        raise ExecutableSkillCatalog.StrictTemplateError(
+                            f"unresolved placeholder '{{{m.group(1)}}}'")
+                    return found
 
                 def _sub(match: "re.Match") -> str:
                     found = _lookup(match.group(1))
-                    if found is None:
-                        return match.group(0)  # leave unknown placeholder literal
+                    if found is missing:
+                        raise ExecutableSkillCatalog.StrictTemplateError(
+                            f"unresolved placeholder '{{{match.group(1)}}}'")
                     return found if isinstance(found, str) else json.dumps(found, default=str)
 
                 return ExecutableSkillCatalog._PLACEHOLDER.sub(_sub, value)
@@ -383,7 +406,7 @@ class ExecutableSkillCatalog(SkillCatalog):
                 return [_render(v) for v in value]
             return value
 
-        return _render(inputs if isinstance(inputs, dict) else {})
+        return _render(inputs)
 
     @staticmethod
     def _run_tool_chain(skill: dict, goal: str, ctx: dict) -> dict | None:
@@ -414,7 +437,13 @@ class ExecutableSkillCatalog(SkillCatalog):
             max_risk = 1
         registered = {t["name"] for t in reg.list_tools(max_risk=5)}
         auto_ok = {t["name"] for t in reg.list_tools(max_risk=max_risk)}
-        approved = set(ctx.get("approved_tools") or [])
+        # ``approved_tools`` lifts a tool above the auto-run risk ceiling, so it is
+        # a privileged escalation key. It is BROKER-OWNED: the execution broker
+        # strips any client-supplied value from request.context and re-derives it
+        # from trusted server-side state before dispatch (see ExecutionBroker.
+        # _trusted_approved_tools). Reading it here is therefore safe; the default
+        # stays fail-closed (empty → nothing beyond the ceiling auto-runs).
+        approved = {str(t) for t in (ctx.get("approved_tools") or []) if isinstance(t, str)}
         agent_id = str(ctx.get("agent_id") or "system")
 
         variables: dict[str, Any] = {}
@@ -435,8 +464,13 @@ class ExecutableSkillCatalog(SkillCatalog):
                         "error": (f"step[{i}] tool '{tool}' exceeds the auto-run risk ceiling "
                                   f"(SKILL_CHAIN_MAX_AUTORISK={max_risk}) and is not approved"),
                         "steps": results}
-            inputs = ExecutableSkillCatalog._resolve_inputs(
-                step.get("inputs") or {}, goal, ctx, variables)
+            try:
+                inputs = ExecutableSkillCatalog._resolve_inputs(
+                    step.get("inputs") or {}, goal, ctx, variables)
+            except ExecutableSkillCatalog.StrictTemplateError as exc:
+                # Fail closed: a bad template never reaches a real tool.
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] {exc}", "steps": results}
             envelope = reg.execute(tool, inputs, agent_id=agent_id)
             ok = bool(envelope.get("ok"))
             results.append({"tool": tool, "ok": ok,

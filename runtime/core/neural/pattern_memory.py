@@ -15,8 +15,8 @@ except ImportError:
 MAX_PATTERNS = 2000
 
 def _path() -> Path:
-    from core.state_paths import canonical_state_dir
-    return canonical_state_dir() / 'pattern_memory.json'
+    from core.state_paths import tenant_state_dir
+    return tenant_state_dir() / 'pattern_memory.json'
 
 class PatternMemory:
     def __init__(self):
@@ -79,13 +79,11 @@ class PatternMemory:
             pass
         return None
 
-_INST: PatternMemory | None = None
-_PM_LOCK = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[PatternMemory] = TenantSingletonPool(PatternMemory)
 
 def get_pattern_memory() -> PatternMemory:
-    """Get or create the process-wide PatternMemory."""
-    global _INST
-    with _PM_LOCK:
-        if _INST is None:
-            _INST = PatternMemory()
-    return _INST
+    """Get or create the PatternMemory for the active tenant (per-tenant isolated;
+    one shared ``__global__`` instance in local/default mode)."""
+    return _pool.get()

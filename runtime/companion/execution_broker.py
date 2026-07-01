@@ -55,6 +55,19 @@ def _computer_use_on() -> bool:
     except Exception:  # noqa: BLE001
         return False
 
+
+def _trusted_approved_tools() -> set[str]:
+    """Tools an operator has pre-approved to run above the skill-chain auto-run
+    risk ceiling. SERVER-OWNED, deny-by-default: sourced only from the
+    ``SKILL_CHAIN_APPROVED_TOOLS`` env (comma-separated), never from request
+    input. Empty unless the operator explicitly configures it.
+
+    This is the trusted origin for ``ctx['approved_tools']`` — a client must not
+    be able to escalate a gated tool (shell/email/browser) by injecting that key
+    into request.context."""
+    raw = os.environ.get("SKILL_CHAIN_APPROVED_TOOLS", "")
+    return {t.strip() for t in raw.split(",") if t.strip()}
+
 # Fine-grained system-info intents → the read-only tool that answers them.
 # Routed deterministically (Phase 7.1.4) so "what time is it on my PC?" always
 # reaches the real local-time tool. These are L0 OS probes (real measured values,
@@ -177,6 +190,16 @@ class ExecutionBroker:
         intent = intent or {}
         resolved = resolved or {}
         ctx = dict(request_context or {})
+
+        # SECURITY (trust boundary): request.context is untrusted client input.
+        # ``approved_tools`` is a privileged escalation key for the skill tool-chain
+        # (it lifts a tool above the auto-run risk ceiling). Drop any inbound value
+        # and re-derive it from trusted server-side state so a caller cannot inject
+        # gated tool names (shell/email/browser) to bypass the gate.
+        ctx.pop("approved_tools", None)
+        _trusted = _trusted_approved_tools()
+        if _trusted:
+            ctx["approved_tools"] = sorted(_trusted)
 
         results: list[dict[str, Any]] = []
         approvals_required: list[dict[str, Any]] = []

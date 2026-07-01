@@ -3503,6 +3503,26 @@ wss.on('connection', (ws, req) => {
             return _broadcast(structuredWsPyReply);
           }
 
+          // Safety net (Codex P1): pipeline-first skipped the execution-engine rung
+          // above. If the pipeline produced no reply (chat backend down, or a real
+          // goal its Phase 0 did not answer), run the execution-engine subprocess
+          // before Ollama/node fallback — it runs independently of the chat backend,
+          // so goals like "build a landing page" still execute.
+          if (!reply && _wsPipelineFirst) {
+            try {
+              const execResult = await runPythonExecution(parsed.message);
+              if (execResult && execResult.is_goal && execResult.reply) {
+                console.info('[AI FLOW] -> Real execution engine (WS pipeline-first fallback): steps=%d success=%s', execResult.steps || 0, execResult.success);
+                const toolSteps = execResult.step_actions || [];
+                toolSteps.slice(0, 5).forEach((s) => {
+                  if (s && s.action) _broadcastStep(`Tool: ${s.action}`, s.status || null);
+                });
+                _broadcastStep('Generating response');
+                return _broadcast(execResult.reply, execResult.attachments);
+              }
+            } catch (_) {}
+          }
+
 	          // 3. Ollama with full conversation history (Groq fallback built-in)
 	          _broadcastStep('Generating response');
 	          const history = _getClientHistory(ws);

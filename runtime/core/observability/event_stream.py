@@ -23,8 +23,8 @@ class EventStream:
 
     @staticmethod
     def _default_path() -> Path:
-        from core.state_paths import canonical_state_dir
-        return canonical_state_dir() / "observability_events.db"
+        from core.state_paths import tenant_state_dir
+        return tenant_state_dir() / "observability_events.db"
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))
@@ -109,13 +109,12 @@ class EventStream:
         }
 
 
-_instance: EventStream | None = None
-_instance_lock = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[EventStream] = TenantSingletonPool(EventStream)
 
 
 def get_event_stream() -> EventStream:
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = EventStream()
-    return _instance
+    """Return the EventStream for the active tenant (per-tenant isolated DB; one
+    shared ``__global__`` instance in local/default mode)."""
+    return _pool.get()

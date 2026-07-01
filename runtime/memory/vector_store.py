@@ -49,21 +49,25 @@ _MAX_ENTRIES = int(os.environ.get("AI_EMPLOYEE_VECTOR_STORE_MAX", "10000"))
 _ALLOWED_STORE_NAMES = {"vector_store.json", "code_index.json"}
 
 
+def _state_root() -> Path:
+    """The one canonical state root (honours STATE_DIR → AI_EMPLOYEE_STATE_DIR →
+    AI_HOME, never repo-local). Single source so the resolver and the path-guard
+    below agree even when AI_HOME is set without STATE_DIR."""
+    from core.state_paths import canonical_state_dir
+    return canonical_state_dir()
+
+
 def _default_path() -> Path:
-    # Honor STATE_DIR first (canonical, set by start.sh), then AI_EMPLOYEE_HOME/AI_HOME,
-    # then the repo — so every subsystem agrees on one state dir.
-    state = os.getenv("STATE_DIR")
-    if state:
-        path = Path(state) / "vector_store.json"
-    else:
-        from core.state_paths import canonical_state_dir
-        path = canonical_state_dir() / "vector_store.json"
+    path = _state_root() / "vector_store.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _safe_store_path(store_name: str = "vector_store.json") -> Path:
-    base = os.path.realpath(os.getenv("STATE_DIR") or Path.home() / ".ai-employee" / "state")
+    # Guard root == the resolver root (canonical_state_dir). Previously this used
+    # STATE_DIR or ~/.ai-employee/state only, so with AI_HOME/AI_EMPLOYEE_STATE_DIR
+    # set (no STATE_DIR) the store opened one file while the guard approved another.
+    base = os.path.realpath(_state_root())
     if store_name not in _ALLOWED_STORE_NAMES:
         raise ValueError("invalid vector store name")
     filename = "code_index.json" if store_name == "code_index.json" else "vector_store.json"

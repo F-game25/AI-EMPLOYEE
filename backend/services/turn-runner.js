@@ -446,6 +446,13 @@ function createTurnRunner(deps) {
       if (kind === 'chat' && pipelineFirst) {
         // Pipeline is the spine for chat; its Phase 0 covers goal execution.
         await tryPipeline();
+        // Safety net (Codex P1): if the pipeline yielded no usable reply — backend
+        // down, or a real goal ("build a landing page") its Phase 0 did not answer —
+        // run the execution engine before dropping to Ollama/node fallback. The
+        // execution engine is an independent subprocess, so it still works when the
+        // chat backend is unreachable. tryExecutionEngine() short-circuits when a
+        // reply already exists, so the pipeline-first happy path is unchanged.
+        await tryExecutionEngine();
       } else {
         // Tasks (after AgentController above), or legacy order when flag=0.
         await tryExecutionEngine();
