@@ -10,13 +10,34 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 _RUNTIME = Path(__file__).resolve().parents[1] / "runtime"
 if str(_RUNTIME) not in sys.path:
     sys.path.insert(0, str(_RUNTIME))
 
-# Belt-and-suspenders: keep the LLM deepening off so the heuristic is asserted.
-os.environ.pop("COMPANION_CRITIQUE_LLM", None)
-os.environ["COMPANION_CRITIQUE_LLM"] = "0"
+
+@pytest.fixture(autouse=True, scope="module")
+def _critique_llm_off():
+    """Belt-and-suspenders: keep the LLM deepening off so the heuristic is asserted.
+
+    CritiqueEngine reads COMPANION_CRITIQUE_LLM lazily via os.getenv() inside a
+    method, not at import time, so this can be a restoring fixture instead of a
+    bare unrestored `os.environ[...] =` assignment (that pattern silently
+    overrides every other test file's env for the rest of the pytest session —
+    see test_conversation_runtime.py for a case where the equivalent mistake
+    with STATE_DIR caused a real cross-test CI failure).
+    """
+    orig = os.environ.get("COMPANION_CRITIQUE_LLM")
+    os.environ["COMPANION_CRITIQUE_LLM"] = "0"
+    try:
+        yield
+    finally:
+        if orig is None:
+            os.environ.pop("COMPANION_CRITIQUE_LLM", None)
+        else:
+            os.environ["COMPANION_CRITIQUE_LLM"] = orig
+
 
 from companion.critique_engine import (  # noqa: E402
     get_critique_engine, CritiqueEngine,

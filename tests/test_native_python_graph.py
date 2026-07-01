@@ -11,6 +11,14 @@ from pathlib import Path
 tmp_root = Path(tempfile.mkdtemp(prefix="aeternus-python-native-graph-"))
 state_dir = tmp_root / "state"
 state_dir.mkdir(parents=True, exist_ok=True)
+# Saved so the `finally` below can restore these instead of leaving every other
+# test file in this pytest session pointed at a directory this module deletes
+# via shutil.rmtree() at the end (STATE_DIR/AI_HOME outrank per-test isolation
+# in core.state_paths.canonical_state_dir(), so an unrestored override here
+# silently redirects every other test's state I/O too).
+_orig_ai_home = os.environ.get("AI_HOME")
+_orig_ai_employee_home = os.environ.get("AI_EMPLOYEE_HOME")
+_orig_state_dir = os.environ.get("STATE_DIR")
 os.environ["AI_HOME"] = str(tmp_root)
 os.environ["AI_EMPLOYEE_HOME"] = str(tmp_root)
 os.environ["STATE_DIR"] = str(state_dir)
@@ -70,3 +78,8 @@ try:
     print("[✓] python native graph fallback contract tests passed")
 finally:
     shutil.rmtree(tmp_root, ignore_errors=True)
+    for _var, _orig in (("AI_HOME", _orig_ai_home), ("AI_EMPLOYEE_HOME", _orig_ai_employee_home), ("STATE_DIR", _orig_state_dir)):
+        if _orig is None:
+            os.environ.pop(_var, None)
+        else:
+            os.environ[_var] = _orig

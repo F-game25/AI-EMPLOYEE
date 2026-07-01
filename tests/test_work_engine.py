@@ -10,17 +10,39 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 _RUNTIME = Path(__file__).resolve().parents[1] / "runtime"
 if str(_RUNTIME) not in sys.path:
     sys.path.insert(0, str(_RUNTIME))
 
-# Redirect canonical state dir to a temp location BEFORE importing the engine.
-_TMP = tempfile.mkdtemp(prefix="work_engine_test_")
-os.environ["STATE_DIR"] = _TMP
-
 from money.work_engine import get_work_engine  # noqa: E402
 from money.work_engine import opportunity_store as store  # noqa: E402
 from money.work_engine import fit_evaluator, pricing_estimator  # noqa: E402
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _isolated_state_dir():
+    """Redirect canonical state dir to a temp location for this module's tests only.
+
+    opportunity_store reads STATE_DIR lazily via canonical_state_dir() inside a
+    method, not at import time, so a module-scoped fixture (set → yield →
+    restore) isolates this file exactly like the old bare `os.environ[...] =`
+    assignment did, but without permanently overriding every other test file's
+    STATE_DIR/AI_HOME isolation for the rest of the pytest session (that exact
+    unrestored-mutation pattern caused a real cross-test failure in
+    test_agent_learning_profile.py — see test_conversation_runtime.py for the
+    full root-cause writeup).
+    """
+    orig = os.environ.get("STATE_DIR")
+    os.environ["STATE_DIR"] = tempfile.mkdtemp(prefix="work_engine_test_")
+    try:
+        yield
+    finally:
+        if orig is None:
+            os.environ.pop("STATE_DIR", None)
+        else:
+            os.environ["STATE_DIR"] = orig
 
 
 def _engine():
