@@ -276,7 +276,7 @@ Research ANY topic across Reddit, X, YouTube, and other sources. Surface what pe
 
 ## Runtime Preflight
 
-Before running any `last30days.py` command in this skill, resolve a Python 3.12+ interpreter once and keep it in `LAST30DAYS_PYTHON`:
+Before running any `last30days.py` command in this skill, resolve a Python 3.11+ interpreter once and keep it in `LAST30DAYS_PYTHON`:
 
 ```bash
 try_last30days_python() {
@@ -289,7 +289,7 @@ try_last30days_python() {
   else
     return 1
   fi
-  "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' || return 1
+  "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || return 1
   LAST30DAYS_PYTHON="$candidate"
   return 0
 }
@@ -321,18 +321,18 @@ EOF_WINDOWS_PYTHON_ROOTS
 fi
 
 if [ -z "${LAST30DAYS_PYTHON:-}" ]; then
-  for py in python3.14 python3.13 python3.12 python3 python; do
+  for py in python3.14 python3.13 python3.12 python3.11 python3 python; do
     try_last30days_python "$py" && break
   done
 fi
 
 if [ -z "${LAST30DAYS_PYTHON:-}" ]; then
-  echo "ERROR: last30days v3 requires Python 3.12+. Install Python 3.12+ or set LAST30DAYS_PYTHON to a supported interpreter." >&2
+  echo "ERROR: last30days v3 requires Python 3.11+. Install Python 3.11+ or set LAST30DAYS_PYTHON to a supported interpreter." >&2
   exit 1
 fi
 
-"${LAST30DAYS_PYTHON}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' || {
-  echo "ERROR: LAST30DAYS_PYTHON must point to Python 3.12+." >&2
+"${LAST30DAYS_PYTHON}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || {
+  echo "ERROR: LAST30DAYS_PYTHON must point to Python 3.11+." >&2
   exit 1
 }
 
@@ -341,13 +341,13 @@ LAST30DAYS_MEMORY_DIR="${LAST30DAYS_MEMORY_DIR:-$HOME/Documents/Last30Days}"
 
 **PYTHON VERSION GATE — when the Runtime Preflight Bash block above exits with a Python version error:**
 
-If the preflight script emits `ERROR: last30days v3 requires Python 3.12+` (or `LAST30DAYS_PYTHON must point to Python 3.12+`) and exits, you MUST:
+If the preflight script emits `ERROR: last30days v3 requires Python 3.11+` (or `LAST30DAYS_PYTHON must point to Python 3.11+`) and exits, you MUST:
 
 1. Display this message to the user:
-   > "The last30days engine needs Python 3.12+. Your system has an older version. Install it with one command:
-   > - **Mac:** `brew install python@3.12`
-   > - **Windows:** `winget install Python.Python.3.12`
-   > - **Linux:** `sudo apt install python3.12` (or `pyenv install 3.12`)
+   > "The last30days engine needs Python 3.11+. Your system has an older version. Install it with one command:
+   > - **Mac:** `brew install python@3.11`
+   > - **Windows:** `winget install Python.Python.3.11`
+   > - **Linux:** `sudo apt install python3.11` (or `pyenv install 3.11`)
    >
    > Then re-run `/last30days <your topic>` and the setup wizard will configure everything automatically."
 2. **Stop.** Do not attempt research. Do not fall back to WebSearch-only synthesis.
