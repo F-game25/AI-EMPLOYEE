@@ -394,18 +394,100 @@ more features.
 
 ---
 
+## Phase E — Goal Achievement System (2026-07-01, plan approved by Lars; execution in progress)
+
+**Reframe (Lars, 2026-07-01):** "the task queue needs to be fully built" → corrected mid-planning:
+"this is not a task system, it's a goal-achieving system." Give it a goal → it produces a detailed
+plan → it puts agents on the sub-tasks → it must also handle short tasks efficiently → everything
+that needs UI wiring must be tracked for the later UI-fixing pass. Full plan, file:line citations,
+and open-decision record: `/home/lf/.claude/plans/clever-wandering-dragon.md` (TQ-1..TQ-6).
+
+**What's already there, verified by reading the code, not assumed:** a goal-container already
+exists (`forge_cycles`, `forge_store.js:243`; routes `forge.js:5389-5473`) — `POST /projects/:id/
+cycles` already does goal→decompose→dependency-aware backlog→cycle→autopilot, it just never writes
+progress back (no `run_ids` append, no completion detection, `success_criteria` stored but never
+evaluated). A sub-task/child-run schema already exists and is completely unused
+(`forge_child_runs`, `forge_store.js:335`, full store API, zero call sites in `forge.js`). The
+Decomposer already asks the LLM for `required_skills` per subtask and throws the answer away —
+every subtask runs the same generic coder/tester loop regardless of what it needs — while
+`runtime/forge/lifecycle/skill_selector.py::select_skills()` (real keyword/tag scoring against the
+570-skill library) sits unused for exactly this purpose. Cross-checked against `MASTER_PLAN_V3.md`
+Module 7 (`runtime/agents/business_swarm/*` — task_decomposer/assignment_engine/dependency_manager/
+parallel_executor/result_aggregator, confirmed **fully built**, 10/10 files, both by my own reading
+and independently by PR #335's gap audit): it's the same decompose→assign→parallel-execute→
+aggregate shape, currently wired only into `company_planner.py` (business domain) — evaluate
+reusing/generalizing it before writing new logic in `forge.js`.
+
+**Three overlapping execution paths consolidate to one:** `forge_queue_item`+`dispatcher.js`
+(weakest — becomes an ingestion adapter only, converts to a backlog item instead of executing
+directly); **Backlog+Autopilot+Decomposer+Cycles** (the one to build on); `/runs`+`/runs/stream`
+(stays as-is — the right tool for small interactive asks).
+
+- **E1 Canonical queue + durable state + finished Cycle lifecycle.** `autopilotSessions`
+  (`forge.js:4824`, currently a bare in-process `Map()` — the one real durability gap, everything
+  else already persists via SQLite) moves into a new `autopilot_sessions` table in `forge_store.js`.
+  `_runAutopilotTick` starts writing back to its Cycle (`run_ids`, completion detection against
+  `success_criteria`, `status` transitions). Boot-time reconciliation for anything stuck
+  `IN_PROGRESS` after an unclean shutdown. `POST /submit` becomes an adapter into the backlog
+  (confirmed: keep this reversible, not a hard cutover). Add `/backlog/:id/cancel|retry`.
+- **E2 Goal intake: fast path + agent/skill routing.** A cheap complexity check before the
+  Decomposer runs, so trivial asks skip the whole cycle apparatus. Wire the Decomposer's
+  `required_skills` into `select_skills()`; route each subtask to a matched skill/specialized agent
+  above a confidence threshold, generic pipeline as the unconditional fallback (strict superset —
+  nothing that works today stops working). Verify business_swarm reuse here first.
+- **E3 Execution capability uplift.** Scoped file read/grep/glob tools for the coder/debug stages
+  (closes the single biggest gap vs. a Claude-Code-style loop — currently one-shot "write
+  everything" with no ability to read existing content first). Iterative per-file edit-then-verify
+  (opt-in, additive). Bounded sub-task delegation via the existing `forge_child_runs` table (depth
+  ≤2). Simple rule-based data-dependent branching.
+- **E4 Reliability.** A concurrency gate around every local-LLM call site (measured this session:
+  4 concurrent forge runs → 2-of-4 Ollama calls failed outright on this 8GB-VRAM box; qwythos:q4
+  stays the model per Lars's instruction — this is a hardware/scheduling fix, not a model change).
+  Re-tune debug-retry counts against a clean serialized baseline via `tests/benchmarks/
+  run_benchmarks.mjs`.
+- **E5 UI/observability.** Cycles/Backlog/Autopilot/Decomposer currently have **zero UI surface** —
+  confirmed by reading `AscendForgePage.jsx`/`forgeStore.js`. New WS events
+  (`forge:cycle_updated`/`backlog_updated`/`autopilot_status_changed`), new tabs, a dependency DAG
+  view. **Confirmed:** collapse the three fragmented approval surfaces (global `ApprovalInbox.jsx`,
+  `AscendForgePage`'s internal `ApprovalsView`, `ForgeQueueView`'s own approvals tab) into the one
+  global inbox, project-filtered.
+- **E6 Safety hardening (cross-cutting, checked per-phase, not last).** External submissions and
+  delegated sub-tasks must go through the exact same autonomy/high-risk approval gate as any other
+  backlog item — no bypass via conversion or delegation. File tools fail loudly on sandbox-escape
+  attempts, never silently empty. Concurrency gate fails closed. Baseline-capture + auto-rollback
+  stay mandatory-on for every path in the consolidated queue.
+
+**Confirmed decisions (2026-07-01):** adapter mode (not hard cutover) for retiring
+`forge_queue_item`/dispatcher; autonomy ceiling stays at the existing default (level 2) for
+unattended runs — high-risk changes always pause for approval; approvals UI collapses into the
+single global inbox. See the plan file for the full open-decision record and per-phase file lists,
+verification steps, and rollback plans.
+
+- **D2 Extend cache/budget to the Python engine LLM path** (`engine/api.generate`). 
+- **D3 Browser/computer-use tasks** behind sandbox+approval (if desired).
+
+---
+
 ## 14. Questions for Lars
 
-1. **Coding models:** which local model is canonical for codegen (e.g. `qwen2.5-coder:14b` vs the
-   current default), and is Claude/OpenAI allowed as the codegen reviewer or planner-only?
+1. **Coding models:** ✅ **ANSWERED 2026-07-01 — qwythos:q4 stays the canonical codegen model.**
+   Measured this session: ~60-70% single-shot success on a trivial task, degrades badly under
+   concurrent load (fix = Phase E4's concurrency gate, not a model swap). Claude/OpenAI as
+   reviewer/planner-only remains open.
 2. **Hardware limits:** VRAM/RAM ceiling on your PC, so model routing + swarm agent counts are tuned
-   to reality (current swarm default = 5 agents)?
+   to reality (current swarm default = 5 agents)? *(Partially answered: RTX 2070 Super, 8GB VRAM —
+   confirmed live this session; informs Phase E4's concurrency gate default of 1.)*
 3. **Remote compute:** do you intend to actually rent (RunPod/Vast) — i.e., should I build the
-   D1 live provider adapter — or is owning/pairing your own machines the priority?
-4. **Autonomy:** for the auto-test→debug loop (B2), how many fix iterations may run *without* asking
-   you, and may it auto-apply once tests pass, or always stop at approval?
-5. **Approvals:** keep approval-gated for every write (current), or allow a "trusted project +
-   trusted worker + passing tests" auto-apply lane?
+   D1 live provider adapter — or is owning/pairing your own machines the priority? *(Still open —
+   flagged again in Phase E4 as the natural next question once the local concurrency ceiling is
+   felt in practice.)*
+4. **Autonomy:** ✅ **ANSWERED 2026-07-01 — stays at the current default (level 2)** for
+   unattended autopilot/cycle runs. High-risk file changes always pause for approval, even after
+   Phase E1's crash-recovery/rollback hardening. Raising it per-project later is Lars's call to
+   make explicitly.
+5. **Approvals:** ✅ **ANSWERED 2026-07-01 — approval-gated for every write stays current
+   behavior**; the three fragmented approval UIs collapse into one surface (Phase E5), but the
+   underlying gate itself is unchanged.
 6. **First target:** which ONE workflow must be excellent first — (a) fix-a-bug-with-tests on this
    repo, (b) build-a-small-feature, (c) research/summary, (d) security audit?
 7. **"Quality output" definition:** for code = "tests pass + lint clean + matches repo style"? For
