@@ -349,7 +349,12 @@ def rate_context_sufficiency(input_text: str, graph_data: dict[str, Any]) -> dic
 # ── Phase 3 — Neural decision layer ──────────────────────────────────────────
 
 # Intent → (agent_id, profit_potential, execution_speed, complexity)
-_INTENT_AGENT_PROFILES: dict[str, tuple[str, float, float, float]] = {
+# Per-intent execution-scoring heuristics for the DecisionEngine:
+# (fallback_agent, profit_potential, execution_speed, complexity).
+# The agent is a *last-resort fallback only* — primary agent selection is the
+# registry-backed `IntentService` candidate scoring (C1/R4). The score tuple is a
+# legitimate intent-level heuristic and stays. This is NOT the hot-path router.
+_INTENT_SCORE_PROFILES: dict[str, tuple[str, float, float, float]] = {
     "lead_gen":  ("lead-hunter-elite",    9.0, 7.0, 5.0),
     "content":   ("content-calendar",     7.0, 8.0, 3.0),
     "social":    ("social-media-manager", 6.0, 9.0, 2.0),
@@ -382,24 +387,31 @@ def classify_decision(
     intent = "ops"
     selected_agents: list[str] = []
     execution_plan = ""
+    candidate_agents: list[str] = []
 
     # Step A — Intent classification via the shared intent seam (coherence): one
-    # classifier for chat/tasks/companion. Internally reuses
-    # TaskOrchestrator.classify_intent, so the label here is unchanged; the seam
-    # also exposes conversation_mode + registry-backed candidate agents that the
-    # other entrypoints adopt as they are unified onto it.
+    # classifier for chat/tasks/companion. Reuses TaskOrchestrator.classify_intent
+    # for the label AND the registry-backed candidate agents (no hardcoded
+    # intent->agent table) — both come from one classify() call.
     try:
         from core.intent_service import get_intent_service  # noqa: PLC0415
-        intent = get_intent_service().classify(input_text).business_intent
+        ir = get_intent_service().classify(input_text)
+        intent = ir.business_intent
+        candidate_agents = list(ir.candidate_agents)
     except Exception as exc:
         logger.debug("Intent classification failed (non-fatal): %s", exc)
 
-    # Step B — Execution plan: rank candidate agents via DecisionEngine
-    # Intent and context-derived scores are kept separate from LLM reasoning.
+    # Step B — Execution plan: pick the agent from the registry-backed seam
+    # scoring (C1/R4), then score it via DecisionEngine. The static profile only
+    # supplies intent-level (profit, speed, complexity) heuristics + a last-resort
+    # agent fallback when the registry yields no candidate.
+    fallback_agent, profit, speed, complexity = _INTENT_SCORE_PROFILES.get(
+        intent, _INTENT_SCORE_PROFILES["ops"]
+    )
+    agent_id = candidate_agents[0] if candidate_agents else fallback_agent
+    agent_source = "registry" if candidate_agents else "fallback_profile"
     try:
         from core.decision_engine import get_decision_engine, ActionSpec  # noqa: PLC0415
-        profile_data = _INTENT_AGENT_PROFILES.get(intent, _INTENT_AGENT_PROFILES["ops"])
-        agent_id, profit, speed, complexity = profile_data
 
         # Boost profit_potential if graph data shows relevant past decisions
         past_len = len(graph_data.get("past_decisions") or [])
@@ -416,15 +428,14 @@ def classify_decision(
         selected_agents = [a.skill for a in ranked]
         execution_plan = (
             f"intent={intent}, "
-            f"agent={selected_agents[0]}, "
+            f"agent={selected_agents[0]} (via {agent_source}), "
             f"score={ranked[0].score:.2f}, "
             f"context_boost={past_len}"
         )
     except Exception as exc:
         logger.debug("DecisionEngine ranking failed (non-fatal): %s", exc)
-        agent_id = _INTENT_AGENT_PROFILES.get(intent, _INTENT_AGENT_PROFILES["ops"])[0]
         selected_agents = [agent_id]
-        execution_plan = f"fallback intent={intent}"
+        execution_plan = f"fallback intent={intent}, agent={agent_id} (via {agent_source})"
 
     return {
         "intent": intent,

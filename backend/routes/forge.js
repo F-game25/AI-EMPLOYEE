@@ -24,6 +24,7 @@ const { ForgeLearningStore } = require('../services/forge_learning_store')
 const { ForgeV7ExecutionStore } = require('../services/forge_v7_execution')
 const forgeWorkspace = require('../services/forge_workspace')
 const forgePath = require('../services/forge_path')
+const forgeFileTools = require('../forge/forge_file_tools')
 const forgeDiff = require('../services/forge_diff')
 const forgeLearning = require('../services/forge_learning')
 const forgeTraining = require('../services/forge_training')
@@ -1214,66 +1215,95 @@ function buildForgeSystemPrompt(project, treeSnippet, historySnippet) {
   )
 }
 
+const _CODE_ACTION_EXT_MAP = {
+  javascript: 'js', typescript: 'ts', jsx: 'jsx', tsx: 'tsx', python: 'py', rust: 'rs',
+  css: 'css', html: 'html', json: 'json', bash: 'sh', shell: 'sh', sh: 'sh', go: 'go',
+  java: 'java', yaml: 'yml', yml: 'yml', sql: 'sql', toml: 'toml', md: 'md',
+}
+const _CODE_ACTION_PATH_RE = /[\w./-]+\.[a-zA-Z0-9]{1,6}/
+
+// Resolves the target file path for one fenced code block and builds its
+// write_file action. Shared by the closed-fence loop and the dangling-fence
+// fallback below so both paths agree on path resolution.
+function _buildCodeAction(text, blockIndex, lang, fenceHint, code, idx, project) {
+  lang = (lang || 'txt').toLowerCase()
+  fenceHint = (fenceHint || '').trim()
+  const ext = _CODE_ACTION_EXT_MAP[lang] || lang
+
+  // 1. path declared on the fence line, e.g. ```js src/app.js  or  ```python:main.py
+  // Extract just the matched path token, not the whole fence-hint string — a
+  // stray leading space before the language token (e.g. "``` python calc.py")
+  // shifts the language word into the hint capture too (fenceHint becomes
+  // "python calc.py"), and naively using the full hint as the path produced a
+  // literal file named "python calc.py" (verified live via the local codegen
+  // benchmark — tests/benchmarks: forge_codegen task).
+  let filePath = ''
+  if (fenceHint) {
+    const hintMatch = _CODE_ACTION_PATH_RE.exec(fenceHint.replace(/^["'`]|["'`]$/g, '').replace(/^title=/, '').trim())
+    if (hintMatch) filePath = hintMatch[0]
+  }
+  // 2. path mentioned in the line(s) just before the block (e.g. **src/app.js** or `src/app.js`)
+  if (!filePath) {
+    const before = text.slice(Math.max(0, blockIndex - 160), blockIndex)
+    const m = before.match(/([`*#>\s])([\w./-]+\.[a-zA-Z0-9]{1,6})[`*:\s]*$/)
+    if (m) filePath = m[2]
+  }
+  // 3. path from a leading comment on the first code line (# path  // path  <!-- path)
+  let codeBody = code
+  if (!filePath) {
+    const firstLine = (code.split('\n')[0] || '').trim()
+    const m = firstLine.match(/^(?:#|\/\/|<!--|\/\*)\s*([\w./-]+\.[a-zA-Z0-9]{1,6})/)
+    if (m) {
+      filePath = m[1]
+      // Strip the path-hint comment line from the code body
+      codeBody = code.split('\n').slice(1).join('\n').replace(/^\n/, '')
+    }
+  }
+  // 4. fallback to a generated name
+  if (!filePath) filePath = `generated_${idx + 1}.${ext}`
+  filePath = filePath.replace(/^\.?\//, '')
+
+  return {
+    id: crypto.randomUUID(),
+    type: 'write_file',
+    label: `Write ${filePath}`,
+    file_path: filePath,
+    description: codeBody.slice(0, 100),
+    status: 'pending_approval',
+    risk_level: 'low',
+    risk_score: 0.1,
+    project_id: project?.id,
+    proposed_content: codeBody,
+    content: codeBody,
+    language: lang,
+    diff: `--- ${filePath}\n+++ ${filePath}\n${codeBody.split('\n').map(l => '+' + l).join('\n')}`,
+  }
+}
+
 function extractCodeActions(text, project) {
   const actions = []
   // Group 1: lang, group 2: optional path hint on the fence line, group 3: code body
   const codeBlockRe = /```([\w+]+)?(?:[ \t:]+([^\n`]+))?\n([\s\S]*?)```/g
-  const extMap = {
-    javascript: 'js', typescript: 'ts', jsx: 'jsx', tsx: 'tsx', python: 'py', rust: 'rs',
-    css: 'css', html: 'html', json: 'json', bash: 'sh', shell: 'sh', sh: 'sh', go: 'go',
-    java: 'java', yaml: 'yml', yml: 'yml', sql: 'sql', toml: 'toml', md: 'md',
-  }
-  const PATH_RE = /[\w./-]+\.[a-zA-Z0-9]{1,6}/
   let match
   let idx = 0
+  let lastEnd = 0
   while ((match = codeBlockRe.exec(text)) !== null) {
-    const lang = (match[1] || 'txt').toLowerCase()
-    const fenceHint = (match[2] || '').trim()
-    const code = match[3]
-    const ext = extMap[lang] || lang
-
-    // 1. path declared on the fence line, e.g. ```js src/app.js  or  ```python:main.py
-    let filePath = ''
-    if (fenceHint && PATH_RE.test(fenceHint)) {
-      filePath = fenceHint.replace(/^["'`]|["'`]$/g, '').replace(/^title=/, '').trim()
-    }
-    // 2. path mentioned in the line(s) just before the block (e.g. **src/app.js** or `src/app.js`)
-    if (!filePath) {
-      const before = text.slice(Math.max(0, match.index - 160), match.index)
-      const m = before.match(/([`*#>\s])([\w./-]+\.[a-zA-Z0-9]{1,6})[`*:\s]*$/)
-      if (m) filePath = m[2]
-    }
-    // 3. path from a leading comment on the first code line (# path  // path  <!-- path)
-    let codeBody = code
-    if (!filePath) {
-      const firstLine = (code.split('\n')[0] || '').trim()
-      const m = firstLine.match(/^(?:#|\/\/|<!--|\/\*)\s*([\w./-]+\.[a-zA-Z0-9]{1,6})/)
-      if (m) {
-        filePath = m[1]
-        // Strip the path-hint comment line from the code body
-        codeBody = code.split('\n').slice(1).join('\n').replace(/^\n/, '')
-      }
-    }
-    // 4. fallback to a generated name
-    if (!filePath) filePath = `generated_${idx + 1}.${ext}`
-    filePath = filePath.replace(/^\.?\//, '')
-
-    actions.push({
-      id: crypto.randomUUID(),
-      type: 'write_file',
-      label: `Write ${filePath}`,
-      file_path: filePath,
-      description: codeBody.slice(0, 100),
-      status: 'pending_approval',
-      risk_level: 'low',
-      risk_score: 0.1,
-      project_id: project?.id,
-      proposed_content: codeBody,
-      content: codeBody,
-      language: lang,
-      diff: `--- ${filePath}\n+++ ${filePath}\n${codeBody.split('\n').map(l => '+' + l).join('\n')}`,
-    })
+    actions.push(_buildCodeAction(text, match.index, match[1], match[2], match[3], idx, project))
+    lastEnd = codeBlockRe.lastIndex
     idx++
+  }
+
+  // Defense-in-depth: local models frequently stop generation right after the
+  // code body without ever emitting the closing fence (verified live against
+  // the configured FORGE_OLLAMA_MODEL — Ollama reports a clean `done_reason:
+  // "stop"`, not a truncation). The strict regex above requires a matched
+  // closing ``` and silently drops that block, so a run reaches
+  // awaiting_approval with zero write actions and no error anywhere. Treat a
+  // trailing, never-closed opening fence as implicitly closed by end-of-text.
+  const tail = text.slice(lastEnd)
+  const openMatch = /```([\w+]+)?(?:[ \t:]+([^\n`]+))?\n([\s\S]*)$/.exec(tail)
+  if (openMatch && openMatch[3] && openMatch[3].trim()) {
+    actions.push(_buildCodeAction(text, lastEnd + openMatch.index, openMatch[1], openMatch[2], openMatch[3], idx, project))
   }
   return actions
 }
@@ -1642,6 +1672,162 @@ print(json.dumps({
 // Expose swarm via HTTP for other parts of the system
 // POST /api/forge/swarm { prompt, task_type, n_agents, timeout_s }
 
+// TQ-2: which categories of the 570-skill library are safe to auto-route a
+// backlog item to WITHOUT going through the file-staging/verify/rollback
+// pipeline. Deliberately conservative — anything that could plausibly need a
+// repo file edit (dev/engineering/automation/project-mgmt/security/finance-
+// execution/etc.) is excluded and stays on the generic agentic pipeline. Only
+// clearly-standalone knowledge/content/outreach work routes here.
+const SKILL_ROUTE_SAFE_CATEGORIES = new Set([
+  'Research & Analysis', 'Content & Writing', 'Data Analysis', 'Growth & Marketing',
+  'Marketing & SEO', 'Social Media', 'Branding & Identity', 'Customer Support',
+  'Company Building & Strategy',
+])
+const SKILL_ROUTE_MIN_SCORE = 6.0
+
+// Best-effort skill match for a subtask, via the same skill_selector the
+// Decomposer's (currently-unused) `required_skills` field was meant to feed.
+// Returns { skill_id, match_score, category, has_tool_chain } or null. Never
+// throws — a routing failure just means "no match", the generic pipeline
+// still runs the work.
+async function routeBacklogItem(title, description, taskType = 'general') {
+  const REPO_ROOT_ROUTE = path.resolve(__dirname, '..', '..')
+  const RUNTIME_DIR_ROUTE = path.join(REPO_ROOT_ROUTE, 'runtime')
+  const AI_HOME_ROUTE = path.resolve(
+    process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee')
+  )
+  const task = `${title || ''} ${description || ''}`.trim().slice(0, 800)
+  if (!task) return null
+  const snippet = `
+import sys, os, json
+sys.path.insert(0, ${JSON.stringify(RUNTIME_DIR_ROUTE)})
+os.environ.setdefault('AI_HOME', ${JSON.stringify(AI_HOME_ROUTE)})
+result = None
+try:
+    from forge.lifecycle.skill_selector import select_skills
+    matches = select_skills(${JSON.stringify(task)}, ${JSON.stringify(taskType)}, max_skills=1)
+    if matches:
+        m = matches[0]
+        result = {
+            'skill_id': m.get('id'),
+            'match_score': m.get('match_score', 0),
+            'category': m.get('category'),
+            'has_tool_chain': bool(m.get('tool_steps')),
+        }
+except Exception as e:
+    result = {'error': str(e)}
+print(json.dumps(result))
+`
+  return new Promise((resolve) => {
+    let stdout = '', stderr = ''
+    const child = spawn(process.env.PYTHON_BIN || 'python3', ['-c', snippet], {
+      env: { ...process.env, AI_HOME: AI_HOME_ROUTE, PYTHONPATH: RUNTIME_DIR_ROUTE },
+      timeout: 15_000,
+    })
+    child.stdout.on('data', d => { stdout += d })
+    child.stderr.on('data', d => { stderr += d })
+    child.on('close', code => {
+      if (code !== 0) { logger.warn('routeBacklogItem exit', code, stderr.slice(0, 200)); return resolve(null) }
+      try {
+        const line = stdout.trim().split('\n').pop() || 'null'
+        const parsed = JSON.parse(line)
+        resolve(parsed && !parsed.error ? parsed : null)
+      } catch { resolve(null) }
+    })
+    child.on('error', () => resolve(null))
+  })
+}
+
+// Computed once at backlog-item creation time (not re-computed per tick).
+// Only returns a non-null assigned_skill_id when BOTH the match is
+// high-confidence AND the skill's category is one that's safe to run
+// standalone (no repo file access implied) — a strict, auditable bar so a
+// generic coding backlog item never silently gets misrouted away from the
+// safe file-staging/verify/rollback pipeline.
+async function computeSkillRouting(title, description) {
+  const routing = await routeBacklogItem(title, description).catch(() => null)
+  if (!routing || !routing.skill_id) return { assigned_skill_id: null, match_score: null }
+  const qualifies = routing.match_score >= SKILL_ROUTE_MIN_SCORE
+    && SKILL_ROUTE_SAFE_CATEGORIES.has(routing.category)
+  return {
+    assigned_skill_id: qualifies ? routing.skill_id : null,
+    match_score: routing.match_score ?? null,
+  }
+}
+
+// Actually run a backlog item's work through the skill catalog's unified
+// dispatch (ExecutableSkillCatalog.dispatch_for_goal — runs the skill's real
+// tool chain if it has one, else falls back to LLM guidance from the skill's
+// own system_prompt). Returns the SAME shape _executeAgenticRun returns so
+// callers (autopilot tick) don't need to know which path ran.
+async function dispatchBacklogItemViaSkill(project, item, routing) {
+  const REPO_ROOT_DISPATCH = path.resolve(__dirname, '..', '..')
+  const RUNTIME_DIR_DISPATCH = path.join(REPO_ROOT_DISPATCH, 'runtime')
+  const AI_HOME_DISPATCH = path.resolve(
+    process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee')
+  )
+  const goal = item.description || item.title
+  const timeoutS = 120
+  const snippet = `
+import sys, os, json
+sys.path.insert(0, ${JSON.stringify(RUNTIME_DIR_DISPATCH)})
+os.environ.setdefault('AI_HOME', ${JSON.stringify(AI_HOME_DISPATCH)})
+from skills.catalog import get_skill_catalog
+catalog = get_skill_catalog()
+result = catalog.dispatch_for_goal(${JSON.stringify(goal)}, {'skill_id': ${JSON.stringify(routing.skill_id)}, 'task_type': 'general'})
+print(json.dumps(result, default=str))
+`
+  const runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+  const dispatchResult = await new Promise((resolve) => {
+    let stdout = '', stderr = ''
+    const child = spawn(process.env.PYTHON_BIN || 'python3', ['-c', snippet], {
+      env: { ...process.env, AI_HOME: AI_HOME_DISPATCH, PYTHONPATH: RUNTIME_DIR_DISPATCH },
+      timeout: (timeoutS + 15) * 1000,
+    })
+    child.stdout.on('data', d => { stdout += d })
+    child.stderr.on('data', d => { stderr += d })
+    child.on('close', code => {
+      if (code !== 0) return resolve({ status: 'error', note: `dispatch exit ${code}: ${stderr.slice(0, 300)}` })
+      try { resolve(JSON.parse(stdout.trim().split('\n').pop() || '{}')) }
+      catch { resolve({ status: 'error', note: `parse error: ${stdout.slice(0, 300)}` }) }
+    })
+    child.on('error', (err) => resolve({ status: 'error', note: err.message }))
+  })
+
+  const success = dispatchResult?.status === 'ok'
+  const finalReport = {
+    status: success ? 'verified' : 'partial',
+    summary: success
+      ? `Routed to skill '${routing.skill_id}' (score ${routing.match_score}, ${dispatchResult.via || 'skill_catalog'}).`
+      : `Skill dispatch did not complete: ${dispatchResult?.note || dispatchResult?.status || 'unknown'}.`,
+    skill_routing: { skill_id: routing.skill_id, match_score: routing.match_score, category: routing.category },
+    dispatch_result: dispatchResult,
+    applied_files: [],
+    snapshots: [],
+    test_result: null,
+    generated_at: nowIso(),
+    provider: 'skill_catalog',
+    next_steps: success ? [] : ['Review the skill output; falls back to the agentic pipeline is not automatic — retry the item to force it.'],
+  }
+  const run = upsertRun({
+    id: runId, run_id: runId, project_id: project.id, goal,
+    status: success ? 'verified' : 'verify_failed',
+    mode: 'skill_dispatch', provider: 'skill_catalog',
+    max_iterations: 1, context_pack: null, plan: null,
+    actions: [], patches: [], approvals: [], test_results: [],
+    review: { status: success ? 'skill_completed' : 'skill_partial', summary: finalReport.summary },
+    final_report: finalReport, audit_ids: [], linked_backlog_id: item.backlog_id,
+    workspace_path: null, created_at: nowIso(), updated_at: nowIso(),
+  })
+  appendAudit('forge_skill_routed_run_completed', {
+    run_id: runId, project_id: project.id, backlog_id: item.backlog_id,
+    skill_id: routing.skill_id, match_score: routing.match_score, success,
+  })
+  broadcastForge('forge:run_created', { run })
+  broadcastForge('forge:run_updated', { run, action: 'skill_dispatch_done' })
+  return { ok: true, success, run_id: runId, run, summary: finalReport.summary }
+}
+
 async function callPythonChat(message, timeoutMs = 30000) {
   // 1. Try local Ollama first (free, private, no API cost). _callOllama accepts a
   // string, a messages array, or a { system, user } pair and routes via /api/chat.
@@ -1717,16 +1903,16 @@ async function forgeCodegen(prompt, goal, body = {}) {
       if (text) {
         try { getTokenBudget().record(estimateTokens(promptStr) + estimateTokens(text), { provider: 'swarm', n_agents: decision.n_agents }) } catch { /* best-effort */ }
       }
-      return { text, mode: 'swarm', n_agents: decision.n_agents, confidence: sw?.confidence ?? null, reason: decision.reason }
+      return { text, mode: 'swarm', n_agents: decision.n_agents, confidence: sw?.confidence ?? null, reason: decision.reason, provider: sw?.provider || 'swarm' }
     } catch (err) {
       // Swarm path failed — fall back to single-agent cached chat, never break the run.
       const r = await cachedForgeChat(prompt, 60000)
-      return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: `swarm failed (${err.message || 'error'}) — single-agent fallback`, fallback: true }
+      return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: `swarm failed (${err.message || 'error'}) — single-agent fallback`, fallback: true, provider: r?.provider || null, model: r?.model || null, cache: r?._cache || null }
     }
   }
 
   const r = await cachedForgeChat(prompt, 60000)
-  return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: decision.reason }
+  return { text: r?.response || r?.reply || '', mode: 'single', n_agents: 1, reason: decision.reason, provider: r?.provider || null, model: r?.model || null, cache: r?._cache || null }
 }
 
 const rateLimit = createRouteRateLimit({ keyPrefix: 'forge-fs', max: 30, windowMs: 60_000 })
@@ -1939,8 +2125,11 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
           const prompt = { system: _sys, user: _userParts.join('\n\n') }
           const cg = await forgeCodegen(prompt, goal, req.body)
           aiText = cg.text
-          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
-        } catch { /* degraded plan-only run */ }
+          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback, provider: cg.provider || null, model: cg.model || null, cache: cg.cache || null }
+        } catch (err) {
+          logger.error('codegen failed, degrading to plan-only run:', err.message)
+          appendAudit('forge_codegen_failed', { run_id: runId, project_id: project.id, error: String(err.message || err).slice(0, 300) })
+        }
       }
 
       const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
@@ -2066,10 +2255,14 @@ module.exports = function createForgeRouter(requireAuth, opts = {}) {
           const prompt = { system: _sys, user: _userParts.join('\n\n') }
           const cg = await forgeCodegen(prompt, goal, req.body)
           aiText = cg.text
-          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback }
+          codegenInfo = { mode: cg.mode, n_agents: cg.n_agents || 1, reason: cg.reason, confidence: cg.confidence ?? null, fallback: !!cg.fallback, provider: cg.provider || null, model: cg.model || null, cache: cg.cache || null }
           if (cg.mode === 'swarm') send('progress', { stage: 'swarm', message: `Swarm: ${cg.n_agents} agents (${cg.reason})` })
           if (aiText) send('progress', { stage: 'extract', message: `AI responded — extracting code actions…` })
-        } catch { /* degraded plan-only */ }
+        } catch (err) {
+          logger.error('codegen failed, degrading to plan-only run:', err.message)
+          appendAudit('forge_codegen_failed', { run_id: runId, project_id: project.id, error: String(err.message || err).slice(0, 300) })
+          send('progress', { stage: 'codegen_failed', message: `AI model call failed (${err.message || 'unknown error'}) — continuing plan-only.` })
+        }
       }
 
       const codeActions = aiText ? extractCodeActions(aiText, project).slice(0, 12) : []
@@ -3813,6 +4006,65 @@ Respond with ONLY valid JSON (no markdown fences) matching this schema:
     return { agent: 'planner', status: 'done', output: plannerOutput, duration_ms, swarm_used: plannerSwarmUsed, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
+  // ── Iterative file read loop for coder agent ─────────────────────────────────
+  // Allows the model to request file reads before generating code, enabling
+  // iterative inspection (Claude-Code-style loop). Pattern: model can include
+  // <read:path> directives; we parse, read, and feed content back.
+  async function runCoderWithFileReads(prompt, project, root, workspaceRoot, opts = {}) {
+    const maxIterations = opts.maxIterations || 2
+    const readContext = []
+    let fullPrompt = prompt
+    let iteration = 0
+
+    for (iteration = 0; iteration < maxIterations; iteration++) {
+      let aiText = ''
+      try {
+        const r = await callPythonChat(fullPrompt, opts.timeout || 90000)
+        aiText = r?.response || r?.reply || ''
+      } catch (err) {
+        logger.warn('[coder-read-loop] LLM call failed:', err?.message)
+        break
+      }
+
+      if (!aiText) break
+
+      // Parse read requests: <read:path> markers
+      const readPattern = /<read:([^\>]+)>/g
+      const readPaths = []
+      let match
+      while ((match = readPattern.exec(aiText)) !== null) {
+        readPaths.push(match[1].trim())
+      }
+
+      // If this is the last iteration OR no reads requested, return the response
+      if (iteration === maxIterations - 1 || !readPaths.length) {
+        return { aiText, readContext, iteration }
+      }
+
+      // Read the requested files and append to context
+      for (const filePath of readPaths.slice(0, 5)) { // limit to 5 files per iteration
+        const result = forgeFileTools.readFile(workspaceRoot, filePath)
+        if (result.ok) {
+          readContext.push(`# File: ${filePath} (${result.lines} lines)\n\`\`\`\n${result.content.slice(0, 5000)}\n\`\`\``)
+        } else {
+          readContext.push(`# Failed to read ${filePath}: ${result.error}`)
+        }
+      }
+
+      // Rebuild prompt with file context and ask for code generation
+      fullPrompt = `${prompt}
+
+--- File context from previous reads ---
+${readContext.join('\n\n')}
+
+--- Now generate the code changes ---
+Based on the files above, output the COMPLETE file content for every file that needs to be created or modified.
+Each file must be in a code block labelled with its relative path.`
+    }
+
+    return { aiText: '', readContext, iteration }
+  }
+
   async function runCoderAgent(project, plannerStage, goal, root, runId, iter) {
     const t0 = Date.now()
     setForgeAgentStatus('coder', 'writing', `Writing files (iter ${iter})`)
@@ -3835,12 +4087,14 @@ Files to modify/create: ${files || '(determine from context)'}
 Steps:
 ${steps || goal}
 
-Output the COMPLETE file content for every file that needs to be created or modified.
+If you need to inspect existing files before writing changes, include markers like <read:path/to/file> on their own line.
+Otherwise, output the COMPLETE file content for every file that needs to be created or modified.
 Each file must be in a code block labelled with its relative path.`
 
     let aiText = ''
     let swarmUsed = false
     const useSwarm = isSwarmEnabled() // runtime-toggleable
+    const useFileReads = process.env.FORGE_CODER_FILE_READS !== 'off'
 
     if (useSwarm) {
       // Swarm mode: run N agents in parallel, pick consensus answer
@@ -3857,15 +4111,28 @@ Each file must be in a code block labelled with its relative path.`
     }
 
     if (!aiText) {
-      try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+      if (useFileReads) {
+        // Iterative read loop: allow model to inspect files first
+        const workspaceRoot = runWorkspaceRoot(runId)
+        const readResult = await runCoderWithFileReads(prompt, project, root, workspaceRoot, { maxIterations: 2 })
+        aiText = readResult.aiText
+      } else {
+        try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+      }
     }
 
-    const actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
+    let actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
+
+    // Optional per-file verify: check syntax of each generated file
+    if (process.env.FORGE_CODER_PER_FILE_VERIFY && actions.length) {
+      actions = await verifyCodeActions(actions, root)
+    }
 
     const duration_ms = Date.now() - t0
-    recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length, swarm_used: swarmUsed })
-    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated${swarmUsed ? ' (swarm)' : ''}`, { swarm_used: swarmUsed })
-    return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length, swarm_used: swarmUsed }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+    const verifyFailed = actions.filter(a => a.verify_failed).length
+    recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length, verify_failed: verifyFailed, swarm_used: swarmUsed })
+    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated${verifyFailed ? ` (${verifyFailed} with syntax errors)` : ''}${swarmUsed ? ' (swarm)' : ''}`, { swarm_used: swarmUsed })
+    return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length, verify_failed: verifyFailed, swarm_used: swarmUsed }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
   // Build a dynamic command list from the detected stack, checking which scripts exist.
@@ -3905,6 +4172,184 @@ Each file must be in a code block labelled with its relative path.`
     if (/ENOENT|No such file/.test(o)) return { reason: 'missing_file', fix: 'A required file is missing — ensure the file path is correct' }
     if (/EACCES|permission denied/i.test(o)) return { reason: 'permission_error', fix: 'Permission issue — check file permissions' }
     return { reason: 'unknown', fix: 'Review the full error output and fix the reported issue' }
+  }
+
+  // ── Per-file syntax verification (TQ-3 phase 2) ──────────────────────────────
+  // Lightweight syntax checks on individual files before batch staging.
+  // Catches errors early without full test suite, only for supported file types.
+  function getFileSyntaxCheckCmd(filePath) {
+    if (/\.js$/.test(filePath)) return { cmd: `node --check "${filePath}"`, type: 'node' }
+    if (/\.ts$/.test(filePath)) return { cmd: `npx tsc --noEmit "${filePath}"`, type: 'tsc' }
+    if (/\.py$/.test(filePath)) return { cmd: `python3 -m py_compile "${filePath}"`, type: 'python' }
+    if (/\.json$/.test(filePath)) return { cmd: `node -e "JSON.parse(require('fs').readFileSync('${filePath}','utf8'))"`, type: 'json' }
+    return null
+  }
+
+  async function verifyFileContent(filePath, content, opts = {}) {
+    // Verify a generated file's content via syntax check
+    // Returns { ok: true } or { ok: false, reason, fix, output }
+    const checkCmd = getFileSyntaxCheckCmd(filePath)
+    if (!checkCmd) return { ok: true } // No syntax check available
+
+    try {
+      const tmpFile = path.join(os.tmpdir(), `verify-${crypto.randomBytes(4).toString('hex')}-${path.basename(filePath)}`)
+      fs.writeFileSync(tmpFile, content, 'utf8')
+      const result = spawnSync(checkCmd.cmd.split(' ')[0], checkCmd.cmd.split(' ').slice(1), {
+        encoding: 'utf8',
+        timeout: 5000,
+        maxBuffer: 100 * 1024,
+        cwd: os.tmpdir(),
+      })
+      fs.rmSync(tmpFile, { force: true })
+
+      if (result.status === 0) return { ok: true }
+      const output = (result.stderr || result.stdout || '').trim()
+      const { reason, fix } = classifyFailure(output)
+      return { ok: false, reason, fix, output: output.slice(0, 300) }
+    } catch (err) {
+      return { ok: false, reason: 'verify_error', fix: 'Could not run syntax check', output: err.message }
+    }
+  }
+
+  async function verifyCodeActions(actions, filePath) {
+    // Optional per-file verify: check each action's content syntax before returning
+    if (!process.env.FORGE_CODER_PER_FILE_VERIFY) return actions // opt-in only
+
+    const verified = []
+    for (const action of actions) {
+      const check = await verifyFileContent(action.file_path, action.content)
+      if (check.ok) {
+        verified.push(action)
+      } else {
+        // Mark failed actions but keep them for later debug
+        action.verify_failed = true
+        action.verify_error = check
+        verified.push(action)
+      }
+    }
+    return verified
+  }
+
+  // ── Sub-task delegation (TQ-3 phase 3) ───────────────────────────────────────
+  // Spawn a child task within a parent run, with depth tracking and merge semantics.
+  // Uses the existing forge_child_runs table for persistence.
+  async function spawnChildTask(project, parentRunId, childGoal, opts = {}) {
+    const maxDepth = opts.maxDepth || 2
+    const parentRun = forgeRunStore.getRun(parentRunId)
+    if (!parentRun) return { ok: false, error: 'parent run not found' }
+
+    // Check depth: reject if parent was already a child at max depth
+    let currentDepth = 1
+    const childTraces = forgeRunStore.getChildRuns(parentRunId)
+    if (childTraces.length > 0) {
+      const firstChild = childTraces[0]
+      // If this parent is itself a child, increment depth
+      const parentAsChild = forgeRunStore.getChildRuns(parentRunId)
+      if (parentAsChild && parentAsChild.length > 0) currentDepth = 2
+    }
+
+    if (currentDepth >= maxDepth) {
+      return { ok: false, error: `max delegation depth ${maxDepth} reached` }
+    }
+
+    // Create a child backlog item (will be picked up by autopilot)
+    const childBacklogItem = {
+      id: crypto.randomUUID(),
+      cycle_id: parentRun.cycle_id || parentRunId,
+      title: `[child] ${childGoal.slice(0, 60)}`,
+      goal: childGoal,
+      status: 'READY',
+      priority: opts.priority || 'normal',
+      risk_level: opts.risk_level || 'medium',
+      depends_on: [parentRunId], // parent task is a dependency
+      created_at: nowIso(),
+    }
+
+    forgeRunStore.upsertBacklogItem(childBacklogItem)
+
+    // Create child run entry in forge_child_runs
+    const childRunEntry = {
+      child_id: crypto.randomUUID(),
+      parent_run_id: parentRunId,
+      child_run_id: null, // will be updated when the backlog item starts
+      dependency_run_ids: JSON.stringify([parentRunId]),
+      merge_status: 'pending',
+      created_at: nowIso(),
+    }
+
+    forgeRunStore.upsertChildRun(childRunEntry)
+
+    return {
+      ok: true,
+      child_id: childRunEntry.child_id,
+      backlog_item_id: childBacklogItem.id,
+      depth: currentDepth + 1,
+    }
+  }
+
+  // Wait for a child task to complete and merge results
+  async function waitForChildCompletion(childId, opts = {}) {
+    const timeoutMs = opts.timeoutMs || 300000 // 5 minutes default
+    const pollIntervalMs = opts.pollIntervalMs || 2000
+    const startTime = Date.now()
+
+    while (Date.now() - startTime < timeoutMs) {
+      const childEntry = forgeRunStore.getChildRuns(childId)
+      if (childEntry && childEntry.length > 0 && childEntry[0].merge_status !== 'pending') {
+        return {
+          ok: true,
+          child_run_id: childEntry[0].child_run_id,
+          merge_status: childEntry[0].merge_status,
+          final_report: childEntry[0].final_child_report ? JSON.parse(childEntry[0].final_child_report) : null,
+        }
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs))
+    }
+
+    return { ok: false, error: 'child task timeout' }
+  }
+
+  // ── Data-dependent branching (TQ-3 phase 4) ──────────────────────────────────
+  // Simple rule-based conditional execution: evaluate if_contains against prior output,
+  // then execute then_step if condition is met. No LLM judgment, purely deterministic.
+  function evaluateConditionalStep(condition, priorOutput) {
+    if (!condition || !priorOutput) return false
+    const text = typeof priorOutput === 'string' ? priorOutput : JSON.stringify(priorOutput)
+    if (condition.if_contains) {
+      // Check if text contains the pattern (case-insensitive)
+      return new RegExp(condition.if_contains, 'i').test(text)
+    }
+    if (condition.if_not_contains) {
+      return !new RegExp(condition.if_not_contains, 'i').test(text)
+    }
+    if (condition.if_equals) {
+      return text === condition.if_equals
+    }
+    return false
+  }
+
+  async function executeConditionalStep(step, context) {
+    // Execute a conditional step: rerun, delegate, or custom action
+    if (!step) return { ok: false, reason: 'no step defined' }
+
+    if (step.type === 'rerun_coder') {
+      // Re-run coder with updated prompt
+      const updatedPrompt = step.prompt_suffix ? `${context.prompt}\n\n${step.prompt_suffix}` : context.prompt
+      return { ok: true, action: 'rerun_coder', prompt: updatedPrompt }
+    }
+
+    if (step.type === 'delegate_child') {
+      // Spawn a child task for a specific sub-goal
+      const childResult = await spawnChildTask(context.project, context.parentRunId, step.goal, { maxDepth: step.maxDepth || 2 })
+      return childResult ? { ok: true, action: 'delegated', ...childResult } : { ok: false }
+    }
+
+    if (step.type === 'run_debug') {
+      // Trigger debug agent even if tests passed
+      return { ok: true, action: 'run_debug', reason: step.reason || 'conditional debug' }
+    }
+
+    return { ok: false, reason: 'unknown step type' }
   }
 
   async function runTesterAgent(project, verifyCmds, root, runId) {
@@ -4514,16 +4959,65 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, state: 'queued', item: action })
   })
 
+  // TQ-1 adapter mode: the caller-facing contract (submit -> approve -> "it runs
+  // eventually") stays identical. What changes internally is where an approved
+  // item goes: instead of the legacy dispatcher polling it into a bare
+  // AgentController.run_goal call, it becomes a real backlog item so it gets
+  // the dependency/priority/autonomy machinery + durable Cycle tracking. Only
+  // items with a project_id can become a backlog item (the schema requires
+  // one) — a project-less submission falls back to the legacy dispatcher
+  // drain, gated by FORGE_DISPATCHER_LEGACY_DRAIN (kept available, not
+  // deleted, per the reversibility design already stated in dispatcher.js).
   router.post('/approve/:id', requireScope('task-emit'), (req, res) => {
     const action = findAction(req.params.id)
     if (!action) return res.status(404).json({ ok: false, error: 'queue item not found' })
-    const updated = updateAction(action.id, {
+    let updated = updateAction(action.id, {
       status: 'approved',
       approved_at: nowIso(),
       approved_by: req.user?.email || 'operator',
       approval_note: req.body?.note || '',
     })
     appendAudit('forge_queue_item_approved', { id: action.id, project_id: action.project_id })
+
+    if (action.project_id && findProject(action.project_id)) {
+      const priorityMap = { low: 30, normal: 50, high: 70, urgent: 90 }
+      const backlogItem = forgeRunStore.upsertBacklogItem({
+        backlog_id: crypto.randomUUID(),
+        project_id: action.project_id,
+        title: action.label || action.description.slice(0, 140),
+        description: action.description || '',
+        priority: priorityMap[String(action.priority || 'normal')] ?? 50,
+        category: 'FEATURE',
+        status: 'READY',
+        risk_level: action.risk === 'dangerous' ? 'high' : action.risk === 'caution' ? 'medium' : 'low',
+        source: 'forge_submit',
+        dependencies: [],
+        created_at: nowIso(), updated_at: nowIso(),
+      })
+      updated = updateAction(action.id, { converted_to_backlog_id: backlogItem.backlog_id })
+      forgeRunStore.recordAudit('forge_queue_item_converted_to_backlog', { id: action.id, backlog_id: backlogItem.backlog_id, project_id: action.project_id })
+      broadcastForge('forge:backlog_updated', { project_id: action.project_id, backlog_id: backlogItem.backlog_id })
+      // Fire-and-forget: make sure the goal actually executes, not just sits
+      // READY forever — auto-start autopilot for this project if it isn't
+      // already running (matches the old dispatcher's "approved -> runs"
+      // guarantee without requiring a separate manual start call).
+      const existingSession = _getAutopilotSession(action.project_id)
+      if (!existingSession?.active) {
+        _saveAutopilotSession(action.project_id, {
+          active: true, runsCompleted: existingSession?.runsCompleted || 0,
+          consecutiveFails: existingSession?.consecutiveFails || 0,
+          maxRuns: existingSession?.maxRuns || 10, autonomyLevel: existingSession?.autonomyLevel ?? 2,
+          cycleId: existingSession?.cycleId || null, startedAt: nowIso(),
+        })
+        broadcastForge('forge:autopilot_status_changed', { project_id: action.project_id, status: getAutopilotStatus(action.project_id) })
+        setImmediate(() => _runAutopilotTick(action.project_id))
+      }
+    } else if (String(process.env.FORGE_DISPATCHER_LEGACY_DRAIN || '0') !== '1') {
+      forgeRunStore.recordAudit('forge_queue_item_no_project_and_legacy_drain_disabled', { id: action.id })
+    }
+    // else: no project_id, but FORGE_DISPATCHER_LEGACY_DRAIN=1 — dispatcher.js's own
+    // poll loop (queue_kind==='forge_queue' && status==='approved') still drains it.
+
     broadcastForge('forge:queue_update', { item: updated, items: loadActions().filter(a => ['proposed', 'pending', 'approved'].includes(a.status)) })
     broadcastForge('forge:action_updated', { action: updated, project_id: action.project_id })
     emitForgeRuntimeSnapshot('queue_item_approved', { project_id: action.project_id })
@@ -4714,11 +5208,13 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, backlog: forgeRunStore.getBacklog(project.id) })
   })
 
-  router.post('/projects/:id/backlog', requireAuth, (req, res) => {
+  router.post('/projects/:id/backlog', requireAuth, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const { title, description, priority, category, status, risk_level, estimated_complexity, dependencies, acceptance_criteria, linked_files, source } = req.body || {}
     if (!title) return res.status(400).json({ ok: false, error: 'title required' })
+    // TQ-2: best-effort skill routing — never blocks item creation on failure.
+    const routing = await computeSkillRouting(title, description).catch(() => ({ assigned_skill_id: null, match_score: null }))
     const item = forgeRunStore.upsertBacklogItem({
       backlog_id: crypto.randomUUID(),
       project_id: project.id,
@@ -4732,8 +5228,16 @@ Respond with ONLY valid JSON (no markdown fences):
       acceptance_criteria: acceptance_criteria || null,
       linked_files: Array.isArray(linked_files) ? linked_files : [],
       source: source || 'manual',
+      assigned_skill_id: routing.assigned_skill_id,
+      match_score: routing.match_score,
       created_at: nowIso(), updated_at: nowIso(),
     })
+    if (routing.assigned_skill_id) {
+      forgeRunStore.recordAudit('forge_backlog_skill_routed', {
+        backlog_id: item.backlog_id, project_id: project.id,
+        skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+      })
+    }
     res.json({ ok: true, item })
   })
 
@@ -4768,6 +5272,54 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, deleted: req.params.backlogId })
   })
 
+  // TQ-1: cancel/retry controls for the consolidated queue.
+  router.post('/backlog/:backlogId/cancel', requireAuth, (req, res) => {
+    const item = forgeRunStore.findBacklogItem(req.params.backlogId)
+    if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
+    if (['DONE', 'CANCELLED'].includes(item.status)) {
+      return res.status(409).json({ ok: false, error: `item is already terminal (${item.status})` })
+    }
+    // If a run is currently in flight for this item, cancel it too — mirrors
+    // the existing /runs/:id/cancel semantics rather than leaving an orphaned
+    // run behind the cancelled backlog item.
+    const run = _mostRecentRunForBacklogItem(item.backlog_id)
+    if (run && !['verified', 'applied', 'verify_failed', 'failed', 'cancelled'].includes(run.status)) {
+      updateRun(run.id || run.run_id, {
+        status: 'cancelled', cancelled_at: nowIso(),
+        review: { ...(run.review || {}), status: 'cancelled', summary: 'Cancelled via backlog item cancellation.' },
+      })
+      broadcastForge('forge:run_updated', { run: findRun(run.id || run.run_id), action: 'cancel' })
+    }
+    const updated = forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'CANCELLED' })
+    forgeRunStore.recordAudit('forge_backlog_cancelled', { backlog_id: item.backlog_id, project_id: item.project_id, by: req.user?.email || 'operator' })
+    broadcastForge('forge:backlog_updated', { project_id: item.project_id, backlog_id: item.backlog_id })
+    res.json({ ok: true, item: updated })
+  })
+
+  router.post('/backlog/:backlogId/retry', requireAuth, (req, res) => {
+    const item = forgeRunStore.findBacklogItem(req.params.backlogId)
+    if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
+    if (item.status !== 'FAILED') {
+      return res.status(400).json({ ok: false, error: `only a FAILED item can be retried (current: ${item.status})` })
+    }
+    const updated = forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'READY' })
+    forgeRunStore.recordAudit('forge_backlog_retried', { backlog_id: item.backlog_id, project_id: item.project_id, by: req.user?.email || 'operator' })
+    broadcastForge('forge:backlog_updated', { project_id: item.project_id, backlog_id: item.backlog_id })
+    // If autopilot isn't already running for this project, the retried item
+    // would otherwise sit READY with nothing draining it.
+    const session = _getAutopilotSession(item.project_id)
+    if (!session?.active) {
+      _saveAutopilotSession(item.project_id, {
+        active: true, runsCompleted: session?.runsCompleted || 0, consecutiveFails: 0,
+        maxRuns: session?.maxRuns || 10, autonomyLevel: session?.autonomyLevel ?? 2,
+        cycleId: session?.cycleId || null, startedAt: nowIso(),
+      })
+      broadcastForge('forge:autopilot_status_changed', { project_id: item.project_id, status: getAutopilotStatus(item.project_id) })
+      setImmediate(() => _runAutopilotTick(item.project_id))
+    }
+    res.json({ ok: true, item: updated })
+  })
+
   router.post('/backlog/:backlogId/run', requireAuth, (req, res) => {
     const item = forgeRunStore.findBacklogItem(req.params.backlogId)
     if (!item) return res.status(404).json({ ok: false, error: 'backlog item not found' })
@@ -4785,10 +5337,19 @@ Respond with ONLY valid JSON (no markdown fences):
   // PHASE 5 — AUTOPILOT
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const autopilotSessions = new Map()
+  // Durable (TQ-1): autopilot session state lives in forge_store's SQLite-backed
+  // forge_autopilot_sessions table, not an in-process Map — a restart no longer
+  // silently drops "active: true" sessions or in-flight backlog items.
+  function _getAutopilotSession(projectId) {
+    return forgeRunStore.getAutopilotSession(projectId)
+  }
+  function _saveAutopilotSession(projectId, session) {
+    forgeRunStore.upsertAutopilotSession(projectId, session)
+    return session
+  }
 
   function getAutopilotStatus(projectId) {
-    const session = autopilotSessions.get(projectId)
+    const session = _getAutopilotSession(projectId)
     if (!session) return { active: false, runsCompleted: 0, consecutiveFails: 0 }
     const currentRun = session.currentRunId ? findRun(session.currentRunId) : null
     return {
@@ -4797,18 +5358,55 @@ Respond with ONLY valid JSON (no markdown fences):
     }
   }
 
+  // Close the Cycle loop (TQ-1): a cycle used to be created and then never
+  // learn its own goal finished — run_ids stayed empty, status stayed RUNNING
+  // forever, success_criteria was stored but never evaluated. Conservative by
+  // design: completion is decided by backlog-item terminal status, not an LLM
+  // judgment call, so it stays auditable.
+  function _evaluateCycleCompletion(cycleId) {
+    if (!cycleId) return
+    const cycle = forgeRunStore.findCycle(cycleId)
+    if (!cycle || cycle.status !== 'RUNNING') return
+    const ids = Array.isArray(cycle.backlog_items) ? cycle.backlog_items : []
+    if (!ids.length) return
+    const items = ids.map(id => forgeRunStore.findBacklogItem(id)).filter(Boolean)
+    const terminal = new Set(['DONE', 'FAILED', 'CANCELLED'])
+    if (items.length !== ids.length || !items.every(i => terminal.has(i.status))) return
+    const allDone = items.every(i => i.status === 'DONE')
+    const updated = forgeRunStore.updateCycle(cycleId, {
+      status: allDone ? 'COMPLETED' : 'FAILED',
+      ended_at: nowIso(),
+      final_report: {
+        summary: allDone
+          ? 'All linked backlog items completed.'
+          : 'One or more linked backlog items failed or were cancelled.',
+        total_items: items.length,
+        done: items.filter(i => i.status === 'DONE').length,
+        failed: items.filter(i => i.status === 'FAILED').length,
+        cancelled: items.filter(i => i.status === 'CANCELLED').length,
+        generated_at: nowIso(),
+      },
+    })
+    forgeRunStore.recordAudit('cycle_completed', { cycle_id: cycleId, status: updated?.status })
+    broadcastForge('forge:cycle_updated', { cycle: updated })
+  }
+
   async function _runAutopilotTick(projectId) {
-    const session = autopilotSessions.get(projectId)
+    let session = _getAutopilotSession(projectId)
     if (!session || !session.active) return
     const MAX_RUNS = session.maxRuns || 10
     if (session.runsCompleted >= MAX_RUNS) {
       session.active = false
+      _saveAutopilotSession(projectId, session)
       forgeRunStore.recordAudit('autopilot_stopped', { project_id: projectId, reason: 'max_runs_reached', runs: session.runsCompleted })
+      broadcastForge('forge:autopilot_status_changed', { project_id: projectId, status: getAutopilotStatus(projectId) })
       return
     }
     if (session.consecutiveFails >= 3) {
       session.active = false
+      _saveAutopilotSession(projectId, session)
       forgeRunStore.recordAudit('autopilot_paused', { project_id: projectId, reason: 'consecutive_failures', count: session.consecutiveFails })
+      broadcastForge('forge:autopilot_status_changed', { project_id: projectId, status: getAutopilotStatus(projectId) })
       return
     }
     const backlog = forgeRunStore.getBacklog(projectId)
@@ -4820,7 +5418,10 @@ Respond with ONLY valid JSON (no markdown fences):
     }).sort((a, b) => (b.priority || 50) - (a.priority || 50))
     if (!ready.length) {
       session.active = false
+      _saveAutopilotSession(projectId, session)
       forgeRunStore.recordAudit('autopilot_stopped', { project_id: projectId, reason: 'no_ready_items' })
+      broadcastForge('forge:autopilot_status_changed', { project_id: projectId, status: getAutopilotStatus(projectId) })
+      if (session.cycleId) _evaluateCycleCompletion(session.cycleId)
       return
     }
     const item = ready[0]
@@ -4828,35 +5429,62 @@ Respond with ONLY valid JSON (no markdown fences):
     if (item.risk_level === 'high' && autonomyLevel < 3) {
       forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'WAITING_APPROVAL' })
       session.active = false
+      _saveAutopilotSession(projectId, session)
       forgeRunStore.recordAudit('autopilot_paused', { project_id: projectId, reason: 'high_risk_requires_approval', backlog_id: item.backlog_id })
+      broadcastForge('forge:backlog_updated', { project_id: projectId, backlog_id: item.backlog_id })
+      broadcastForge('forge:autopilot_status_changed', { project_id: projectId, status: getAutopilotStatus(projectId) })
       return
     }
     const project = findProject(projectId)
-    if (!project) { session.active = false; return }
+    if (!project) { session.active = false; _saveAutopilotSession(projectId, session); return }
 
     // Phase 6: execute the run end-to-end via the shared agentic core
     forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'IN_PROGRESS' })
+    broadcastForge('forge:backlog_updated', { project_id: projectId, backlog_id: item.backlog_id })
     session.currentRunId = null
     session.runsCompleted++
+    _saveAutopilotSession(projectId, session)
     forgeRunStore.recordAudit('autopilot_run_started', { project_id: projectId, backlog_id: item.backlog_id })
 
     let runResult = null
     try {
-      runResult = await _executeAgenticRun(project, item.description || item.title, {
-        autonomy_level: autonomyLevel,
-        linked_backlog_id: item.backlog_id,
-        auto_rollback: true,
-        max_iterations: 3,
-      })
+      // TQ-2: an item routed to a confident, safe skill match at creation
+      // time bypasses the generic file-editing pipeline entirely — it runs
+      // through the skill catalog's own tool chain / LLM guidance instead.
+      // Falls through to the generic pipeline for everything else (the
+      // overwhelming majority — routing is deliberately conservative).
+      if (item.assigned_skill_id) {
+        forgeRunStore.recordAudit('forge_backlog_routed_to_skill', {
+          project_id: projectId, backlog_id: item.backlog_id,
+          skill_id: item.assigned_skill_id, match_score: item.match_score,
+        })
+        runResult = await dispatchBacklogItemViaSkill(project, item, {
+          skill_id: item.assigned_skill_id, match_score: item.match_score,
+        })
+      } else {
+        runResult = await _executeAgenticRun(project, item.description || item.title, {
+          autonomy_level: autonomyLevel,
+          linked_backlog_id: item.backlog_id,
+          auto_rollback: true,
+          max_iterations: 3,
+        })
+      }
     } catch (err) {
       forgeRunStore.recordAudit('autopilot_run_error', { project_id: projectId, backlog_id: item.backlog_id, error: err.message })
     }
+
+    // Re-fetch — the session may have been mutated (e.g. stopped) by a
+    // concurrent request while the run above was in flight.
+    session = _getAutopilotSession(projectId) || session
 
     if (runResult?.waiting_approval) {
       // High-risk item hit an approval gate — pause autopilot; human must review then resume
       forgeRunStore.updateBacklogItem(item.backlog_id, { status: 'WAITING_APPROVAL' })
       session.active = false
+      _saveAutopilotSession(projectId, session)
       forgeRunStore.recordAudit('autopilot_paused', { project_id: projectId, reason: 'waiting_approval', run_id: runResult.run_id, backlog_id: item.backlog_id })
+      broadcastForge('forge:backlog_updated', { project_id: projectId, backlog_id: item.backlog_id })
+      broadcastForge('forge:autopilot_status_changed', { project_id: projectId, status: getAutopilotStatus(projectId) })
       return
     }
 
@@ -4869,8 +5497,22 @@ Respond with ONLY valid JSON (no markdown fences):
       session.consecutiveFails = (session.consecutiveFails || 0) + 1
       forgeRunStore.recordAudit('autopilot_run_done', { project_id: projectId, backlog_id: item.backlog_id, run_id: runResult?.run_id, success: false })
     }
+    broadcastForge('forge:backlog_updated', { project_id: projectId, backlog_id: item.backlog_id })
 
     session.currentRunId = runResult?.run_id || null
+    _saveAutopilotSession(projectId, session)
+    broadcastForge('forge:autopilot_status_changed', { project_id: projectId, status: getAutopilotStatus(projectId) })
+
+    if (session.cycleId && runResult?.run_id) {
+      const cycle = forgeRunStore.findCycle(session.cycleId)
+      if (cycle) {
+        const runIds = Array.isArray(cycle.run_ids) ? cycle.run_ids : []
+        if (!runIds.includes(runResult.run_id)) {
+          forgeRunStore.updateCycle(session.cycleId, { run_ids: [...runIds, runResult.run_id] })
+        }
+      }
+      _evaluateCycleCompletion(session.cycleId)
+    }
 
     // Chain to next item after a 5-second cooldown, if still active
     if (session.active) {
@@ -4878,10 +5520,57 @@ Respond with ONLY valid JSON (no markdown fences):
     }
   }
 
+  // Boot-time reconciliation (TQ-1): a backlog item stuck IN_PROGRESS/PLANNING
+  // means the process died mid-execution — recover it instead of leaving it
+  // stuck forever. `_executeAgenticRun` sets `linked_backlog_id` on the run
+  // itself at creation time (there is no forward `linked_run_id` set on the
+  // backlog item while a run is in flight), so reconciliation looks up the
+  // most recent run by that back-reference rather than assuming a field that
+  // doesn't get populated on this path. Any session that was `active: true`
+  // before the restart gets its tick loop re-armed.
+  const _RECONCILE_SUCCESS_STATUSES = new Set(['verified', 'applied'])
+  const _RECONCILE_FAILURE_STATUSES = new Set(['verify_failed', 'failed', 'blocked'])
+  function _mostRecentRunForBacklogItem(backlogId) {
+    const matches = loadRuns().filter(r => r.linked_backlog_id === backlogId)
+    if (!matches.length) return null
+    matches.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+    return matches[0]
+  }
+  function _reconcileForgeQueueOnBoot() {
+    try {
+      for (const project of loadProjects()) {
+        const backlog = forgeRunStore.getBacklog(project.id)
+        for (const item of backlog) {
+          if (item.status !== 'IN_PROGRESS' && item.status !== 'PLANNING') continue
+          const run = _mostRecentRunForBacklogItem(item.backlog_id)
+          let nextStatus
+          let reason
+          if (!run) { nextStatus = 'READY'; reason = 'no_matching_run' }
+          else if (_RECONCILE_SUCCESS_STATUSES.has(run.status)) { nextStatus = 'DONE'; reason = 'run_succeeded_before_crash' }
+          else if (_RECONCILE_FAILURE_STATUSES.has(run.status)) { nextStatus = 'FAILED'; reason = 'run_failed_cleanly' }
+          else { nextStatus = 'FAILED'; reason = 'run_never_reached_terminal_state' }
+          forgeRunStore.updateBacklogItem(item.backlog_id, { status: nextStatus })
+          forgeRunStore.recordAudit('forge_backlog_reconciled_on_boot', {
+            backlog_id: item.backlog_id, project_id: project.id, new_status: nextStatus,
+            reason, run_status: run?.status || null,
+          })
+        }
+        const session = forgeRunStore.getAutopilotSession(project.id)
+        if (session?.active) {
+          forgeRunStore.recordAudit('autopilot_reconciled_on_boot', { project_id: project.id })
+          setImmediate(() => _runAutopilotTick(project.id))
+        }
+      }
+    } catch (err) {
+      logger.error('forge queue boot reconciliation failed:', err.message)
+    }
+  }
+  _reconcileForgeQueueOnBoot()
+
   router.post('/projects/:id/autopilot/start', requireAuth, (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    const existing = autopilotSessions.get(project.id)
+    const existing = _getAutopilotSession(project.id)
     if (existing?.active) return res.json({ ok: true, message: 'already running', status: existing })
     const session = {
       active: true,
@@ -4891,8 +5580,9 @@ Respond with ONLY valid JSON (no markdown fences):
       autonomyLevel: typeof req.body?.autonomy_level === 'number' ? req.body.autonomy_level : 2,
       startedAt: nowIso(),
     }
-    autopilotSessions.set(project.id, session)
+    _saveAutopilotSession(project.id, session)
     forgeRunStore.recordAudit('autopilot_started', { project_id: project.id, max_runs: session.maxRuns, autonomy_level: session.autonomyLevel })
+    broadcastForge('forge:autopilot_status_changed', { project_id: project.id, status: getAutopilotStatus(project.id) })
     setImmediate(() => _runAutopilotTick(project.id))
     res.json({ ok: true, message: 'autopilot started', status: session })
   })
@@ -4900,8 +5590,13 @@ Respond with ONLY valid JSON (no markdown fences):
   router.post('/projects/:id/autopilot/stop', requireAuth, (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    const session = autopilotSessions.get(project.id)
-    if (session) { session.active = false; forgeRunStore.recordAudit('autopilot_stopped', { project_id: project.id, reason: 'user_stopped', runs: session.runsCompleted }) }
+    const session = _getAutopilotSession(project.id)
+    if (session) {
+      session.active = false
+      _saveAutopilotSession(project.id, session)
+      forgeRunStore.recordAudit('autopilot_stopped', { project_id: project.id, reason: 'user_stopped', runs: session.runsCompleted })
+      broadcastForge('forge:autopilot_status_changed', { project_id: project.id, status: getAutopilotStatus(project.id) })
+    }
     res.json({ ok: true, message: 'autopilot stopped', status: session || { active: false } })
   })
 
@@ -4915,11 +5610,13 @@ Respond with ONLY valid JSON (no markdown fences):
   router.post('/projects/:id/autopilot/resume', requireAuth, (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
-    const session = autopilotSessions.get(project.id)
+    const session = _getAutopilotSession(project.id)
     if (!session) return res.status(404).json({ ok: false, error: 'no autopilot session for this project' })
     if (session.active) return res.json({ ok: true, message: 'already active', status: getAutopilotStatus(project.id) })
     session.active = true
+    _saveAutopilotSession(project.id, session)
     forgeRunStore.recordAudit('autopilot_resumed', { project_id: project.id, runs_completed: session.runsCompleted })
+    broadcastForge('forge:autopilot_status_changed', { project_id: project.id, status: getAutopilotStatus(project.id) })
     setImmediate(() => _runAutopilotTick(project.id))
     res.json({ ok: true, message: 'autopilot resumed', status: getAutopilotStatus(project.id) })
   })
@@ -4927,6 +5624,24 @@ Respond with ONLY valid JSON (no markdown fences):
   // ═══════════════════════════════════════════════════════════════════════════
   // PHASE 5 — DECOMPOSER AGENT
   // ═══════════════════════════════════════════════════════════════════════════
+
+  // TQ-2: a goal-achieving system must also handle short tasks efficiently —
+  // not every goal needs the full Decomposer-into-3-to-8-subtasks ceremony.
+  // Deliberately simple and deterministic (word count / sentence count /
+  // multi-step language signals), not an LLM judgment call, so it's cheap and
+  // auditable. Conservative by design: anything ambiguous falls through to
+  // the full decompose path rather than risking under-planning a real goal.
+  const _MULTI_STEP_SIGNALS = /\b(then|after that|afterwards|first[,]?\s|second[,]?\s|next,|also,|additionally|as well as|and then)\b/i
+  function isSimpleGoal(goal) {
+    const text = String(goal || '').trim()
+    if (!text) return false
+    const wordCount = text.split(/\s+/).filter(Boolean).length
+    const sentenceCount = (text.match(/[.!?]+/g) || []).length
+    if (wordCount > 25) return false
+    if (sentenceCount > 1) return false
+    if (_MULTI_STEP_SIGNALS.test(text)) return false
+    return true
+  }
 
   async function runDecomposerAgent(project, goal, repoIdx, taskMemory, backlogContext) {
     const systemPrompt = 'You are a software task decomposer. Break a high-level goal into specific ordered subtasks. Output ONLY a JSON array — no prose, no markdown.'
@@ -4964,14 +5679,20 @@ Output a JSON array:
       const subtasks = await runDecomposerAgent(project, goal, repoIdx, taskMemory, backlog)
       let addedItems = []
       if (add_to_backlog && subtasks.length) {
-        addedItems = subtasks.map((st, i) => forgeRunStore.upsertBacklogItem({
-          backlog_id: crypto.randomUUID(), project_id: project.id,
-          title: st.title, description: st.description || '',
-          priority: 50 - i, category: 'FEATURE',
-          status: 'IDEA', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
-          acceptance_criteria: st.acceptance_criteria || null, source: 'decomposer',
-          dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
-          created_at: nowIso(), updated_at: nowIso(),
+        // TQ-2: route each subtask (required_skills was captured by the LLM
+        // prompt and previously discarded — this is where it finally matters).
+        addedItems = await Promise.all(subtasks.map(async (st, i) => {
+          const routing = await computeSkillRouting(st.title, st.description).catch(() => ({ assigned_skill_id: null, match_score: null }))
+          return forgeRunStore.upsertBacklogItem({
+            backlog_id: crypto.randomUUID(), project_id: project.id,
+            title: st.title, description: st.description || '',
+            priority: 50 - i, category: 'FEATURE',
+            status: 'IDEA', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
+            acceptance_criteria: st.acceptance_criteria || null, source: 'decomposer',
+            dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
+            assigned_skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+            created_at: nowIso(), updated_at: nowIso(),
+          })
         }))
       }
       res.json({ ok: true, parent_goal: goal, subtasks, count: subtasks.length, added_to_backlog: addedItems.length })
@@ -5357,6 +6078,24 @@ Return JSON:
     if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
     const cycleId = crypto.randomUUID()
     let itemIds = Array.isArray(backlog_item_ids) ? backlog_item_ids : []
+    let fastPath = false
+    if (!itemIds.length && isSimpleGoal(goal)) {
+      // TQ-2 fast path: a short, single-step goal skips the Decomposer
+      // entirely — one backlog item, still tracked through the same
+      // Cycle/Autopilot machinery so it stays visible like everything else.
+      fastPath = true
+      const routing = await computeSkillRouting(goal, '').catch(() => ({ assigned_skill_id: null, match_score: null }))
+      const item = forgeRunStore.upsertBacklogItem({
+        backlog_id: crypto.randomUUID(), project_id: project.id,
+        title: goal.slice(0, 140), description: goal,
+        priority: 50, category: 'FEATURE', status: 'READY', risk_level: 'low',
+        source: 'cycle_fast_path', dependencies: [],
+        assigned_skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+        created_at: nowIso(), updated_at: nowIso(),
+      })
+      itemIds = [item.backlog_id]
+      forgeRunStore.recordAudit('forge_cycle_fast_path', { project_id: project.id, goal: goal.slice(0, 160), backlog_id: item.backlog_id })
+    }
     if (!itemIds.length) {
       try {
         const [repoIdx, taskMemory, backlog] = await Promise.all([
@@ -5365,13 +6104,18 @@ Return JSON:
           Promise.resolve(forgeRunStore.getBacklog(project.id)),
         ])
         const subtasks = await runDecomposerAgent(project, goal, repoIdx, taskMemory, backlog)
-        const added = subtasks.map((st, i) => forgeRunStore.upsertBacklogItem({
-          backlog_id: crypto.randomUUID(), project_id: project.id, title: st.title,
-          description: st.description || '', priority: 50 - i, category: 'FEATURE',
-          status: 'READY', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
-          acceptance_criteria: st.acceptance_criteria || null, source: 'cycle',
-          dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
-          created_at: nowIso(), updated_at: nowIso(),
+        // TQ-2: route each subtask to a skill (if a confident, safe match exists).
+        const added = await Promise.all(subtasks.map(async (st, i) => {
+          const routing = await computeSkillRouting(st.title, st.description).catch(() => ({ assigned_skill_id: null, match_score: null }))
+          return forgeRunStore.upsertBacklogItem({
+            backlog_id: crypto.randomUUID(), project_id: project.id, title: st.title,
+            description: st.description || '', priority: 50 - i, category: 'FEATURE',
+            status: 'READY', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
+            acceptance_criteria: st.acceptance_criteria || null, source: 'cycle',
+            dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
+            assigned_skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+            created_at: nowIso(), updated_at: nowIso(),
+          })
         }))
         itemIds = added.map(i => i.backlog_id)
       } catch {}
@@ -5382,10 +6126,12 @@ Return JSON:
       max_runs: typeof max_runs === 'number' ? max_runs : 20,
       max_duration_sec: typeof max_duration_sec === 'number' ? max_duration_sec : 3600,
       started_at: nowIso(), backlog_items: itemIds, run_ids: [],
-      success_criteria: success_criteria || null, current_phase: 'executing',
+      success_criteria: success_criteria || null, current_phase: fastPath ? 'executing_fast_path' : 'executing',
       created_at: nowIso(), updated_at: nowIso(),
     })
-    autopilotSessions.set(project.id, { active: true, runsCompleted: 0, consecutiveFails: 0, maxRuns: cycle.max_runs, autonomyLevel: cycle.autonomy_level, cycleId, startedAt: nowIso() })
+    _saveAutopilotSession(project.id, { active: true, runsCompleted: 0, consecutiveFails: 0, maxRuns: cycle.max_runs, autonomyLevel: cycle.autonomy_level, cycleId, startedAt: nowIso() })
+    broadcastForge('forge:cycle_updated', { cycle })
+    broadcastForge('forge:autopilot_status_changed', { project_id: project.id, status: getAutopilotStatus(project.id) })
     setImmediate(() => _runAutopilotTick(project.id))
     res.json({ ok: true, cycle })
   })
@@ -5405,10 +6151,12 @@ Return JSON:
   router.post('/cycles/:cycleId/pause', requireAuth, (req, res) => {
     const cycle = forgeRunStore.findCycle(req.params.cycleId)
     if (!cycle) return res.status(404).json({ ok: false, error: 'cycle not found' })
-    const session = autopilotSessions.get(cycle.project_id)
-    if (session) session.active = false
+    const session = _getAutopilotSession(cycle.project_id)
+    if (session) { session.active = false; _saveAutopilotSession(cycle.project_id, session) }
     const updated = forgeRunStore.updateCycle(cycle.cycle_id, { status: 'PAUSED' })
     forgeRunStore.recordAudit('cycle_paused', { cycle_id: cycle.cycle_id })
+    broadcastForge('forge:cycle_updated', { cycle: updated })
+    broadcastForge('forge:autopilot_status_changed', { project_id: cycle.project_id, status: getAutopilotStatus(cycle.project_id) })
     res.json({ ok: true, cycle: updated })
   })
 
@@ -5416,7 +6164,9 @@ Return JSON:
     const cycle = forgeRunStore.findCycle(req.params.cycleId)
     if (!cycle) return res.status(404).json({ ok: false, error: 'cycle not found' })
     const updated = forgeRunStore.updateCycle(cycle.cycle_id, { status: 'RUNNING' })
-    autopilotSessions.set(cycle.project_id, { active: true, runsCompleted: 0, consecutiveFails: 0, maxRuns: cycle.max_runs, autonomyLevel: cycle.autonomy_level, cycleId: cycle.cycle_id, startedAt: nowIso() })
+    _saveAutopilotSession(cycle.project_id, { active: true, runsCompleted: 0, consecutiveFails: 0, maxRuns: cycle.max_runs, autonomyLevel: cycle.autonomy_level, cycleId: cycle.cycle_id, startedAt: nowIso() })
+    broadcastForge('forge:cycle_updated', { cycle: updated })
+    broadcastForge('forge:autopilot_status_changed', { project_id: cycle.project_id, status: getAutopilotStatus(cycle.project_id) })
     setImmediate(() => _runAutopilotTick(cycle.project_id))
     forgeRunStore.recordAudit('cycle_resumed', { cycle_id: cycle.cycle_id })
     res.json({ ok: true, cycle: updated })
@@ -5425,14 +6175,16 @@ Return JSON:
   router.post('/cycles/:cycleId/cancel', requireAuth, (req, res) => {
     const cycle = forgeRunStore.findCycle(req.params.cycleId)
     if (!cycle) return res.status(404).json({ ok: false, error: 'cycle not found' })
-    const session = autopilotSessions.get(cycle.project_id)
-    if (session) session.active = false
+    const session = _getAutopilotSession(cycle.project_id)
+    if (session) { session.active = false; _saveAutopilotSession(cycle.project_id, session) }
     for (const bid of (cycle.backlog_items || [])) {
       const it = forgeRunStore.findBacklogItem(bid)
       if (it && it.status === 'IN_PROGRESS') forgeRunStore.updateBacklogItem(bid, { status: 'CANCELLED' })
     }
     const updated = forgeRunStore.updateCycle(cycle.cycle_id, { status: 'CANCELLED', ended_at: nowIso() })
     forgeRunStore.recordAudit('cycle_cancelled', { cycle_id: cycle.cycle_id })
+    broadcastForge('forge:cycle_updated', { cycle: updated })
+    broadcastForge('forge:autopilot_status_changed', { project_id: cycle.project_id, status: getAutopilotStatus(cycle.project_id) })
     res.json({ ok: true, cycle: updated })
   })
 
@@ -6982,6 +7734,19 @@ Return JSON:
     res.json({ ok: true, consultation: result, note: 'ADVISORY ONLY — rule/safety systems remain authoritative' })
   })
 
+  // Closure-internal functions surfaced for unit testing (TQ-1/TQ-2 —
+  // tests/test_forge_queue_consolidation.js). Not part of the HTTP surface.
+  router.__test__ = {
+    getAutopilotSession: _getAutopilotSession,
+    saveAutopilotSession: _saveAutopilotSession,
+    evaluateCycleCompletion: _evaluateCycleCompletion,
+    reconcileForgeQueueOnBoot: _reconcileForgeQueueOnBoot,
+    mostRecentRunForBacklogItem: _mostRecentRunForBacklogItem,
+    getAutopilotStatus,
+    isSimpleGoal,
+    computeSkillRouting,
+  }
+
   return router
 }
 
@@ -6998,3 +7763,7 @@ module.exports.store = {
   emitForgeRuntimeSnapshot,
   nowIso,
 }
+
+// Pure helper surfaced for unit testing (tests/test_forge_codegen_extract.js).
+// Not part of the HTTP surface — no auth/side-effect concerns.
+module.exports.__test__ = { extractCodeActions }

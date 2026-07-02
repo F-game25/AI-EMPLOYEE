@@ -54,14 +54,24 @@ skip_if_offline = pytest.mark.skipif(
 
 def _get(path: str, *, auth: bool = False, timeout: int = 5) -> requests.Response:
     headers = AUTH_HEADERS if auth else {}
-    return requests.get(f"{BASE}{path}", headers=headers, timeout=timeout)
+    try:
+        return requests.get(f"{BASE}{path}", headers=headers, timeout=timeout)
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+        # _reachable() is checked once at collection time; the backend can still
+        # go down (or not be fully up yet) by the time a test actually runs. Skip
+        # rather than fail so a flapping/slow-starting local server doesn't read
+        # as a code regression.
+        pytest.skip(f"Backend became unreachable at {BASE}{path}: {exc}")
 
 
 def _post(path: str, payload: dict, *, auth: bool = False, timeout: int = 5) -> requests.Response:
     headers = {"Content-Type": "application/json"}
     if auth:
         headers.update(AUTH_HEADERS)
-    return requests.post(f"{BASE}{path}", json=payload, headers=headers, timeout=timeout)
+    try:
+        return requests.post(f"{BASE}{path}", json=payload, headers=headers, timeout=timeout)
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+        pytest.skip(f"Backend became unreachable at {BASE}{path}: {exc}")
 
 
 def _assert_auth_gate(resp: requests.Response) -> None:

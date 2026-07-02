@@ -145,6 +145,13 @@ def isolated_ai_home(tmp_path, monkeypatch):
     (fake_home / "state").mkdir()
 
     monkeypatch.setenv("AI_HOME", str(fake_home))
+    # canonical_state_dir() resolves STATE_DIR before AI_HOME (production exports
+    # STATE_DIR via start.sh). CI also exports a shared STATE_DIR=/tmp/ci-state, so
+    # without this redirect every test's state collapses into one global file and
+    # leaks across tests. Pin STATE_DIR to this test's fresh tree to honour the
+    # isolation this fixture promises.
+    monkeypatch.setenv("STATE_DIR", str(fake_home / "state"))
+    monkeypatch.setenv("AI_EMPLOYEE_STATE_DIR", str(fake_home / "state"))
     monkeypatch.setenv("AUTO_RESEARCH_MODE", "off")
     # Skills dispatch defaults to REAL LLM in production; keep tests deterministic
     # and offline (no backend required) with the placeholder executor.

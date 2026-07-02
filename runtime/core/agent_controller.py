@@ -608,13 +608,14 @@ class AgentController:
         return summary
 
     def _emit_action(self, action: str, payload: dict) -> dict:
-        """Dispatch a skill via the ActionBus with a REAL LLM executor.
+        """Dispatch a skill via the ActionBus with the full skill-chain executor.
 
-        Previously this emitted an unregistered ``skill:<name>`` action with no
-        executor → the bus returned ``unknown_action`` but the skill still reported
-        success (a fake-success no-op). We now supply an executor that runs the goal
-        through the local LLM, so the action genuinely executes and honest status
-        propagates (executor raising → bus returns error → task fails).
+        B1 routing (C2): tries the skill catalog first so skills with declared
+        ``tool_steps`` (batch-1+) run a real tool chain instead of a generic
+        role-prompt. Falls back to the library-guided LLM path, then the bare
+        role-prompt only when the skill has no catalog entry at all.
+        Fail-closed: chain ``error`` / ``blocked`` statuses propagate as
+        RuntimeError rather than silently falling back to fake success.
         """
         from actions.action_bus import get_action_bus
 
@@ -624,39 +625,80 @@ class AgentController:
         goal = str(task_input.get("goal") or task_input.get("task") or "").strip()
         context = task_input.get("context")
 
-        if not self._llm_provider_available():
-            def _unavailable_executor(_p: dict) -> dict:
-                raise RuntimeError("llm_provider_unavailable")
+        def _skill_chain_executor(
+            _p: dict, _skill=skill, _goal=goal,
+            _task_input=task_input, _context=context,
+        ) -> dict:
+            # B1 — catalog first: tool-chain (if skill has tool_steps) then
+            # library-guided LLM (skill's own system_prompt/execution_steps).
+            # Catalog dispatch is attempted regardless of LLM provider
+            # availability — a tool_steps chain may not need an LLM at all
+            # (e.g. pure tool calls), so gating catalog execution on
+            # _llm_provider_available() would block work the catalog can do
+            # without one.
+            #
+            # Only obtaining the catalog (import + getter) degrades to
+            # "unavailable" -> bare-LLM floor; dispatch_for_goal() itself is
+            # NOT covered by this except. It already catches its own internal
+            # failures and returns {"status": "error", ...}, which fails
+            # closed below via the explicit RuntimeError branch — wrapping it
+            # here too would swallow genuine catalog/tool errors that escape
+            # its internal handling and silently mask them as fake success
+            # via the LLM fallback instead of failing closed. Any such
+            # exception still degrades safely: actions.action_bus.emit()
+            # catches executor exceptions and returns a structured
+            # {"status": "error", ...} result rather than crashing the caller.
+            try:
+                from skills.catalog import get_skill_catalog
+                catalog = get_skill_catalog()
+            except (ImportError, ModuleNotFoundError):
+                chain = {"status": "unavailable"}
+            else:
+                chain = catalog.dispatch_for_goal(
+                    _goal or str(_task_input),
+                    ctx={"skill_id": _skill},
+                )
 
-            return get_action_bus().emit(
-                action_type=action_type,
-                payload={"task_input": task_input, "action": action},
-                actor="agent_controller",
-                reason="executor dispatch",
-                executor=_unavailable_executor,
+            status = chain.get("status")
+            if status == "ok":
+                return {
+                    "skill": _skill, "goal": _goal,
+                    "via": chain.get("via"),
+                    "steps": chain.get("steps", []),
+                    "output": chain.get("output"),
+                }
+            if status in ("no_skill", "unavailable"):
+                # Graceful floor: skill not in catalog / catalog module import
+                # failure. This is the only branch that needs an LLM, so the
+                # provider-availability check is scoped to here.
+                if not self._llm_provider_available():
+                    raise RuntimeError("llm_provider_unavailable")
+                from engine.api import generate
+                role = _skill.replace("-", " ").replace("_", " ")
+                system = (
+                    f"You are the '{role}' capability inside an AI operations "
+                    "system. Complete the user's goal concretely and concisely. "
+                    "If the goal asks for code or a file, output the full content."
+                )
+                text = (generate(
+                    prompt=_goal or str(_task_input), system=system,
+                    context=_context if isinstance(_context, str) else None,
+                ) or "").strip()
+                if not text:
+                    raise RuntimeError(f"skill '{_skill}' produced no output")
+                return {"skill": _skill, "goal": _goal, "via": "llm_role_prompt",
+                        "output": text}
+            # "error", "blocked", unexpected → fail closed.
+            raise RuntimeError(
+                chain.get("error") or f"skill '{_skill}' chain status={status}"
             )
-
-        def _llm_executor(_p: dict) -> dict:
-            from engine.api import generate
-            role = skill.replace("-", " ").replace("_", " ")
-            system = (
-                f"You are the '{role}' capability inside an AI operations system. "
-                "Complete the user's goal concretely and concisely. If the goal asks "
-                "for code or a file, output the full content."
-            )
-            text = generate(prompt=goal or str(task_input), system=system,
-                            context=context if isinstance(context, str) else None)
-            text = (text or "").strip()
-            if not text:
-                raise RuntimeError(f"skill '{skill}' produced no output")
-            return {"skill": skill, "goal": goal, "output": text}
 
         return get_action_bus().emit(
             action_type=action_type,
             payload={"task_input": task_input, "action": action},
             actor="agent_controller",
             reason="executor dispatch",
-            executor=_llm_executor,
+            executor=_skill_chain_executor,
         )
 
     @staticmethod

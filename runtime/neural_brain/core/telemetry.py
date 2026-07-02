@@ -8,7 +8,6 @@ All telemetry is:
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
@@ -20,10 +19,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from core.state_paths import canonical_state_dir
+from core import rotating_jsonl
+
 logger = logging.getLogger(__name__)
 
 _BUFFER_SIZE = 10_000
-_LOG_PATH = Path("state/telemetry.jsonl")
+# Canonical state tree (honours STATE_DIR / AI_HOME). Was relative Path("state/…")
+# which resolved to CWD-relative ./state — repo-local split-brain (134MB stray log).
+# See docs/SYSTEM_COHERENCE_PLAN.md C0.
+_LOG_PATH = canonical_state_dir() / "telemetry.jsonl"
 
 
 class TelemetryCategory(str, Enum):
@@ -218,9 +223,10 @@ class TelemetryLogger:
             records = list(self._write_queue)
             self._write_queue.clear()
         try:
-            with open(_LOG_PATH, "a") as f:
-                for r in records:
-                    f.write(json.dumps(asdict(r)) + "\n")
+            # Size-bounded batch append (C0 disk-growth backlog): the file is
+            # otherwise unbounded — a stray copy reached 134MB. One size check +
+            # rotation per drain batch keeps disk capped on the hot path.
+            rotating_jsonl.append_many(_LOG_PATH, (asdict(r) for r in records))
         except Exception as e:
             logger.warning("Telemetry write error: %s", e)
 

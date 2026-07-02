@@ -173,9 +173,14 @@ class AuditEngine:
 
     @staticmethod
     def _default_path() -> Path:
-        ai_home = os.environ.get("AI_HOME")
-        base = Path(ai_home) if ai_home else Path(__file__).resolve().parents[3]
-        return base / "state" / "audit_log.db"
+        # Install-global compliance store (NOT tenant-scoped): a single immutable
+        # audit trail is the GDPR contract. Filename stays ``audit_log.db`` (table
+        # ``audit_log``) because that is the *current* DB the data-subject-rights
+        # API reads/erases from (data_subject_rights_api.py) and the server's audit
+        # probe treats as current (audit.db/audit_events is the legacy pair).
+        # Renaming to audit.db would split the writer from the DSR reader.
+        from core.state_paths import canonical_state_dir
+        return canonical_state_dir() / "audit_log.db"
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))

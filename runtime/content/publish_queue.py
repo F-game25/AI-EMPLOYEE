@@ -20,8 +20,8 @@ def _state_dir() -> Path:
     try:
         from core.state_paths import canonical_state_dir
         return canonical_state_dir()
-    except Exception:  # noqa: BLE001
-        return Path(__file__).resolve().parents[2] / "state"
+    except Exception:  # noqa: BLE001 — never repo-local ./state (C0); mirror canonical default
+        return Path.home() / ".ai-employee" / "state"
 
 
 def _now() -> str:

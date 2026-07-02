@@ -13,8 +13,9 @@
  * Writes tests/benchmarks/results.json.
  */
 import { createRequire } from 'node:module'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
 
@@ -110,6 +111,99 @@ async function runForgeRun(task) {
   }
 }
 
+// Coding-capability check for the local codegen model (FORGE_OLLAMA_MODEL, e.g.
+// qwythos:q4): proves — fully offline, no cloud — that the configured model can
+// actually produce a real, syntactically valid write_file action and that the
+// full submit -> approve -> auto-verify -> apply loop lands a real file on disk.
+// This is the gate that should be green before trusting the model for real work;
+// a lifecycle "not blocked" check alone (see lifecycle_allows_clear above) is not
+// enough — it would have missed a real incident where the model's response never
+// closed its code fence and the run silently produced zero code actions.
+// Single-quote a shell arg (POSIX sh): close the quote, emit an escaped
+// literal quote, reopen — safe for any byte sequence including embedded quotes.
+const shellQuote = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
+
+async function runForgeCodegen(task) {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'forge-bench-codegen-'))
+  let pid = null
+  try {
+    // No verification_commands here: the model is free to place the file wherever
+    // it thinks the project convention calls for (e.g. "src/") and we don't know
+    // that path yet. Left unset it defaults to a non-runnable "manual review"
+    // placeholder, so auto-verify-on-approve harmlessly no-ops instead of failing
+    // against a path we haven't discovered yet — we verify explicitly below, once
+    // the real write_file path is known.
+    const proj = await jpost('/api/forge/projects/import', {
+      name: `bench-codegen-${Date.now().toString(36)}`,
+      path: tmpDir,
+      write_access: true,
+    })
+    pid = proj.json?.project?.id
+    if (!pid) return { status: 'SKIP', detail: `project import ${proj.status}: ${proj.json?.error || ''}` }
+
+    const run = await jpost('/api/forge/runs', { project_id: pid, goal: task.goal })
+    if (run.status >= 400) return { status: 'SKIP', detail: `run ${run.status}: ${run.json?.error || ''}` }
+    const runId = run.json?.run?.id
+    const codegen = run.json?.run?.codegen || {}
+    const modelTag = codegen.model ? `${codegen.provider || '?'}/${codegen.model}` : (codegen.provider || 'unknown')
+    const writeAction = (run.json?.run?.actions || []).find(a => a.type === 'write_file')
+    if (!writeAction) {
+      return { status: 'FAIL', detail: `no write_file action produced (model=${modelTag}, run.status=${run.json?.run?.status})` }
+    }
+    // The model chooses this path freely (see comment above) — it is untrusted
+    // input from here on. Reject anything absolute or that would resolve
+    // outside tmpDir before it's ever interpolated into a shell command or
+    // joined onto a filesystem path.
+    const generatedPath = String(writeAction.file_path || '')
+    const tmpRoot = path.resolve(tmpDir)
+    const onDiskPath = path.resolve(tmpRoot, generatedPath)
+    if (!generatedPath || path.isAbsolute(generatedPath) || !onDiskPath.startsWith(`${tmpRoot}${path.sep}`)) {
+      return { status: 'FAIL', detail: `unsafe generated path '${generatedPath}' (model=${modelTag})` }
+    }
+    if (task.expect_file && path.basename(generatedPath) !== task.expect_file) {
+      return { status: 'FAIL', detail: `expected a file named '${task.expect_file}', model wrote '${generatedPath}' (model=${modelTag})` }
+    }
+
+    // Offline syntax check of the raw generated content, independent of the
+    // project workspace, before trusting it further.
+    const syntaxCheckFile = path.join(tmpDir, '__bench_syntax_check.py')
+    writeFileSync(syntaxCheckFile, writeAction.content || '')
+    try {
+      execFileSync('python3', ['-m', 'py_compile', syntaxCheckFile], { stdio: 'pipe' })
+    } catch (e) {
+      return { status: 'FAIL', detail: `generated code is not valid Python (model=${modelTag}): ${String(e.message || e).slice(0, 150)}` }
+    } finally {
+      rmSync(syntaxCheckFile, { force: true })
+    }
+
+    // Full loop: approve -> stage -> verify against the model's ACTUAL chosen path
+    // (real py_compile, not "manual review") -> apply -> file genuinely on disk.
+    const appr = await jpost(`/api/forge/runs/${runId}/approve`, { ownerApproved: true })
+    if (appr.status >= 400 || appr.json?.run?.status !== 'staged') {
+      return { status: 'FAIL', detail: `approve failed (model=${modelTag}): ${appr.json?.error || appr.status}` }
+    }
+    const verify = await jpost(`/api/forge/runs/${runId}/verify`, {
+      ownerApproved: true,
+      commands: [`python3 -m py_compile ${shellQuote(generatedPath)}`],
+    })
+    if (!verify.json?.ok || !verify.json?.test_result?.all_passed) {
+      const output = (verify.json?.test_result?.results || []).map(r => r.output).join(' ').slice(0, 150)
+      return { status: 'FAIL', detail: `verification failed (model=${modelTag}): ${output || verify.json?.error || verify.status}` }
+    }
+    const apply = await jpost(`/api/forge/runs/${runId}/apply`, { ownerApproved: true })
+    if (apply.status >= 400) {
+      return { status: 'FAIL', detail: `apply blocked (model=${modelTag}): ${apply.json?.error || apply.status}` }
+    }
+    if (!existsSync(onDiskPath)) {
+      return { status: 'FAIL', detail: `apply reported ok but file missing on disk (model=${modelTag})` }
+    }
+    return { status: 'PASS', score: 1, detail: `'${generatedPath}' generated, verified (py_compile) + applied (model=${modelTag})` }
+  } finally {
+    if (pid) await fetch(`${B}/api/forge/projects/${pid}`, { method: 'DELETE', headers: H() }).catch(() => {})
+    rmSync(tmpDir, { recursive: true, force: true })
+  }
+}
+
 async function main() {
   const { tasks } = JSON.parse(readFileSync(path.join(HERE, 'tasks.json'), 'utf8'))
 
@@ -132,6 +226,7 @@ async function main() {
       r = t.type === 'research' ? await runResearch(t)
         : t.type === 'research_skill' ? await runResearchSkill(t)
         : t.type === 'forge_run' ? await runForgeRun(t)
+        : t.type === 'forge_codegen' ? await runForgeCodegen(t)
         : { status: 'SKIP', detail: `unknown type ${t.type}` }
     } catch (e) { r = { status: 'SKIP', detail: `error: ${e.message}` } }
     results.push({ id: t.id, title: t.title, ...r })

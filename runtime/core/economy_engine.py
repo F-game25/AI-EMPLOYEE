@@ -61,9 +61,8 @@ def _state_path() -> Path:
     env = os.environ.get(_PERSIST_PATH_ENV)
     if env:
         return Path(env)
-    home = os.environ.get("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[3]
-    p = base / "state" / "economy_state.json"
+    from core.state_paths import tenant_state_dir
+    p = tenant_state_dir() / "economy_state.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -419,14 +418,12 @@ class EconomyEngine:
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 
-_instance: EconomyEngine | None = None
-_instance_lock = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[EconomyEngine] = TenantSingletonPool(EconomyEngine)
 
 
 def get_economy_engine() -> EconomyEngine:
-    """Return the process-wide EconomyEngine singleton."""
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = EconomyEngine()
-    return _instance
+    """Return the EconomyEngine for the active tenant (per-tenant isolated; one
+    shared ``__global__`` instance in local/default mode)."""
+    return _pool.get()

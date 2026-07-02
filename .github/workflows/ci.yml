@@ -144,6 +144,15 @@ jobs:
       - name: Run compute dispatch + egress-guard tests (D1)
         run: node tests/test_compute_dispatch.js
 
+      - name: Run forge codegen extraction tests (dangling-fence regression)
+        run: node tests/test_forge_codegen_extract.js
+
+      - name: Run system halt/restart tests (phantom runtimeState.agents regression)
+        run: node tests/test_system_halt_restart.js
+
+      - name: Run forge queue consolidation tests (TQ-1)
+        run: node tests/test_forge_queue_consolidation.js
+
       - name: Run system update endpoint auth regression test
         run: node tests/test_update_endpoint_auth.js
 

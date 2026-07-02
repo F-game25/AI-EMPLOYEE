@@ -11,8 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Isolate session persistence to a throwaway state dir BEFORE importing companion.
-os.environ["STATE_DIR"] = tempfile.mkdtemp(prefix="conv-rt-test-")
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runtime"))
 
 from companion.session_state import get_session_store, extract_options  # noqa: E402
@@ -20,6 +20,34 @@ from companion.context_resolver import resolve_option_selection  # noqa: E402
 from companion.response_policy import policy_for  # noqa: E402
 from companion.conversation_runtime import ConversationRuntime, _render_dialogue  # noqa: E402
 from companion.schemas import CompanionRequest  # noqa: E402
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _isolated_state_dir():
+    """Isolate session persistence to a throwaway state dir for this module's tests.
+
+    STATE_DIR is read lazily per-call by core.state_paths.canonical_state_dir()
+    (SessionStore._path() calls it fresh on every load/save — nothing caches it
+    at import time), so scoping the env var to a fixture instead of a bare
+    module-level `os.environ[...] =` assignment keeps the isolation local to
+    this file. The previous bare assignment ran at collection time (before any
+    test anywhere executes) and was never restored, permanently overriding
+    every other test file's own STATE_DIR/AI_HOME isolation for the rest of the
+    pytest session — STATE_DIR outranks AI_HOME in canonical_state_dir(), so it
+    silently defeated AI_HOME-based isolation too. Root cause of an unrelated
+    CI failure: test_agent_learning_profile.py's grade-distribution count came
+    out as the accumulated total across every test that touched
+    AgentLearningProfile that session, not just its own two agents.
+    """
+    orig = os.environ.get("STATE_DIR")
+    os.environ["STATE_DIR"] = tempfile.mkdtemp(prefix="conv-rt-test-")
+    try:
+        yield
+    finally:
+        if orig is None:
+            os.environ.pop("STATE_DIR", None)
+        else:
+            os.environ["STATE_DIR"] = orig
 
 
 def _seed_options(session_id, options):

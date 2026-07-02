@@ -15,8 +15,19 @@ def _reload(module_name: str):
     return importlib.reload(module)
 
 
-def test_weights_update_and_persist(tmp_path, monkeypatch):
+def _pin_state_dir(tmp_path, monkeypatch) -> None:
+    """Pin all state-dir env vars so canonical_state_dir() resolves under tmp_path.
+
+    canonical_state_dir() checks STATE_DIR before AI_HOME — the suite is run with
+    STATE_DIR=/tmp/ci-full, so tests that only set AI_HOME get the wrong path.
+    """
     monkeypatch.setenv("AI_HOME", str(tmp_path))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("AI_EMPLOYEE_STATE_DIR", str(tmp_path / "state"))
+
+
+def test_weights_update_and_persist(tmp_path, monkeypatch):
+    _pin_state_dir(tmp_path, monkeypatch)
     bw = _reload("core.brain_weights")
 
     before = bw.get_weights()["lead_hunter"]["task_match"]
@@ -28,7 +39,7 @@ def test_weights_update_and_persist(tmp_path, monkeypatch):
 
 
 def test_same_task_selection_improves_over_runs(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_HOME", str(tmp_path))
+    _pin_state_dir(tmp_path, monkeypatch)
     bw = _reload("core.brain_weights")
     br = _reload("core.brain_registry")
     from core.contracts import TaskNode
@@ -54,7 +65,7 @@ def test_same_task_selection_improves_over_runs(tmp_path, monkeypatch):
 
 
 def test_learn_topic_is_reused_in_planner_context(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_HOME", str(tmp_path))
+    _pin_state_dir(tmp_path, monkeypatch)
     _reload("core.knowledge_store")
     ra = _reload("core.research_agent")
     from core.self_improvement.contracts import ImprovementTask
@@ -77,7 +88,7 @@ def test_learn_topic_is_reused_in_planner_context(tmp_path, monkeypatch):
 
 
 def test_conversation_profile_learning(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_HOME", str(tmp_path))
+    _pin_state_dir(tmp_path, monkeypatch)
     ks = _reload("core.knowledge_store")
     store = ks.get_knowledge_store()
     profile = store.learn_from_conversation(

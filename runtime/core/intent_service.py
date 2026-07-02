@@ -95,19 +95,45 @@ class IntentResult:
     entities: list[str] = field(default_factory=list)
     is_command: bool = False
     confidence: float = 0.0
+    reason: str = ""                         # companion classifier rationale (traceability)
     candidate_agents: list[str] = field(default_factory=list)
     sources: dict[str, bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def to_companion_intent(self) -> dict[str, Any]:
+        """Map to the dict shape ``companion.ConversationRuntime`` consumes
+        (``mode``/``task_type``/``confidence``/``is_command``/``reason``), so the
+        companion sources intent from the one seam without changing its contract.
+        Adds ``business_intent``/``candidate_agents`` (inert for current consumers;
+        used once broker routing goes registry-backed in C2)."""
+        return {
+            "mode": self.conversation_mode,
+            "task_type": self.task_type,
+            "confidence": self.confidence,
+            "is_command": self.is_command,
+            "reason": self.reason,
+            "business_intent": self.business_intent,
+            "candidate_agents": list(self.candidate_agents),
+        }
 
-def classify(text: str, context: Optional[dict] = None) -> IntentResult:
+
+def classify(
+    text: str,
+    context: Optional[dict] = None,
+    *,
+    business_intent: bool = True,
+) -> IntentResult:
     """Compose the three classifiers + registry routing into one result.
 
-    Never raises: each axis degrades to its default on failure. Cost is one LLM
-    call (business intent) — the same call ``classify_decision`` already made —
-    plus local heuristics; the companion axis only escalates to an LLM when
+    Never raises: each axis degrades to its default on failure. Axes 2 (companion
+    conversation mode) and 3 (entity/task-type normalization) are pure heuristics.
+    Axis 1 (business intent) is the only LLM call — the same one
+    ``classify_decision`` already makes — so latency-sensitive callers that don't
+    need a business label (the companion's conversational turns) pass
+    ``business_intent=False`` to stay on the seam without paying for an extra LLM
+    round-trip. The companion axis only escalates to an LLM when
     ``COMPANION_LLM_INTENT=1``.
     """
     text = (text or "").strip()
@@ -117,12 +143,14 @@ def classify(text: str, context: Optional[dict] = None) -> IntentResult:
     ctx = context or {}
 
     # Axis 1 — business-domain intent (LLM label; reuse TaskOrchestrator).
-    try:
-        from core.orchestrator import TaskOrchestrator  # noqa: PLC0415
-        res.business_intent = TaskOrchestrator().classify_intent(text)
-        res.sources["business_intent"] = True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("business_intent classify failed (non-fatal): %s", exc)
+    # Opt-out for latency-sensitive callers (companion conversation turns).
+    if business_intent:
+        try:
+            from core.orchestrator import TaskOrchestrator  # noqa: PLC0415
+            res.business_intent = TaskOrchestrator().classify_intent(text)
+            res.sources["business_intent"] = True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("business_intent classify failed (non-fatal): %s", exc)
 
     # Axis 2 — conversation mode (heuristic-first; reuse companion classifier).
     try:
@@ -132,6 +160,7 @@ def classify(text: str, context: Optional[dict] = None) -> IntentResult:
         res.task_type = c.get("task_type", res.task_type)
         res.is_command = bool(c.get("is_command", False))
         res.confidence = float(c.get("confidence", 0.0) or 0.0)
+        res.reason = c.get("reason", "")
         res.sources["conversation_mode"] = True
     except Exception as exc:  # noqa: BLE001
         logger.debug("conversation_mode classify failed (non-fatal): %s", exc)

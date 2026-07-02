@@ -261,6 +261,19 @@ class ForgeStore {
         CREATE INDEX IF NOT EXISTS idx_forge_cycles_project
           ON forge_cycles(project_id, status);
 
+        CREATE TABLE IF NOT EXISTS forge_autopilot_sessions (
+          project_id TEXT PRIMARY KEY,
+          active INTEGER DEFAULT 0,
+          runs_completed INTEGER DEFAULT 0,
+          consecutive_fails INTEGER DEFAULT 0,
+          max_runs INTEGER DEFAULT 10,
+          autonomy_level INTEGER DEFAULT 2,
+          cycle_id TEXT,
+          current_run_id TEXT,
+          started_at TEXT,
+          updated_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS forge_roadmaps (
           roadmap_id TEXT PRIMARY KEY,
           project_id TEXT NOT NULL UNIQUE,
@@ -686,10 +699,24 @@ class ForgeStore {
         CREATE INDEX IF NOT EXISTS idx_forge_v5_quality_goal
           ON forge_v5_quality_gates(goal_id, updated_at);
       `)
+      this._migrateBacklogSkillRoutingColumns()
       this.backend = 'sqlite'
       this.lastError = null
     } catch (err) {
       this._degrade(err)
+    }
+  }
+
+  // TQ-2: additive columns on an already-shipped table. SQLite has no
+  // `ADD COLUMN IF NOT EXISTS`, so each ALTER is attempted and a "duplicate
+  // column" failure (already migrated) is swallowed; any other error is not.
+  _migrateBacklogSkillRoutingColumns() {
+    const existing = new Set(this._db.prepare('PRAGMA table_info(forge_backlog)').all().map(c => c.name))
+    if (!existing.has('assigned_skill_id')) {
+      this._db.exec('ALTER TABLE forge_backlog ADD COLUMN assigned_skill_id TEXT')
+    }
+    if (!existing.has('match_score')) {
+      this._db.exec('ALTER TABLE forge_backlog ADD COLUMN match_score REAL')
     }
   }
 
@@ -886,8 +913,9 @@ class ForgeStore {
         INSERT OR REPLACE INTO forge_backlog
           (backlog_id, project_id, title, description, priority, category, status,
            risk_level, estimated_complexity, dependencies, source, linked_run_id,
-           acceptance_criteria, linked_files, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           acceptance_criteria, linked_files, assigned_skill_id, match_score,
+           created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         item.backlog_id, item.project_id, item.title || '', item.description || '',
         item.priority ?? 50, item.category || 'FEATURE', item.status || 'IDEA',
@@ -895,6 +923,7 @@ class ForgeStore {
         JSON.stringify(item.dependencies || []), item.source || 'manual',
         item.linked_run_id || null, item.acceptance_criteria || null,
         JSON.stringify(item.linked_files || []),
+        item.assigned_skill_id || null, item.match_score ?? null,
         item.created_at || nowIso(), item.updated_at || nowIso(),
       )
     } catch (err) { this._degrade(err) }
@@ -1002,6 +1031,71 @@ class ForgeStore {
     const cycle = this.findCycle(id)
     if (!cycle) return null
     return this.upsertCycle({ ...cycle, ...patch, cycle_id: id, updated_at: nowIso() })
+  }
+
+  // ── Autopilot sessions (durable — TQ-1: previously an in-process Map, lost on restart) ──────
+  _rowToAutopilotSession(r) {
+    if (!r) return null
+    return {
+      active: !!r.active,
+      runsCompleted: r.runs_completed,
+      consecutiveFails: r.consecutive_fails,
+      maxRuns: r.max_runs,
+      autonomyLevel: r.autonomy_level,
+      cycleId: r.cycle_id || null,
+      currentRunId: r.current_run_id || null,
+      startedAt: r.started_at,
+    }
+  }
+
+  upsertAutopilotSession(projectId, session = {}) {
+    this._ensureDb()
+    if (!this._db) return session
+    try {
+      this._db.prepare(`
+        INSERT OR REPLACE INTO forge_autopilot_sessions
+          (project_id, active, runs_completed, consecutive_fails, max_runs, autonomy_level,
+           cycle_id, current_run_id, started_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        projectId,
+        session.active ? 1 : 0,
+        session.runsCompleted ?? 0,
+        session.consecutiveFails ?? 0,
+        session.maxRuns ?? 10,
+        session.autonomyLevel ?? 2,
+        session.cycleId || null,
+        session.currentRunId || null,
+        session.startedAt || nowIso(),
+        nowIso(),
+      )
+    } catch (err) { this._degrade(err) }
+    return session
+  }
+
+  getAutopilotSession(projectId) {
+    this._ensureDb()
+    if (!this._db) return null
+    try {
+      const r = this._db.prepare('SELECT * FROM forge_autopilot_sessions WHERE project_id = ?').get(projectId)
+      return this._rowToAutopilotSession(r)
+    } catch (err) { this._degrade(err); return null }
+  }
+
+  getAllActiveAutopilotSessions() {
+    this._ensureDb()
+    if (!this._db) return []
+    try {
+      return this._db.prepare('SELECT * FROM forge_autopilot_sessions WHERE active = 1').all()
+        .map(r => ({ projectId: r.project_id, ...this._rowToAutopilotSession(r) }))
+    } catch (err) { this._degrade(err); return [] }
+  }
+
+  deleteAutopilotSession(projectId) {
+    this._ensureDb()
+    if (!this._db) return
+    try { this._db.prepare('DELETE FROM forge_autopilot_sessions WHERE project_id = ?').run(projectId) }
+    catch (err) { this._degrade(err) }
   }
 
   // ── Roadmap ───────────────────────────────────────────────────────────────

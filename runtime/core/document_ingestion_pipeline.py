@@ -38,7 +38,8 @@ def _repo_root() -> Path:
 
 
 def _state_path() -> Path:
-    p = _repo_root() / "state"
+    from core.state_paths import tenant_state_dir
+    p = tenant_state_dir()
     p.mkdir(parents=True, exist_ok=True)
     return p
 

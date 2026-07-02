@@ -35,7 +35,7 @@ from typing import Any, Optional
 
 from companion.schemas import CompanionRequest, CompanionResponse
 from companion.context_resolver import get_context_resolver, resolve_option_selection
-from companion.intent_classifier import get_intent_classifier
+from core.intent_service import get_intent_service
 from companion.execution_broker import get_execution_broker
 from companion.avatar_state_engine import get_avatar_state_engine
 from companion.session_state import get_session_store
@@ -123,7 +123,7 @@ class ConversationRuntime:
 
     def __init__(self) -> None:
         self._resolver = get_context_resolver()
-        self._classifier = get_intent_classifier()
+        self._intent_service = get_intent_service()
         self._broker = get_execution_broker()
         self._avatar = get_avatar_state_engine()
         self._critic = get_critique_engine()
@@ -182,8 +182,14 @@ class ConversationRuntime:
             resolved = self._resolver.resolve(request.text, ctx)
             resolved_text = resolved.get("resolved_text") or request.text
 
-        # 2) Classify into a conversation mode.
-        intent = self._classifier.classify(resolved_text, ctx)
+        # 2) Classify into a conversation mode — through the one intent seam
+        #    (C1/R2). business_intent=False skips the seam's only LLM axis so the
+        #    avatar's conversational latency is unchanged; the conversation-mode
+        #    axis is the same companion classifier, so mode/task_type/confidence/
+        #    is_command are identical to before.
+        intent = self._intent_service.classify(
+            resolved_text, ctx, business_intent=False
+        ).to_companion_intent()
         mode = intent.get("mode", "conversation")
 
         # 2.5) Response policy — match answer length/shape to the intent

@@ -31,6 +31,14 @@
       "goal": "Add a function add(a, b) that returns the sum with a docstring",
       "expect_status": "not_blocked",
       "weight": 1
+    },
+    {
+      "id": "codegen_local_model",
+      "title": "Local codegen model (FORGE_OLLAMA_MODEL) writes valid, verifiable code",
+      "type": "forge_codegen",
+      "goal": "Create a file calc.py with a function add(a, b) that returns a + b, with a docstring.",
+      "expect_file": "calc.py",
+      "weight": 2
     }
   ]
 }

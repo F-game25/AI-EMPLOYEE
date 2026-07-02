@@ -155,9 +155,8 @@ def _topic_key(topic: str) -> str:
 
 
 def _state_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    p = base / "state" / "learning_ladder.json"
+    from core.state_paths import canonical_state_dir
+    p = canonical_state_dir() / "learning_ladder.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 

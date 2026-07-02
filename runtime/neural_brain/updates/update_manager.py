@@ -32,12 +32,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from core.file_lock import FileLock
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger(__name__)
 
-_PENDING_DIR   = Path("state/updates/pending")
-_APPLIED_DIR   = Path("state/updates/applied")
-_MANIFEST_PATH = Path("state/updates/last_manifest.json")
-_VERSION_FILE  = Path("state/version.json")
+# Canonical state tree (honours STATE_DIR / AI_HOME) — not repo-local ./state. C0.
+_STATE_DIR     = canonical_state_dir()
+_PENDING_DIR   = _STATE_DIR / "updates" / "pending"
+_APPLIED_DIR   = _STATE_DIR / "updates" / "applied"
+_MANIFEST_PATH = _STATE_DIR / "updates" / "last_manifest.json"
+_VERSION_FILE  = _STATE_DIR / "version.json"
 _CHECK_INTERVAL_S = int(os.getenv("UPDATE_CHECK_INTERVAL_S", str(6 * 3600)))  # 6h
 _DOWNLOAD_TIMEOUT_S = int(os.getenv("UPDATE_DOWNLOAD_TIMEOUT_S", "30"))
 
@@ -115,7 +120,9 @@ class UpdateManager:
             )
             with self._lock:
                 self._available = info
-            _MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
+            _MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with FileLock(_MANIFEST_PATH, timeout=2.0):
+                _MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
             self._emit("update:available", {
                 "version": info.version,
                 "update_type": info.update_type,
@@ -313,21 +320,29 @@ class UpdateManager:
     @staticmethod
     def _read_version() -> str:
         try:
-            if _VERSION_FILE.exists():
-                return json.loads(_VERSION_FILE.read_text()).get("version", "0.0.0")
+            with FileLock(_VERSION_FILE, timeout=2.0):
+                if _VERSION_FILE.exists():
+                    return json.loads(_VERSION_FILE.read_text()).get("version", "0.0.0")
         except Exception:
             pass
         return "0.0.0"
 
     @staticmethod
     def _write_version(version: str) -> None:
+        # Lock the whole read-modify-write so a concurrent updater can't interleave
+        # and leave version.json with a mismatched version/updated_at pair.
         try:
-            existing = {}
-            if _VERSION_FILE.exists():
-                existing = json.loads(_VERSION_FILE.read_text())
-            existing["version"] = version
-            existing["updated_at"] = int(time.time())
-            _VERSION_FILE.write_text(json.dumps(existing, indent=2))
+            _VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with FileLock(_VERSION_FILE, timeout=2.0):
+                existing = {}
+                if _VERSION_FILE.exists():
+                    try:
+                        existing = json.loads(_VERSION_FILE.read_text())
+                    except Exception:
+                        existing = {}
+                existing["version"] = version
+                existing["updated_at"] = int(time.time())
+                _VERSION_FILE.write_text(json.dumps(existing, indent=2))
         except Exception:
             pass
 

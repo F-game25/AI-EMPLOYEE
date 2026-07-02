@@ -50,9 +50,8 @@ def _state_dir() -> Path:
     state = os.getenv("STATE_DIR")
     if state:
         return Path(state)
-    home = os.getenv("AI_EMPLOYEE_HOME") or os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    return base / "state"
+    from core.state_paths import canonical_state_dir
+    return canonical_state_dir()
 
 
 # ── JSON-file fallback store (for types without a dedicated backend) ──────────

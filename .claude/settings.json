@@ -115,7 +115,21 @@
       "Bash(sed -n '1,40p' /home/lf/AI-EMPLOYEE/tests/test_model_lanes.py)",
       "Bash(sed -n '1,60p' /home/lf/AI-EMPLOYEE/tests/test_companion_adapters.py)",
       "Bash(PYTHONPATH=__TRACKED_VAR__:__TRACKED_VAR__/runtime python3 -m pytest tests/test_context_db.py -q --no-cov -p no:cacheprovider)",
-      "Bash(git -C /home/lf/AI-EMPLOYEE status --porcelain)"
+      "Bash(git -C /home/lf/AI-EMPLOYEE status --porcelain)",
+      "Bash(python3 -m pytest -o addopts= tests/test_inference_quant_wiring.py tests/test_model_lanes.py tests/test_model_lanes_quant.py tests/test_model_role_resolver.py tests/test_turbo_quant.py tests/test_compute_plan_routing.py -q -p no:cacheprovider)",
+      "Bash(CARGO_TARGET_DIR=/home/lf/AI-EMPLOYEE/src-tauri/target cargo check --manifest-path src-tauri/Cargo.toml)",
+      "Bash(python3 -m venv /tmp/m3venv_smoke)",
+      "Bash(/tmp/m3venv_smoke/bin/python -c \"import sys; print\\('venv runs:', sys.executable\\)\")",
+      "Bash(/tmp/m3venv_smoke/bin/python -m pip --version)",
+      "Bash(/tmp/m3venv_smoke/bin/python -m pip install --no-index --find-links /tmp)",
+      "Bash(node -e 'let d=\"\";process.stdin.on\\(\"data\",c=>d+=c\\).on\\(\"end\",\\(\\)=>{d.trim\\(\\).split\\(\"\\\\n\"\\).filter\\(Boolean\\).forEach\\(l=>{try{const j=JSON.parse\\(l\\);console.log\\(j.event, JSON.stringify\\(j.details\\)\\)}catch{}}\\)}\\)')",
+      "Bash(curl -s --max-time 90 http://127.0.0.1:11434/api/chat -d '{ *)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); c=d.get\\('message',{}\\).get\\('content',''\\); import re; m=re.search\\(r'\\\\`\\\\`\\\\`\\(\\\\w+\\)\\\\s+\\(\\\\S+\\)',c\\); print\\('done_reason:',d.get\\('done_reason'\\)\\); print\\('code block with path:', m.group\\(0\\) if m else 'NONE'\\); print\\('snippet:', c.strip\\(\\)[:200]\\)\")",
+      "Bash(python3 -m pytest tests/test_skill_chain.py -q)",
+      "Bash(PYTHONPATH=runtime:runtime/agents STATE_DIR=/tmp/ci-state JWT_SECRET_KEY=ci-test-secret-not-real timeout 150 python3 -m pytest tests/test_skill_chain.py -q --no-header -p no:cacheprovider)",
+      "Bash(echo \"=== EXIT: $? ===\")",
+      "Bash(STRICT_PIPELINE=0 python3 -m pytest tests/test_skill_batch1_readiness.py tests/test_skill_chain.py tests/test_teammate_skill_routing.py -o addopts=\"\" -q -p no:cacheprovider)",
+      "Bash(export STATE_DIR=/tmp/c0_probe_state)"
     ],
     "additionalDirectories": [
       "/tmp"

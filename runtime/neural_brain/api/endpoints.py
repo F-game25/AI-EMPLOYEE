@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 
+from core.state_paths import canonical_state_dir
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -197,7 +198,7 @@ async def get_graph_view(view: str, limit: int = Query(300, ge=10, le=1000)):
 async def list_threads(limit: int = Query(20, ge=1, le=200)):
     """List recent reasoning threads from trace JSONL files."""
     try:
-        traces_dir = Path("state/neural_brain/traces")
+        traces_dir = (canonical_state_dir() / "neural_brain" / "traces")
         if not traces_dir.exists():
             return {"threads": []}
         threads = []
@@ -267,7 +268,7 @@ async def get_reasoning_trace(trace_id: str):
     try:
         if not _SAFE_TRACE_ID.fullmatch(trace_id):
             raise HTTPException(status_code=400, detail="Invalid trace id")
-        trace_root = Path("state/neural_brain/traces")
+        trace_root = (canonical_state_dir() / "neural_brain" / "traces")
         trace_file = next((p for p in trace_root.glob("*.jsonl") if p.stem == trace_id), None)
         if trace_file is None or not trace_file.exists():
             raise HTTPException(status_code=404, detail="Trace not found")

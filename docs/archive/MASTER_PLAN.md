@@ -1,3 +1,5 @@
+> **ARCHIVED — superseded by `docs/SYSTEM_COHERENCE_PLAN.md` (canonical).** Compute/cluster Phases 0–8 here are DONE; their status carries forward in `docs/MASTER_PLAN_V3.md`. Kept for history.
+
 # AI Employee — Master Plan
 **Status: EXECUTING**
 **Last updated: 2026-06-05**

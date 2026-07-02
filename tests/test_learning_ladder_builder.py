@@ -15,6 +15,13 @@ def _reload(module_name: str):
     return importlib.reload(module)
 
 
+def _pin_state_dir(tmp_path, monkeypatch) -> None:
+    """Pin all state-dir env vars so canonical_state_dir() resolves under tmp_path."""
+    monkeypatch.setenv("AI_HOME", str(tmp_path))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("AI_EMPLOYEE_STATE_DIR", str(tmp_path / "state"))
+
+
 # ── build_ladder ──────────────────────────────────────────────────────────────
 
 def test_build_ladder_returns_five_levels(tmp_path, monkeypatch):
@@ -77,7 +84,7 @@ def test_build_ladder_invalid_topic(tmp_path, monkeypatch):
 
 
 def test_build_ladder_persists_state(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_HOME", str(tmp_path))
+    _pin_state_dir(tmp_path, monkeypatch)
     mod = _reload("core.learning_ladder_builder")
     builder = mod.get_learning_ladder_builder()
     builder.build_ladder("Kubernetes")
