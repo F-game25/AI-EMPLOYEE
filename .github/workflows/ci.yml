@@ -20,6 +20,9 @@ env:
   LOG_LEVEL: WARNING
   EVOLUTION_MODE: "OFF"
   PYTHONPATH: runtime:runtime/agents
+  # Pins Python's string-hash seed so hash-based fallback embeddings
+  # (runtime/core/memory_index.py) rank identically across CI runs.
+  PYTHONHASHSEED: "0"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────
