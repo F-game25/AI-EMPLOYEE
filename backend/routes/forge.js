@@ -4121,12 +4121,18 @@ Each file must be in a code block labelled with its relative path.`
       }
     }
 
-    const actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
+    let actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []
+
+    // Optional per-file verify: check syntax of each generated file
+    if (process.env.FORGE_CODER_PER_FILE_VERIFY && actions.length) {
+      actions = await verifyCodeActions(actions, root)
+    }
 
     const duration_ms = Date.now() - t0
-    recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length, swarm_used: swarmUsed })
-    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated${swarmUsed ? ' (swarm)' : ''}`, { swarm_used: swarmUsed })
-    return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length, swarm_used: swarmUsed }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
+    const verifyFailed = actions.filter(a => a.verify_failed).length
+    recordAgentOutcome(project.id, 'coder', { run_id: runId, goal, success: actions.length > 0, duration_ms, files_generated: actions.length, verify_failed: verifyFailed, swarm_used: swarmUsed })
+    setForgeAgentStatus('coder', actions.length ? 'done' : 'failed', `${actions.length} file(s) generated${verifyFailed ? ` (${verifyFailed} with syntax errors)` : ''}${swarmUsed ? ' (swarm)' : ''}`, { swarm_used: swarmUsed })
+    return { agent: 'coder', status: actions.length ? 'done' : 'failed', output: { actions_count: actions.length, raw_length: aiText.length, verify_failed: verifyFailed, swarm_used: swarmUsed }, actions, duration_ms, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
   // Build a dynamic command list from the detected stack, checking which scripts exist.
@@ -4166,6 +4172,184 @@ Each file must be in a code block labelled with its relative path.`
     if (/ENOENT|No such file/.test(o)) return { reason: 'missing_file', fix: 'A required file is missing — ensure the file path is correct' }
     if (/EACCES|permission denied/i.test(o)) return { reason: 'permission_error', fix: 'Permission issue — check file permissions' }
     return { reason: 'unknown', fix: 'Review the full error output and fix the reported issue' }
+  }
+
+  // ── Per-file syntax verification (TQ-3 phase 2) ──────────────────────────────
+  // Lightweight syntax checks on individual files before batch staging.
+  // Catches errors early without full test suite, only for supported file types.
+  function getFileSyntaxCheckCmd(filePath) {
+    if (/\.js$/.test(filePath)) return { cmd: `node --check "${filePath}"`, type: 'node' }
+    if (/\.ts$/.test(filePath)) return { cmd: `npx tsc --noEmit "${filePath}"`, type: 'tsc' }
+    if (/\.py$/.test(filePath)) return { cmd: `python3 -m py_compile "${filePath}"`, type: 'python' }
+    if (/\.json$/.test(filePath)) return { cmd: `node -e "JSON.parse(require('fs').readFileSync('${filePath}','utf8'))"`, type: 'json' }
+    return null
+  }
+
+  async function verifyFileContent(filePath, content, opts = {}) {
+    // Verify a generated file's content via syntax check
+    // Returns { ok: true } or { ok: false, reason, fix, output }
+    const checkCmd = getFileSyntaxCheckCmd(filePath)
+    if (!checkCmd) return { ok: true } // No syntax check available
+
+    try {
+      const tmpFile = path.join(os.tmpdir(), `verify-${crypto.randomBytes(4).toString('hex')}-${path.basename(filePath)}`)
+      fs.writeFileSync(tmpFile, content, 'utf8')
+      const result = spawnSync(checkCmd.cmd.split(' ')[0], checkCmd.cmd.split(' ').slice(1), {
+        encoding: 'utf8',
+        timeout: 5000,
+        maxBuffer: 100 * 1024,
+        cwd: os.tmpdir(),
+      })
+      fs.rmSync(tmpFile, { force: true })
+
+      if (result.status === 0) return { ok: true }
+      const output = (result.stderr || result.stdout || '').trim()
+      const { reason, fix } = classifyFailure(output)
+      return { ok: false, reason, fix, output: output.slice(0, 300) }
+    } catch (err) {
+      return { ok: false, reason: 'verify_error', fix: 'Could not run syntax check', output: err.message }
+    }
+  }
+
+  async function verifyCodeActions(actions, filePath) {
+    // Optional per-file verify: check each action's content syntax before returning
+    if (!process.env.FORGE_CODER_PER_FILE_VERIFY) return actions // opt-in only
+
+    const verified = []
+    for (const action of actions) {
+      const check = await verifyFileContent(action.file_path, action.content)
+      if (check.ok) {
+        verified.push(action)
+      } else {
+        // Mark failed actions but keep them for later debug
+        action.verify_failed = true
+        action.verify_error = check
+        verified.push(action)
+      }
+    }
+    return verified
+  }
+
+  // ── Sub-task delegation (TQ-3 phase 3) ───────────────────────────────────────
+  // Spawn a child task within a parent run, with depth tracking and merge semantics.
+  // Uses the existing forge_child_runs table for persistence.
+  async function spawnChildTask(project, parentRunId, childGoal, opts = {}) {
+    const maxDepth = opts.maxDepth || 2
+    const parentRun = forgeRunStore.getRun(parentRunId)
+    if (!parentRun) return { ok: false, error: 'parent run not found' }
+
+    // Check depth: reject if parent was already a child at max depth
+    let currentDepth = 1
+    const childTraces = forgeRunStore.getChildRuns(parentRunId)
+    if (childTraces.length > 0) {
+      const firstChild = childTraces[0]
+      // If this parent is itself a child, increment depth
+      const parentAsChild = forgeRunStore.getChildRuns(parentRunId)
+      if (parentAsChild && parentAsChild.length > 0) currentDepth = 2
+    }
+
+    if (currentDepth >= maxDepth) {
+      return { ok: false, error: `max delegation depth ${maxDepth} reached` }
+    }
+
+    // Create a child backlog item (will be picked up by autopilot)
+    const childBacklogItem = {
+      id: crypto.randomUUID(),
+      cycle_id: parentRun.cycle_id || parentRunId,
+      title: `[child] ${childGoal.slice(0, 60)}`,
+      goal: childGoal,
+      status: 'READY',
+      priority: opts.priority || 'normal',
+      risk_level: opts.risk_level || 'medium',
+      depends_on: [parentRunId], // parent task is a dependency
+      created_at: nowIso(),
+    }
+
+    forgeRunStore.upsertBacklogItem(childBacklogItem)
+
+    // Create child run entry in forge_child_runs
+    const childRunEntry = {
+      child_id: crypto.randomUUID(),
+      parent_run_id: parentRunId,
+      child_run_id: null, // will be updated when the backlog item starts
+      dependency_run_ids: JSON.stringify([parentRunId]),
+      merge_status: 'pending',
+      created_at: nowIso(),
+    }
+
+    forgeRunStore.upsertChildRun(childRunEntry)
+
+    return {
+      ok: true,
+      child_id: childRunEntry.child_id,
+      backlog_item_id: childBacklogItem.id,
+      depth: currentDepth + 1,
+    }
+  }
+
+  // Wait for a child task to complete and merge results
+  async function waitForChildCompletion(childId, opts = {}) {
+    const timeoutMs = opts.timeoutMs || 300000 // 5 minutes default
+    const pollIntervalMs = opts.pollIntervalMs || 2000
+    const startTime = Date.now()
+
+    while (Date.now() - startTime < timeoutMs) {
+      const childEntry = forgeRunStore.getChildRuns(childId)
+      if (childEntry && childEntry.length > 0 && childEntry[0].merge_status !== 'pending') {
+        return {
+          ok: true,
+          child_run_id: childEntry[0].child_run_id,
+          merge_status: childEntry[0].merge_status,
+          final_report: childEntry[0].final_child_report ? JSON.parse(childEntry[0].final_child_report) : null,
+        }
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs))
+    }
+
+    return { ok: false, error: 'child task timeout' }
+  }
+
+  // ── Data-dependent branching (TQ-3 phase 4) ──────────────────────────────────
+  // Simple rule-based conditional execution: evaluate if_contains against prior output,
+  // then execute then_step if condition is met. No LLM judgment, purely deterministic.
+  function evaluateConditionalStep(condition, priorOutput) {
+    if (!condition || !priorOutput) return false
+    const text = typeof priorOutput === 'string' ? priorOutput : JSON.stringify(priorOutput)
+    if (condition.if_contains) {
+      // Check if text contains the pattern (case-insensitive)
+      return new RegExp(condition.if_contains, 'i').test(text)
+    }
+    if (condition.if_not_contains) {
+      return !new RegExp(condition.if_not_contains, 'i').test(text)
+    }
+    if (condition.if_equals) {
+      return text === condition.if_equals
+    }
+    return false
+  }
+
+  async function executeConditionalStep(step, context) {
+    // Execute a conditional step: rerun, delegate, or custom action
+    if (!step) return { ok: false, reason: 'no step defined' }
+
+    if (step.type === 'rerun_coder') {
+      // Re-run coder with updated prompt
+      const updatedPrompt = step.prompt_suffix ? `${context.prompt}\n\n${step.prompt_suffix}` : context.prompt
+      return { ok: true, action: 'rerun_coder', prompt: updatedPrompt }
+    }
+
+    if (step.type === 'delegate_child') {
+      // Spawn a child task for a specific sub-goal
+      const childResult = await spawnChildTask(context.project, context.parentRunId, step.goal, { maxDepth: step.maxDepth || 2 })
+      return childResult ? { ok: true, action: 'delegated', ...childResult } : { ok: false }
+    }
+
+    if (step.type === 'run_debug') {
+      // Trigger debug agent even if tests passed
+      return { ok: true, action: 'run_debug', reason: step.reason || 'conditional debug' }
+    }
+
+    return { ok: false, reason: 'unknown step type' }
   }
 
   async function runTesterAgent(project, verifyCmds, root, runId) {
