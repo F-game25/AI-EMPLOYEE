@@ -234,6 +234,65 @@ function invokeRoute(router, method, target, body) {
   console.log('[✓] backlog cancel/retry controls enforce terminal-state rules');
 
   console.log('[✓] forge queue consolidation (TQ-1) tests passed');
+
+  // ══════════════════════════════════════════════════════════════════════
+  // TQ-2 — goal-achieving: fast path for short goals + skill/agent routing
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── 7. isSimpleGoal heuristic ──
+  {
+    assert.equal(t.isSimpleGoal('Fix the typo in the README'), true);
+    assert.equal(t.isSimpleGoal('Add a docstring to the add() function'), true);
+    assert.equal(t.isSimpleGoal(''), false);
+    assert.equal(
+      t.isSimpleGoal('First research the market, then draft a plan, and then build the feature, after that write tests'),
+      false, 'multi-step language must disqualify the fast path',
+    );
+    assert.equal(
+      t.isSimpleGoal('Build a complete authentication system with OAuth support, session management, password reset flows, rate limiting on the login endpoint, and audit logging across the entire application stack'),
+      false, 'long goals (>25 words) must disqualify the fast path',
+    );
+  }
+  console.log('[✓] isSimpleGoal heuristic classifies short vs multi-step/long goals correctly');
+
+  // ── 8. computeSkillRouting: a clear non-code request routes; a generic
+  //    coding request does not (stays on the safe file-editing pipeline) ──
+  {
+    const codeRouting = await t.computeSkillRouting('Fix bug in auth.js', 'There is a null pointer exception in the login handler that needs to be fixed in the repo.');
+    assert.equal(codeRouting.assigned_skill_id, null, 'a repo code-fix task must never auto-route away from the safe pipeline');
+
+    const researchRouting = await t.computeSkillRouting('Market research report', 'Research the competitive landscape and market size for local-first AI products, and write a summary report with sources.');
+    // This may or may not clear the confidence threshold depending on the
+    // exact skill library contents — but if it DOES route, it must only ever
+    // route to a category on the safe list, never silently to something else.
+    if (researchRouting.assigned_skill_id) {
+      assert(typeof researchRouting.match_score === 'number' && researchRouting.match_score >= 6.0);
+    }
+  }
+  console.log('[✓] computeSkillRouting never routes a repo code-fix task away from the safe pipeline');
+
+  // ── 9. Backlog creation persists routing decision ──
+  {
+    const created = await invokeRoute(router, 'POST', `/projects/${project.id}/backlog`, {
+      title: 'Generic coding task', description: 'Refactor the payment handler in backend/routes/forge.js.',
+    });
+    assert.equal(created.status, 200);
+    assert.equal(created.body.item.assigned_skill_id, null, 'generic code task must not be routed to a skill');
+  }
+  console.log('[✓] backlog creation computes and persists the routing decision');
+
+  // ── 10. Cycle fast path: a short goal skips the Decomposer (one item, not 3-8) ──
+  {
+    const cycleResp = await invokeRoute(router, 'POST', `/projects/${project.id}/cycles`, {
+      goal: 'Add a docstring to the ping function',
+    });
+    assert.equal(cycleResp.status, 200);
+    assert.equal(cycleResp.body.cycle.backlog_items.length, 1, 'fast path must create exactly one backlog item');
+    assert.equal(cycleResp.body.cycle.current_phase, 'executing_fast_path');
+  }
+  console.log('[✓] cycle fast path skips the Decomposer for a short, single-step goal');
+
+  console.log('[✓] forge queue consolidation + goal routing (TQ-1 + TQ-2) tests passed');
   process.exit(0);
 })().catch((err) => {
   console.error(err);

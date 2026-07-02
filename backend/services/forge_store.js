@@ -699,10 +699,24 @@ class ForgeStore {
         CREATE INDEX IF NOT EXISTS idx_forge_v5_quality_goal
           ON forge_v5_quality_gates(goal_id, updated_at);
       `)
+      this._migrateBacklogSkillRoutingColumns()
       this.backend = 'sqlite'
       this.lastError = null
     } catch (err) {
       this._degrade(err)
+    }
+  }
+
+  // TQ-2: additive columns on an already-shipped table. SQLite has no
+  // `ADD COLUMN IF NOT EXISTS`, so each ALTER is attempted and a "duplicate
+  // column" failure (already migrated) is swallowed; any other error is not.
+  _migrateBacklogSkillRoutingColumns() {
+    const existing = new Set(this._db.prepare('PRAGMA table_info(forge_backlog)').all().map(c => c.name))
+    if (!existing.has('assigned_skill_id')) {
+      this._db.exec('ALTER TABLE forge_backlog ADD COLUMN assigned_skill_id TEXT')
+    }
+    if (!existing.has('match_score')) {
+      this._db.exec('ALTER TABLE forge_backlog ADD COLUMN match_score REAL')
     }
   }
 
@@ -899,8 +913,9 @@ class ForgeStore {
         INSERT OR REPLACE INTO forge_backlog
           (backlog_id, project_id, title, description, priority, category, status,
            risk_level, estimated_complexity, dependencies, source, linked_run_id,
-           acceptance_criteria, linked_files, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           acceptance_criteria, linked_files, assigned_skill_id, match_score,
+           created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         item.backlog_id, item.project_id, item.title || '', item.description || '',
         item.priority ?? 50, item.category || 'FEATURE', item.status || 'IDEA',
@@ -908,6 +923,7 @@ class ForgeStore {
         JSON.stringify(item.dependencies || []), item.source || 'manual',
         item.linked_run_id || null, item.acceptance_criteria || null,
         JSON.stringify(item.linked_files || []),
+        item.assigned_skill_id || null, item.match_score ?? null,
         item.created_at || nowIso(), item.updated_at || nowIso(),
       )
     } catch (err) { this._degrade(err) }

@@ -1671,6 +1671,162 @@ print(json.dumps({
 // Expose swarm via HTTP for other parts of the system
 // POST /api/forge/swarm { prompt, task_type, n_agents, timeout_s }
 
+// TQ-2: which categories of the 570-skill library are safe to auto-route a
+// backlog item to WITHOUT going through the file-staging/verify/rollback
+// pipeline. Deliberately conservative — anything that could plausibly need a
+// repo file edit (dev/engineering/automation/project-mgmt/security/finance-
+// execution/etc.) is excluded and stays on the generic agentic pipeline. Only
+// clearly-standalone knowledge/content/outreach work routes here.
+const SKILL_ROUTE_SAFE_CATEGORIES = new Set([
+  'Research & Analysis', 'Content & Writing', 'Data Analysis', 'Growth & Marketing',
+  'Marketing & SEO', 'Social Media', 'Branding & Identity', 'Customer Support',
+  'Company Building & Strategy',
+])
+const SKILL_ROUTE_MIN_SCORE = 6.0
+
+// Best-effort skill match for a subtask, via the same skill_selector the
+// Decomposer's (currently-unused) `required_skills` field was meant to feed.
+// Returns { skill_id, match_score, category, has_tool_chain } or null. Never
+// throws — a routing failure just means "no match", the generic pipeline
+// still runs the work.
+async function routeBacklogItem(title, description, taskType = 'general') {
+  const REPO_ROOT_ROUTE = path.resolve(__dirname, '..', '..')
+  const RUNTIME_DIR_ROUTE = path.join(REPO_ROOT_ROUTE, 'runtime')
+  const AI_HOME_ROUTE = path.resolve(
+    process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee')
+  )
+  const task = `${title || ''} ${description || ''}`.trim().slice(0, 800)
+  if (!task) return null
+  const snippet = `
+import sys, os, json
+sys.path.insert(0, ${JSON.stringify(RUNTIME_DIR_ROUTE)})
+os.environ.setdefault('AI_HOME', ${JSON.stringify(AI_HOME_ROUTE)})
+result = None
+try:
+    from forge.lifecycle.skill_selector import select_skills
+    matches = select_skills(${JSON.stringify(task)}, ${JSON.stringify(taskType)}, max_skills=1)
+    if matches:
+        m = matches[0]
+        result = {
+            'skill_id': m.get('id'),
+            'match_score': m.get('match_score', 0),
+            'category': m.get('category'),
+            'has_tool_chain': bool(m.get('tool_steps')),
+        }
+except Exception as e:
+    result = {'error': str(e)}
+print(json.dumps(result))
+`
+  return new Promise((resolve) => {
+    let stdout = '', stderr = ''
+    const child = spawn(process.env.PYTHON_BIN || 'python3', ['-c', snippet], {
+      env: { ...process.env, AI_HOME: AI_HOME_ROUTE, PYTHONPATH: RUNTIME_DIR_ROUTE },
+      timeout: 15_000,
+    })
+    child.stdout.on('data', d => { stdout += d })
+    child.stderr.on('data', d => { stderr += d })
+    child.on('close', code => {
+      if (code !== 0) { logger.warn('routeBacklogItem exit', code, stderr.slice(0, 200)); return resolve(null) }
+      try {
+        const line = stdout.trim().split('\n').pop() || 'null'
+        const parsed = JSON.parse(line)
+        resolve(parsed && !parsed.error ? parsed : null)
+      } catch { resolve(null) }
+    })
+    child.on('error', () => resolve(null))
+  })
+}
+
+// Computed once at backlog-item creation time (not re-computed per tick).
+// Only returns a non-null assigned_skill_id when BOTH the match is
+// high-confidence AND the skill's category is one that's safe to run
+// standalone (no repo file access implied) — a strict, auditable bar so a
+// generic coding backlog item never silently gets misrouted away from the
+// safe file-staging/verify/rollback pipeline.
+async function computeSkillRouting(title, description) {
+  const routing = await routeBacklogItem(title, description).catch(() => null)
+  if (!routing || !routing.skill_id) return { assigned_skill_id: null, match_score: null }
+  const qualifies = routing.match_score >= SKILL_ROUTE_MIN_SCORE
+    && SKILL_ROUTE_SAFE_CATEGORIES.has(routing.category)
+  return {
+    assigned_skill_id: qualifies ? routing.skill_id : null,
+    match_score: routing.match_score ?? null,
+  }
+}
+
+// Actually run a backlog item's work through the skill catalog's unified
+// dispatch (ExecutableSkillCatalog.dispatch_for_goal — runs the skill's real
+// tool chain if it has one, else falls back to LLM guidance from the skill's
+// own system_prompt). Returns the SAME shape _executeAgenticRun returns so
+// callers (autopilot tick) don't need to know which path ran.
+async function dispatchBacklogItemViaSkill(project, item, routing) {
+  const REPO_ROOT_DISPATCH = path.resolve(__dirname, '..', '..')
+  const RUNTIME_DIR_DISPATCH = path.join(REPO_ROOT_DISPATCH, 'runtime')
+  const AI_HOME_DISPATCH = path.resolve(
+    process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || path.join(os.homedir(), '.ai-employee')
+  )
+  const goal = item.description || item.title
+  const timeoutS = 120
+  const snippet = `
+import sys, os, json
+sys.path.insert(0, ${JSON.stringify(RUNTIME_DIR_DISPATCH)})
+os.environ.setdefault('AI_HOME', ${JSON.stringify(AI_HOME_DISPATCH)})
+from skills.catalog import get_skill_catalog
+catalog = get_skill_catalog()
+result = catalog.dispatch_for_goal(${JSON.stringify(goal)}, {'skill_id': ${JSON.stringify(routing.skill_id)}, 'task_type': 'general'})
+print(json.dumps(result, default=str))
+`
+  const runId = `run-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
+  const dispatchResult = await new Promise((resolve) => {
+    let stdout = '', stderr = ''
+    const child = spawn(process.env.PYTHON_BIN || 'python3', ['-c', snippet], {
+      env: { ...process.env, AI_HOME: AI_HOME_DISPATCH, PYTHONPATH: RUNTIME_DIR_DISPATCH },
+      timeout: (timeoutS + 15) * 1000,
+    })
+    child.stdout.on('data', d => { stdout += d })
+    child.stderr.on('data', d => { stderr += d })
+    child.on('close', code => {
+      if (code !== 0) return resolve({ status: 'error', note: `dispatch exit ${code}: ${stderr.slice(0, 300)}` })
+      try { resolve(JSON.parse(stdout.trim().split('\n').pop() || '{}')) }
+      catch { resolve({ status: 'error', note: `parse error: ${stdout.slice(0, 300)}` }) }
+    })
+    child.on('error', (err) => resolve({ status: 'error', note: err.message }))
+  })
+
+  const success = dispatchResult?.status === 'ok'
+  const finalReport = {
+    status: success ? 'verified' : 'partial',
+    summary: success
+      ? `Routed to skill '${routing.skill_id}' (score ${routing.match_score}, ${dispatchResult.via || 'skill_catalog'}).`
+      : `Skill dispatch did not complete: ${dispatchResult?.note || dispatchResult?.status || 'unknown'}.`,
+    skill_routing: { skill_id: routing.skill_id, match_score: routing.match_score, category: routing.category },
+    dispatch_result: dispatchResult,
+    applied_files: [],
+    snapshots: [],
+    test_result: null,
+    generated_at: nowIso(),
+    provider: 'skill_catalog',
+    next_steps: success ? [] : ['Review the skill output; falls back to the agentic pipeline is not automatic — retry the item to force it.'],
+  }
+  const run = upsertRun({
+    id: runId, run_id: runId, project_id: project.id, goal,
+    status: success ? 'verified' : 'verify_failed',
+    mode: 'skill_dispatch', provider: 'skill_catalog',
+    max_iterations: 1, context_pack: null, plan: null,
+    actions: [], patches: [], approvals: [], test_results: [],
+    review: { status: success ? 'skill_completed' : 'skill_partial', summary: finalReport.summary },
+    final_report: finalReport, audit_ids: [], linked_backlog_id: item.backlog_id,
+    workspace_path: null, created_at: nowIso(), updated_at: nowIso(),
+  })
+  appendAudit('forge_skill_routed_run_completed', {
+    run_id: runId, project_id: project.id, backlog_id: item.backlog_id,
+    skill_id: routing.skill_id, match_score: routing.match_score, success,
+  })
+  broadcastForge('forge:run_created', { run })
+  broadcastForge('forge:run_updated', { run, action: 'skill_dispatch_done' })
+  return { ok: true, success, run_id: runId, run, summary: finalReport.summary }
+}
+
 async function callPythonChat(message, timeoutMs = 30000) {
   // 1. Try local Ollama first (free, private, no API cost). _callOllama accepts a
   // string, a messages array, or a { system, user } pair and routes via /api/chat.
@@ -4799,11 +4955,13 @@ Respond with ONLY valid JSON (no markdown fences):
     res.json({ ok: true, backlog: forgeRunStore.getBacklog(project.id) })
   })
 
-  router.post('/projects/:id/backlog', requireAuth, (req, res) => {
+  router.post('/projects/:id/backlog', requireAuth, async (req, res) => {
     const project = findProject(req.params.id)
     if (!project) return res.status(404).json({ ok: false, error: 'project not found' })
     const { title, description, priority, category, status, risk_level, estimated_complexity, dependencies, acceptance_criteria, linked_files, source } = req.body || {}
     if (!title) return res.status(400).json({ ok: false, error: 'title required' })
+    // TQ-2: best-effort skill routing — never blocks item creation on failure.
+    const routing = await computeSkillRouting(title, description).catch(() => ({ assigned_skill_id: null, match_score: null }))
     const item = forgeRunStore.upsertBacklogItem({
       backlog_id: crypto.randomUUID(),
       project_id: project.id,
@@ -4817,8 +4975,16 @@ Respond with ONLY valid JSON (no markdown fences):
       acceptance_criteria: acceptance_criteria || null,
       linked_files: Array.isArray(linked_files) ? linked_files : [],
       source: source || 'manual',
+      assigned_skill_id: routing.assigned_skill_id,
+      match_score: routing.match_score,
       created_at: nowIso(), updated_at: nowIso(),
     })
+    if (routing.assigned_skill_id) {
+      forgeRunStore.recordAudit('forge_backlog_skill_routed', {
+        backlog_id: item.backlog_id, project_id: project.id,
+        skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+      })
+    }
     res.json({ ok: true, item })
   })
 
@@ -5029,12 +5195,27 @@ Respond with ONLY valid JSON (no markdown fences):
 
     let runResult = null
     try {
-      runResult = await _executeAgenticRun(project, item.description || item.title, {
-        autonomy_level: autonomyLevel,
-        linked_backlog_id: item.backlog_id,
-        auto_rollback: true,
-        max_iterations: 3,
-      })
+      // TQ-2: an item routed to a confident, safe skill match at creation
+      // time bypasses the generic file-editing pipeline entirely — it runs
+      // through the skill catalog's own tool chain / LLM guidance instead.
+      // Falls through to the generic pipeline for everything else (the
+      // overwhelming majority — routing is deliberately conservative).
+      if (item.assigned_skill_id) {
+        forgeRunStore.recordAudit('forge_backlog_routed_to_skill', {
+          project_id: projectId, backlog_id: item.backlog_id,
+          skill_id: item.assigned_skill_id, match_score: item.match_score,
+        })
+        runResult = await dispatchBacklogItemViaSkill(project, item, {
+          skill_id: item.assigned_skill_id, match_score: item.match_score,
+        })
+      } else {
+        runResult = await _executeAgenticRun(project, item.description || item.title, {
+          autonomy_level: autonomyLevel,
+          linked_backlog_id: item.backlog_id,
+          auto_rollback: true,
+          max_iterations: 3,
+        })
+      }
     } catch (err) {
       forgeRunStore.recordAudit('autopilot_run_error', { project_id: projectId, backlog_id: item.backlog_id, error: err.message })
     }
@@ -5191,6 +5372,24 @@ Respond with ONLY valid JSON (no markdown fences):
   // PHASE 5 — DECOMPOSER AGENT
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // TQ-2: a goal-achieving system must also handle short tasks efficiently —
+  // not every goal needs the full Decomposer-into-3-to-8-subtasks ceremony.
+  // Deliberately simple and deterministic (word count / sentence count /
+  // multi-step language signals), not an LLM judgment call, so it's cheap and
+  // auditable. Conservative by design: anything ambiguous falls through to
+  // the full decompose path rather than risking under-planning a real goal.
+  const _MULTI_STEP_SIGNALS = /\b(then|after that|afterwards|first[,]?\s|second[,]?\s|next,|also,|additionally|as well as|and then)\b/i
+  function isSimpleGoal(goal) {
+    const text = String(goal || '').trim()
+    if (!text) return false
+    const wordCount = text.split(/\s+/).filter(Boolean).length
+    const sentenceCount = (text.match(/[.!?]+/g) || []).length
+    if (wordCount > 25) return false
+    if (sentenceCount > 1) return false
+    if (_MULTI_STEP_SIGNALS.test(text)) return false
+    return true
+  }
+
   async function runDecomposerAgent(project, goal, repoIdx, taskMemory, backlogContext) {
     const systemPrompt = 'You are a software task decomposer. Break a high-level goal into specific ordered subtasks. Output ONLY a JSON array — no prose, no markdown.'
     const userPrompt = `Project: ${project.name}
@@ -5227,14 +5426,20 @@ Output a JSON array:
       const subtasks = await runDecomposerAgent(project, goal, repoIdx, taskMemory, backlog)
       let addedItems = []
       if (add_to_backlog && subtasks.length) {
-        addedItems = subtasks.map((st, i) => forgeRunStore.upsertBacklogItem({
-          backlog_id: crypto.randomUUID(), project_id: project.id,
-          title: st.title, description: st.description || '',
-          priority: 50 - i, category: 'FEATURE',
-          status: 'IDEA', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
-          acceptance_criteria: st.acceptance_criteria || null, source: 'decomposer',
-          dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
-          created_at: nowIso(), updated_at: nowIso(),
+        // TQ-2: route each subtask (required_skills was captured by the LLM
+        // prompt and previously discarded — this is where it finally matters).
+        addedItems = await Promise.all(subtasks.map(async (st, i) => {
+          const routing = await computeSkillRouting(st.title, st.description).catch(() => ({ assigned_skill_id: null, match_score: null }))
+          return forgeRunStore.upsertBacklogItem({
+            backlog_id: crypto.randomUUID(), project_id: project.id,
+            title: st.title, description: st.description || '',
+            priority: 50 - i, category: 'FEATURE',
+            status: 'IDEA', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
+            acceptance_criteria: st.acceptance_criteria || null, source: 'decomposer',
+            dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
+            assigned_skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+            created_at: nowIso(), updated_at: nowIso(),
+          })
         }))
       }
       res.json({ ok: true, parent_goal: goal, subtasks, count: subtasks.length, added_to_backlog: addedItems.length })
@@ -5620,6 +5825,24 @@ Return JSON:
     if (!goal) return res.status(400).json({ ok: false, error: 'goal required' })
     const cycleId = crypto.randomUUID()
     let itemIds = Array.isArray(backlog_item_ids) ? backlog_item_ids : []
+    let fastPath = false
+    if (!itemIds.length && isSimpleGoal(goal)) {
+      // TQ-2 fast path: a short, single-step goal skips the Decomposer
+      // entirely — one backlog item, still tracked through the same
+      // Cycle/Autopilot machinery so it stays visible like everything else.
+      fastPath = true
+      const routing = await computeSkillRouting(goal, '').catch(() => ({ assigned_skill_id: null, match_score: null }))
+      const item = forgeRunStore.upsertBacklogItem({
+        backlog_id: crypto.randomUUID(), project_id: project.id,
+        title: goal.slice(0, 140), description: goal,
+        priority: 50, category: 'FEATURE', status: 'READY', risk_level: 'low',
+        source: 'cycle_fast_path', dependencies: [],
+        assigned_skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+        created_at: nowIso(), updated_at: nowIso(),
+      })
+      itemIds = [item.backlog_id]
+      forgeRunStore.recordAudit('forge_cycle_fast_path', { project_id: project.id, goal: goal.slice(0, 160), backlog_id: item.backlog_id })
+    }
     if (!itemIds.length) {
       try {
         const [repoIdx, taskMemory, backlog] = await Promise.all([
@@ -5628,13 +5851,18 @@ Return JSON:
           Promise.resolve(forgeRunStore.getBacklog(project.id)),
         ])
         const subtasks = await runDecomposerAgent(project, goal, repoIdx, taskMemory, backlog)
-        const added = subtasks.map((st, i) => forgeRunStore.upsertBacklogItem({
-          backlog_id: crypto.randomUUID(), project_id: project.id, title: st.title,
-          description: st.description || '', priority: 50 - i, category: 'FEATURE',
-          status: 'READY', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
-          acceptance_criteria: st.acceptance_criteria || null, source: 'cycle',
-          dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
-          created_at: nowIso(), updated_at: nowIso(),
+        // TQ-2: route each subtask to a skill (if a confident, safe match exists).
+        const added = await Promise.all(subtasks.map(async (st, i) => {
+          const routing = await computeSkillRouting(st.title, st.description).catch(() => ({ assigned_skill_id: null, match_score: null }))
+          return forgeRunStore.upsertBacklogItem({
+            backlog_id: crypto.randomUUID(), project_id: project.id, title: st.title,
+            description: st.description || '', priority: 50 - i, category: 'FEATURE',
+            status: 'READY', risk_level: ['low','medium','high'].includes(st.risk_level) ? st.risk_level : 'low',
+            acceptance_criteria: st.acceptance_criteria || null, source: 'cycle',
+            dependencies: Array.isArray(st.depends_on) ? st.depends_on : [],
+            assigned_skill_id: routing.assigned_skill_id, match_score: routing.match_score,
+            created_at: nowIso(), updated_at: nowIso(),
+          })
         }))
         itemIds = added.map(i => i.backlog_id)
       } catch {}
@@ -5645,7 +5873,7 @@ Return JSON:
       max_runs: typeof max_runs === 'number' ? max_runs : 20,
       max_duration_sec: typeof max_duration_sec === 'number' ? max_duration_sec : 3600,
       started_at: nowIso(), backlog_items: itemIds, run_ids: [],
-      success_criteria: success_criteria || null, current_phase: 'executing',
+      success_criteria: success_criteria || null, current_phase: fastPath ? 'executing_fast_path' : 'executing',
       created_at: nowIso(), updated_at: nowIso(),
     })
     _saveAutopilotSession(project.id, { active: true, runsCompleted: 0, consecutiveFails: 0, maxRuns: cycle.max_runs, autonomyLevel: cycle.autonomy_level, cycleId, startedAt: nowIso() })
@@ -7253,7 +7481,7 @@ Return JSON:
     res.json({ ok: true, consultation: result, note: 'ADVISORY ONLY — rule/safety systems remain authoritative' })
   })
 
-  // Closure-internal functions surfaced for unit testing (TQ-1 —
+  // Closure-internal functions surfaced for unit testing (TQ-1/TQ-2 —
   // tests/test_forge_queue_consolidation.js). Not part of the HTTP surface.
   router.__test__ = {
     getAutopilotSession: _getAutopilotSession,
@@ -7262,6 +7490,8 @@ Return JSON:
     reconcileForgeQueueOnBoot: _reconcileForgeQueueOnBoot,
     mostRecentRunForBacklogItem: _mostRecentRunForBacklogItem,
     getAutopilotStatus,
+    isSimpleGoal,
+    computeSkillRouting,
   }
 
   return router
