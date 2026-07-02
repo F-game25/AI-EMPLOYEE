@@ -70,10 +70,15 @@ function canWritePath(project, filePath) {
   })
 }
 
+function safeResolve(root, rel) {
+  return resolveInsideProject({ root_path: root }, rel)
+}
+
 module.exports = {
   PROJECT_SKIP,
   PROTECTED_PATH_PATTERNS,
   safeProjectRoot,
+  safeResolve,
   resolveInsideProject,
   resolveInsideWorkspace,
   normalizeRelPath,

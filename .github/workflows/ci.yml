@@ -20,6 +20,9 @@ env:
   LOG_LEVEL: WARNING
   EVOLUTION_MODE: "OFF"
   PYTHONPATH: runtime:runtime/agents
+  # Pins Python's string-hash seed so hash-based fallback embeddings
+  # (runtime/core/memory_index.py) rank identically across CI runs.
+  PYTHONHASHSEED: "0"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────
@@ -161,6 +164,12 @@ jobs:
 
       - name: Run JWT algorithm-pin regression test (M1)
         run: node tests/test_jwt_alg_pin.js
+
+      - name: Run workspace upload router unit tests
+        run: node tests/test_upload_unit.js
+
+      - name: Run workspace routes regression tests (tenant fail-closed + exact-match)
+        run: node tests/test_workspace_routes.js
 
   # ─────────────────────────────────────────────────────────────────
   # FRONTEND BUILD CHECK

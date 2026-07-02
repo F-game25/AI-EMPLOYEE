@@ -4,6 +4,7 @@
  * Coverage: validation, encryption, tenant isolation, edge cases
  */
 
+const { describe, it, before, after } = require('node:test');
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs').promises;

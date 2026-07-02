@@ -1,5 +1,9 @@
 # AI-EMPLOYEE — MASTER PLAN V3
 
+**Status:** IN PROGRESS
+**Created:** 2026-06-09
+**Gap audit:** `docs/GAP_ANALYSIS_2026_06_30.md` (2026-06-30) — filesystem verification of every path/file in this plan.
+**Supersedes / extends:** `docs/MASTER_PLAN.md` (compute/cluster, Phases 0–8 DONE), `docs/V2_MASTER_PLAN.md` (partly stale), `docs/SYSTEM_CONNECTIVITY_ROADMAP.md`
 > **COMPANION to `docs/SYSTEM_COHERENCE_PLAN.md` (canonical).** This is the **feature roadmap + build-status record** (P1–P10; P3–P9 DONE with commits) and the 12-module Reference-Capability Layer. The coherence plan governs architecture/control; this governs feature/capability execution history. Kept, not archived.
 
 **Status:** ACTIVE — build-status record (P3–P9 landed with commits; P1/P2/P10 + capability modules in progress). _Original "PROPOSED" corrected 2026-06-30._
@@ -115,6 +119,8 @@ P10 AI Company-Builder (CompanyOS)(full design now; build as final major phase)
 
 **DoD:** Tab switch <100ms perceived; no full-store re-render on telemetry tick (React DevTools Profiler); long lists virtualized; bundle still <2MB gzip.
 
+**Gap audit (2026-06-30):** `useTransition` wired (Dashboard.jsx:240) ✅; WS throttle for `system:status` at 4Hz ✅; virtualization active on **OrdersPage only** — event feed, agent grid, and logs remain unvirtualized ❌; `useDeferredValue` has **zero uses** anywhere in `frontend/src/` ❌; no bare `useAppStore()` calls found ✅.
+
 ---
 
 ### P3 — Model Tiers & Warmup — DONE (bc727051, 56ee3443)
@@ -152,6 +158,8 @@ backend/routes/companion.js  # POST /api/companion/message (+ streaming), /voice
 - **Frontend:** `frontend/src/stores/companionStore.js`, `CompanionShell`/`AvatarStage`/`CompanionChat`/`ApprovalCard`, `useCompanionSocket.js`. Existing `/api/chat` keeps working; companion is the new spine other phases plug into.
 
 **DoD:** "What is the system doing?" via chat returns real status through the gateway; avatar state changes from real backend events (not frontend timers); risky actions produce approval cards; existing chat unbroken.
+
+**Gap audit (2026-06-30):** Backend 14/15 files present — `runtime/companion/audit_logger.py` **missing** ❌ (companion actions are unlogged; compliance gap). Frontend components `CompanionShell`, `AvatarStage`, `CompanionChat`, `useCompanionSocket.js` **not created as distinct files** ❌ — companion routes through existing `ChatPanel.jsx` + `NexusOSDashboard.jsx`; `companionStore.js` exists but no dedicated socket hook.
 
 ---
 
@@ -209,6 +217,8 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 
 **DoD:** trace per task w/ minimal overhead; failed tasks get lessons + failure type; candidates testable before activation; promotion only on passing gates; rollback works; distillation feeds existing Forge pipeline (no second distiller).
 
+**Gap audit (2026-06-30):** 11/12 files present — `runtime/evolution/trace_store.py` **missing** ❌. The collector appends traces but there is no JSONL→SQLite persistence module; traces don't survive process restarts and replay/promotion gates can't query historical trace data.
+
 ---
 
 ### P8 — UX Overhaul (ONE auto-adapting system) — DONE (cf65605a)
@@ -243,6 +253,8 @@ backend/routes/evolution.js  # /api/evolution/status|traces|lessons|candidates|.
 
 **DoD:** user sees local vs remote at a glance; can start/stop remote safely w/ kill switch; remote outputs sync back; service control works; costs/privacy shown before execution.
 
+**Gap audit (2026-06-30):** Compute fabric core verified working ✅; `COMPUTE_FABRIC_LIVE=0` gate correct ✅; RunPod/VastAI listed as `enabled: false` (awaiting provider credentials — intentional) ✅. **ServiceControlPanel + ComputeRouterStatus UI not found** ❌ — backend `/api/services` exists but no matching React panel in `frontend/src/`. **Desktop Phase 2 orphaned** ❌ — `runtime/infra/rpa/desktop_worker.py` exists with `pyautogui` + FAILSAFE but not installed/ungated and no `desktop.*` capabilities registered. **RPA proxy auth broken** ❌ — Node `makeProxy('RPA')` doesn't forward a Python-valid token; `/api/rpa/*` returns 500 at the boundary.
+
 ---
 
 ### P9.5 — Hybrid Rust Performance
@@ -274,6 +286,8 @@ Full design captured (build deferred to final phase):
 **Polsia-beating differentiators (non-negotiable):** local-first ownership · full exportability · transparent agent reasoning/action logs · validation-before-build · human approval gates for spend/publish/email/deploy/core-mod · memory-graph linkage · avatar/voice as central command · remote compute that syncs back · sandbox before real changes.
 
 **DoD:** user creates a company via intake → validation report → approved MVP plan → tasks via existing agents → sandboxed build → approval-gated marketing → metrics tracked → full export. Nothing autonomous spends/sends/deploys without approval.
+
+**Gap audit (2026-06-30):** `companyos.py`, `company_planner.py`, `company_store.py`, `validation_engine.py`, `founder_intake.py`, `idea_refiner.py`, `export_engine.py` all present ✅. **Missing 6 backend modules** ❌: `agent_team_orchestrator.py` (role→agent mapping), `task_cycle_engine.py` (recurring loops + approval checkpoints), `build_integration.py` (Forge sandbox wiring), `marketing_engine.py`, `support_engine.py`, `metrics_engine.py`. Memory graph linkage absent ❌. Avatar/voice command wiring absent ❌. Frontend `CompanyBuilderPage.jsx` (607 lines) exists; cockpit pages for task cycles, agent team, marketing, and metrics are missing ❌.
 
 ---
 
@@ -354,6 +368,8 @@ Full design captured (build deferred to final phase):
 - **Governance:** nav/snapshot/extract = L0 free; **L3 approval** for submit/purchase/account-change/outreach/download/writing eval. Sandboxed per-task profiles; every action logs snapshot+screenshot.
 - **DoD:** open→snapshot→click-ref→screenshot read path free; side-effecting actions produce approval cards; profile isolation verified.
 
+**Gap audit (2026-06-30):** 7/10 files present. **Missing** ❌: `browser_session.py` (per-task session lifecycle), `browser_sandbox.py` (sandboxed profile isolation), `browser_events.py` (WS event emission — `browser:status/action_started/finished/approval_required`). Without `browser_events.py` the companion gateway cannot stream browser activity; without `browser_sandbox.py` profile isolation is unimplemented.
+
 ### Computer-Use Mode  *(DONE — cd8638ca; master switch over Module 1)*
 - **What:** a persisted master toggle (`runtime/companion/computer_use_mode.py`, default OFF) gating the `browser`/`desktop` subsystems in the execution broker. OFF → every `browser.*` cap is refused (`status:disabled`, not an approval); ON → Module 1's risk model applies (read/look free, `browser.act` L3 approval). One chokepoint → voice + chat both inherit it.
 - **Usability link:** `intent_classifier` routes "browse to / open <url> / go to / click / screenshot the page" → `execution` + `task_type=browser` so the runtime actually reaches the browser caps ("open the file" / "read the report" stay non-browser).
@@ -370,12 +386,16 @@ Full design captured (build deferred to final phase):
 - **Governance:** retrieval read-only; writes validated; tenant/project ACL via allowlist; **trace always returned** (debuggable); exact-search fallback for critical scopes.
 - **DoD:** tiered nodes + visible trace using existing stores (no 2nd store); session compression → durable memory; ACL respected.
 
+**Gap audit (2026-06-30):** 6/9 files present. **Missing** ❌: `context_node.py` (node dataclass — tree likely uses ad-hoc dicts without it), `retrieval_trace.py` (the "trace always returned" DoD requirement), `memory_writer.py` (the `write(path,content,validate)` interface — durable session write-back broken).
+
 ### Module 3 — Skill Lifecycle OS for Forge  *(NEW — formalizes Forge Phase5–9 / P8)*
 - **Ref:** agent-skills (spec→plan→build→test→review→simplify→ship, auto-select) + taste-skill (UI quality, anti-slop, image-to-code, no-placeholder). **Builds on** existing Forge routes/controller/sandbox.
 - **Paths:** `runtime/forge/lifecycle/{spec,planning,implementation,test,review,simplify,ship}_engine.py + skill_selector.py + acceptance_criteria.py`; `runtime/forge/ui_quality/{ui_auditor,design_language_inferer,component_quality_checker,image_to_code_pipeline,frontend_preflight}.py`.
 - **Interfaces:** `select_skills(task,type,risk,max) -> [skill]`; `run_lifecycle(goal) -> {spec,acceptance,plan,slices,tests,review,ship_checklist}` (machine-checkable per stage); `ui_audit(target) -> {design_map,violations,placeholders}`.
 - **Governance:** plan/spec/review/tests L0/L1; `apply_patch`/merge stays **L3** (already enforced). Anti-rationalization gate blocks ship until criteria+tests pass; UI gate blocks placeholders.
 - **DoD:** full spec→ship lifecycle with gate per stage; skill auto-select works; UI gate fails a placeholder build; apply still approval-gated.
+
+**Gap audit (2026-06-30):** Lifecycle engines complete (all 9 planned files present) ✅. UI quality: 3/5 files present. **Missing** ❌: `component_quality_checker.py` (per-component quality scoring), `image_to_code_pipeline.py` (visual→code generation, taste-skill pattern).
 
 ### Module 4 — Work Acquisition + Delivery Engine  *(PARTIAL-upgrade on money_mode; P10)*
 - **Ref:** cashclaw. **Builds on** `runtime/core/money_mode.py` + approvals/HITL — lifecycle upgrade, not replacement.
@@ -384,6 +404,8 @@ Full design captured (build deferred to final phase):
 - **Governance:** **no autonomous client messaging / marketplace action / wallet movement without approval.** Anti-spam throttle. Study loop feeds P7/Forge distillation, async only.
 - **DoD:** opportunity → eval → quote → (approve) → execute → stage → (approve) → submit with two hard gates; feedback stored; offline study lessons.
 
+**Gap audit (2026-06-30):** 8/14 planned items present. **Missing** ❌: `opportunity_ingestion.py` (external source intake), `client_message_engine.py` (approval-gated client comms — safety invariant), `submission_queue.py` (the two hard approval gates before submit), `study_session_runner.py` (offline learning → P7 distillation), `money_memory.py` (cross-session work/client memory), `marketplace_adapters/` directory (no actual marketplace connectivity). Without `submission_queue.py` the two-gate approval invariant is unenforced.
+
 ### Module 5 — Content Factory + Creative Studio + Voice + Media Intake  *(NEW — P10)*
 - **Ref:** MoneyPrinterTurbo, Fooocus, VoxCPM, yt-dlp. **Builds on** existing voice services for TTS plumbing.
 - **Paths:** `runtime/content/video/*`, `runtime/content/image/*`, `runtime/voice/{tts_router,voice_design,voice_clone_gate,streaming_tts,avatar_voice_controller}.py`, `runtime/media/{media_intake_service,source_permission_checker,transcript_extractor,subtitle_service,media_to_memory_pipeline}.py`.
@@ -391,11 +413,15 @@ Full design captured (build deferred to final phase):
 - **Governance:** **all publish/post approval-gated** (publish_queue stages, never auto-posts). **Voice cloning only with consent token; synthetic voice labeled.** Media only with rights confirmation + license metadata. No face cloning/impersonation.
 - **DoD:** topic→script→assets→TTS→subtitles→rendered draft staged (not posted); image+brand assets; consented clone gated; media ingest with license metadata.
 
+**Gap audit (2026-06-30):** Content (`runtime/content/`) 5 files present (content_factory, local_image_gen, media_models, muapi_client, publish_queue) ✅. **`runtime/voice/` entirely missing** ❌ — `tts_router.py`, `voice_design.py`, `voice_clone_gate.py`, `streaming_tts.py`, `avatar_voice_controller.py` all absent; voice cloning consent gate does not exist. **`runtime/media/` entirely missing** ❌ — `media_intake_service.py`, `source_permission_checker.py`, `transcript_extractor.py`, `subtitle_service.py`, `media_to_memory_pipeline.py` all absent.
+
 ### Module 6 — FinanceOps  *(NEW — P10, advisory only)*
 - **Ref:** financial-services. **Paths:** `runtime/finance/{finance_agent_registry,business_model_builder,market_researcher,financial_model_drafter,pricing_analyzer,pitch_memo_builder,revenue_forecaster,human_review_gate}.py`.
 - **Interfaces:** `draft_business_model`, `draft_financial_model`, `price_analysis`, `build_pitch_memo` — **all return `requires_human_signoff`**.
 - **Governance:** **advisory only.** No transaction/trade execution, no final tax/legal/accounting advice. All staged through human_review_gate. Feeds P10 Validation Engine.
 - **DoD:** cashflow/pricing/comps/memo drafts marked advisory + sign-off; no money/trade action executable.
+
+**Gap audit (2026-06-30):** Consolidated into `runtime/finance/financeops.py` (single 150-line file) — individual sub-module files from the plan are absent but functionality is merged. `requires_human_signoff` flag exists in response schema; however **`human_review_gate` is a flag, not a hard enforcement module** ❌ — no separate gate that physically blocks action before sign-off.
 
 ### Module 7 — Business Swarm Layer  *(PARTIAL-upgrade on 59-agent catalog; P10)*
 - **Ref:** openclaw-2. **Builds on** `agent_capabilities.json` + `backend/agents/index.js` — formalizes contracts; P10 orchestrator consumes it.
@@ -404,12 +430,16 @@ Full design captured (build deferred to final phase):
 - **Governance:** no fake autonomy — real tools/memory/metrics/contracts per agent. Risky caps → `requires_approval_for` → HITL; tool perms via `safety_gate.py`.
 - **DoD:** each agent has a typed contract; goal decompose→assign→parallel→aggregate; approval-gated caps can't fire without HITL.
 
+**Gap audit (2026-06-30):** All 10 planned files present ✅ — `agent_contracts.py`, `assignment_engine.py`, `capability_profiles.py`, `dependency_manager.py`, `parallel_executor.py`, `registry.py`, `result_aggregator.py`, `swarm.py`, `task_decomposer.py`, `__init__.py`.
+
 ### Module 8 — Research Quality Engine  *(PARTIAL-upgrade on deep_research_engine; extends P7)*
 - **Ref:** academic-research-skills. **Builds on** `deep_research_engine.py` + search.
 - **Paths:** `runtime/research/quality/{research_planner,source_collector,source_verifier,claim_auditor,citation_anchor,integrity_gate,reviewer_panel,report_builder,material_passport}.py`.
 - **Interfaces:** `plan(topic)`; `verify_source(ref) -> {valid,provenance}`; `audit_claims(draft) -> {anchored,unsupported,fabricated}`; `review_panel(report)`; `integrity_gate(report) -> pass|block`.
 - **Governance:** **no hallucinated sources** — verified sources separated from reasoning; fabricated-ref detection blocks ship; reproducibility metadata attached. Heavy review async.
 - **DoD:** report carries citation anchors, claim audit (no unsupported/fabricated through gate), review scores, reproducibility metadata.
+
+**Gap audit (2026-06-30):** 8/9 files present (814 total lines — stub-level implementations). **Missing** ❌: `source_collector.py` — the structured intake of raw sources before `source_verifier.py`; without it the pipeline has no standardised source ingestion step.
 
 ### Module 9 — Blacklight Defensive Skill OS  *(PARTIAL-upgrade on blacklight; P9/P10)*
 - **Ref:** Anthropic-Cybersecurity-Skills (progressive disclosure, MITRE/NIST/ATLAS/D3FEND), hexstrike (defensive parts: registry, risk cards, process mgmt). **Builds on** existing blacklight tools/routes.
@@ -418,11 +448,15 @@ Full design captured (build deferred to final phase):
 - **Governance:** **defensive/authorized only.** Default = defensive analysis/lab/internal hardening/remediation. **Active scans require signed scope + ownership + approval** (scope_gate + authorization_gate). No offensive automation, no exploit generation as autonomous feature.
 - **DoD:** progressive discovery returns framework-tagged defensive skills; active scan blocked without signed scope + approval; defensive report templates with MITRE/NIST mappings.
 
+**Gap audit (2026-06-30):** **ENTIRELY MISSING** ❌ — only `runtime/security/policy.py` exists. `runtime/security/skills/` directory absent (all 8 planned files). `runtime/security/tools/` directory absent (all 5 planned files). Existing `backend/routes/security-ops.js` routes to Node-side `blacklight_tools.js`, not the Python defensive skill OS with MITRE/NIST/ATLAS/D3FEND framework tags and scope-gated authorization.
+
 ### Module 10 — Harness Compatibility Layer + Dev Kit  *(NEW — P8/P10 packaging)*
 - **Ref:** ECC, goose, pi. **Paths:** `runtime/harness/{harness_registry,claude_exporter,codex_exporter,cursor_exporter,opencode_exporter,gemini_exporter,copilot_exporter,rules_compiler,hook_manager,mcp_config_generator}.py`; `tools/ai_employee_cli/{start,stop,doctor,task,agent,logs,install-extension,export-config}`; `runtime/extensions/{extension_registry,mcp_adapter,install_manager,permission_manifest,extension_health}.py`.
 - **Interfaces:** `export(harness,profile) -> config_bundle` (one canonical source → per-harness); `install_extension(manifest)`; CLI `doctor`.
 - **Governance:** **one canonical internal source** — export, never hand-maintain copies. **Secrets never in exported prompts/configs.** Extension installs permission-reviewed; diagnostics scrub secrets.
 - **DoD:** export to Claude Code/Codex/Cursor produces valid secret-free configs from one source; CLI works; extension install permission-gated.
+
+**Gap audit (2026-06-30):** **ENTIRELY MISSING** ❌ — `runtime/harness/` directory does not exist. No exporter modules, no `rules_compiler`, no `hook_manager`, no `mcp_config_generator`. `tools/ai_employee_cli/` also absent.
 
 ### Module 11 — Reference Learning Library  *(NEW — context-only; feeds Skill OS/Forge)*
 - **Ref:** build-your-own-x. **Paths:** `runtime/learning/reference_library/{guide_index,architecture_patterns,first_principles_planner,build_template_generator,skill_recommender,forge_reference_loader}.py`.
@@ -430,12 +464,16 @@ Full design captured (build deferred to final phase):
 - **Governance:** **context-only, not a runtime dependency.** Sources validated; used as research context, never direct code source (no-copy rule).
 - **DoD:** Forge queries a pattern for a build target → first-principles plan; read-only reference, no runtime coupling.
 
+**Gap audit (2026-06-30):** **ENTIRELY MISSING** ❌ — `runtime/learning/reference_library/` does not exist. Various `learning_*.py` files in `runtime/core/` are the agent self-improvement systems, not this reference architecture library. No impact on live runtime (context-only module).
+
 ### Module 12 — Model Arena Mode  *(NEW — extends P3, feeds P7)*
 - **Ref:** GODMOD3 — **SAFE parts only** (multi-model race, composite scoring, context-adaptive sampling, EMA feedback). **EXCLUDE** jailbreak/prompt-bypass/refusal-evasion/obfuscation. **Builds on** `model_lanes.py`/`model_routing.py`.
 - **Paths:** `runtime/core/arena/{model_race,output_scorer,routing_feedback,sampling_autotune,response_normalizer,model_benchmark_store}.py`.
 - **Interfaces:** `race(prompt,models,constraints) -> [responses]`; `score(responses) -> ranked` (transparent); `learn(result) -> routing_pref_update` (feeds router + P7).
 - **Governance:** transparent scoring; racing is **cost-aware** (gated by `allow_paid` + budget) and opt-in; **no bypass features.**
 - **DoD:** arena races N models, transparent composite ranking, picks best, updates routing pref within budget gates; no bypass behavior.
+
+**Gap audit (2026-06-30):** **ENTIRELY MISSING** ❌ — `runtime/core/arena/` directory does not exist. Only an orphaned UI panel (`runtime/ui/agent_arena/arena_panel.py`) exists with no backend. All 6 planned backend files absent: `model_race.py`, `output_scorer.py`, `routing_feedback.py`, `sampling_autotune.py`, `response_normalizer.py`, `model_benchmark_store.py`.
 
 ### 3-phase implementation order (mirrors research.md)
 - **Phase 1 — Capability foundation:** Browser Exec (1), Context DB (2), Skill Lifecycle OS (3); *Model Router DONE (P3); Companion Gateway DONE (P4/P5).*

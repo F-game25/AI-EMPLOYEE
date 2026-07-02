@@ -86,7 +86,6 @@ _needs_playwright = pytest.mark.skipif(
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
-@_needs_playwright
 def browser_context():
     """Launch a single browser context shared across the session."""
     from playwright.sync_api import sync_playwright
@@ -103,7 +102,6 @@ def browser_context():
 
 
 @pytest.fixture(scope="session")
-@_needs_playwright
 def page(browser_context):
     """Return a page that has loaded the ASCEND AI UI."""
     pg = browser_context.new_page()

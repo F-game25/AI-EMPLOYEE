@@ -204,6 +204,7 @@ class MemoryIndex:
     def get_relevant_memories(self, query: str, *, top_k: int = 5, touch: bool = True) -> list[dict[str, Any]]:
         query_embedding = embed_text(query)
         with _lock:
+            known_ids = {str(m.get("id")) for m in self._memories if m.get("id")}
             ranked = sorted(
                 self._memories,
                 key=lambda m: self.rank_memory(m, query_embedding),
@@ -216,7 +217,9 @@ class MemoryIndex:
                     mem["last_used"] = now
                 if ranked:
                     self._save()
-            return self._merge_unified_results(query, [dict(m) for m in ranked], top_k=max(top_k, 1), touch=touch)
+            return self._merge_unified_results(
+                query, [dict(m) for m in ranked], top_k=max(top_k, 1), touch=touch, known_ids=known_ids
+            )
 
     def _merge_unified_results(
         self,
@@ -225,6 +228,7 @@ class MemoryIndex:
         *,
         top_k: int,
         touch: bool,
+        known_ids: set[str],
     ) -> list[dict[str, Any]]:
         if self._unified is None:
             return ranked[:top_k]
@@ -234,7 +238,13 @@ class MemoryIndex:
         except Exception:
             return ranked[:top_k]
         for record in records:
-            if record.id in merged:
+            # _store_unified() mirrors every locally-added memory into the unified
+            # store under the same id. A record that lost the local top-k ranking
+            # must not be able to re-enter here via the unified store's own
+            # (differently-tuned) search — only genuinely unified-only memories
+            # (written by other code paths, never seen by the local ranker) should
+            # be merged in.
+            if record.id in merged or str(record.id) in known_ids:
                 continue
             metadata = record.metadata or {}
             item = {

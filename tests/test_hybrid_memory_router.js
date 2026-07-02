@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const Database = require('../backend/node_modules/better-sqlite3');
+const Database = require('better-sqlite3');
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aeternus-memory-router-'));
 const stateDir = path.join(tmpRoot, 'state');

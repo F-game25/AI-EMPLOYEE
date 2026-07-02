@@ -29,6 +29,8 @@
     "test:settings:integration": "node tests/test_settings_integration.js",
     "test:settings:all": "npm run test:settings && npm run test:settings:frontend && npm run test:settings:integration",
     "test:security:node": "node tests/test_security_node.js",
+    "test:security:ascendforge": "node tests/test_ascendforge_security.js",
+    "test:security:all": "npm run test:security:node && npm run test:security:ascendforge",
     "test:voice-runtime": "node tests/test_voice_runtime_manager.js",
     "test:nemotron-asr": "node tests/test_nemotron_asr.js",
     "test:boot-contract": "node tests/test_boot_contract_routes.js",
@@ -40,7 +42,11 @@
     "tauri:build:linux": "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig ~/.cargo/bin/cargo tauri build --target x86_64-unknown-linux-gnu --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "compression": "^1.8.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "uuid": "^14.0.0"
   }
