@@ -37,6 +37,9 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
+from core.file_lock import FileLock
+from core.state_paths import canonical_state_dir
+
 logger = logging.getLogger(__name__)
 
 _BUNDLE_INTERVAL_S  = int(os.getenv("TELEMETRY_BUNDLE_INTERVAL_S", str(24 * 3600)))  # 24h
@@ -47,9 +50,11 @@ _SAMPLE_RATE_NORMAL = 1.0    # 100% capture when load is low
 _SAMPLE_RATE_HIGH   = 0.25   # 25% capture when buffer > 80% full
 _SAMPLE_THRESHOLD   = int(_BUFFER_SIZE * 0.8)
 _SCHEMA_VERSION     = "2.0"
-_BUNDLE_DIR         = Path("state/telemetry/bundles")
-_STATS_PATH         = Path("state/telemetry/local_stats.json")
-_NONCE_PATH         = Path("state/telemetry/.nonce_counter")
+# Canonical state tree (honours STATE_DIR / AI_HOME) — not repo-local ./state. C0.
+_TELEMETRY_DIR      = canonical_state_dir() / "telemetry"
+_BUNDLE_DIR         = _TELEMETRY_DIR / "bundles"
+_STATS_PATH         = _TELEMETRY_DIR / "local_stats.json"
+_NONCE_PATH         = _TELEMETRY_DIR / ".nonce_counter"
 
 
 @dataclass
@@ -323,19 +328,35 @@ class TelemetryEngine:
     def _load_nonce(self) -> int:
         try:
             _NONCE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            if _NONCE_PATH.exists():
-                return int(_NONCE_PATH.read_text().strip())
+            with FileLock(_NONCE_PATH, timeout=2.0):
+                if _NONCE_PATH.exists():
+                    return int(_NONCE_PATH.read_text().strip())
         except Exception:
             pass
         return 0
 
     def _next_nonce(self) -> int:
-        self._nonce += 1
+        # The nonce is anti-replay: two processes sharing this install-global
+        # counter must not reuse a value. Lock the read-modify-write so the
+        # on-disk counter is the source of truth, not a per-process cache.
         try:
-            _NONCE_PATH.write_text(str(self._nonce))
+            _NONCE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with FileLock(_NONCE_PATH, timeout=2.0):
+                current = 0
+                if _NONCE_PATH.exists():
+                    try:
+                        current = int(_NONCE_PATH.read_text().strip())
+                    except Exception:
+                        current = self._nonce
+                nxt = max(current, self._nonce) + 1
+                _NONCE_PATH.write_text(str(nxt))
+                self._nonce = nxt
+                return nxt
         except Exception:
-            pass
-        return self._nonce
+            # Lock/IO failure: still advance in-process so the bundle gets a
+            # monotonic value, even if cross-process uniqueness can't be guaranteed.
+            self._nonce += 1
+            return self._nonce
 
     def _save_local_stats(self, bundle: dict) -> None:
         try:
@@ -350,7 +371,8 @@ class TelemetryEngine:
                     bundle["error_counts"].items(), key=lambda x: x[1], reverse=True
                 )[:10],
             }
-            _STATS_PATH.write_text(json.dumps(summary, indent=2))
+            with FileLock(_STATS_PATH, timeout=2.0):
+                _STATS_PATH.write_text(json.dumps(summary, indent=2))
         except Exception:
             pass
 
@@ -389,26 +411,31 @@ class TelemetryEngine:
     @staticmethod
     def _get_or_create_system_id() -> str:
         """Stable anon ID for this installation. NOT linked to any user or IP."""
-        id_path = Path("state/telemetry/.system_id")
+        id_path = _TELEMETRY_DIR / ".system_id"
         try:
             id_path.parent.mkdir(parents=True, exist_ok=True)
-            if id_path.exists():
-                return id_path.read_text().strip()
+            # Lock create-or-read so two starting workers settle on ONE id instead
+            # of racing to mint and overwrite competing ids.
+            with FileLock(id_path, timeout=2.0):
+                if id_path.exists():
+                    existing = id_path.read_text().strip()
+                    if existing:
+                        return existing
+                new_id = hashlib.sha256(os.urandom(32)).hexdigest()
+                id_path.write_text(new_id)
+                return new_id
         except Exception:
             pass
-        new_id = hashlib.sha256(os.urandom(32)).hexdigest()
-        try:
-            id_path.write_text(new_id)
-        except Exception:
-            pass
-        return new_id
+        return hashlib.sha256(os.urandom(32)).hexdigest()
 
     def rotate_system_id(self) -> str:
         """Admin action: rotate the anon system ID. Breaks linkability to past bundles."""
-        id_path = Path("state/telemetry/.system_id")
+        id_path = _TELEMETRY_DIR / ".system_id"
         new_id = hashlib.sha256(os.urandom(32)).hexdigest()
         try:
-            id_path.write_text(new_id)
+            id_path.parent.mkdir(parents=True, exist_ok=True)
+            with FileLock(id_path, timeout=2.0):
+                id_path.write_text(new_id)
         except Exception:
             pass
         with self._lock:

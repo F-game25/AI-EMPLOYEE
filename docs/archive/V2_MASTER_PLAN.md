@@ -1,3 +1,5 @@
+> **ARCHIVED — superseded by `docs/SYSTEM_COHERENCE_PLAN.md` (canonical).** Partly stale (money-mode + route-auth claims outdated); useful invariants folded into MASTER_PLAN_V3 + the coherence plan. Kept for history.
+
 # V2 MASTER PLAN — AI Operating System: Production Evolution
 
 > Status: Active. Phases execute sequentially. Each phase has a clear Definition of Done before the next begins.

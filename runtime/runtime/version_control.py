@@ -38,9 +38,8 @@ _MAX_SNAPSHOTS = int(os.environ.get("AI_EMPLOYEE_MAX_SNAPSHOTS", "200"))
 
 
 def _default_state_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[3]
-    path = base / "state" / "version_control.json"
+    from core.state_paths import canonical_state_dir
+    path = canonical_state_dir() / "version_control.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -1,8 +1,10 @@
 # AI-EMPLOYEE — MASTER PLAN V3
 
-**Status:** PROPOSED (awaiting approval)
-**Created:** 2026-06-09
-**Supersedes / extends:** `docs/MASTER_PLAN.md` (compute/cluster, Phases 0–8 DONE), `docs/V2_MASTER_PLAN.md` (partly stale), `docs/SYSTEM_CONNECTIVITY_ROADMAP.md`
+> **COMPANION to `docs/SYSTEM_COHERENCE_PLAN.md` (canonical).** This is the **feature roadmap + build-status record** (P1–P10; P3–P9 DONE with commits) and the 12-module Reference-Capability Layer. The coherence plan governs architecture/control; this governs feature/capability execution history. Kept, not archived.
+
+**Status:** ACTIVE — build-status record (P3–P9 landed with commits; P1/P2/P10 + capability modules in progress). _Original "PROPOSED" corrected 2026-06-30._
+**Created:** 2026-06-09 · **Last reviewed:** 2026-06-30
+**Supersedes / extends (now archived):** `docs/archive/MASTER_PLAN.md` (compute/cluster, Phases 0–8 DONE), `docs/archive/V2_MASTER_PLAN.md` (partly stale), `docs/SYSTEM_CONNECTIVITY_ROADMAP.md`
 **Inputs synthesized:** 7 research/plan documents (nr1 avatar rebuild · nr2 perf + companion teammate · nr3 evolution engine · nr4 companion/voice gateway · nr5 UX overhaul + remote/voice/PC-interlink · nr6 AI company-builder vs Polsia · nr7 reference-repo research `research.md`)
 
 ---

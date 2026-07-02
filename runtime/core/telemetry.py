@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import logging
 import os
 import threading
@@ -22,7 +21,9 @@ logger = logging.getLogger("ai_employee.telemetry")
 
 _SKIP_PATHS = {"/health", "/metrics", "/api/status"}
 
-_STATE_DIR = Path(os.environ.get("AI_HOME", Path.home() / ".ai-employee")) / "state"
+from core.state_paths import canonical_state_dir
+from core import rotating_jsonl
+_STATE_DIR = canonical_state_dir()  # honours STATE_DIR first, then AI_HOME (C0)
 
 # ── HMAC helper ────────────────────────────────────────────────────────────────
 
@@ -73,8 +74,11 @@ class TelemetryCollector:
             self._events.append(event)
             if self._jsonl_path:
                 try:
-                    with self._jsonl_path.open("a") as fh:
-                        fh.write(json.dumps(asdict(event)) + "\n")
+                    # Size-bounded append: telemetry.jsonl is otherwise unbounded
+                    # (C0 disk-growth backlog). The neural_brain telemetry module
+                    # writes the same file; the helper's per-path lock serializes
+                    # both writers.
+                    rotating_jsonl.append(self._jsonl_path, asdict(event))
                 except Exception as exc:
                     logger.debug("Telemetry write failed: %s", exc)
 

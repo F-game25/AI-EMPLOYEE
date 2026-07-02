@@ -22,8 +22,43 @@ def test_intent_result_defaults():
     assert r.is_command is False
     assert set(r.to_dict()) == {
         "text", "business_intent", "conversation_mode", "task_type",
-        "entities", "is_command", "confidence", "candidate_agents", "sources",
+        "entities", "is_command", "confidence", "reason",
+        "candidate_agents", "sources",
     }
+
+
+def test_business_intent_optout_skips_llm_axis():
+    """Companion conversational turns pass business_intent=False — the only LLM
+    axis (TaskOrchestrator.classify_intent) must not be touched (C1/R2 perf)."""
+    with patch("core.orchestrator.TaskOrchestrator") as mock_to:
+        res = classify("what's the system status", business_intent=False)
+        mock_to.assert_not_called()
+    assert res.business_intent == "ops"            # untouched default
+    assert "business_intent" not in res.sources     # axis skipped
+    assert res.sources.get("conversation_mode")     # heuristic axes still ran
+
+
+def test_companion_intent_parity_with_classifier():
+    """to_companion_intent() must preserve the companion classifier's contract:
+    mode/task_type/confidence/is_command identical to calling it directly."""
+    from companion.intent_classifier import get_intent_classifier
+    text = "deploy the build to staging now"
+    direct = get_intent_classifier().classify(text, {})
+    seam = classify(text, {}, business_intent=False).to_companion_intent()
+    for key in ("mode", "task_type", "is_command", "confidence", "reason"):
+        assert seam[key] == direct[key], f"{key} diverged: {seam[key]} != {direct[key]}"
+    # superset: seam adds these for downstream routing (inert for current consumers)
+    assert "business_intent" in seam and "candidate_agents" in seam
+
+
+def test_to_companion_intent_shape():
+    r = IntentResult(text="hi", conversation_mode="monitoring", task_type="briefing.morning",
+                     is_command=False, confidence=0.93, reason="briefing cue")
+    ci = r.to_companion_intent()
+    assert ci["mode"] == "monitoring"
+    assert ci["task_type"] == "briefing.morning"
+    assert ci["confidence"] == 0.93
+    assert ci["reason"] == "briefing cue"
 
 
 def test_score_agents_matches_registry():

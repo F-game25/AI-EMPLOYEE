@@ -19,9 +19,8 @@ _VALID_STATUSES = ("concept", "goedgekeurd", "gepubliceerd")
 
 
 def _db_path() -> Path:
-    ai_home = os.environ.get("AI_HOME")
-    base = Path(ai_home) if ai_home else Path.home() / ".ai-employee"
-    return base / "state" / "ecom.db"
+    from core.state_paths import canonical_state_dir
+    return canonical_state_dir() / "ecom.db"
 
 
 def _conn() -> sqlite3.Connection:

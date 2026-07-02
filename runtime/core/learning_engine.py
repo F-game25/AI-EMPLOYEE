@@ -31,9 +31,11 @@ def _ts() -> str:
 
 
 def _state_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    path = base / "state" / "learning_engine.json"
+    # Canonical state tree (honours STATE_DIR then AI_HOME) — was AI_HOME-only with a
+    # repo-local parents[2] fallback, which split learning state across two trees
+    # (13MB accumulated repo-local while canonical stayed empty). See C0.
+    from core.state_paths import canonical_state_dir
+    path = canonical_state_dir() / "learning_engine.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

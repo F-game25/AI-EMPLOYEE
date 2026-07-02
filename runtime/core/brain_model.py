@@ -63,9 +63,14 @@ _last_learning_update: str | None = None
 
 
 def _state_path() -> Path:
-    home = os.getenv("AI_HOME")
-    base = Path(home) if home else Path(__file__).resolve().parents[2]
-    path = base / "state" / "brain_weights.json"
+    # Install-global (NOT tenant-scoped): brain_weights.json is the system's learned
+    # agent-routing model (per-agent task_match/success_history/speed/complexity_fit),
+    # held in a module-level ``agent_model`` global — a shared model like telemetry
+    # identity, not per-tenant PII. Kept on the canonical tree deliberately; per-tenant
+    # routing weights would require restructuring the module-global state (tracked as a
+    # follow-up), not a path swap that would falsely imply isolation.
+    from core.state_paths import canonical_state_dir
+    path = canonical_state_dir() / "brain_weights.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -28,12 +28,43 @@ def _post(url: str, **kwargs):
     return _request_or_skip("POST", url, **kwargs)
 
 
+_AUTH_TOKEN: str | None = None
+
+
+def _auth_headers() -> dict:
+    """Mint a short-lived JWT via the localhost-only auto-token endpoint (mirrors
+    test_api.py's pattern) so tests exercise real authenticated behavior instead
+    of the unauthenticated/minimal-response fallback most /api/* routes now use
+    (route auth coverage has grown since these tests were first written)."""
+    global _AUTH_TOKEN
+    if _AUTH_TOKEN:
+        return {"Authorization": _AUTH_TOKEN}
+    try:
+        res = requests.get(f"{BASE_URL}/api/auth/auto-token", timeout=TIMEOUT)
+        body = res.json()
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, ValueError):
+        # ValueError covers requests.exceptions.JSONDecodeError (a subclass) —
+        # a non-JSON error body (e.g. an HTML gateway error page) must degrade
+        # to "no auth header" like the network-failure cases, not crash every
+        # test that calls this helper.
+        return {}
+    token = body.get("token") or body.get("access_token")
+    if token:
+        _AUTH_TOKEN = f"Bearer {token}"
+    return {"Authorization": _AUTH_TOKEN} if _AUTH_TOKEN else {}
+
+
 class TestHealthEndpoints:
     """Test enhanced health check endpoints with LLM and dependency validation."""
 
     def test_node_health_endpoint(self):
-        """GET /health returns detailed health status."""
-        res = _get(f"{BASE_URL}/health", timeout=TIMEOUT)
+        """GET /health/full returns detailed health status (auth-gated).
+
+        /health (no suffix) is intentionally minimal — fast boot-polling check
+        with no external calls (see backend/routes/health.js). Detailed
+        subsystem checks live at /health/full behind requireAuth.
+        """
+        res = _get(f"{BASE_URL}/health/full", headers=_auth_headers(), timeout=TIMEOUT)
         assert res.status_code in (200, 503), f"Health check failed: {res.text}"
         data = res.json()
         assert "status" in data
@@ -64,9 +95,14 @@ class TestSentryIntegration:
     """Test Sentry error tracking integration."""
 
     def test_sentry_header_presence(self):
-        """Sentry SDK should not break request handling if DSN not set."""
-        # This is a soft test — just ensure the app starts without Sentry breaking it
-        res = _get(f"{BASE_URL}/version", timeout=TIMEOUT)
+        """Sentry SDK should not break request handling if DSN not set.
+
+        /version deliberately withholds "commit" from unauthenticated callers
+        (prevents git-commit/start-time enumeration by attackers — see
+        backend/routes/health.js) and returns the full payload only when
+        authenticated. Authenticate to exercise that full path.
+        """
+        res = _get(f"{BASE_URL}/version", headers=_auth_headers(), timeout=TIMEOUT)
         assert res.status_code == 200
         assert "commit" in res.json()
 
@@ -132,8 +168,8 @@ class TestAgentsHttpFallback:
     """Test /api/agents HTTP endpoint for AgentsPage WebSocket fallback."""
 
     def test_agents_endpoint_returns_json(self):
-        """GET /api/agents returns list of agents."""
-        res = _get(f"{BASE_URL}/api/agents", timeout=TIMEOUT)
+        """GET /api/agents returns list of agents (auth-gated route)."""
+        res = _get(f"{BASE_URL}/api/agents", headers=_auth_headers(), timeout=TIMEOUT)
         assert res.status_code == 200
         data = res.json()
         assert isinstance(data, dict)
@@ -141,7 +177,7 @@ class TestAgentsHttpFallback:
 
     def test_agents_endpoint_schema(self):
         """Each agent in /api/agents has required fields."""
-        res = _get(f"{BASE_URL}/api/agents", timeout=TIMEOUT)
+        res = _get(f"{BASE_URL}/api/agents", headers=_auth_headers(), timeout=TIMEOUT)
         data = res.json()
         agents = data.get("agents", data if isinstance(data, list) else [])
         if agents:
@@ -153,10 +189,20 @@ class TestErrorRecovery:
     """Test error recovery and resilience."""
 
     def test_500_error_handling(self):
-        """Invalid routes return proper error responses, not 500s."""
-        res = _get(f"{BASE_URL}/api/invalid-route-xyz", timeout=TIMEOUT)
-        assert res.status_code in (404, 400, 422)
-        assert "error" in res.json() or "detail" in res.json()
+        """Invalid routes return proper error responses, not 500s.
+
+        A genuinely unregistered path falls through to Express's default
+        not-found handler, which returns an HTML body — only routes that exist
+        and are wrapped in requireAuth return a JSON 401. Either shape is an
+        acceptable "not a crash" outcome; the status code is what matters here.
+        """
+        res = _get(f"{BASE_URL}/api/invalid-route-xyz", headers=_auth_headers(), timeout=TIMEOUT)
+        assert res.status_code in (401, 404, 400, 422)
+        try:
+            body = res.json()
+            assert "error" in body or "detail" in body
+        except ValueError:
+            assert res.status_code == 404  # Express default HTML 404 page
 
     def test_malformed_json_handling(self):
         """Malformed JSON request bodies are rejected gracefully."""
@@ -184,7 +230,7 @@ class TestDatabaseResilience:
     def test_file_locking_protection(self):
         """Concurrent writes to state files are protected by file locking."""
         # This is a soft test — we just ensure the system doesn't corrupt state
-        res = _get(f"{BASE_URL}/api/status", timeout=TIMEOUT)
+        res = _get(f"{BASE_URL}/api/status", headers=_auth_headers(), timeout=TIMEOUT)
         assert res.status_code == 200
         # If we got here, state files are accessible and not corrupted
 

@@ -84,3 +84,32 @@ def test_state_store_uses_canonical_dir(tmp_path, monkeypatch):
     ss._save_json("c0_probe", {"ok": True})
     assert (tmp_path / "c0_probe.json").exists()
     assert ss._load_json("c0_probe") == {"ok": True}
+
+
+@pytest.mark.parametrize(
+    "module, attr, suffix",
+    [
+        ("neural_brain.core.telemetry", "_LOG_PATH", "telemetry.jsonl"),
+        ("neural_brain.telemetry.telemetry_engine", "_BUNDLE_DIR", "telemetry/bundles"),
+        ("neural_brain.updates.update_manager", "_VERSION_FILE", "version.json"),
+        ("neural_brain.forge.builder", "_BUILD_DIR", "build_outputs"),
+        ("neural_brain.config.privacy_mode", "_MODE_FILE", "privacy_mode.json"),
+    ],
+)
+def test_neural_brain_writers_resolve_under_canonical_dir(tmp_path, monkeypatch, module, attr, suffix):
+    """Regression guard for the C0 split-brain: neural_brain modules used relative
+    Path("state/…") literals that resolved to CWD-relative ./state (one stray
+    telemetry.jsonl reached 134MB). Every such path must now resolve UNDER the
+    canonical STATE_DIR — never repo-local."""
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    import importlib
+    import core.state_paths as sp
+    importlib.reload(sp)
+    mod = importlib.import_module(module)
+    importlib.reload(mod)
+    resolved = Path(getattr(mod, attr)).resolve()
+    assert str(resolved).startswith(str(tmp_path.resolve())), f"{attr} escaped STATE_DIR: {resolved}"
+    assert str(resolved).endswith(suffix), f"{attr} unexpected suffix: {resolved}"
+    # And it must NOT point at the repo-local ./state tree.
+    repo_state = (ROOT / "state").resolve()
+    assert repo_state not in resolved.parents and resolved != repo_state

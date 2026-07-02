@@ -53,7 +53,17 @@ function createForgeDispatcher(deps = {}) {
     throw new Error('createForgeDispatcher: deps.requestPythonJSON is required')
   }
 
-  const enabled = String(process.env.FORGE_DISPATCH_ENABLED ?? '1') !== '0'
+  // TQ-1: Backlog+Autopilot+Cycles is now the canonical execution path (see
+  // forge.js's /approve/:id — an approved item with a project_id is converted
+  // into a backlog item and autopilot is auto-started for it). This poll loop
+  // would otherwise ALSO drain the same 'approved' item and double-execute it
+  // via the old AgentController.run_goal path, so it now requires an explicit
+  // opt-in on top of its own long-standing kill switch. Reversible: set
+  // FORGE_DISPATCHER_LEGACY_DRAIN=1 to fully restore the old behavior (only
+  // matters for project-less submissions, which the adapter can't convert).
+  const dispatchEnabled = String(process.env.FORGE_DISPATCH_ENABLED ?? '1') !== '0'
+  const legacyDrainEnabled = String(process.env.FORGE_DISPATCHER_LEGACY_DRAIN || '0') === '1'
+  const enabled = dispatchEnabled && legacyDrainEnabled
   const concurrency = _int('FORGE_DISPATCH_CONCURRENCY', 1)
   const intervalMs = _int('FORGE_DISPATCH_INTERVAL_MS', 5000)
   const maxRetries = _int('FORGE_DISPATCH_MAX_RETRIES', 2)
@@ -74,7 +84,10 @@ function createForgeDispatcher(deps = {}) {
 
   function pendingApproved() {
     return loadActions().filter(
-      (a) => a && a.queue_kind === QUEUE_KIND && a.status === 'approved' && !_inFlight.has(a.id),
+      // Skip anything already converted to a backlog item (TQ-1 adapter mode) —
+      // never double-execute the same goal through both paths, even if legacy
+      // drain is explicitly re-enabled.
+      (a) => a && a.queue_kind === QUEUE_KIND && a.status === 'approved' && !a.converted_to_backlog_id && !_inFlight.has(a.id),
     )
   }
 
@@ -177,7 +190,9 @@ function createForgeDispatcher(deps = {}) {
   function start() {
     if (_timer) return api
     if (!enabled) {
-      log('disabled via FORGE_DISPATCH_ENABLED=0 — queue stays approve-only')
+      log(dispatchEnabled
+        ? 'disabled: set FORGE_DISPATCHER_LEGACY_DRAIN=1 to enable legacy drain'
+        : 'disabled via FORGE_DISPATCH_ENABLED=0 — queue stays approve-only')
       return api
     }
     log(`started — concurrency=${concurrency} interval=${intervalMs}ms maxRetries=${maxRetries} taskTimeout=${taskTimeoutMs}ms`)

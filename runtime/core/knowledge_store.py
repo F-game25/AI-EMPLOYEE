@@ -47,12 +47,8 @@ class KnowledgeStore:
 
     @staticmethod
     def _default_path() -> Path:
-        home = os.getenv("AI_HOME")
-        if home:
-            base = Path(home)
-        else:
-            base = Path(__file__).resolve().parents[2]
-        return base / "state" / "knowledge_store.json"
+        from core.state_paths import tenant_state_dir
+        return tenant_state_dir() / "knowledge_store.json"
 
     @staticmethod
     def _ts() -> str:
@@ -378,15 +374,19 @@ class KnowledgeStore:
         return embedded
 
 
-_instance: KnowledgeStore | None = None
-_instance_lock = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[KnowledgeStore] = TenantSingletonPool(KnowledgeStore)
 
 
 def get_knowledge_store(path: Path | None = None) -> KnowledgeStore:
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = KnowledgeStore(path)
-        elif path is not None and _instance._path != path:
-            _instance = KnowledgeStore(path)
-    return _instance
+    """Return the KnowledgeStore for the active tenant (per-tenant isolated; one
+    shared ``__global__`` instance in local/default mode). An explicit ``path``
+    pins a fresh instance for the active tenant (tests / reconfiguration)."""
+    if path is not None:
+        inst = _pool.get()
+        if inst._path != path:
+            inst = KnowledgeStore(path)
+            _pool.set(inst)
+        return inst
+    return _pool.get()

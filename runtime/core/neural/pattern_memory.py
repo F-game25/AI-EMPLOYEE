@@ -15,18 +15,24 @@ except ImportError:
 MAX_PATTERNS = 2000
 
 def _path() -> Path:
-    base = Path(os.getenv('AI_HOME', Path(__file__).parents[3]))
-    return base / 'state' / 'pattern_memory.json'
+    from core.state_paths import tenant_state_dir
+    return tenant_state_dir() / 'pattern_memory.json'
 
 class PatternMemory:
-    def __init__(self):
+    def __init__(self, path: Path | None = None):
+        # Pinned at construction time, while the correct tenant context is
+        # active (TenantSingletonPool.get() creates this instance under the
+        # active tenant's key) — recomputing _path() on every I/O would let an
+        # instance that outlives its tenant context write to whichever tenant
+        # happens to be active *later*, corrupting/leaking across tenants.
+        self._path = path or _path()
         self._lock = threading.RLock()
         self._patterns: list[dict] = self._load()
 
     def _load(self) -> list:
         """Load pattern memory from disk."""
         try:
-            return json.loads(_path().read_text())
+            return json.loads(self._path.read_text())
         except Exception:
             return []
 
@@ -46,8 +52,8 @@ class PatternMemory:
             self._patterns.append(pattern)
             if len(self._patterns) > MAX_PATTERNS:
                 self._patterns = self._patterns[-MAX_PATTERNS:]
-            _path().parent.mkdir(parents=True, exist_ok=True)
-            _path().write_text(json.dumps(self._patterns))
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(self._patterns))
 
     def recognize(self, text: str, threshold: float = 0.7) -> dict | None:
         """Find a similar pattern in memory."""
@@ -79,13 +85,11 @@ class PatternMemory:
             pass
         return None
 
-_INST: PatternMemory | None = None
-_PM_LOCK = threading.Lock()
+from core.tenant_singleton import TenantSingletonPool
+
+_pool: TenantSingletonPool[PatternMemory] = TenantSingletonPool(PatternMemory)
 
 def get_pattern_memory() -> PatternMemory:
-    """Get or create the process-wide PatternMemory."""
-    global _INST
-    with _PM_LOCK:
-        if _INST is None:
-            _INST = PatternMemory()
-    return _INST
+    """Get or create the PatternMemory for the active tenant (per-tenant isolated;
+    one shared ``__global__`` instance in local/default mode)."""
+    return _pool.get()

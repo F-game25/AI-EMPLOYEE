@@ -9,6 +9,8 @@ direct skill execution.
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 import threading
 from typing import Any, Callable
@@ -408,6 +410,16 @@ class ExecutableSkillCatalog(SkillCatalog):
             skill = picks[0] if picks else None
         if skill is None:
             return {"status": "no_skill", "note": "no matching skill in the library for this goal"}
+
+        # B2 — executable tool chain. If the skill declares deterministic
+        # ``tool_steps`` (real ToolRegistry calls), run them instead of an
+        # LLM-only prose pass. Absent → fall through to the LLM guidance path
+        # below (fully backward-compatible). The chain's status (ok/blocked/
+        # error) is surfaced honestly — no silent fallback masks a real failure.
+        chain = ExecutableSkillCatalog._run_tool_chain(skill, goal, ctx)
+        if chain is not None:
+            return chain
+
         system = str(skill.get("system_prompt") or
                      f"You are the '{skill.get('name', 'specialist')}' capability. "
                      "Complete the user's goal concretely and concisely.")
@@ -445,6 +457,152 @@ class ExecutableSkillCatalog(SkillCatalog):
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "skill_id": skill.get("id"), "error": str(exc)}
 
+    # ── B2: executable tool-chain interpreter ─────────────────────────────────
+
+    _PLACEHOLDER = re.compile(r"\{([a-zA-Z0-9_.]+)\}")
+    _MISSING = object()  # sentinel: placeholder key absent (vs present-but-empty)
+
+    class StrictTemplateError(ValueError):
+        """A skill step referenced a placeholder that cannot be resolved, or its
+        inputs were malformed. The chain must fail closed rather than execute a
+        real tool with a silently-mutated argument."""
+
+    @staticmethod
+    def _resolve_inputs(inputs: Any, goal: str, ctx: dict, variables: dict) -> Any:
+        """Render a step's inputs from a STRICT template — only ``{goal}``,
+        ``{vars.NAME}`` (prior step output) and ``{ctx.KEY}`` placeholders. No
+        eval, no arbitrary expressions: raw model text never becomes a tool arg
+        except where the skill author explicitly placed a placeholder.
+
+        Fail-closed: a malformed ``inputs`` shape, or any placeholder that does
+        not resolve (typo'd ``{vars.hit}``, an unknown namespace, a not-yet-saved
+        var), raises ``StrictTemplateError`` so the chain stops *before* the tool
+        runs — it never coerces the bad reference to ``""`` and proceeds."""
+        if not isinstance(inputs, dict):
+            raise ExecutableSkillCatalog.StrictTemplateError(
+                f"step inputs must be an object, got {type(inputs).__name__}")
+
+        missing = ExecutableSkillCatalog._MISSING
+
+        def _lookup(key: str) -> Any:
+            if key == "goal":
+                return goal
+            if key.startswith("vars."):
+                name = key[5:]
+                return variables[name] if name in variables else missing
+            if key.startswith("ctx."):
+                name = key[4:]
+                return ctx[name] if name in ctx else missing
+            return missing  # unknown namespace — not goal/vars./ctx.
+
+        def _render(value: Any) -> Any:
+            if isinstance(value, str):
+                # Whole-string single placeholder → preserve the native type.
+                m = ExecutableSkillCatalog._PLACEHOLDER.fullmatch(value)
+                if m:
+                    found = _lookup(m.group(1))
+                    if found is missing:
+                        raise ExecutableSkillCatalog.StrictTemplateError(
+                            f"unresolved placeholder '{{{m.group(1)}}}'")
+                    return found
+
+                def _sub(match: "re.Match") -> str:
+                    found = _lookup(match.group(1))
+                    if found is missing:
+                        raise ExecutableSkillCatalog.StrictTemplateError(
+                            f"unresolved placeholder '{{{match.group(1)}}}'")
+                    return found if isinstance(found, str) else json.dumps(found, default=str)
+
+                return ExecutableSkillCatalog._PLACEHOLDER.sub(_sub, value)
+            if isinstance(value, dict):
+                return {k: _render(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_render(v) for v in value]
+            return value
+
+        return _render(inputs)
+
+    @staticmethod
+    def _run_tool_chain(skill: dict, goal: str, ctx: dict) -> dict | None:
+        """Run a skill's declared ``tool_steps`` through the ToolRegistry.
+
+        Returns ``None`` when the skill declares no chain (caller falls back to
+        the LLM guidance path). Otherwise returns an honest envelope:
+        ``ok`` (all steps ran), ``blocked`` (a step's tool exceeds the auto-run
+        risk ceiling and is not pre-approved → needs HITL), or ``error`` (unknown
+        tool / step failure). Each step:
+        ``{"tool": <registered>, "inputs": {...templated...}, "save_as": <var>}``.
+
+        Safety: tools are risk-gated via the registry — only tools at or below
+        ``SKILL_CHAIN_MAX_AUTORISK`` (default 1 = read + local-write) auto-run;
+        anything higher (send_email, call_api, shell/code exec, browser) is
+        blocked unless its name is in ``ctx['approved_tools']``. Fail-closed:
+        an unknown tool or a failing step stops the chain with an explicit error.
+        """
+        steps = skill.get("tool_steps")
+        if not isinstance(steps, list) or not steps:
+            return None
+
+        from tools.registry import get_tool_registry
+        reg = get_tool_registry()
+        try:
+            max_risk = int(os.environ.get("SKILL_CHAIN_MAX_AUTORISK", "1"))
+        except ValueError:
+            max_risk = 1
+        registered = {t["name"] for t in reg.list_tools(max_risk=5)}
+        auto_ok = {t["name"] for t in reg.list_tools(max_risk=max_risk)}
+        # ``approved_tools`` lifts a tool above the auto-run risk ceiling, so it is
+        # a privileged escalation key. It is BROKER-OWNED: the execution broker
+        # strips any client-supplied value from request.context and re-derives it
+        # from trusted server-side state before dispatch (see ExecutionBroker.
+        # _trusted_approved_tools). Reading it here is therefore safe; the default
+        # stays fail-closed (empty → nothing beyond the ceiling auto-runs).
+        approved = {str(t) for t in (ctx.get("approved_tools") or []) if isinstance(t, str)}
+        agent_id = str(ctx.get("agent_id") or "system")
+
+        variables: dict[str, Any] = {}
+        results: list[dict[str, Any]] = []
+        skill_id = skill.get("id")
+
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] is not an object", "steps": results}
+            tool = str(step.get("tool") or "").strip()
+            if tool not in registered:
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] unknown tool '{tool}'", "steps": results}
+            if tool not in auto_ok and tool not in approved:
+                return {"status": "blocked", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "requires_approval": True, "blocked_tool": tool,
+                        "error": (f"step[{i}] tool '{tool}' exceeds the auto-run risk ceiling "
+                                  f"(SKILL_CHAIN_MAX_AUTORISK={max_risk}) and is not approved"),
+                        "steps": results}
+            try:
+                inputs = ExecutableSkillCatalog._resolve_inputs(
+                    step.get("inputs") or {}, goal, ctx, variables)
+            except ExecutableSkillCatalog.StrictTemplateError as exc:
+                # Fail closed: a bad template never reaches a real tool.
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] {exc}", "steps": results}
+            envelope = reg.execute(tool, inputs, agent_id=agent_id)
+            ok = bool(envelope.get("ok"))
+            results.append({"tool": tool, "ok": ok,
+                            "result": envelope.get("result"), "error": envelope.get("error")})
+            if not ok:
+                return {"status": "error", "via": "skill_tool_chain", "skill_id": skill_id,
+                        "error": f"step[{i}] tool '{tool}' failed: {envelope.get('error')}",
+                        "steps": results}
+            save_as = step.get("save_as")
+            if save_as:
+                variables[str(save_as)] = envelope.get("result")
+
+        output = variables.get("output", results[-1]["result"] if results else None)
+        return {"status": "ok", "via": "skill_tool_chain", "skill_id": skill_id,
+                "skill_name": skill.get("name"),
+                "tools": [r["tool"] for r in results],
+                "steps": results, "output": output}
+
     # ── Default skills ────────────────────────────────────────────────────────
 
     def _register_exec_defaults(self) -> None:
@@ -464,30 +622,42 @@ class ExecutableSkillCatalog(SkillCatalog):
                             ["llm_infer", "get_memory"],
                             "Handle customer queries", 1)
 
+    @staticmethod
+    def _require_ok(envelope: dict, tool: str) -> dict:
+        """Fail closed instead of fake-success: these skill functions used to
+        embed a failed/stubbed tool envelope straight into their own return
+        value without checking it, and execute_skill()'s try/except only
+        catches raised exceptions — so a failed web_search/llm_infer call was
+        silently reported as a successful skill run. Raising here lets that
+        try/except do its job and report the real failure."""
+        if not envelope.get("ok"):
+            raise RuntimeError(f"{tool} failed: {envelope.get('error') or 'unknown error'}")
+        return envelope
+
     def _market_research(self, topic: str, **_):
         from tools.registry import get_tool_registry
         r = get_tool_registry()
-        search_result = r.execute("web_search", {"query": topic, "limit": 5})
-        llm_result = r.execute("llm_infer", {
+        search_result = self._require_ok(r.execute("web_search", {"query": topic, "limit": 5}), "web_search")
+        llm_result = self._require_ok(r.execute("llm_infer", {
             "prompt": f"Summarize market research for: {topic}", "max_tokens": 500,
-        })
+        }), "llm_infer")
         return {"topic": topic, "sources": search_result, "summary": llm_result}
 
     def _content_creation(self, topic: str, format: str = "article", **_):
         from tools.registry import get_tool_registry
-        return get_tool_registry().execute(
+        return self._require_ok(get_tool_registry().execute(
             "llm_infer",
             {"prompt": f"Write a {format} about: {topic}", "max_tokens": 1000},
-        )
+        ), "llm_infer")
 
     def _doc_intelligence(self, path: str, query: str = "", **_):
         from tools.registry import get_tool_registry
         r = get_tool_registry()
-        doc = r.execute("read_file", {"path": path})
-        return r.execute("llm_infer", {
+        doc = self._require_ok(r.execute("read_file", {"path": path}), "read_file")
+        return self._require_ok(r.execute("llm_infer", {
             "prompt": f"Analyze this document: {doc}\n\nQuery: {query}",
             "max_tokens": 800,
-        })
+        }), "llm_infer")
 
     def _lead_gen(self, criteria: str, **_):
         return {"stub": True,
@@ -496,7 +666,7 @@ class ExecutableSkillCatalog(SkillCatalog):
 
     def _support(self, query: str, **_):
         from tools.registry import get_tool_registry
-        return get_tool_registry().execute(
+        return self._require_ok(get_tool_registry().execute(
             "llm_infer",
             {"prompt": f"Help customer with: {query}", "max_tokens": 500},
-        )
+        ), "llm_infer")

@@ -90,8 +90,12 @@ class TestToolRegistryClass(unittest.TestCase):
         self.assertIn("not found", result["error"])
 
     def test_execute_read_nonexistent_file(self):
+        # Regression: execute() used to report ok=True for a tool that signals
+        # failure by returning {"error": ...} instead of raising — a fake
+        # success masking a real failure. Fixed to fail closed.
         result = self.reg.execute("read_file", {"path": "/nonexistent/path/file.txt"})
-        self.assertTrue(result["ok"])  # execute returns ok=True; error is in result
+        self.assertFalse(result["ok"])
+        self.assertIn("error", result)
         self.assertIn("error", result["result"])
 
     def test_register_custom_tool(self):

@@ -50,8 +50,29 @@ This is the single consolidated backlog so nothing is lost. Keep it updated; arc
 ## 7. Sales / demos  — memory `sales-demo-rebuild-progress`
 - 🟡 Unique multi-page demos + Sales section (mid-flight)
 
-## 8. AscendForge  — `docs/ASCEND_FORGE_V7_CONTROLLED_EXECUTION_*` (latest of v2→v7)
-- ⬜ Finish v7 controlled-execution items (verify against the audit/impl docs)
+## 8. AscendForge  — `ASCENDFORGE_SYSTEM_AUDIT.md` Phase E (2026-07-01, current)
+- 🟡 **Phase E — Goal Achievement System** (plan approved; execution starting) — reframed from
+  "task queue" to "goal in → plan → agents on sub-tasks" per Lars. Full plan:
+  `/home/lf/.claude/plans/clever-wandering-dragon.md`.
+  - ⬜ E1 — canonical queue: durable `autopilot_sessions`, finish the `forge_cycles` lifecycle
+    (progress tracking + completion detection), `/submit` adapter mode, backlog cancel/retry
+  - ⬜ E2 — goal fast-path (skip full decompose for simple asks) + skill/agent routing (wire
+    `runDecomposerAgent`'s unused `required_skills` → `skill_selector.select_skills()`; verify
+    reuse of `runtime/agents/business_swarm/*` before writing new logic)
+  - ⬜ E3 — execution capability uplift: scoped file read/grep/glob tools, iterative per-file
+    verify, sub-task delegation via the existing-but-unused `forge_child_runs` table, branching
+  - ⬜ E4 — concurrency gate for local LLM calls (measured: 4 concurrent forge runs → 2-of-4
+    Ollama calls failed on 8GB VRAM) + retry tuning against a clean serialized baseline
+  - ⬜ E5 — UI: Cycles/Backlog/Autopilot/Decomposer currently have zero UI surface; collapse the
+    3 fragmented approval views into one
+  - ⬜ E6 — safety hardening cross-cutting (no autonomy-gate bypass via conversion/delegation)
+- ✅ Two live codegen bugs found + fixed 2026-07-01 (dangling unclosed code fence; fence-hint path
+  leakage e.g. `"python calc.py"`) in `extractCodeActions`/`_buildCodeAction`, `backend/routes/
+  forge.js` — benefits both the basic `/runs` path and the agentic `runCoderAgent` path. Regression
+  tests: `tests/test_forge_codegen_extract.js`. New local benchmark task `codegen_local_model` in
+  `tests/benchmarks/` measures real coding-model reliability (not just "did it run").
+- ⬜ Older v2→v7 controlled-execution docs (`docs/ASCEND_FORGE_V7_CONTROLLED_EXECUTION_*`) —
+  superseded by the live audit doc; archive once Phase E lands.
 
 ## 9. Security & privacy  — `CLAUDE.md`, `SECURITY*.md`, `docs/PRIVACY_ARCHITECTURE.md`
 - ⬜ Increase route auth coverage (was 44/119 Node routes)
@@ -62,18 +83,43 @@ This is the single consolidated backlog so nothing is lost. Keep it updated; arc
 - ⬜ Desktop tests + CI coverage
 - ⬜ Archive superseded/duplicate plans (see inventory)
 
+## 11. Cross-system gap audit — PR #335 (`claude/gap-analysis-deep-dive-twiozu`, **not yet merged**)
+A file-level audit of every path/DoD claimed across all of `MASTER_PLAN_V3.md` (P1-P10 + Modules
+1-12), landing here so it isn't lost regardless of whether/when that PR merges. Full detail:
+`docs/GAP_ANALYSIS_2026_06_30.md` (on that branch). Cross-confirms two AscendForge findings
+independently (Module 3 Forge Lifecycle OS essentially complete; Module 7 Business Swarm fully
+built — see section 8 above). Total: 4 modules entirely missing, 9 partially built, ~25 individual
+missing files, 5 cross-cutting issues, 7 fully done.
+
+**Tier 1 — fix broken / safety gaps:**
+- ⬜ `runtime/evolution/trace_store.py` — traces don't survive a restart, no replay/promotion query
+- ⬜ `runtime/companion/audit_logger.py` — companion actions currently unlogged (compliance gap)
+- ⬜ `runtime/tools/browser/browser_events.py` — companion can't stream browser activity without it
+- ⬜ `runtime/money/work_engine/submission_queue.py` — the two-gate approval safety invariant is unenforced without it
+- ⬜ RPA proxy auth fix — `/api/rpa/*` 500s at the Node→Python boundary (`makeProxy('RPA')` doesn't forward a valid token)
+
+**Tier 2 — complete partial modules:** `browser_session.py`+`browser_sandbox.py` (profile isolation); `context_node.py`+`retrieval_trace.py`+`memory_writer.py` (Context DB); `component_quality_checker.py`+`image_to_code_pipeline.py` (Forge UI quality); `source_collector.py` (Research Quality); extract `human_review_gate.py` as a hard enforcement module (FinanceOps).
+
+**Tier 3 — complete P10 CompanyOS backend:** `agent_team_orchestrator.py`, `task_cycle_engine.py`, `build_integration.py`, `marketing_engine.py`, `support_engine.py`, `metrics_engine.py`; memory graph linkage; frontend TaskCycle/AgentTeam/Marketing/Metrics cockpit pages.
+
+**Tier 4 — build missing modules:** M12 Model Arena (`runtime/core/arena/`, 6 files); M9 Blacklight Defensive Skill OS (`runtime/security/skills/`+`security/tools/`, 16 files, entirely absent); M5 voice/media (`runtime/voice/` + `runtime/media/`, entirely absent); M4 Work Engine completion (6 files + `marketplace_adapters/`); M10 Harness Compat (`runtime/harness/`, entirely absent); M11 Reference Learning Library (entirely absent).
+
+**Tier 5 — P2 perf + P9.5 Rust:** `useDeferredValue` (zero uses anywhere in `frontend/src/`); virtualize event feed + logs (extend the `@tanstack/react-virtual` pattern already used on `OrdersPage`); P9.5 gather profiling data first, before any native rewrite.
+
 ---
 
 ## Plan inventory (duplicates to resolve)
 | Doc | Note |
 |---|---|
-| `MASTER_PLAN.md`, `V2_MASTER_PLAN.md`, `MASTER_PLAN_V3.md` | 3 master plans — V3 likely newest; confirm + archive older |
+| ✅ `MASTER_PLAN.md`, `V2_MASTER_PLAN.md`, `MASTER_PLAN_V3.md` | **RESOLVED (2026-06-30):** older two → `docs/archive/`. `MASTER_PLAN_V3.md` KEPT as the feature-roadmap + build-status **companion** to the canonical plan. |
 | `DESKTOP_APP_PLAN.md` vs `ENTERPRISE_DESKTOP_APP_PLAN.md` | two desktop plans — `DESKTOP_APP_PLAN.md` is the active one (this effort) |
 | `ASCENDFORGE_*` / `ASCEND_FORGE_*` v2→v7 | many iterations — v7 is latest |
-| `SYSTEM_COHERENCE_PLAN.md`, `SYSTEM_CONNECTIVITY_ROADMAP.md`, `TARGET_ARCHITECTURE.md`, `SYSTEM_REALITY_AUDIT.md` | overlapping architecture/coherence — reconcile into one source of truth |
+| ✅ `SYSTEM_COHERENCE_PLAN.md` | **CANONICAL (2026-06-30)** — single authoritative architecture/control plan; incoming research lands in its Appendix A (R-1…R-5 added 2026-07-01). `SYSTEM_CONNECTIVITY_ROADMAP.md`/`TARGET_ARCHITECTURE.md`/`SYSTEM_REALITY_AUDIT.md` remain reference inputs to reconcile into it over time. |
+| 🟡 `docs/GAP_ANALYSIS_2026_06_30.md` | Lives on unmerged PR #335 (`claude/gap-analysis-deep-dive-twiozu`) — file-level gap audit of `MASTER_PLAN_V3.md`. Reconciled into section 11 above 2026-07-01 so nothing is lost regardless of merge status. |
 
 ## Needs-decision (Lars)
-- ❓ Which master plan is authoritative (archive the rest)?
+- ✅ **Which master plan is authoritative?** → `SYSTEM_COHERENCE_PLAN.md` (canonical); `MASTER_PLAN_V3.md` kept as companion; `MASTER_PLAN.md` + `V2_MASTER_PLAN.md` archived. _(decided 2026-06-30)_
 - ❓ Desktop milestone order after M3 — updater (M4) next, or jump to Linux bundle (M5)?
 - ❓ Do the AETERNUS→AETHERNUS rename now (touches identity contract) or after desktop v1?
 - ❓ Re-run the full 40-doc audit agent (fresh session) to make this list exhaustive?
+- ❓ Merge PR #335 (`claude/gap-analysis-deep-dive-twiozu`)? Real, already-verified gap-audit work sitting unmerged; recommend merging so `MASTER_PLAN_V3.md`'s gap annotations become the live version everyone works from — but merging is Lars's call, not done silently as part of this reconciliation pass.
