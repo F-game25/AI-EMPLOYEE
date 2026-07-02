@@ -400,7 +400,10 @@ more features.
 "this is not a task system, it's a goal-achieving system." Give it a goal → it produces a detailed
 plan → it puts agents on the sub-tasks → it must also handle short tasks efficiently → everything
 that needs UI wiring must be tracked for the later UI-fixing pass. Full plan, file:line citations,
-and open-decision record: `/home/lf/.claude/plans/clever-wandering-dragon.md` (TQ-1..TQ-6).
+and open-decision record were drafted in a local Claude Code plan file
+(`~/.claude/plans/clever-wandering-dragon.md`, TQ-1..TQ-6) — that path is developer-machine-local,
+non-canonical, and not committed to the repo. The canonical, portable record of the same plan is
+this document (Phase E below) plus `docs/SYSTEM_COHERENCE_PLAN.md`'s R-5 entry (TQ-1..TQ-6).
 
 **What's already there, verified by reading the code, not assumed:** a goal-container already
 exists (`forge_cycles`, `forge_store.js:243`; routes `forge.js:5389-5473`) — `POST /projects/:id/

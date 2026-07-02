@@ -119,6 +119,10 @@ async function runForgeRun(task) {
 // a lifecycle "not blocked" check alone (see lifecycle_allows_clear above) is not
 // enough — it would have missed a real incident where the model's response never
 // closed its code fence and the run silently produced zero code actions.
+// Single-quote a shell arg (POSIX sh): close the quote, emit an escaped
+// literal quote, reopen — safe for any byte sequence including embedded quotes.
+const shellQuote = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
+
 async function runForgeCodegen(task) {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'forge-bench-codegen-'))
   let pid = null
@@ -146,8 +150,18 @@ async function runForgeCodegen(task) {
     if (!writeAction) {
       return { status: 'FAIL', detail: `no write_file action produced (model=${modelTag}, run.status=${run.json?.run?.status})` }
     }
-    if (task.expect_file && path.basename(writeAction.file_path || '') !== task.expect_file) {
-      return { status: 'FAIL', detail: `expected a file named '${task.expect_file}', model wrote '${writeAction.file_path}' (model=${modelTag})` }
+    // The model chooses this path freely (see comment above) — it is untrusted
+    // input from here on. Reject anything absolute or that would resolve
+    // outside tmpDir before it's ever interpolated into a shell command or
+    // joined onto a filesystem path.
+    const generatedPath = String(writeAction.file_path || '')
+    const tmpRoot = path.resolve(tmpDir)
+    const onDiskPath = path.resolve(tmpRoot, generatedPath)
+    if (!generatedPath || path.isAbsolute(generatedPath) || !onDiskPath.startsWith(`${tmpRoot}${path.sep}`)) {
+      return { status: 'FAIL', detail: `unsafe generated path '${generatedPath}' (model=${modelTag})` }
+    }
+    if (task.expect_file && path.basename(generatedPath) !== task.expect_file) {
+      return { status: 'FAIL', detail: `expected a file named '${task.expect_file}', model wrote '${generatedPath}' (model=${modelTag})` }
     }
 
     // Offline syntax check of the raw generated content, independent of the
@@ -170,7 +184,7 @@ async function runForgeCodegen(task) {
     }
     const verify = await jpost(`/api/forge/runs/${runId}/verify`, {
       ownerApproved: true,
-      commands: [`python3 -m py_compile ${writeAction.file_path}`],
+      commands: [`python3 -m py_compile ${shellQuote(generatedPath)}`],
     })
     if (!verify.json?.ok || !verify.json?.test_result?.all_passed) {
       const output = (verify.json?.test_result?.results || []).map(r => r.output).join(' ').slice(0, 150)
@@ -180,11 +194,10 @@ async function runForgeCodegen(task) {
     if (apply.status >= 400) {
       return { status: 'FAIL', detail: `apply blocked (model=${modelTag}): ${apply.json?.error || apply.status}` }
     }
-    const onDisk = path.join(tmpDir, writeAction.file_path)
-    if (!existsSync(onDisk)) {
+    if (!existsSync(onDiskPath)) {
       return { status: 'FAIL', detail: `apply reported ok but file missing on disk (model=${modelTag})` }
     }
-    return { status: 'PASS', score: 1, detail: `'${writeAction.file_path}' generated, verified (py_compile) + applied (model=${modelTag})` }
+    return { status: 'PASS', score: 1, detail: `'${generatedPath}' generated, verified (py_compile) + applied (model=${modelTag})` }
   } finally {
     if (pid) await fetch(`${B}/api/forge/projects/${pid}`, { method: 'DELETE', headers: H() }).catch(() => {})
     rmSync(tmpDir, { recursive: true, force: true })

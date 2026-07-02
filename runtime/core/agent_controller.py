@@ -625,32 +625,39 @@ class AgentController:
         goal = str(task_input.get("goal") or task_input.get("task") or "").strip()
         context = task_input.get("context")
 
-        if not self._llm_provider_available():
-            def _unavailable_executor(_p: dict) -> dict:
-                raise RuntimeError("llm_provider_unavailable")
-
-            return get_action_bus().emit(
-                action_type=action_type,
-                payload={"task_input": task_input, "action": action},
-                actor="agent_controller",
-                reason="executor dispatch",
-                executor=_unavailable_executor,
-            )
-
         def _skill_chain_executor(
             _p: dict, _skill=skill, _goal=goal,
             _task_input=task_input, _context=context,
         ) -> dict:
             # B1 — catalog first: tool-chain (if skill has tool_steps) then
             # library-guided LLM (skill's own system_prompt/execution_steps).
+            # Catalog dispatch is attempted regardless of LLM provider
+            # availability — a tool_steps chain may not need an LLM at all
+            # (e.g. pure tool calls), so gating catalog execution on
+            # _llm_provider_available() would block work the catalog can do
+            # without one.
+            #
+            # Only obtaining the catalog (import + getter) degrades to
+            # "unavailable" -> bare-LLM floor; dispatch_for_goal() itself is
+            # NOT covered by this except. It already catches its own internal
+            # failures and returns {"status": "error", ...}, which fails
+            # closed below via the explicit RuntimeError branch — wrapping it
+            # here too would swallow genuine catalog/tool errors that escape
+            # its internal handling and silently mask them as fake success
+            # via the LLM fallback instead of failing closed. Any such
+            # exception still degrades safely: actions.action_bus.emit()
+            # catches executor exceptions and returns a structured
+            # {"status": "error", ...} result rather than crashing the caller.
             try:
                 from skills.catalog import get_skill_catalog
-                chain = get_skill_catalog().dispatch_for_goal(
+                catalog = get_skill_catalog()
+            except (ImportError, ModuleNotFoundError):
+                chain = {"status": "unavailable"}
+            else:
+                chain = catalog.dispatch_for_goal(
                     _goal or str(_task_input),
                     ctx={"skill_id": _skill},
                 )
-            except Exception:
-                chain = {"status": "unavailable"}
 
             status = chain.get("status")
             if status == "ok":
@@ -661,7 +668,11 @@ class AgentController:
                     "output": chain.get("output"),
                 }
             if status in ("no_skill", "unavailable"):
-                # Graceful floor: skill not in catalog / selector import failure.
+                # Graceful floor: skill not in catalog / catalog module import
+                # failure. This is the only branch that needs an LLM, so the
+                # provider-availability check is scoped to here.
+                if not self._llm_provider_available():
+                    raise RuntimeError("llm_provider_unavailable")
                 from engine.api import generate
                 role = _skill.replace("-", " ").replace("_", " ")
                 system = (

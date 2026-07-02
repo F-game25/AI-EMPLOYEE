@@ -19,14 +19,20 @@ def _path() -> Path:
     return tenant_state_dir() / 'pattern_memory.json'
 
 class PatternMemory:
-    def __init__(self):
+    def __init__(self, path: Path | None = None):
+        # Pinned at construction time, while the correct tenant context is
+        # active (TenantSingletonPool.get() creates this instance under the
+        # active tenant's key) — recomputing _path() on every I/O would let an
+        # instance that outlives its tenant context write to whichever tenant
+        # happens to be active *later*, corrupting/leaking across tenants.
+        self._path = path or _path()
         self._lock = threading.RLock()
         self._patterns: list[dict] = self._load()
 
     def _load(self) -> list:
         """Load pattern memory from disk."""
         try:
-            return json.loads(_path().read_text())
+            return json.loads(self._path.read_text())
         except Exception:
             return []
 
@@ -46,8 +52,8 @@ class PatternMemory:
             self._patterns.append(pattern)
             if len(self._patterns) > MAX_PATTERNS:
                 self._patterns = self._patterns[-MAX_PATTERNS:]
-            _path().parent.mkdir(parents=True, exist_ok=True)
-            _path().write_text(json.dumps(self._patterns))
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(self._patterns))
 
     def recognize(self, text: str, threshold: float = 0.7) -> dict | None:
         """Find a similar pattern in memory."""

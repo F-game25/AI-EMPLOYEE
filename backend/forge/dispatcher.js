@@ -61,8 +61,9 @@ function createForgeDispatcher(deps = {}) {
   // opt-in on top of its own long-standing kill switch. Reversible: set
   // FORGE_DISPATCHER_LEGACY_DRAIN=1 to fully restore the old behavior (only
   // matters for project-less submissions, which the adapter can't convert).
-  const enabled = String(process.env.FORGE_DISPATCH_ENABLED ?? '1') !== '0'
-    && String(process.env.FORGE_DISPATCHER_LEGACY_DRAIN || '0') === '1'
+  const dispatchEnabled = String(process.env.FORGE_DISPATCH_ENABLED ?? '1') !== '0'
+  const legacyDrainEnabled = String(process.env.FORGE_DISPATCHER_LEGACY_DRAIN || '0') === '1'
+  const enabled = dispatchEnabled && legacyDrainEnabled
   const concurrency = _int('FORGE_DISPATCH_CONCURRENCY', 1)
   const intervalMs = _int('FORGE_DISPATCH_INTERVAL_MS', 5000)
   const maxRetries = _int('FORGE_DISPATCH_MAX_RETRIES', 2)
@@ -189,7 +190,9 @@ function createForgeDispatcher(deps = {}) {
   function start() {
     if (_timer) return api
     if (!enabled) {
-      log('disabled via FORGE_DISPATCH_ENABLED=0 — queue stays approve-only')
+      log(dispatchEnabled
+        ? 'disabled: set FORGE_DISPATCHER_LEGACY_DRAIN=1 to enable legacy drain'
+        : 'disabled via FORGE_DISPATCH_ENABLED=0 — queue stays approve-only')
       return api
     }
     log(`started — concurrency=${concurrency} interval=${intervalMs}ms maxRetries=${maxRetries} taskTimeout=${taskTimeoutMs}ms`)

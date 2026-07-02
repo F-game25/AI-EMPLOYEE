@@ -7,6 +7,12 @@ Verifies that AgentController._emit_action:
   4. Falls back to the bare role-prompt when the catalog import fails
   5. Propagates error status as RuntimeError (fail-closed)
   6. Propagates blocked status as RuntimeError (fail-closed)
+  7. Catalog dispatch runs even with no LLM provider available (CodeRabbit,
+     PR #334) — a tool_steps chain may not need an LLM at all
+  8. A genuine exception from dispatch_for_goal() itself (not the catalog
+     getter) is NOT silently swallowed into the bare-LLM fallback (CodeRabbit,
+     PR #334) — it propagates so the caller fails closed instead of returning
+     a degraded fake-success answer
 
 All network/LLM/bus calls are mocked — no live infra required.
 """
@@ -193,3 +199,61 @@ def test_blocked_status_propagates_as_runtime_error(monkeypatch):
             "skill": "lead_scraping",
             "input": {"goal": "find leads"},
         })
+
+
+def test_catalog_dispatch_runs_without_llm_provider(monkeypatch):
+    """A tool_steps chain must not require an LLM provider to run — only the
+    bare role-prompt fallback branch needs one."""
+    from core.agent_controller import AgentController
+
+    monkeypatch.setattr(
+        "core.agent_controller.AgentController.__init__",
+        lambda self: None,
+    )
+    ctrl = AgentController.__new__(AgentController)
+    # No LLM provider available at all.
+    monkeypatch.setattr(
+        "core.agent_controller.AgentController._llm_provider_available",
+        lambda self: False,
+    )
+    captured = {}
+    _stub_bus(monkeypatch, captured)
+    _stub_catalog(monkeypatch, {
+        "status": "ok",
+        "via": "skill_tool_chain",
+        "steps": [{"tool": "web_search", "result": "raw"}],
+        "output": "TOOL-ONLY-OUTPUT",
+    })
+
+    ctrl._emit_action("skill:market_research", {
+        "skill": "market_research",
+        "input": {"goal": "research SaaS market 2026"},
+    })
+
+    r = captured["result"]
+    assert r["via"] == "skill_tool_chain"
+    assert r["output"] == "TOOL-ONLY-OUTPUT"
+
+
+def test_dispatch_exception_not_swallowed_into_bare_llm_fallback(monkeypatch):
+    """A genuine exception raised BY dispatch_for_goal() (not the catalog
+    getter) must propagate, not be silently treated as 'unavailable' and
+    masked by a degraded bare-LLM answer."""
+    ctrl = _make_controller(monkeypatch)
+    captured = {}
+    _stub_bus(monkeypatch, captured)
+
+    class _BrokenCatalog:
+        def dispatch_for_goal(self, goal, ctx=None):
+            raise ValueError("simulated tool-chain bug, not an import failure")
+
+    import skills.catalog as _catalog_mod
+    monkeypatch.setattr(_catalog_mod, "get_skill_catalog", lambda: _BrokenCatalog())
+    _stub_generate(monkeypatch, text="SHOULD-NOT-BE-USED")
+
+    with pytest.raises(ValueError, match="simulated tool-chain bug"):
+        ctrl._emit_action("skill:market_research", {
+            "skill": "market_research",
+            "input": {"goal": "research something"},
+        })
+    assert "result" not in captured, "must not have produced a fake-success bare-LLM result"

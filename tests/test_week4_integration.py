@@ -41,11 +41,16 @@ def _auth_headers() -> dict:
         return {"Authorization": _AUTH_TOKEN}
     try:
         res = requests.get(f"{BASE_URL}/api/auth/auto-token", timeout=TIMEOUT)
-        token = res.json().get("token") or res.json().get("access_token")
-        if token:
-            _AUTH_TOKEN = f"Bearer {token}"
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        pass
+        body = res.json()
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, ValueError):
+        # ValueError covers requests.exceptions.JSONDecodeError (a subclass) —
+        # a non-JSON error body (e.g. an HTML gateway error page) must degrade
+        # to "no auth header" like the network-failure cases, not crash every
+        # test that calls this helper.
+        return {}
+    token = body.get("token") or body.get("access_token")
+    if token:
+        _AUTH_TOKEN = f"Bearer {token}"
     return {"Authorization": _AUTH_TOKEN} if _AUTH_TOKEN else {}
 
 
