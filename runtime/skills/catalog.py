@@ -508,30 +508,42 @@ class ExecutableSkillCatalog(SkillCatalog):
                             ["llm_infer", "get_memory"],
                             "Handle customer queries", 1)
 
+    @staticmethod
+    def _require_ok(envelope: dict, tool: str) -> dict:
+        """Fail closed instead of fake-success: these skill functions used to
+        embed a failed/stubbed tool envelope straight into their own return
+        value without checking it, and execute_skill()'s try/except only
+        catches raised exceptions — so a failed web_search/llm_infer call was
+        silently reported as a successful skill run. Raising here lets that
+        try/except do its job and report the real failure."""
+        if not envelope.get("ok"):
+            raise RuntimeError(f"{tool} failed: {envelope.get('error') or 'unknown error'}")
+        return envelope
+
     def _market_research(self, topic: str, **_):
         from tools.registry import get_tool_registry
         r = get_tool_registry()
-        search_result = r.execute("web_search", {"query": topic, "limit": 5})
-        llm_result = r.execute("llm_infer", {
+        search_result = self._require_ok(r.execute("web_search", {"query": topic, "limit": 5}), "web_search")
+        llm_result = self._require_ok(r.execute("llm_infer", {
             "prompt": f"Summarize market research for: {topic}", "max_tokens": 500,
-        })
+        }), "llm_infer")
         return {"topic": topic, "sources": search_result, "summary": llm_result}
 
     def _content_creation(self, topic: str, format: str = "article", **_):
         from tools.registry import get_tool_registry
-        return get_tool_registry().execute(
+        return self._require_ok(get_tool_registry().execute(
             "llm_infer",
             {"prompt": f"Write a {format} about: {topic}", "max_tokens": 1000},
-        )
+        ), "llm_infer")
 
     def _doc_intelligence(self, path: str, query: str = "", **_):
         from tools.registry import get_tool_registry
         r = get_tool_registry()
-        doc = r.execute("read_file", {"path": path})
-        return r.execute("llm_infer", {
+        doc = self._require_ok(r.execute("read_file", {"path": path}), "read_file")
+        return self._require_ok(r.execute("llm_infer", {
             "prompt": f"Analyze this document: {doc}\n\nQuery: {query}",
             "max_tokens": 800,
-        })
+        }), "llm_infer")
 
     def _lead_gen(self, criteria: str, **_):
         return {"stub": True,
@@ -540,7 +552,7 @@ class ExecutableSkillCatalog(SkillCatalog):
 
     def _support(self, query: str, **_):
         from tools.registry import get_tool_registry
-        return get_tool_registry().execute(
+        return self._require_ok(get_tool_registry().execute(
             "llm_infer",
             {"prompt": f"Help customer with: {query}", "max_tokens": 500},
-        )
+        ), "llm_infer")

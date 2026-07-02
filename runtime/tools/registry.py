@@ -107,6 +107,15 @@ class ToolRegistry:
             return {"ok": False, "error": f"Tool '{name}' not found"}
         try:
             result = tool["fn"](**payload)
+            # Several default tools (read_file, llm_infer, embed_text,
+            # get_memory, web_search) signal failure by *returning* a dict
+            # with a truthy "error" key instead of raising — this only
+            # caught raised exceptions, so those soft failures were always
+            # reported as ok:True to callers (fake success). None of the
+            # registered tools use "error" for legitimate success-path data.
+            if isinstance(result, dict) and result.get("error"):
+                logger.warning("ToolRegistry.execute '%s' returned an error result: %s", name, result.get("error"))
+                return {"ok": False, "tool": name, "error": result["error"], "result": result}
             return {"ok": True, "tool": name, "result": result}
         except Exception as e:
             logger.warning("ToolRegistry.execute '%s' raised: %s", name, e)
@@ -144,11 +153,23 @@ class ToolRegistry:
             prompt, model=model, media_type=media_type, provider=provider, **opts)
 
     def _web_search(self, query: str, limit: int = 5, **_):
+        # Was importing `tools.web_research_tool.search`, which has never
+        # existed (that module only exports a private `_call` self-registered
+        # under the *different* tool name "web_research", a heavier
+        # multi-hop research pipeline — not this tool). Every call here
+        # silently hit the except and returned an empty stub. Route to the
+        # actual lightweight multi-provider search function instead.
         try:
-            from tools.web_research_tool import search
-            return search(query, limit)
-        except Exception:
-            return {"results": [], "stub": True, "query": query}
+            import sys
+            from pathlib import Path
+            ai_router_dir = str(Path(__file__).resolve().parent.parent / "agents" / "ai-router")
+            if ai_router_dir not in sys.path:
+                sys.path.insert(0, ai_router_dir)
+            from ai_router import search_web
+            return {"results": search_web(query, max_results=limit), "query": query}
+        except Exception as e:
+            logger.warning("web_search tool failed: %s", e)
+            return {"results": [], "stub": True, "error": str(e), "query": query}
 
     def _read_file(self, path: str, **_):
         import os
@@ -167,9 +188,17 @@ class ToolRegistry:
         return self._write_file(path, content)
 
     def _llm_infer(self, prompt: str, model: str = None, max_tokens: int = 500, **_):
+        # LLMClient.complete() is keyword-only and has no `max_tokens` param
+        # (`*, prompt, system, tenant_id, model`) — this always raised
+        # TypeError, silently caught below and reported as a "stub". Also
+        # returns a result dict directly (not re-wrapped in another "output").
+        # `max_tokens` is accepted here for call-site compatibility but not
+        # forwarded — the underlying client doesn't expose a token cap at
+        # this layer.
         try:
             from core.orchestrator import LLMClient
-            return {"output": LLMClient().complete(prompt, max_tokens=max_tokens)}
+            result = LLMClient().complete(prompt=prompt, model=model)
+            return {"output": result.get("output", ""), "model": result.get("model"), "provider": result.get("provider")}
         except Exception as e:
             return {"error": str(e), "stub": True}
 
