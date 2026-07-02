@@ -1,16 +1,22 @@
 'use strict';
 
-// ── Sentry initialization (must be first) ────────────────────────────────────
+// ── Sentry initialization (must be first; no-op unless SENTRY_DSN is set) ─────
+// v8+ API: integrations are functions (no `new`); request isolation is automatic;
+// the Express error handler is registered after routes (setupExpressErrorHandler).
 if (process.env.SENTRY_DSN) {
-  const Sentry = require('@sentry/node');
-  const { nodeProfilingIntegration } = require('@sentry/profiling-node');
-  Sentry.init({
-    dsn: process.env.SENTRY_DSN,
-    integrations: [new nodeProfilingIntegration()],
-    tracesSampleRate: 0.1,
-    profilesSampleRate: 0.1,
-    environment: process.env.ENVIRONMENT || 'production',
-  });
+  try {
+    const Sentry = require('@sentry/node');
+    const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      integrations: [nodeProfilingIntegration()],
+      tracesSampleRate: 0.1,
+      profilesSampleRate: 0.1,
+      environment: process.env.ENVIRONMENT || 'production',
+    });
+  } catch (err) {
+    console.warn('[sentry] init skipped:', err.message);
+  }
 }
 
 const http = require('http');
@@ -24,6 +30,7 @@ const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
+const { rateLimit: expressRateLimit } = require('express-rate-limit');
 const compression = require('compression');
 
 const gateway = require('./gateway');
@@ -320,7 +327,7 @@ function requireAuth(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : req.query.token;
   if (!token) return res.status(401).json({ ok: false, error: 'Authentication required' });
   try {
-    req.jwtPayload = jwt.verify(token, JWT_SECRET);
+    req.jwtPayload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     next();
   } catch {
     return res.status(401).json({ ok: false, error: 'Invalid or expired token' });
@@ -392,7 +399,7 @@ const _rl_upload      = makeRateLimit(20);   // /api/workspace/upload — 20/min
 const _rl_ollama_pull = makeRateLimit(3);    // /api/ollama/pull — 3/min per IP (expensive operation)
 const _rl_chat        = makeRateLimit(30);   // /api/chat — 30/min per IP
 const _rl_tasks_run   = makeRateLimit(30);   // /api/tasks/run — 30/min per IP
-const _rl_api_global  = makeRateLimit(120);  // /api/* catch-all — 120/min per IP
+const _rl_api_global  = expressRateLimit({ windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false });  // /api/* catch-all — 120/min per IP (express-rate-limit: recognised by CodeQL)
 
 // Simple in-memory response cache with TTL.
 // Returns middleware that serves cached JSON for ttlMs, then refreshes.
@@ -424,7 +431,7 @@ function wsTokenValid(req) {
     const url = new URL(req.url, 'http://localhost');
     const token = url.searchParams.get('token');
     if (!token) return false;
-    jwt.verify(token, JWT_SECRET);
+    jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     return true;
   } catch {
     return false;
@@ -441,12 +448,8 @@ app.set('trust proxy', 1);
 const { ipBlockMiddleware: _sentinelIpBlock } = require('./security/sentinel_guard');
 app.use(_sentinelIpBlock);
 
-// Sentry error tracking middleware (if initialized)
-if (process.env.SENTRY_DSN) {
-  const Sentry = require('@sentry/node');
-  app.use(Sentry.Handlers.requestHandler());
-  app.use(Sentry.Handlers.errorHandler());
-}
+// Sentry request isolation is automatic in v8+ (no requestHandler middleware).
+// The Express error handler must run AFTER all routes — registered before listen.
 
 // Security headers — applied before all routes
 // Gzip all text responses >1KB. Serves hashed JS/CSS ~60-70% smaller.
@@ -478,6 +481,17 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '64kb' }));
+
+// Global API rate-limit backstop using express-rate-limit (recognised by CodeQL).
+// Per-route limiters above stay stricter for sensitive routes; this bounds
+// unauthenticated floods / DoS on every other route. Generous so the local
+// dashboard's polling is never throttled. (CodeQL: js/missing-rate-limiting.)
+app.use(expressRateLimit({
+  windowMs: 60_000,
+  max: 3000,
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
 
 // ── Multi-tenancy middleware (extracts tenant from JWT) ───────────────────────
 app.use(tenantMiddleware(JWT_SECRET));
@@ -4079,6 +4093,12 @@ server.on('error', (err) => {
   }
   process.exit(1);
 });
+
+// Sentry Express error handler — must be registered after all routes (v8+ API).
+if (process.env.SENTRY_DSN) {
+  try { require('@sentry/node').setupExpressErrorHandler(app); }
+  catch (err) { console.warn('[sentry] error handler skipped:', err.message); }
+}
 
 server.listen(PORT, LISTEN_HOST, () => {
   console.log(`[SERVER] ✅ AI Employee backend running on http://${LISTEN_HOST}:${PORT}`);

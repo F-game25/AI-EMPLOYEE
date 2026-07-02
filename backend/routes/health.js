@@ -485,7 +485,7 @@ module.exports = function createHealthRouter(deps) {
       try {
         const authHeader = req.headers.authorization || '';
         if (!authHeader.startsWith('Bearer ')) return false;
-        jwt.verify(authHeader.slice(7), JWT_SECRET);
+        jwt.verify(authHeader.slice(7), JWT_SECRET, { algorithms: ['HS256'] });
         return true;
       } catch (_) { return false; }
     })();

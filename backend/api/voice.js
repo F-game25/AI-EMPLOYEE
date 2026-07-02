@@ -15,8 +15,11 @@ const voiceRuntime = require('../services/voice/voice_runtime_manager');
 const voiceTeammate = require('../services/voice/voice_teammate_service');
 const { splitSentences } = require('../services/voice/stream_pipeline');
 const { getWorker } = require('../py_worker_client');
+const { createRouteRateLimit } = require('../middleware/route-rate-limit');
 
 const router = Router();
+// File-writing voice routes are rate-limited (CodeQL: missing rate limiting).
+const narrateLimit = createRouteRateLimit({ max: 10, windowMs: 60_000, keyPrefix: 'voice-narrate' });
 const audioBodyParser = raw({
   type: ['audio/wav', 'audio/x-wav', 'audio/wave', 'application/octet-stream'],
   limit: '25mb',
@@ -381,7 +384,12 @@ async function processVoiceAudioTurn(req, res, session, audioBuffer) {
   const filePath = tempWavPath(session.id);
   try {
     await fs.promises.writeFile(filePath, audioBuffer);
-    const transcription = await voiceRuntime.transcribeWav(filePath);
+    const asrCfg = voiceManager.getConfig().asr || {};
+    const transcription = await voiceRuntime.transcribeWav(filePath, {
+      engine: asrCfg.engine,
+      language: asrCfg.language,
+      timeoutMs: asrCfg.timeoutMs,
+    });
     const transcript = String(transcription?.text || '').trim();
     if (!transcript) {
       const message = 'Whisper returned an empty transcript.';
@@ -719,6 +727,12 @@ router.get('/config', async (_req, res) => {
       tones: ['calm', 'warm', 'focused', 'authoritative', 'concerned', 'urgent', 'professional', 'firm'],
       emotions: ['neutral', 'calm', 'warm_confident', 'focused', 'curious', 'concerned', 'firm', 'urgent', 'subtle_excited'],
       approval_modes: ['approval_gates'],
+      asr_engines: ['auto', 'nemotron', 'whisper'],
+    },
+    asr: {
+      ...(cfg.asr || {}),
+      active_engine: runtime.stt?.active_engine || null,
+      engines: runtime.stt?.engines || null,
     },
     profiles: profiles.filter((p) => !p.startsWith('customer_')),
     customer_profiles: profiles.filter((p) => p.startsWith('customer_')),
@@ -815,6 +829,51 @@ router.post('/config', (req, res) => {
     const cfg = voiceManager.getConfig();
     fishSpeech.configure(cfg.fishSpeech || {});
     res.json({ ok: true, config: cfg, engine: voiceManager.getEngineStatus(), fish_speech: fishSpeech.getStatus() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// POST /api/voice/speak — synthesize text → raw WAV audio (for live chat playback,
+// no artifact saved). The browser plays the returned audio so the teammate "responds".
+router.post('/speak', async (req, res) => {
+  const text = String(req.body?.text || '').trim().slice(0, 4000);
+  if (!text) return res.status(400).json({ ok: false, error: 'text required' });
+  try {
+    const kokoro = require('../services/voice/kokoro');
+    const st = await kokoro.getStatus();
+    if (!st.ready) return res.status(503).json({ ok: false, error: 'voice model not installed', install: st.install });
+    const r = await kokoro.synthesize(text, { voice: req.body?.voice, speed: Number(req.body?.speed) || 1.0, language: req.body?.language });
+    if (!r.ok || !r.audioBuf) return res.status(502).json({ ok: false, error: r.reason || 'synthesis failed' });
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(r.audioBuf);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// POST /api/voice/narrate — synthesize text → a downloadable audio artifact.
+// Powers video narration; the .wav lands in state/artifacts → the AI Output screen.
+router.post('/narrate', narrateLimit, async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ ok: false, error: 'text required' });
+  if (text.length > 20000) return res.status(400).json({ ok: false, error: 'text too long (max 20000 chars)' });
+  try {
+    const kokoro = require('../services/voice/kokoro');
+    const st = await kokoro.getStatus();
+    if (!st.ready) return res.status(503).json({ ok: false, error: 'voice model not installed', install: st.install });
+    const result = await kokoro.synthesize(text, {
+      voice: req.body?.voice, speed: Number(req.body?.speed) || 1.0, language: req.body?.language,
+    });
+    if (!result.ok) return res.status(502).json({ ok: false, error: result.reason });
+    const os = require('os'); const fsx = require('fs'); const pathx = require('path');
+    const AI_HOME = pathx.resolve(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME || pathx.join(os.homedir(), '.ai-employee'));
+    const dir = pathx.join(process.env.STATE_DIR || pathx.join(AI_HOME, 'state'), 'artifacts');
+    fsx.mkdirSync(dir, { recursive: true });
+    const name = `narration-${Date.now()}.wav`;
+    fsx.writeFileSync(pathx.join(dir, name), result.audioBuf);
+    res.json({ ok: true, artifact: name, url: `/api/artifacts/${name}`, bytes: result.audioBuf.length });
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }

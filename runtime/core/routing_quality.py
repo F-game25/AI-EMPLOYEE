@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -311,8 +312,40 @@ def _state_dir() -> Path:
     return path
 
 
+def _current_tenant_id() -> "str | None":
+    """Active tenant id if a request-scoped tenant context is set, else None.
+    Uses the non-raising accessor so single-tenant / background callers are fine."""
+    try:
+        from core.tenancy import get_tenant_manager
+        ctx = get_tenant_manager().get_current_tenant()
+        return ctx.tenant_id if ctx is not None else None
+    except Exception:  # noqa: BLE001 — tenancy optional; never break telemetry
+        return None
+
+
+def _goal_hash(goal: str) -> "str | None":
+    """A tenant-keyed HMAC-SHA256 fingerprint of the goal for dedup/traceability
+    ONLY (the goal text itself is never stored). Keying by tenant prevents cross-
+    tenant correlation and offline dictionary attacks on the local ledger; this is
+    not a cryptographic guarantee, just defense-in-depth over a plain SHA-1 prefix."""
+    if not goal:
+        return None
+    key = (_current_tenant_id() or "global").encode("utf-8")
+    return hmac.new(key, goal.encode("utf-8", "ignore"), hashlib.sha256).hexdigest()[:16]
+
+
 def _ledger_path() -> Path:
-    return _state_dir() / _config()["ledger"].get("filename", "model_quality.jsonl")
+    """Tenant-scoped ledger when a tenant context is active (so one tenant's quality
+    data is never co-mingled with another's), shared path otherwise."""
+    filename = _config()["ledger"].get("filename", "model_quality.jsonl")
+    tid = _current_tenant_id()
+    if tid:
+        try:
+            from core.tenancy import get_tenant_state_file
+            return get_tenant_state_file(filename, tenant_id=tid)
+        except Exception:  # noqa: BLE001 — fall back to shared on any tenancy error
+            pass
+    return _state_dir() / filename
 
 
 def logging_enabled() -> bool:
@@ -350,7 +383,7 @@ def record_quality(
         "score": round(float(score), 4),
         "passed": bool(passed),
         "reasons": list(reasons or []),
-        "goal_hash": hashlib.sha1((goal or "").encode("utf-8", "ignore")).hexdigest()[:12] if goal else None,
+        "goal_hash": _goal_hash(goal),
     }
     try:
         path = _ledger_path()

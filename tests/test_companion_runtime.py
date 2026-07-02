@@ -176,9 +176,12 @@ def test_voice_channel_populates_voice_summary(monkeypatch):
     assert r["meta"]["channel"] == "voice"
     vs = r["meta"].get("voice_summary")
     assert isinstance(vs, str) and vs.strip()
-    # Short reply → spoken summary equals the reply (no needless truncation).
+    # Short reply → not truncated. voice_summary strips markdown + flattens
+    # newlines so TTS doesn't read syntax aloud, so compare on text content
+    # (alphanumerics), not verbatim formatting — proves no content was lost.
     if len(r["reply"]) <= 280:
-        assert vs == r["reply"].strip() or vs in r["reply"]
+        _norm = lambda s: "".join(c for c in s.lower() if c.isalnum())
+        assert _norm(vs) == _norm(r["reply"])
 
 
 def test_voice_morning_brief_is_structured_and_remembered(tmp_path, monkeypatch):

@@ -51,6 +51,7 @@ const SalesPage         = lazy(() => import('./pages/sales/SalesPage'))
 const AvatarLabPage     = lazy(() => import('./pages/AvatarLabPage'))
 const QuantumBrainPage   = lazy(() => import('./pages/QuantumBrainPage'))
 const DeepResearchPage   = lazy(() => import('./pages/DeepResearchPage'))
+const AIOutputPage       = lazy(() => import('./pages/AIOutputPage'))
 const OrdersPage         = lazy(() => import('./pages/OrdersPage'))
 const CompanyBuilderPage = lazy(() => import('./pages/CompanyBuilderPage'))
 // Previously-orphaned pages — built but never mounted; surfaced under DIAGNOSTICS (C4).
@@ -112,6 +113,7 @@ const PAGES = {
   'trends':         IntelligencePage,
   'research':       ResearchPage,
   'deep-research':  DeepResearchPage,
+  'ai-output':      AIOutputPage,
   'recon':          ReconPage,
   'prompt-inspector': PromptInspectorPage,
   // SECURITY — panel switches internally on activeSection

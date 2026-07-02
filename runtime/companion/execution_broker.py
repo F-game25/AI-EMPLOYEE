@@ -84,6 +84,12 @@ _EXACT_TASK_CAPS: dict[str, str] = {
     "teammate.routine.status": "teammate.routine.status",
     "teammate.routine.configure": "teammate.routine.configure",
     "teammate.briefing.create_task": "teammate.briefing.create_task",
+    # Business "do real work" intents go straight to the skill catalog (which
+    # selects the right one of the ~859 executable skills) — not coincidental
+    # token-overlap with a system capability.
+    "skill": "skills.run",
+    # "deep research X" goes to the real multi-hop engine, not a shallow skill.
+    "research.deep": "research.deep.start",
 }
 
 # ── Adapter bounds (keep every executor cheap, read-only, non-destructive) ────
@@ -135,6 +141,7 @@ class ExecutionBroker:
         self._dispatch: dict[str, Callable[[Capability, dict], dict]] = {
             "system.health.read": self._exec_system_health,
             "system.tasks.active": self._exec_system_tasks_active,
+            "system.overview": self._exec_system_overview,
             "system.logs.search": self._exec_system_logs_search,
             "briefing.morning": self._exec_morning_briefing,
             "teammate.routine.status": self._exec_teammate_routine_status,
@@ -384,6 +391,55 @@ class ExecutionBroker:
         return {"stored": True, "key": key, "namespace": namespace}
 
     # ── system.tasks.active ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exec_system_overview(cap: Capability, ctx: dict) -> dict:
+        """Enterprise status report: aggregate REAL system state — active tasks,
+        agent count, system health, recent activity — read-only, always honest
+        (no fabricated numbers; missing sources degrade to 0/empty)."""
+        import json
+        sd = _state_dir()
+        ov: dict[str, Any] = {}
+        # Active tasks (reuse the tasks executor).
+        try:
+            tasks = ExecutionBroker._exec_system_tasks_active(cap, ctx).get("tasks") or []
+        except Exception:
+            tasks = []
+        ov["active_tasks"] = len(tasks)
+        ov["tasks"] = tasks[:10]
+        # Agent count from the catalog.
+        try:
+            from pathlib import Path as _P
+            ac = json.loads((_P(__file__).resolve().parents[1] / "config" / "agent_capabilities.json").read_text(encoding="utf-8"))
+            agents = ac.get("agents", ac) if isinstance(ac, dict) else ac
+            ov["agents_total"] = len(agents)
+        except Exception:
+            ov["agents_total"] = 0
+        # System health.
+        try:
+            h = ExecutionBroker._exec_system_health(cap, ctx)
+            ov["health"] = {k: h.get(k) for k in ("cpu_percent", "memory_percent", "gpu_percent", "status") if k in h} or h
+        except Exception:
+            ov["health"] = {}
+        # Recent activity (event-bus tail).
+        try:
+            bus = sd / "bus.jsonl"
+            lines = bus.read_text(encoding="utf-8").splitlines()[-8:] if bus.exists() else []
+            acts = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                    acts.append(obj.get("event") or obj.get("type") or str(obj)[:80])
+                except Exception:
+                    acts.append(line[:80])
+            ov["recent_activity"] = acts[-8:]
+        except Exception:
+            ov["recent_activity"] = []
+        summary = (f"{ov['active_tasks']} active task(s), {ov['agents_total']} agents available, "
+                   f"system {ov.get('health', {}).get('status', 'ok')}.")
+        return {"overview": ov, "summary": summary}
 
     @staticmethod
     def _exec_system_tasks_active(cap: Capability, ctx: dict) -> dict:
@@ -790,59 +846,37 @@ class ExecutionBroker:
 
     @staticmethod
     def _exec_research_deep_start(cap: Capability, ctx: dict) -> dict:
-        """Start a deep-research run in the BACKGROUND — never blocks the broker.
+        """Emit a deep-research DIRECTIVE for the UI to run + visualize live.
 
-        The DeepResearchEngine.run() coroutine is long-running. We pre-create the
-        report row (so the caller can poll /api/research/deep/{id}) and launch the
-        engine on a dedicated daemon thread with its own event loop. The broker
-        returns immediately with status='started'. If the engine cannot be
-        imported/launched we degrade to status='queued' that points at the
-        existing endpoint — honest about which path was taken.
+        Previously this spawned a dead daemon thread with no progress feedback, so a
+        chat 'deep research X' looked fake (confirmation, then nothing). Now it returns
+        a structured directive; the chat renders the live DeepResearchInline card,
+        which starts the run via POST /api/research/deep/start — the SAME path as the
+        Deep Research button (real multi-hop engine + live WS progress + the report).
         """
-        topic = str(ctx.get("topic") or ctx.get("text") or "").strip()
-        if not topic:
+        import re as _re
+        raw = str(ctx.get("topic") or ctx.get("text") or "").strip()
+        if not raw:
             return {"status": "error", "note": "no topic provided"}
+        # Strip the command framing so the topic is just the subject.
+        topic = _re.sub(
+            r"^(please\s+)?(do|run|start|perform|conduct|give me|i want|can you)?\s*"
+            r"(a|an|the)?\s*(deep[\s-]?(dive|research)|in[\s-]?depth research|thorough research|"
+            r"comprehensive research|exhaustive research|research(\s+report)?)\s*"
+            r"(on|into|about|of|for)?\s*",
+            "", raw, flags=_re.I).strip() or raw
         if len(topic) > 600:
             topic = topic[:600]
         depth = str(ctx.get("depth") or "deep")
         if depth not in ("shallow", "normal", "deep"):
             depth = "deep"
-
-        try:
-            from core.deep_research_engine import (
-                DeepResearchEngine, DeepResearchReport, _save_report,
-            )
-            import time as _time
-            import uuid as _uuid
-
-            report_id = _uuid.uuid4().hex[:16]
-            report = DeepResearchReport(id=report_id, topic=topic,
-                                        created_at=_time.time())
-            _save_report(report)
-
-            def _worker() -> None:
-                import asyncio as _aio
-                try:
-                    engine = DeepResearchEngine()
-                    # Pass the SAME report_id created above so the run saves under it
-                    # and the caller that received report_id can poll /deep/{id} and
-                    # actually get the finished report (fixes the never-reports-back id
-                    # mismatch). Live WS progress is delivered via the button path which
-                    # runs on the main loop; this thread guarantees completion + result.
-                    _aio.run(engine.run(topic=topic, depth=depth, report_id=report_id))
-                except Exception as exc:  # background failure must not crash broker
-                    logger.warning("background deep research failed: %s", exc)
-
-            threading.Thread(target=_worker, daemon=True,
-                             name=f"companion-research-{report_id}").start()
-            return {"status": "started", "report_id": report_id, "topic": topic,
-                    "depth": depth,
-                    "note": "running in background; poll /api/research/deep/{id}"}
-        except Exception as exc:
-            logger.warning("research.deep.start could not launch inline: %s", exc)
-            return {"status": "queued", "topic": topic, "depth": depth,
-                    "note": "use POST /api/research/deep/start to run this",
-                    "error": str(exc)}
+        return {
+            "status": "directive",
+            "directive": "deep_research",
+            "topic": topic,
+            "depth": depth,
+            "note": "Launching deep research — live progress + the full report appear below.",
+        }
 
     # ── money.analyze_idea ────────────────────────────────────────────────────────
 

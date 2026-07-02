@@ -6,6 +6,10 @@
 ([docs/SYSTEM_COHERENCE_PLAN.md](../SYSTEM_COHERENCE_PLAN.md)). Where they overlap, that plan is the
 parent; this doc is the authoritative detail for the security/legal milestones.
 
+> Companions in this folder: [SYSTEM_MAP](SYSTEM_MAP.md) · [SECURITY_RISK_REGISTER](SECURITY_RISK_REGISTER.md) ·
+> [LEGAL_READINESS_REGISTER](LEGAL_READINESS_REGISTER.md) · [IMPLEMENTATION_PLAN](IMPLEMENTATION_PLAN.md) ·
+> [TEST_MATRIX](TEST_MATRIX.md) · [CLAUDE_TASKS](CLAUDE_TASKS.md)
+
 ---
 
 ## 1. Context — why this roadmap exists
@@ -330,7 +334,6 @@ isolation contract joins this gate.
 | Scale (JSON/SQLite → multi-customer) | Low now | M5 Postgres path documented, switch-ready |
 
 ## 9. Definition of Done (overall, per CLAUDE.md rule 30)
-
 Code builds · suite green · permissions enforced (deny-by-default) · unsafe input handled & tested ·
 secrets protected · logs redacted · dangerous actions HITL-gated · rollback possible · changed files
 listed · remaining risks documented · **every "done" backed by evidence.**

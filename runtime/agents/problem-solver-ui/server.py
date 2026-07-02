@@ -8054,7 +8054,7 @@ _SETTINGS_SCHEMA: list = [
     ("PROBLEM_SOLVER_UI_PORT","Dashboard Port",              "text",     "8787",                          "preferences"),
     ("DASHBOARD_PORT",        "Legacy Dashboard Port",       "text",     "3000",                          "preferences"),
     ("OLLAMA_HOST",           "Ollama Host URL",             "text",     "http://localhost:11434",        "preferences"),
-    ("OLLAMA_MODEL",          "Ollama Model",                "text",     "llama3.2",                      "preferences"),
+    ("OLLAMA_MODEL",          "Ollama Model",                "text",     "qwythos:q4",                    "preferences"),
     ("LOG_LEVEL",             "Log Level",                   "text",     "INFO",                          "preferences"),
     ("RATE_LIMIT_PER_MINUTE", "Rate Limit (req/min)",        "text",     "60",                            "preferences"),
     ("TASK_ORCHESTRATOR_MAX_PARALLEL", "Max Parallel Tasks", "text",    "10",                            "preferences"),

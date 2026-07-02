@@ -24,6 +24,7 @@ const { ForgeLearningStore } = require('../services/forge_learning_store')
 const { ForgeV7ExecutionStore } = require('../services/forge_v7_execution')
 const forgeWorkspace = require('../services/forge_workspace')
 const forgePath = require('../services/forge_path')
+const forgeFileTools = require('../forge/forge_file_tools')
 const forgeDiff = require('../services/forge_diff')
 const forgeLearning = require('../services/forge_learning')
 const forgeTraining = require('../services/forge_training')
@@ -4005,6 +4006,65 @@ Respond with ONLY valid JSON (no markdown fences) matching this schema:
     return { agent: 'planner', status: 'done', output: plannerOutput, duration_ms, swarm_used: plannerSwarmUsed, started_at: new Date(t0).toISOString(), finished_at: nowIso() }
   }
 
+  // ── Iterative file read loop for coder agent ─────────────────────────────────
+  // Allows the model to request file reads before generating code, enabling
+  // iterative inspection (Claude-Code-style loop). Pattern: model can include
+  // <read:path> directives; we parse, read, and feed content back.
+  async function runCoderWithFileReads(prompt, project, root, workspaceRoot, opts = {}) {
+    const maxIterations = opts.maxIterations || 2
+    const readContext = []
+    let fullPrompt = prompt
+    let iteration = 0
+
+    for (iteration = 0; iteration < maxIterations; iteration++) {
+      let aiText = ''
+      try {
+        const r = await callPythonChat(fullPrompt, opts.timeout || 90000)
+        aiText = r?.response || r?.reply || ''
+      } catch (err) {
+        logger.warn('[coder-read-loop] LLM call failed:', err?.message)
+        break
+      }
+
+      if (!aiText) break
+
+      // Parse read requests: <read:path> markers
+      const readPattern = /<read:([^\>]+)>/g
+      const readPaths = []
+      let match
+      while ((match = readPattern.exec(aiText)) !== null) {
+        readPaths.push(match[1].trim())
+      }
+
+      // If this is the last iteration OR no reads requested, return the response
+      if (iteration === maxIterations - 1 || !readPaths.length) {
+        return { aiText, readContext, iteration }
+      }
+
+      // Read the requested files and append to context
+      for (const filePath of readPaths.slice(0, 5)) { // limit to 5 files per iteration
+        const result = forgeFileTools.readFile(workspaceRoot, filePath)
+        if (result.ok) {
+          readContext.push(`# File: ${filePath} (${result.lines} lines)\n\`\`\`\n${result.content.slice(0, 5000)}\n\`\`\``)
+        } else {
+          readContext.push(`# Failed to read ${filePath}: ${result.error}`)
+        }
+      }
+
+      // Rebuild prompt with file context and ask for code generation
+      fullPrompt = `${prompt}
+
+--- File context from previous reads ---
+${readContext.join('\n\n')}
+
+--- Now generate the code changes ---
+Based on the files above, output the COMPLETE file content for every file that needs to be created or modified.
+Each file must be in a code block labelled with its relative path.`
+    }
+
+    return { aiText: '', readContext, iteration }
+  }
+
   async function runCoderAgent(project, plannerStage, goal, root, runId, iter) {
     const t0 = Date.now()
     setForgeAgentStatus('coder', 'writing', `Writing files (iter ${iter})`)
@@ -4027,12 +4087,14 @@ Files to modify/create: ${files || '(determine from context)'}
 Steps:
 ${steps || goal}
 
-Output the COMPLETE file content for every file that needs to be created or modified.
+If you need to inspect existing files before writing changes, include markers like <read:path/to/file> on their own line.
+Otherwise, output the COMPLETE file content for every file that needs to be created or modified.
 Each file must be in a code block labelled with its relative path.`
 
     let aiText = ''
     let swarmUsed = false
     const useSwarm = isSwarmEnabled() // runtime-toggleable
+    const useFileReads = process.env.FORGE_CODER_FILE_READS !== 'off'
 
     if (useSwarm) {
       // Swarm mode: run N agents in parallel, pick consensus answer
@@ -4049,7 +4111,14 @@ Each file must be in a code block labelled with its relative path.`
     }
 
     if (!aiText) {
-      try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+      if (useFileReads) {
+        // Iterative read loop: allow model to inspect files first
+        const workspaceRoot = runWorkspaceRoot(runId)
+        const readResult = await runCoderWithFileReads(prompt, project, root, workspaceRoot, { maxIterations: 2 })
+        aiText = readResult.aiText
+      } else {
+        try { const r = await callPythonChat(prompt, 90000); aiText = r?.response || r?.reply || '' } catch { /* */ }
+      }
     }
 
     const actions = aiText ? extractCodeActions(aiText, project).slice(0, 8) : []

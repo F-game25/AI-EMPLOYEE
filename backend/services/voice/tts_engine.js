@@ -5,6 +5,7 @@ const { spawn, spawnSync } = require('child_process');
 const fishSpeech = require('./fish_speech');
 const voiceCore = require('./voice_core_local');
 const voiceLite = require('./voice_lite');
+const kokoro = require('./kokoro');
 
 const DEFAULT_VOLUME = 0.9;
 
@@ -54,6 +55,7 @@ let engineProvider = 'voice_core_local'; // 'voice_core_local' | 'voice_lite' | 
 let engineFishOptions = { ...fishSpeech.DEFAULT_OPTIONS };
 let engineVoiceCoreOptions = { enabled: true, language: 'en', voice: 'default', emotion: 'warm_confident', threads: 4, timeoutMs: 30000, localFallback: false };
 let engineVoiceLiteOptions = { enabled: true, language: 'en', voice: 'custom', threads: 4, timeoutMs: 30000, localFallback: true };
+let engineKokoroOptions = { ...kokoro.DEFAULT_OPTIONS };
 let lastProviderError = null;
 let lastArtifact = null;
 let queue = [];
@@ -204,6 +206,7 @@ function setProvider(provider) {
   const value = String(provider || '').trim();
   if (value === 'voice_core_local' || value === 'voice_core' || value === 'default_voice') engineProvider = 'voice_core_local';
   else if (value.startsWith('voice_lite')) engineProvider = 'voice_lite';
+  else if (value === 'kokoro') engineProvider = 'kokoro';
   else engineProvider = ['fish_speech', 'local'].includes(value) ? value : 'voice_core_local';
 }
 
@@ -223,6 +226,9 @@ async function init(options = {}) {
   }
   if (options.voiceLite && typeof options.voiceLite === 'object') {
     engineVoiceLiteOptions = { ...engineVoiceLiteOptions, ...options.voiceLite };
+  }
+  if (options.kokoro && typeof options.kokoro === 'object') {
+    engineKokoroOptions = kokoro.configure({ ...engineKokoroOptions, ...options.kokoro });
   }
 
   engineVolume = clampVolume(options.volume ?? engineVolume);
@@ -301,6 +307,43 @@ async function runSpeak(text, channel) {
       consecutiveFailures += 1;
       console.warn(`[VOICE] Default Human Voice failed: ${lastProviderError}`);
       if (!engineVoiceCoreOptions.localFallback) return;
+    }
+  }
+
+  if (engineProvider === 'kokoro' && engineKokoroOptions.enabled !== false) {
+    try {
+      const status = await kokoro.getStatus();
+      if (status.ready) {
+        speaking = true;
+        console.log(`[VOICE:${resolvedChannel}] Kokoro 82M: ${normalized}`);
+        const result = await kokoro.synthesize(normalized, {
+          voice: engineKokoroOptions.voice,
+          speed: engineSpeed,
+          language: engineKokoroOptions.language,
+          timeoutMs: engineKokoroOptions.timeoutMs,
+        });
+        if (result.ok && result.audioBuf) {
+          lastArtifact = kokoro.saveArtifact(result.audioBuf);
+          const played = await playAudioFile(lastArtifact.path).catch((err) => {
+            lastProviderError = String(err.message || err);
+            return false;
+          });
+          lastProviderError = null;
+          speaking = false;
+          consecutiveFailures = 0;
+          if (played) return;
+          lastProviderError = 'Kokoro produced audio, but no local WAV player is available for server-side playback.';
+        } else {
+          lastProviderError = result.reason || 'Kokoro synthesis failed';
+        }
+      } else {
+        lastProviderError = status.install || 'Kokoro is not ready (model not installed).';
+      }
+    } catch (err) {
+      speaking = false;
+      lastProviderError = String(err.message || err);
+      consecutiveFailures += 1;
+      console.warn(`[VOICE] Kokoro failed, using local fallback: ${lastProviderError}`);
     }
   }
 
@@ -462,6 +505,9 @@ async function reconfigure(options = {}) {
   if (options.voiceLite && typeof options.voiceLite === 'object') {
     engineVoiceLiteOptions = { ...engineVoiceLiteOptions, ...options.voiceLite };
   }
+  if (options.kokoro && typeof options.kokoro === 'object') {
+    engineKokoroOptions = kokoro.configure({ ...engineKokoroOptions, ...options.kokoro });
+  }
   engineVolume = clampVolume(options.volume ?? engineVolume);
   if (options.profile && VOICE_PROFILES[options.profile]) {
     loadVoice(options.profile);
@@ -489,6 +535,11 @@ function getStatus() {
     voice_lite: {
       status: engineProvider === 'voice_lite' ? 'selected' : 'available_when_selected',
       options: { ...engineVoiceLiteOptions },
+    },
+    kokoro: {
+      status: engineProvider === 'kokoro' ? 'selected' : 'available_when_selected',
+      ready: kokoro.modelsPresent(),
+      options: { ...engineKokoroOptions },
     },
     fish_speech: fishSpeech.getStatus(),
     last_provider_error: lastProviderError,

@@ -15,6 +15,11 @@
     "addressStyle": "command",
     "startupStyle": "soldier"
   },
+  "asr": {
+    "engine": "auto",
+    "language": "auto",
+    "timeoutMs": 120000
+  },
   "fishSpeech": {
     "enabled": true,
     "baseUrl": "http://127.0.0.1:8080",

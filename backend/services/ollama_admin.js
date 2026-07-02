@@ -10,12 +10,23 @@ const AI_HOME = path.resolve(process.env.AI_EMPLOYEE_HOME || process.env.AI_HOME
 const RUN_DIR = path.resolve(process.env.RUN_DIR || path.join(AI_HOME, 'run'))
 const LOG_DIR = path.resolve(process.env.LOG_DIR || path.join(AI_HOME, 'logs'))
 const DEFAULT_HOST = 'http://127.0.0.1:11434'
-const DEFAULT_MODEL = 'llama3.2'
+const DEFAULT_MODEL = 'qwythos:q4'
 const DEFAULT_MODEL_HOME = path.join(AI_HOME, 'models', 'ollama')
 const BUNDLED_ROOT = path.join(REPO_ROOT, 'runtime', 'vendor', 'ollama')
 const BUNDLED_LIBRARY_DIR = path.join(BUNDLED_ROOT, 'lib')
 const SYSTEM_LIBRARY_DIR = '/usr/local/lib/ollama'
 const MODEL_CATALOG = [
+  {
+    model: 'qwythos:q4',
+    label: 'Qwythos 9B (Claude-Mythos)',
+    tier: 'recommended',
+    estimated_size_gib: 7,
+    min_ram_gib: 8,
+    min_vram_gib: 6,
+    min_cpu_cores: 4,
+    priority: 60,
+    rationale: 'Primary system model: Claude-distilled 9B with strong reasoning + coding, hardened and tuned for this system. Runs on 8 GB (GPU-accelerated, or CPU on 8 GB+ RAM). Recommended for best overall capability and efficiency.',
+  },
   {
     model: 'qwen2.5:32b',
     label: 'Qwen 2.5 32B',
